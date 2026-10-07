@@ -11,12 +11,10 @@ import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.process.*
 import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
-import io.mazewall.seccomp.InstallSelfVerifier
 
 /** Resets reversible process-wide test seams after every JUnit test. */
 internal object GlobalTestState {
     fun resetAll() {
-        InstallSelfVerifier.reset()
         PolicyCompilationCache.clear()
         MazewallEvents.clear()
         MazewallEvents.failOnListenerError = false

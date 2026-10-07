@@ -25,7 +25,7 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * Unit tests for the verifier PLUMBING (probe selection, memoization, opt-out, failure mapping).
+ * Unit tests for verifier plumbing (probe selection, current evidence, opt-out, failure mapping).
  * The mock engine derives its verdicts from the shared oracle, so these tests do not re-assert
  * filter semantics — kernel-vs-oracle truth is covered by SeccompDifferentialVerdictTest.
  */
@@ -42,7 +42,6 @@ class InstallSelfVerifierTest {
     fun tearDown() {
         System.clearProperty("io.mazewall.selfVerify")
         LinuxNative.resetToDefault()
-        InstallSelfVerifier.reset()
     }
 
     private fun blacklistProgram(): BpfProgram<BpfStatus.Verified> =
@@ -169,7 +168,7 @@ class InstallSelfVerifierTest {
     }
 
     @Test
-    fun `memoized per program identity`() {
+    fun `each verification probes the current installation`() {
         val program = blacklistProgram()
         var probeCount = 0
         oracleMock(program) { _ ->
@@ -181,11 +180,42 @@ class InstallSelfVerifierTest {
         val afterFirst = probeCount
         assertTrue(afterFirst > 0, "expected probes on first verification")
 
-        // Same instance AND same instruction list through a fresh wrapper: no re-probing.
+        // Identical instructions cannot attest the current installation.
         InstallSelfVerifier.verify(program, arch)
         InstallSelfVerifier.verify(BpfProgram(program.instructions), arch)
 
-        assertEquals(afterFirst, probeCount)
+        assertTrue(probeCount > afterFirst)
+    }
+
+    @Test
+    fun `prior successful program cannot conceal a divergent current backend`() {
+        val program = blacklistProgram()
+        oracleMock(program)
+        InstallSelfVerifier.verify(program, arch)
+        oracleMock(program) { nr -> if (nr == Syscall.CONNECT.numberFor(arch)) LinuxNative.SyscallResult.Success(0L) else null }
+
+        assertFailsWith<InstallSelfVerifier.SelfVerificationException> { InstallSelfVerifier.verify(program, arch) }
+    }
+
+    @Test
+    fun `prior successful program cannot attest a different merged filter state`() {
+        val program = blacklistProgram()
+        oracleMock(program)
+        InstallSelfVerifier.verify(program, arch)
+        val merged = io.mazewall.enforcer.state
+            .ContainerState(syscallActions = mapOf(Syscall.GETPID to SeccompAction.ACT_ERRNO(1)))
+
+        assertFailsWith<InstallSelfVerifier.SelfVerificationException> {
+            InstallSelfVerifier.verify(program, arch, priorFilterDepth = 1, mergedState = merged)
+        }
+    }
+
+    @Test
+    fun `stacked verification requires merged filter evidence`() {
+        val program = blacklistProgram()
+        oracleMock(program)
+
+        assertFailsWith<IllegalArgumentException> { InstallSelfVerifier.verify(program, arch, priorFilterDepth = 1) }
     }
 
     @Test

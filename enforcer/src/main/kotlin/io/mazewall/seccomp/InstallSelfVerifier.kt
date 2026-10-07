@@ -8,7 +8,6 @@ import io.mazewall.platform.native.RuntimeSnapshot
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.platform.syscall.SeccompAction
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Post-install self-verification (issue-20260823-172003).
@@ -25,8 +24,8 @@ import java.util.concurrent.ConcurrentHashMap
  *   asserted once via getpid.
  * - KILL_* groups are skipped entirely (issue-20260823-172000).
  *
- * Results are memoized per program identity so repeated installs of an identical program (e.g.
- * wrapped-executor tasks) probe only once. Failures throw per operator fallback policy.
+ * Every enabled verification probes the current installation. Identical instructions do not
+ * attest another backend, worker, or merged filter tree. Failures throw per operator fallback policy.
  */
 internal object InstallSelfVerifier {
     /**
@@ -45,8 +44,6 @@ internal object InstallSelfVerifier {
      */
     private const val ENABLED_PROPERTY = "io.mazewall.selfVerify"
 
-    private val verifiedPrograms = ConcurrentHashMap<List<BpfInstruction>, Unit>()
-
     fun isEnabled(native: RuntimeSnapshot = LinuxNative.snapshot()): Boolean {
         when (System.getProperty(ENABLED_PROPERTY)?.lowercase()) {
             "false" -> return false
@@ -64,11 +61,6 @@ internal object InstallSelfVerifier {
     fun warmup() {
         val arch = Arch.current()
         SelfVerificationPlan.create(emptyList(), arch)
-    }
-
-    /** Test seam: forget memoized program verifications. */
-    internal fun reset() {
-        verifiedPrograms.clear()
     }
 
     /**
@@ -92,22 +84,10 @@ internal object InstallSelfVerifier {
         val instructions = program.instructions
         if (!enabled) return
 
-        // Memoize only after every check passes: a cached entry from a failed
-        // verification would turn all later installs of the same program into an
-        // unchecked path (fail-closed rule).
-        if (verifiedPrograms.containsKey(instructions)) return
-
         if (priorFilterDepth > 0) {
-            // Stacked filters: the kernel enforces the UNION of all programs.
-            // Use union-aware verification if merged state is provided.
-            if (mergedState != null) {
-                verifyWithUnion(instructions, arch, mergedState, priorFilterDepth, native)
-                return
-            } else {
-                // Fallback: skip verification (legacy behavior)
-                // Union-aware simulation is implemented in verifyWithUnion() (issue-20260824-011900).
-                return
-            }
+            // Stacked filters require current merged evidence; never silently skip enabled checks.
+            verifyWithUnion(instructions, arch, requireNotNull(mergedState) { "Stacked self-verification requires merged filter state" }, priorFilterDepth, native)
+            return
         }
 
         val plan = SelfVerificationPlan.create(instructions, arch)
@@ -115,7 +95,6 @@ internal object InstallSelfVerifier {
             // The policy denies getpid: skip liveness (it would be a false failure), but still
             // verify the DENIED probes below, which do not depend on thread health.
             verifyDeniedProbes(instructions, plan.deniedProbes, native)
-            markVerified(instructions)
             return
         }
 
@@ -133,17 +112,12 @@ internal object InstallSelfVerifier {
         }
 
         verifyDeniedProbes(instructions, plan.deniedProbes, native)
-        markVerified(instructions)
         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
             io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
                 passed = true,
                 detail = "program=${instructions.size} insns",
             ),
         )
-    }
-
-    private fun markVerified(instructions: List<BpfInstruction>) {
-        verifiedPrograms.putIfAbsent(instructions, Unit)
     }
 
     private fun verifyDeniedProbes(
@@ -218,14 +192,12 @@ internal object InstallSelfVerifier {
         } else {
             // Liveness is denied by merged policy - skip the actual probe but verify denied probes
             verifyDeniedProbes(instructions, plan.deniedProbes, native)
-            markVerified(instructions)
             return
         }
 
         // 2. Verify denied probes based on union semantics
         verifyDeniedProbes(instructions, plan.deniedProbes, native)
 
-        markVerified(instructions)
         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
             io.mazewall.enforcer.diagnostics.MazewallEvents.SelfVerificationResult(
                 passed = true,

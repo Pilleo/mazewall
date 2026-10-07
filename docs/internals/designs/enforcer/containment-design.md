@@ -373,8 +373,11 @@ and enablement decision, captured before native stages. Default real/mock engine
 classification belongs to the immutable native snapshot; explicit property opt-in/out
 is read once per attempt. Liveness, denied-only and union-aware probes cannot switch
 backends during execution. Standalone verifier entry selects its own snapshot and
-gate before probing. Existing program-keyed memoization is unchanged by this capture
-slice; application-owned evidence scope remains subsequent runtime work.
+gate before probing. Every enabled verification executes the bounded probe plan for
+the current installation; identical instructions are not reusable installation
+evidence across workers, native backends or merged filter trees. Stacked verification
+requires merged state and cannot silently skip enabled checks. Compilation caches
+remain independent of installation evidence.
 
 Each installation attempt also retains a `CapturedPlatform`. Production capability
 probes are bound to the selected native owner through the shared real-provider
