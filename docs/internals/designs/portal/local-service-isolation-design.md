@@ -107,6 +107,13 @@ bindings before creating a worker.
 
 ## Process and ownership rules
 
+Runtime configuration copies manifest/profile/artifact collections; later caller
+mutation cannot change validated lazy startup. Application acquisition ownership is
+registered before broker creation/startup. Close stops admission/publication, joins
+pending acquisition and retains failed cleanup owners for a later retry. Existing
+proxies check runtime admission before a call, and fatal startup/rollback identity is
+preserved. Broker process/native retirement continues to use its own lifecycle.
+
 - The host resolves generated stubs only. It must neither initialize nor
   construct a guest implementation.
 - The worker verifies its manifest and generated dispatcher after containment
@@ -128,7 +135,9 @@ bindings before creating a worker.
 ## Initial service modes
 
 `STATEFUL_SINGLETON` means one worker-side instance for an isolation group and
-one active invocation. After that worker dies, the group reports state loss and
+one atomically admitted active invocation. Overlap rejects with NOT_STARTED before
+dispatch. Unknown completion or fatal invocation failure terminally loses the group;
+later completion cannot reopen it. After that worker dies, the group reports state loss and
 requires explicit recreation. `STATELESS` permits independently managed,
 explicit capacity replacement, but never replays a call whose completion is
 unknown.

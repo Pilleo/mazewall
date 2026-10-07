@@ -21,11 +21,9 @@ public class PortalRuntime private constructor(
     }
 
     private val registry = PortalServiceRegistry(config.manifests)
-    private val brokers = ConcurrentHashMap<String, ProcessBroker>()
+    private val brokers = PortalBrokerOwnership<ProcessBroker>(DEFAULT_CLOSE_TIMEOUT_MS)
     private val proxies = ConcurrentHashMap<PortalServiceId, Any>()
     private val statefulGate = PortalStatefulInvocationGate()
-
-    @Volatile private var closed: Boolean = false
 
     public fun <T : Any> get(type: Class<T>): T {
         ensureOpen()
@@ -49,6 +47,7 @@ public class PortalRuntime private constructor(
                     "toString" -> if (method.parameterCount == 0) "PortalProxy(${manifest.serviceId.value})" else null
                     else ->
                         statefulGate.invoke(manifest) {
+                            ensureOpen()
                             try {
                                 method.invoke(delegate, *(arguments ?: emptyArray()))
                             } catch (wrapped: InvocationTargetException) {
@@ -57,7 +56,10 @@ public class PortalRuntime private constructor(
                         }
                 }
             }
-        }.let(type::cast)
+        }.let { value ->
+            ensureOpen()
+            type.cast(value)
+        }
     }
 
     /** Returns local group health without contacting or controlling a worker. */
@@ -68,7 +70,7 @@ public class PortalRuntime private constructor(
             .map { (group, members) ->
                 val baseline = statefulGate.health(members.first())
                 val manifest = members.first()
-                val broker = brokers[group]
+                 val broker = brokers.ready(group)
                 baseline.copy(
                     policyProfile = manifest.policyProfile,
                     workerProfile = config.profile(manifest),
@@ -80,46 +82,35 @@ public class PortalRuntime private constructor(
             }
 
     private fun ensureOpen() {
-        if (closed) throw PortalRuntimeClosedException()
+        brokers.assertOpen()
     }
 
     @Suppress("TooGenericExceptionCaught") // Startup rollback must close a partially started broker for every failure.
-    private fun brokerFor(manifest: PortalServiceManifest): ProcessBroker =
-        brokers.computeIfAbsent(manifest.isolationGroup) {
-            val broker =
+    private fun brokerFor(manifest: PortalServiceManifest): ProcessBroker = try {
+        brokers.acquire(manifest.isolationGroup, {
                 ProcessBroker(
                     workerClasspath = config.workerClasspath(manifest),
                     workerProfile = config.profile(manifest),
                     cgroupRoot = config.cgroupRoot,
                     grantRoots = config.grantRoots,
                 )
-            try {
-                broker.start()
-                broker
-            } catch (failure: Throwable) {
-                runCatching { broker.close() }.exceptionOrNull()?.let(failure::addSuppressed)
-                throw PortalWorkerStartupException(manifest.serviceId, failure)
-            }
-        }
+            }) { it.start() }
+    } catch (closed: PortalRuntimeClosedException) {
+        throw closed
+    } catch (fatal: Error) {
+        throw fatal
+    } catch (failure: Exception) {
+        throw PortalWorkerStartupException(manifest.serviceId, failure)
+    }
 
     override fun close() {
-        if (closed) return
-        synchronized(this) {
-            if (closed) return
-            closed = true
-            proxies.clear()
-            var failure: Throwable? = null
-            brokers.values.toSet().forEach { broker ->
-                runCatching { broker.close() }.exceptionOrNull()?.let { closeFailure ->
-                    if (failure == null) failure = closeFailure else failure.addSuppressed(closeFailure)
-                }
-            }
-            brokers.clear()
-            failure?.let { throw PortalIsolationException("portal runtime failed to close every broker", it) }
-        }
+        brokers.close()
+        proxies.clear()
     }
 
     public companion object {
+        private const val DEFAULT_CLOSE_TIMEOUT_MS = 30_000L
+
         @JvmStatic
         public fun open(config: PortalRuntimeConfig = PortalRuntimeConfig.load()): PortalRuntime = PortalRuntime(config)
     }

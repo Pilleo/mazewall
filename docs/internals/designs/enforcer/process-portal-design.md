@@ -39,6 +39,19 @@ Presentation context: [article0a-history.md](../../../presentation/article0a-his
 
 ## Authoritative lifecycles
 
+The application runtime snapshots manifest, artifact and profile selectors before lazy
+startup. Broker acquisition is registered before construction and the broker is owned
+before start. Runtime closing stops publication/invocation admission, cancels visible
+startup through the existing broker lifecycle and joins late acquisition. Failed
+retirement retains ownership for retry; Closed is published only after acquisitions
+and every owner retire. Startup/rollback preserve fatal-first failure identity.
+
+Stateful group admission is atomic with terminal state loss: exactly one invocation
+can be active, overlapping calls reject as NOT_STARTED before body entry, and unknown
+completion or fatal invocation failure makes the group unavailable. A delayed success
+or completion event cannot reopen lost state. Stateless groups keep their independent
+capacity/replacement contract.
+
 The broker pool is published transactionally. Its closed lifecycle is `New → Starting → Running
 → Closing → Closed`, with `Failed` retaining startup/cleanup failure until cleanup is retried. `Starting` workers
 remain provisional: the idle queue and live-slot registry receive no entry until every configured
