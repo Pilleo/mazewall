@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 76 | *Total Resolved Issues:* 646
+*Total Active Issues:* 77 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261007-071511-687-bind-installation-platform-probes-to-the-selected-](issue-20261007-071511-687-bind-installation-platform-probes-to-the-selected-.md) | Bind installation platform probes to the selected native and provider context | high | core |
 | [issue-20261007-070828-910-investigate-container-process-tree-cleanup-failure](issue-20261007-070828-910-investigate-container-process-tree-cleanup-failure.md) | Investigate container process-tree cleanup failure under concurrent verification | high | core |
 | [issue-20261007-014904-639-capture-optional-self-verification-authority-befor](issue-20261007-014904-639-capture-optional-self-verification-authority-befor.md) | Capture optional self-verification authority before installation | high | core |
 | [issue-20261007-010355-695-bind-supervised-installation-and-task-registration](issue-20261007-010355-695-bind-supervised-installation-and-task-registration.md) | Bind supervised installation and task registration to attempt native authority | high | core |

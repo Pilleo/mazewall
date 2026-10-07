@@ -8,13 +8,25 @@ import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.landlock.LandlockCapabilityProbe
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.syscall.PrctlCommand
 import java.io.File
 
-internal object RealPlatformProvider : PlatformProvider {
+internal object RealPlatformProvider : PlatformProvider by NativePlatformProvider(LinuxNative, { RealPlatformProvider.yamaPath }) {
     @JvmField
     internal var yamaPath: String = "/proc/sys/kernel/yama/ptrace_scope"
 
+    internal fun capture(native: NativeEngine): PlatformProvider {
+        val path = yamaPath
+        return NativePlatformProvider(native) { path }
+    }
+}
+
+/** Probe implementation shared by live diagnostics and immutable installation selection. */
+private class NativePlatformProvider(
+    private val native: NativeEngine,
+    private val yamaPath: () -> String,
+) : PlatformProvider {
     override fun getOsName(): String = System.getProperty("os.name") ?: "Unknown"
 
     override fun getOsVersion(): String = System.getProperty("os.version") ?: "Unknown"
@@ -25,7 +37,7 @@ internal object RealPlatformProvider : PlatformProvider {
         if (!getOsName().equals("Linux", ignoreCase = true)) {
             false
         } else {
-            LinuxNative.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
+            native.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
         }
 
     override fun getSeccompMode(): SeccompMode =
@@ -33,7 +45,7 @@ internal object RealPlatformProvider : PlatformProvider {
         if (!getOsName().equals("Linux", ignoreCase = true)) {
             SeccompMode.Disabled
         } else {
-            val seccompVal = LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
+            val seccompVal = native.process.prctl(PrctlCommand.GetSeccomp)
             when (seccompVal) {
                 is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
                 is LinuxNative.SyscallResult.Success -> {
@@ -54,7 +66,7 @@ internal object RealPlatformProvider : PlatformProvider {
         if (!getOsName().equals("Linux", ignoreCase = true)) {
             LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
         } else {
-            LinuxNative.process.prctl(PrctlCommand.SetSeccomp(-1L))
+            native.process.prctl(PrctlCommand.SetSeccomp(-1L))
         }
 
     override fun isNoNewPrivsEnabled(): Boolean =
@@ -62,7 +74,7 @@ internal object RealPlatformProvider : PlatformProvider {
         if (!getOsName().equals("Linux", ignoreCase = true)) {
             false
         } else {
-            val nnpVal = LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs)
+            val nnpVal = native.process.prctl(PrctlCommand.GetNoNewPrivs)
             if (nnpVal is LinuxNative.SyscallResult.Success) {
                 nnpVal.value == 1L
             } else {
@@ -75,7 +87,7 @@ internal object RealPlatformProvider : PlatformProvider {
 
     override fun getYamaPtraceScope(): YamaPtraceScope {
         if (!getOsName().equals("Linux", ignoreCase = true)) return YamaPtraceScope.Unavailable
-        val file = File(yamaPath)
+        val file = File(yamaPath())
         if (!file.exists()) return YamaPtraceScope.Unavailable
         return try {
             val content = file.readText().trim()
@@ -98,7 +110,7 @@ internal object RealPlatformProvider : PlatformProvider {
         if (!getOsName().equals("Linux", ignoreCase = true)) {
             KernelCapability.Unsupported
         } else {
-            LandlockCapabilityProbe.probeCapability()
+            LandlockCapabilityProbe.probeCapability(native)
         }
 
     override fun getLandlockAbiVersion(): Int = getLandlockCapability().availableValueOrZero()
@@ -131,7 +143,16 @@ internal object RealPlatformProvider : PlatformProvider {
 
         // Check kernel support via arch_prctl
         // Also respect the override if set (for testing)
-        return (cpuSupported && Platform.isKernelCetSupported()) ||
+        return (
+            cpuSupported &&
+            Platform.isKernelCetSupported(
+                native,
+                platformEligible =
+                getOsName().equals("Linux", ignoreCase = true) &&
+                    io.mazewall.platform.syscall.Arch
+                    .current() == io.mazewall.platform.syscall.Arch.AMD64,
+            )
+        ) ||
                (Platform.isCpuCetSupportedOverride ?: false)
     }
 
@@ -148,7 +169,7 @@ internal object RealPlatformProvider : PlatformProvider {
         } catch (_: UnsupportedOperationException) {
             return false
         }
-        val res = LinuxNative.raw.syscall(
+        val res = native.raw.syscall(
             arch.seccompSyscallNumber.toLong(),
             io.mazewall.platform.syscall.NativeArg
                 .LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),

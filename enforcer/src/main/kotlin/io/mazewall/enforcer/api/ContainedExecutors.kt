@@ -317,7 +317,7 @@ public object ContainedExecutors {
             val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
             unsupportedPlatformReceipt(processWide, policy, attempt)?.let { return recordInstallationResult(it) }
 
-            validateLinuxAndNotVirtual()
+            check(attempt.platform.isLinux) { "Mazewall requires Linux for kernel-level containment." }
             preparePreSeccompEffects(augmentedPolicy, attempt)
             return recordInstallationResult(installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy, attempt))
         } catch (fatal: Error) {
@@ -400,7 +400,7 @@ public object ContainedExecutors {
         policy: PolicyDefinition<*>,
         attempt: InstallationAttempt,
     ): io.mazewall.enforcer.api.InstallationReceipt? {
-        if (Platform.isSupported()) return null
+        if (attempt.platform.isSupported()) return null
         handleUnsupportedPlatform(attempt.fallback)
         return io.mazewall.enforcer.api
             .InstallationReceipt(
@@ -554,7 +554,7 @@ public object ContainedExecutors {
                 val publish = ContainmentRegistryEffectInterpreter.prepare(
                     ContainmentRegistryEffect.LandlockApplied(processWide, policy),
                 )
-                val capabilities = Platform.featureSnapshot
+                val capabilities = attempt.platform.capabilities
                 val applied = Landlock.tryApplyRuleset(policy, processWide, fallback = attempt.fallback, native = attempt.native, capabilities = capabilities) {
                     attempt.landlockApplied = true
                     publish()
@@ -607,7 +607,7 @@ public object ContainedExecutors {
             attempt.cetOutcome = CetOutcome.VERIFIED_CURRENT_THREAD
             return
         }
-            requireEnabledShadowStack(native, "before lock")
+            requireEnabledShadowStack(attempt, "before lock")
             val lock = native.process.archPrctl(io.mazewall.ffi.NativeConstants.ARCH_SHSTK_LOCK, io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK)
             check(lock is LinuxNative.SyscallResult.Success && lock.value == 0L) {
                 when (lock) {
@@ -617,7 +617,7 @@ public object ContainedExecutors {
             }
             // Successful LOCK is irreversible even if later status/diagnostic work fails.
             attempt.cetLocked = true
-            requireEnabledShadowStack(native, "after lock")
+            requireEnabledShadowStack(attempt, "after lock")
             ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(CetThreadProof(native.engineIdentity, owner)))
             attempt.cetOutcome = CetOutcome.VERIFIED_CURRENT_THREAD
             io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
@@ -629,10 +629,10 @@ public object ContainedExecutors {
     }
 
     private fun requireEnabledShadowStack(
-        native: NativeEngine,
+        attempt: InstallationAttempt,
         phase: String,
     ) {
-        val status = Platform.probeShstkStatus(native)
+        val status = Platform.probeShstkStatus(attempt.native, attempt.platform.isCetEligible)
         if (status !is KernelCapability.Available) throw Platform.cetStatusFailure(status)
         check((status.value and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L) {
             "Shadow stack is inactive $phase. A compatible runtime/loader must enable SHSTK before library entry; late FFM enablement is unsupported."
@@ -669,6 +669,7 @@ public object ContainedExecutors {
                     publish()
                 },
                 attempt.native,
+                attempt.platform.capabilities.matrix.seccompUserNotifSupported,
             )
             return session
         } else {
@@ -688,7 +689,7 @@ public object ContainedExecutors {
                     newDefaultAction,
                 ),
             )
-            PureJavaBpfEngine.installWithPublication(compiledSandbox, processWide, native = attempt.native) {
+            PureJavaBpfEngine.installWithPublication(compiledSandbox, processWide, native = attempt.native, platform = attempt.platform) {
                 attempt.seccompApplied = true
                 publish()
             }

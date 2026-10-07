@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.api
 
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.RawSyscallOperations
@@ -49,9 +50,26 @@ class CapturedLandlockBackendNativeTest : BaseIntegrationTest() {
         verifyCapturedInstallation(file, supervised = true)
     }
 
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `captured provider spans Landlock and supervised installation`() {
+        val file = Files.createTempFile("captured-platform-landlock-", ".txt")
+        try {
+            Files.writeString(file, "caller-readable")
+            IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyCapturedPlatformInstallation", file.toString())
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    fun verifyCapturedPlatformInstallation(file: String) {
+        verifyCapturedInstallation(file, supervised = true, replaceProvider = true)
+    }
+
     private fun verifyCapturedInstallation(
         file: String,
         supervised: Boolean,
+        replaceProvider: Boolean = false,
     ) {
         System.setProperty("io.mazewall.fallback", "FAIL")
         val actual = LinuxNative.snapshot()
@@ -85,7 +103,18 @@ class CapturedLandlockBackendNativeTest : BaseIntegrationTest() {
                 a6: NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 val result = actual.raw.syscall(nr, a1, a2, a3, a4, a5, a6)
-                if (nr == 444L && result is LinuxNative.SyscallResult.Success && result.value >= 0L && a3.asLong == 0L) LinuxNative.setEngine(foreign)
+                if (nr == 444L && result is LinuxNative.SyscallResult.Success && result.value >= 0L && a3.asLong == 0L) {
+                    LinuxNative.setEngine(foreign)
+                    if (replaceProvider) {
+                        Platform.setProvider(object : PlatformProvider by RealPlatformProvider {
+                        override fun getOsName(): String = "Windows"
+
+                        override fun probeSeccompUserNotif(): Boolean = false
+
+                        override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Rejected(13)
+                    })
+                    }
+                }
                 return result
             }
         }
@@ -116,6 +145,7 @@ class CapturedLandlockBackendNativeTest : BaseIntegrationTest() {
             assertEquals(0, foreignCalls.get())
             assertEquals("caller-readable", Files.readString(Path.of(file)))
         } finally {
+            Platform.resetToDefault()
             LinuxNative.resetToDefault()
         }
     }

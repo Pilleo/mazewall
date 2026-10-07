@@ -4,7 +4,6 @@ import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.CompiledSandbox
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.ManagedSegment
@@ -44,8 +43,12 @@ internal sealed interface SeccompInstallationState {
     ) : SeccompInstallationState {
         override val rank: Int = 2
 
-        fun lockPrivileges(native: NativeEngine = LinuxNative.snapshot()): PrivilegesLocked {
-            validateLinuxAndNotVirtual()
+        fun lockPrivileges(
+            native: NativeEngine = LinuxNative.snapshot(),
+            platform: CapturedPlatform = Platform.capture(native),
+        ): PrivilegesLocked {
+            requirePlatformThread()
+            if (!platform.isLinux) throw UnsupportedOperationException("Mazewall requires Linux for kernel-level containment.")
             PureJavaBpfEngine.lockNoNewPrivileges(native)
             return PrivilegesLocked(program)
         }

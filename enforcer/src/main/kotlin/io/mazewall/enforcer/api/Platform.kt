@@ -64,9 +64,13 @@ public object Platform {
             }
         }
 
-    /**
-     * Swaps the active platform provider. Used for testing and fault injection.
-     */
+    /** Selects one provider and binds production probes to the installing native owner. */
+    internal fun capture(native: NativeEngine): CapturedPlatform {
+        val selected = synchronized(this) { provider }
+        return CapturedPlatform(if (selected === RealPlatformProvider) RealPlatformProvider.capture(native) else selected)
+    }
+
+    /** Swaps the active platform provider for testing and fault injection. */
     @JvmStatic
     internal fun setProvider(newProvider: PlatformProvider) {
         synchronized(this) {
@@ -126,8 +130,11 @@ public object Platform {
     @JvmStatic
     public fun isSupported(): Boolean =
         isLinux &&
-            provider.hasKernelSeccompSupport() &&
-            isSeccompSanityCheckPassing() &&
+            isSupported(provider)
+
+    internal fun isSupported(selected: PlatformProvider): Boolean =
+        selected.hasKernelSeccompSupport() &&
+            isSeccompSanityCheckPassing(selected) &&
             isArchitectureSupported()
 
     /**
@@ -146,12 +153,12 @@ public object Platform {
         }
     }
 
-    private fun isSeccompSanityCheckPassing(): Boolean {
+    private fun isSeccompSanityCheckPassing(selected: PlatformProvider): Boolean {
         // Bogus Sanity Check: Ensure the kernel actively enforces seccomp.
         // We call prctl(PR_SET_SECCOMP) with an invalid mode (-1).
         // A healthy kernel should return -1 and set errno to EINVAL (22).
         // Some container environments or broken kernels might silently return 0 or a different error.
-        val bogusCheck = provider.checkSeccompSanity()
+        val bogusCheck = selected.checkSeccompSanity()
         val passed = bogusCheck is SyscallResult.Error && bogusCheck.errno == NativeConstants.EINVAL
         if (!passed) {
             val (ret, errno) =
@@ -212,8 +219,11 @@ public object Platform {
      * Probes enabled SHSTK bits using the read-only Linux status operation. Native errors and
      * unexpected return values remain distinct; enabled status does not prove a lock.
      */
-    internal fun probeShstkStatus(native: NativeEngine = LinuxNative.snapshot()): KernelCapability<Long> {
-        if (!isCetPlatformEligible) return KernelCapability.Unsupported
+    internal fun probeShstkStatus(
+        native: NativeEngine = LinuxNative.snapshot(),
+        platformEligible: Boolean = isCetPlatformEligible,
+    ): KernelCapability<Long> {
+        if (!platformEligible) return KernelCapability.Unsupported
         return try {
             NativeArena.ofConfined().use { arena ->
                 val statusSeg = arena.allocate(8)
@@ -239,8 +249,11 @@ public object Platform {
         return false
     }
 
-    internal fun isKernelCetSupported(): Boolean =
-        when (val status = probeShstkStatus()) {
+    internal fun isKernelCetSupported(
+        native: NativeEngine = LinuxNative.snapshot(),
+        platformEligible: Boolean = isCetPlatformEligible,
+    ): Boolean =
+        when (val status = probeShstkStatus(native, platformEligible)) {
             is KernelCapability.Available -> true
             KernelCapability.Unsupported -> false
             is KernelCapability.Rejected -> if (isUnsupportedCetErrno(status.errno)) false else throw cetStatusFailure(status)

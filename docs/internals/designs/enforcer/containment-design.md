@@ -376,6 +376,15 @@ backends during execution. Standalone verifier entry selects its own snapshot an
 gate before probing. Existing program-keyed memoization is unchanged by this capture
 slice; application-owned evidence scope remains subsequent runtime work.
 
+Each installation attempt also retains a `CapturedPlatform`. Production capability
+probes are bound to the selected native owner through the shared real-provider
+implementation; support, Linux validation, Landlock, CET and USER_NOTIF decisions
+retain the selected provider. Plain Seccomp privilege validation and TSYNC checks
+receive the same selection. This does not consume the global provider-generation
+cache as proof for an independently selected native backend. Standalone diagnostic
+entry points remain live; application-owned prepared-context lifetime is subsequent
+managed-runtime work.
+
 `ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
 of policy coverage and Seccomp engine-state rank. The interpreter retains the first
 failure without rewinding applied stages. Registry merges carry thread/process

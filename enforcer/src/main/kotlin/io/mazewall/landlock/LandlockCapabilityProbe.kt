@@ -3,6 +3,7 @@ package io.mazewall.landlock
 import io.mazewall.enforcer.api.KernelCapability
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.syscall.NativeArg
 
 /** Pure classification of the Landlock ABI probe; permission failure is never capability absence. */
@@ -39,10 +40,10 @@ internal object LandlockCapabilityProbe {
                 }
         }
 
-    fun probeCapability(): KernelCapability<Int> =
+    fun probeCapability(native: NativeEngine = LinuxNative.snapshot()): KernelCapability<Int> =
         try {
             classifyCapability(
-                LinuxNative.raw.syscall(
+                native.raw.syscall(
                     NativeConstants.LANDLOCK_CREATE_RULESET_NR,
                     NativeArg.LongArg(0L),
                     NativeArg.LongArg(0L),

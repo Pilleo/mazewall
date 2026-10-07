@@ -63,10 +63,12 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     }
 
     override fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
-        if (!Platform.featureMatrix.seccompTsyncSupported) {
+        val native = LinuxNative.snapshot()
+        val platform = Platform.capture(native)
+        if (!platform.capabilities.matrix.seccompTsyncSupported) {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
-        installInternal(policy, useTsync = true)
+        installInternal(policy, useTsync = true, native = native, platform = platform)
         return LoadedEngine(this)
     }
 
@@ -74,6 +76,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         policy: CompiledSandbox<*>,
         useTsync: Boolean,
         native: NativeEngine = LinuxNative.snapshot(),
+        platform: CapturedPlatform = Platform.capture(native),
         onApplied: () -> Unit = {},
     ) {
         io.mazewall.enforcer.diagnostics.requirePlatformThread()
@@ -96,7 +99,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             ScopedBpfProgram.withProgram(filters, native) { program ->
                 val built = SeccompInstallationState.FilterBuilt(program)
                 updateState(built, useTsync)
-                val locked = built.lockPrivileges(native)
+                val locked = built.lockPrivileges(native, platform)
                 updateState(locked, useTsync)
                 val applied = locked.applyFilter(arch, useTsync, native)
                 onApplied()
@@ -123,11 +126,17 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     }
 
     /** Publication occurs immediately after native success, before verification can fail. */
-    internal fun installWithPublication(policy: CompiledSandbox<*>, processWide: Boolean, native: NativeEngine = LinuxNative.snapshot(), onApplied: () -> Unit) {
-        if (processWide && !Platform.featureMatrix.seccompTsyncSupported) {
+    internal fun installWithPublication(
+        policy: CompiledSandbox<*>,
+        processWide: Boolean,
+        native: NativeEngine = LinuxNative.snapshot(),
+        platform: CapturedPlatform = Platform.capture(native),
+        onApplied: () -> Unit,
+    ) {
+        if (processWide && !platform.capabilities.matrix.seccompTsyncSupported) {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
-        installInternal(policy, processWide, native, onApplied)
+        installInternal(policy, processWide, native, platform, onApplied)
     }
 
     private fun getStepName(): String {

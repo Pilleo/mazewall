@@ -31,6 +31,7 @@ internal class InstallationAttempt(
         .snapshot()
     val selfVerificationEnabled = io.mazewall.seccomp.InstallSelfVerifier
         .isEnabled(native)
+    val platform = Platform.capture(native)
     var landlockApplied: Boolean = false
     var seccompApplied: Boolean = false
     var failure: Throwable? = null
