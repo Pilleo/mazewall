@@ -49,8 +49,10 @@ and every owner retire. Startup/rollback preserve fatal-first failure identity.
 Stateful group admission is atomic with terminal state loss: exactly one invocation
 can be active, overlapping calls reject as NOT_STARTED before body entry, and unknown
 completion or fatal invocation failure makes the group unavailable. A delayed success
-or completion event cannot reopen lost state. Stateless groups keep their independent
-capacity/replacement contract.
+or completion event cannot reopen lost state. The broker captures the manifest's instance
+mode: retiring a lost stateful worker moves the running broker to Failed before maintenance
+and never constructs a replacement guest. Cleanup remains retryable. Stateless groups keep
+their independent capacity/replacement contract.
 
 The broker pool is published transactionally. Its closed lifecycle is `New → Starting → Running
 → Closing → Closed`, with `Failed` retaining startup/cleanup failure until cleanup is retried. `Starting` workers
@@ -67,14 +69,14 @@ or interruption cannot orphan a late child. Cleanup drains independent resources
 fatal failures, publishes `Failed`, and releases concurrent close waiters before rethrowing the
 fatal-first aggregate. `Closed` therefore never precedes acquisition completion and child reaping.
 
-Worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
+Stateless worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
 is destroyed and reaped first; replenishment runs independently, is logged separately, and cannot
 replace or delay the original failure. Checkout, return, replacement, and shutdown consult the same lifecycle authority,
 so a slot cannot be returned after closing admission begins.
 
 A fatal broker call error retires and reaps its checked-out worker before propagation. The
 original error retains cleanup failures as suppressed evidence; replacement remains separate
-maintenance. Each child output pump drains incrementally into at most 64 diagnostic lines of
+stateless maintenance. Each child output pump drains incrementally into at most 64 diagnostic lines of
 1,024 characters, records truncation/drop counts and stream failures, and recognizes readiness
 only from an exact complete sentinel line. Child output is never appended to a shared file or
 forwarded continuously into broker logs. Startup failures carry the bounded diagnostic snapshot.
@@ -153,7 +155,8 @@ minimal privileged grant helper remains the future isolation step.
 
 v1 forbids worker → broker FDs (confused deputy). Return values are data only.
 
-Timeouts kill/restart the **worker process**. Do not `Thread.interrupt()` the broker.
+Timeouts retire the **worker process**. Stateless pools may replace it; stateful groups
+remain terminally unavailable. Do not `Thread.interrupt()` the broker.
 
 Every broker RPC creates one monotonic absolute deadline before worker checkout. The same
 budget covers request bytes, every descriptor transfer, and response bytes; frame stages

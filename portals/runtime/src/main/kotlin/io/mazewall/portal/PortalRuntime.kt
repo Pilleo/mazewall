@@ -93,6 +93,7 @@ public class PortalRuntime private constructor(
                     workerProfile = config.profile(manifest),
                     cgroupRoot = config.cgroupRoot,
                     grantRoots = config.grantRoots,
+                    instanceMode = manifest.instanceMode,
                     limits = if (manifest.instanceMode == PortalInstanceMode.STATEFUL_SINGLETON) config.limits.copy(workers = 1) else config.limits,
                 )
             }) { it.start() }

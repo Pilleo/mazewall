@@ -47,8 +47,10 @@ public class ProcessBroker internal constructor(
     private val workerProfile: PortalWorkerProfile = PortalWorkerProfile(),
     private val cgroupRoot: java.nio.file.Path? = null,
     private val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
+    private val instanceMode: PortalInstanceMode = PortalInstanceMode.STATELESS,
 ) : AutoCloseable {
     init {
+        require(instanceMode != PortalInstanceMode.STATEFUL_SINGLETON || limits.workers == 1) { "stateful Portal groups require exactly one worker" }
         require(!workerProfile.requiresCgroup || cgroupRoot != null) {
             "limited portal worker profile requires a delegated cgroup root"
         }
@@ -640,6 +642,13 @@ public class ProcessBroker internal constructor(
     }
 
     private fun scheduleRecycle(dead: WorkerSlot) {
+        synchronized(lifecycleGate) {
+            if (instanceMode == PortalInstanceMode.STATEFUL_SINGLETON && lifecycle == ProcessBrokerLifecycle.Running) {
+                lifecycle = ProcessBrokerLifecycleMachine
+                    .evaluate(lifecycle, ProcessBrokerLifecycleEvent.WorkerLost("stateful portal worker lost; guest state cannot be recreated"))
+                    .state
+            }
+        }
         try {
             maintenance.execute {
                 runCatching {

@@ -37,6 +37,18 @@ class ProcessBrokerLifecycleMachineTest {
     }
 
     @Test
+    fun `lost running worker cannot be republished and retains cleanup admission`() {
+        val lost = ProcessBrokerLifecycleMachine.evaluate(ProcessBrokerLifecycle.Running, ProcessBrokerLifecycleEvent.WorkerLost("state lost"))
+        assertEquals(ProcessBrokerLifecycle.Failed("state lost"), lost.state)
+        val restart = ProcessBrokerLifecycleMachine.evaluate(lost.state, ProcessBrokerLifecycleEvent.StartRequested)
+        assertInstanceOf(ProcessBrokerLifecycleTransition.ProtocolViolation::class.java, restart)
+        val publish = ProcessBrokerLifecycleMachine.evaluate(lost.state, ProcessBrokerLifecycleEvent.StartupSucceeded)
+        assertEquals(lost.state, publish.state)
+        assertInstanceOf(ProcessBrokerLifecycleTransition.ProtocolViolation::class.java, publish)
+        assertEquals(ProcessBrokerLifecycle.Closing, ProcessBrokerLifecycleMachine.evaluate(lost.state, ProcessBrokerLifecycleEvent.CloseRequested).state)
+    }
+
+    @Test
     fun `every lifecycle event combination is explicitly classified`() {
         val states = listOf(
             ProcessBrokerLifecycle.New,
@@ -50,6 +62,7 @@ class ProcessBrokerLifecycleMachineTest {
             ProcessBrokerLifecycleEvent.StartRequested,
             ProcessBrokerLifecycleEvent.StartupSucceeded,
             ProcessBrokerLifecycleEvent.StartupFailed("x"),
+            ProcessBrokerLifecycleEvent.WorkerLost("x"),
             ProcessBrokerLifecycleEvent.CloseRequested,
             ProcessBrokerLifecycleEvent.CleanupSucceeded,
             ProcessBrokerLifecycleEvent.CleanupFailed("x"),
@@ -64,7 +77,7 @@ class ProcessBrokerLifecycleMachineTest {
                         event is ProcessBrokerLifecycleEvent.StartupSucceeded ||
                         event is ProcessBrokerLifecycleEvent.StartupFailed ||
                         event is ProcessBrokerLifecycleEvent.CloseRequested
-                    ProcessBrokerLifecycle.Running -> event is ProcessBrokerLifecycleEvent.CloseRequested
+                    ProcessBrokerLifecycle.Running -> event is ProcessBrokerLifecycleEvent.CloseRequested || event is ProcessBrokerLifecycleEvent.WorkerLost
                     ProcessBrokerLifecycle.Closing -> event is ProcessBrokerLifecycleEvent.CleanupSucceeded || event is ProcessBrokerLifecycleEvent.CleanupFailed
                     is ProcessBrokerLifecycle.Failed -> event is ProcessBrokerLifecycleEvent.CloseRequested
                     ProcessBrokerLifecycle.Closed -> false

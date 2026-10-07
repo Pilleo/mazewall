@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 90 | *Total Resolved Issues:* 646
+*Total Active Issues:* 91 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261007-205309-190-prevent-stateful-portal-worker-recreation-after-am](issue-20261007-205309-190-prevent-stateful-portal-worker-recreation-after-am.md) | Prevent stateful Portal worker recreation after ambiguous loss | high | core |
 | [issue-20261007-201438-646-expose-finite-portal-worker-admission-deadlines-an](issue-20261007-201438-646-expose-finite-portal-worker-admission-deadlines-an.md) | Expose finite Portal worker admission deadlines and transport limits | high | core |
 | [issue-20261007-181510-737-own-portal-broker-acquisition-and-retain-failed-cl](issue-20261007-181510-737-own-portal-broker-acquisition-and-retain-failed-cl.md) | Own Portal broker acquisition and retain failed close resources transactionally | high | core |
 | [issue-20261007-180300-646-freeze-portal-runtime-configuration-before-lazy-wo](issue-20261007-180300-646-freeze-portal-runtime-configuration-before-lazy-wo.md) | Freeze Portal runtime configuration before lazy worker startup | high | core |

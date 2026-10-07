@@ -499,6 +499,25 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
+    fun `stateful timeout retires worker without recreating guest state`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 200), instanceMode = PortalInstanceMode.STATEFUL_SINGLETON).use { broker ->
+            broker.start()
+            val child = ProcessHandle.of(broker.workerPids().single()).orElseThrow()
+            val failed = assertThrows(PortalCallException::class.java) { broker.sleep(10_000) }
+            assertEquals(PortalInvocationEvidence.UNKNOWN_COMPLETION, failed.evidence)
+            awaitCondition(java.time.Duration.ofSeconds(5), "stateful worker retirement") { broker.trackedWorkers() == 0 }
+            assertFalse(child.isAlive)
+            assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+            assertThrows(IllegalStateException::class.java) { broker.echo("must-not-recreate") }
+            assertEquals(1, broker.spawnedWorkers())
+            assertEquals(0, broker.idleSize())
+            broker.close()
+            assertEquals(1, broker.spawnedWorkers(), "joined maintenance must never construct replacement state")
+        }
+    }
+
+    @Test
     fun `timeout kills worker and later call succeeds`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 800)).use { broker ->

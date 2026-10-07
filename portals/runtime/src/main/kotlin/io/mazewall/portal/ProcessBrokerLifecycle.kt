@@ -26,6 +26,10 @@ internal sealed interface ProcessBrokerLifecycleEvent {
         val reason: String,
     ) : ProcessBrokerLifecycleEvent
 
+    data class WorkerLost(
+        val reason: String,
+    ) : ProcessBrokerLifecycleEvent
+
     data object CloseRequested : ProcessBrokerLifecycleEvent
 
     data object CleanupSucceeded : ProcessBrokerLifecycleEvent
@@ -68,6 +72,7 @@ internal object ProcessBrokerLifecycleMachine {
         ProcessBrokerLifecycleEvent.CloseRequested -> advanced(ProcessBrokerLifecycle.Closing)
         ProcessBrokerLifecycleEvent.StartupSucceeded,
         is ProcessBrokerLifecycleEvent.StartupFailed,
+        is ProcessBrokerLifecycleEvent.WorkerLost,
         ProcessBrokerLifecycleEvent.CleanupSucceeded,
         is ProcessBrokerLifecycleEvent.CleanupFailed,
         -> violation(ProcessBrokerLifecycle.New, event)
@@ -79,6 +84,7 @@ internal object ProcessBrokerLifecycleMachine {
         is ProcessBrokerLifecycleEvent.StartupFailed -> advanced(ProcessBrokerLifecycle.Failed(event.reason))
         ProcessBrokerLifecycleEvent.CloseRequested -> advanced(ProcessBrokerLifecycle.Closing)
         ProcessBrokerLifecycleEvent.StartRequested,
+        is ProcessBrokerLifecycleEvent.WorkerLost,
         ProcessBrokerLifecycleEvent.CleanupSucceeded,
         is ProcessBrokerLifecycleEvent.CleanupFailed,
         -> violation(ProcessBrokerLifecycle.Starting, event)
@@ -87,6 +93,7 @@ internal object ProcessBrokerLifecycleMachine {
     private fun fromRunning(event: ProcessBrokerLifecycleEvent) =
         when (event) {
         ProcessBrokerLifecycleEvent.CloseRequested -> advanced(ProcessBrokerLifecycle.Closing)
+        is ProcessBrokerLifecycleEvent.WorkerLost -> advanced(ProcessBrokerLifecycle.Failed(event.reason))
         ProcessBrokerLifecycleEvent.StartRequested,
         ProcessBrokerLifecycleEvent.StartupSucceeded,
         is ProcessBrokerLifecycleEvent.StartupFailed,
@@ -103,6 +110,7 @@ internal object ProcessBrokerLifecycleMachine {
         ProcessBrokerLifecycleEvent.StartupSucceeded,
         is ProcessBrokerLifecycleEvent.StartupFailed,
         ProcessBrokerLifecycleEvent.CloseRequested,
+        is ProcessBrokerLifecycleEvent.WorkerLost,
         -> violation(ProcessBrokerLifecycle.Closing, event)
         }
 
@@ -114,6 +122,7 @@ internal object ProcessBrokerLifecycleMachine {
         ProcessBrokerLifecycleEvent.StartRequested,
         ProcessBrokerLifecycleEvent.StartupSucceeded,
         is ProcessBrokerLifecycleEvent.StartupFailed,
+        is ProcessBrokerLifecycleEvent.WorkerLost,
         ProcessBrokerLifecycleEvent.CleanupSucceeded,
         is ProcessBrokerLifecycleEvent.CleanupFailed,
         -> violation(state, event)
