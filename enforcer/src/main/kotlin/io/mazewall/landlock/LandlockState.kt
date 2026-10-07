@@ -17,6 +17,7 @@ import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.fd.close
 import io.mazewall.platform.fd.use
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 
 /**
  * States representing the configuration and application of a Landlock ruleset.
@@ -212,6 +213,7 @@ internal sealed interface RulesetState {
  */
 internal class LandlockRuleset<out S : RulesetState> internal constructor(
     public val fd: FileDescriptor<FileDescriptorRole.Ruleset, FdState.Open, FdOwnership.Owned>,
+    val native: NativeEngine = LinuxNative.snapshot(),
 )
 
 /**
@@ -269,6 +271,8 @@ internal class LandlockSession(
     private val processWide: Boolean = false,
     private val onRestrictionApplied: () -> Unit = {},
     private val fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
+    private val native: NativeEngine = LinuxNative.snapshot(),
+    private val capabilities: KernelFeatureSnapshot = Platform.featureSnapshot,
 ) {
     var state: LandlockState = LandlockState.Uninitialized
         private set
@@ -284,22 +288,33 @@ internal class LandlockSession(
     }
 
     private fun interpretTerminalEffects(effects: List<LandlockInstallEffect>) {
-        effects.filterIsInstance<LandlockInstallEffect.CloseFd>().forEach { it.rulesetFd.close() }
+        effects.filterIsInstance<LandlockInstallEffect.CloseFd>().forEach { it.rulesetFd.close(native.fileSystem) }
     }
 
     fun tryApplyRuleset(): LandlockApplyResult {
         try {
-            val features = Platform.featureMatrix
-            val abi = features.landlockAbiVersion
-            if (processWide && !features.landlockTsyncSupported) {
-                handleProcessWideUnsupported()
+            return when (val capability = capabilities.landlockCapability) {
+                is KernelCapability.Available -> applyAvailableAbi(capability.value)
+                KernelCapability.Unsupported -> applyUnsupportedAbi()
+                is KernelCapability.Rejected -> rejectCapability(capability.errno)
+                is KernelCapability.ProbeFailed -> rejectInstallFailure(capability.cause)
             }
-            return if (abi < 1) applyUnsupportedAbi() else applySupportedRuleset(abi)
         } catch (expectedInstallFailure: Exception) {
             return rejectInstallFailure(expectedInstallFailure)
         } catch (expectedFatalFailure: Error) {
             return rejectInstallFailure(expectedFatalFailure)
         }
+    }
+
+    private fun applyAvailableAbi(abi: Int): LandlockApplyResult {
+        if (processWide && !capabilities.matrix.landlockTsyncSupported) handleProcessWideUnsupported()
+        return if (abi < 1) applyUnsupportedAbi() else applySupportedRuleset(abi)
+    }
+
+    private fun rejectCapability(errno: Int): LandlockApplyResult {
+        val outcome = LandlockApplyResult.Rejected("Landlock capability probe rejected with errno=$errno", errno = errno)
+        interpretTerminalEffects(transition(LandlockInstallEvent.Failed(outcome.toFailure())))
+        return outcome
     }
 
     private fun rejectInstallFailure(failure: Throwable): LandlockApplyResult {
@@ -325,11 +340,11 @@ internal class LandlockSession(
             .single() as LandlockInstallEffect.CreateRuleset
         NativeArena.ofConfined().use { arena ->
             val created = with(arena) {
-                Landlock.tryCreateRuleset(createRuleset.filesystemAccess, createRuleset.networkAccess, createRuleset.abi)
+                Landlock.tryCreateRuleset(createRuleset.filesystemAccess, createRuleset.networkAccess, createRuleset.abi, native)
             }
             return when (created) {
                 is LandlockFdOutcome.Err -> failNativeStep("landlock_create_ruleset", created.errno)
-                is LandlockFdOutcome.Ok -> created.fd.use { rulesetFd -> applyRulesAndRestrict(rulesetFd, abi, arena) }
+                is LandlockFdOutcome.Ok -> created.fd.use(native.fileSystem) { rulesetFd -> applyRulesAndRestrict(rulesetFd, abi, arena) }
             }
         }
     }
@@ -339,7 +354,7 @@ internal class LandlockSession(
         abi: Int,
         arena: NativeArena,
     ): LandlockApplyResult {
-        val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd)
+        val ruleset = LandlockRuleset<RulesetState.Building>(rulesetFd, native)
         val addRules = transition(LandlockInstallEvent.RulesetCreated(ruleset, abi, policy))
             .single() as LandlockInstallEffect.AddRules
         val added = LandlockLifecycle.RulesetCreated(addRules.ruleset, addRules.abi, addRules.policy).addRules(arena)
@@ -365,7 +380,7 @@ internal class LandlockSession(
 
     private fun handleProcessWideUnsupported() {
         val msg = "Process-wide Landlock requires ABI v8 with LANDLOCK_RESTRICT_SELF_TSYNC. " +
-            "This kernel supports ABI v${Platform.featureMatrix.landlockAbiVersion}."
+            "This kernel supports ABI v${capabilities.matrix.landlockAbiVersion}."
         if (fallback == Platform.FallbackBehavior.FAIL) {
             throw UnsupportedKernelFeatureException(msg)
         } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {

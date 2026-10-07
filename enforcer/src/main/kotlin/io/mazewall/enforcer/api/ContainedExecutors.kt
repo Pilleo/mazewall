@@ -554,7 +554,8 @@ public object ContainedExecutors {
                 val publish = ContainmentRegistryEffectInterpreter.prepare(
                     ContainmentRegistryEffect.LandlockApplied(processWide, policy),
                 )
-                val applied = Landlock.tryApplyRuleset(policy, processWide, fallback = attempt.fallback) {
+                val capabilities = Platform.featureSnapshot
+                val applied = Landlock.tryApplyRuleset(policy, processWide, fallback = attempt.fallback, native = attempt.native, capabilities = capabilities) {
                     attempt.landlockApplied = true
                     publish()
                 }
@@ -563,8 +564,7 @@ public object ContainedExecutors {
                         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
                             io.mazewall.enforcer.diagnostics.MazewallEvents.LandlockApplied(
                                 processWide = processWide,
-                                abiVersion = io.mazewall.landlock.Landlock
-                                    .getAbiVersion(),
+                                abiVersion = capabilities.matrix.landlockAbiVersion,
                             ),
                         )
                         return LandlockStep.APPLIED

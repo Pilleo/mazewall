@@ -235,11 +235,11 @@ internal class FileDescriptor<out R : FileDescriptorRole, out S : FdState, out O
      * retry can close a reused fd. The token is retired even if the syscall result
      * is an error; see docs/internals/designs/core/fd-token-ownership.md.
      */
-    internal fun closeResource() {
+    internal fun closeResource(native: io.mazewall.platform.native.NativeFileSystem = LinuxNative.snapshot().fileSystem) {
         synchronized(lifecycle) {
             if (value < 0 || isClosedType() || !isLiveForIo()) return
             try {
-                LinuxNative.fileSystem.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
+                native.close(this as FileDescriptor<*, FdState.Open, FdOwnership.Owned>)
             } finally {
                 markClosed()
                 arena?.close()
@@ -490,8 +490,10 @@ internal fun LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unh
  * @return A new [FileDescriptor] instance with the same value but [FdState.Closed] state.
  * @throws IllegalStateException if this descriptor is Unowned.
  */
-internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdOwnership.Owned>.close(): FileDescriptor<R, FdState.Closed, FdOwnership.Owned> {
-    closeResource()
+internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdOwnership.Owned>.close(
+    native: io.mazewall.platform.native.NativeFileSystem = LinuxNative.snapshot().fileSystem,
+): FileDescriptor<R, FdState.Closed, FdOwnership.Owned> {
+    closeResource(native)
 
     return FileDescriptor.closedView(this)
 }
@@ -501,7 +503,10 @@ internal fun <R : FileDescriptorRole, S : FdState.Open> FileDescriptor<R, S, FdO
  * even if an exception is thrown.
  */
 @Suppress("TooGenericExceptionCaught", "ThrowingExceptionFromFinally") // Preserve the primary failure and attach a native-close failure as evidence.
-internal fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T): T {
+internal fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, FdOwnership.Owned>.use(
+    native: io.mazewall.platform.native.NativeFileSystem = LinuxNative.snapshot().fileSystem,
+    block: (FileDescriptor<R, S, FdOwnership.Owned>) -> T,
+): T {
     var blockFailure: Throwable? = null
     try {
         return block(this)
@@ -510,7 +515,7 @@ internal fun <R : FileDescriptorRole, S : FdState.Open, T> FileDescriptor<R, S, 
         throw failure
     } finally {
         try {
-            close()
+            close(native)
         } catch (closeFailure: Throwable) {
             val prior = blockFailure
             if (prior != null) prior.addSuppressed(closeFailure) else throw closeFailure

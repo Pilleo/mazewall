@@ -44,9 +44,11 @@ internal class NativeArena internal constructor(
 context(arena: NativeArena) internal fun openPath(
     path: String,
     flags: io.mazewall.platform.lifecycle.OpenFlags,
+    native: io.mazewall.platform.native.NativeEngine = io.mazewall.platform.native.LinuxNative
+        .snapshot(),
 ): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, *> {
     val segment = arena.allocateFrom(path)
-    return io.mazewall.platform.native.LinuxNative.fileSystem
+    return native.fileSystem
         .open(segment, flags)
 }
 

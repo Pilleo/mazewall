@@ -351,6 +351,15 @@ failure; successful inherited coverage can therefore have an empty attempt delta
 Receipt/progress/failure classes are preloaded before restrictive class-read rules
 can make diagnostic allocation fail. This does not broaden the compiled policy.
 
+`LandlockSession` captures its backend and structured kernel capabilities at
+construction. `LandlockRuleset` retains the selected native owner; path operations,
+add-rule/restrict calls, and owned descriptor cleanup use it explicitly. Applied
+ABI diagnostics consume the captured capability value rather than probing again
+after restriction. `Rejected`/`ProbeFailed` capabilities preserve errno/cause and
+cannot be collapsed into ABI-zero unsupported bypass. Standalone legacy helpers
+still select their own context; application-owned unified capture is subsequent
+runtime work.
+
 `ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
 of policy coverage and Seccomp engine-state rank. The interpreter retains the first
 failure without rewinding applied stages. Registry merges carry thread/process

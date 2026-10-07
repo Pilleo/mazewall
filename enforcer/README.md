@@ -154,8 +154,13 @@ The plain Seccomp native pipeline now uses one selected backend for BPF packing,
 privilege locking, raw installation, compatibility fallback, retries, and mandatory
 mode verification. CET and plain Seccomp receive the installation attempt's same
 captured backend. Global backend replacement during those stages cannot redirect
-the in-flight calls. Application-owned capture across remaining Landlock/supervised
-paths is the next runtime-integration step.
+the in-flight calls. Unified application-owned context and supervised-path capture
+are the next runtime-integration steps.
+
+Landlock sessions now bind one native backend and typed capability snapshot to their
+ruleset lifetime. Path opening, rule insertion, restriction, descriptor retirement,
+and applied-ABI diagnostics use that selection. Permission-rejected or failed
+capability probes remain rejected outcomes rather than unsupported-ABI bypass.
 
 `lockIntelCet()` verifies and locks an **already-enabled SHSTK** on the installing
 platform thread. Receipts require `CetOutcome.VERIFIED_CURRENT_THREAD` for that
