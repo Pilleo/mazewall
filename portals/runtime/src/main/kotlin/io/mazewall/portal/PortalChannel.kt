@@ -45,6 +45,7 @@ internal class PortalChannel(
 ) : AutoCloseable {
     private companion object {
         const val DEFAULT_TIMEOUT_MS = 30_000L
+        const val MAX_CONTROL_BYTES = 512
     }
 
     private val closed = java.util.concurrent.atomic
@@ -92,9 +93,27 @@ internal class PortalChannel(
     fun receive(timeoutMs: Long = DEFAULT_TIMEOUT_MS): Pair<PortalFrame, List<Capability.ReadFd>> = receive(Deadline.afterMillis(timeoutMs))
 
     fun receive(deadline: Deadline): Pair<PortalFrame, List<Capability.ReadFd>> {
+        return receiveBounded(deadline, receivePayloadLimit, capabilityLimit)
+    }
+
+    internal fun sendControl(
+        frame: PortalFrame,
+        deadline: Deadline,
+    ) {
+        require(frame.method == PortalParentAuthorization.METHOD && frame.requestId == 0 && frame.fdCount == 0 && frame.payload.size <= MAX_CONTROL_BYTES) { "invalid startup control frame" }
+        terminalOnFailure(deadline) { writeFrame(frame, deadline) }
+    }
+
+    internal fun receiveControl(deadline: Deadline): PortalFrame = receiveBounded(deadline, MAX_CONTROL_BYTES, 0).first
+
+    private fun receiveBounded(
+        deadline: Deadline,
+        payloadLimit: Int,
+        fdLimit: Int,
+    ): Pair<PortalFrame, List<Capability.ReadFd>> {
         return terminalOnFailure(deadline) {
             val header = PortalFrame.parseHeader(io.read(PortalFrame.HEADER_SIZE, deadline, idleAllowed = true))
-            require(header.payloadLen <= receivePayloadLimit && header.fdCount <= capabilityLimit) { "Portal response exceeds configured transport bounds" }
+            require(header.payloadLen <= payloadLimit && header.fdCount <= fdLimit) { "Portal response exceeds configured transport bounds" }
             val payload = io.read(header.payloadLen, deadline, idleAllowed = false)
             repeat(header.fdCount) { received.add(io.receiveDescriptor(deadline)) }
             val delivery = PortalFrame(header.kind, header.requestId, header.method, PortalPayload(payload), header.fdCount) to received.toList()

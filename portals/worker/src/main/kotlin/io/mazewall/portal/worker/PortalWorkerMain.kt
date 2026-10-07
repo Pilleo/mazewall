@@ -51,6 +51,28 @@ public object PortalWorkerMain {
         val transport = ChannelWorkerTransport(channel, idleTimeoutMs)
         runWorker(
             transport,
+            authorizeParent = {
+                val sessionIndex = args.indexOf("--parent-session")
+                if (sessionIndex >= 0) {
+                    require(args.count { it == "--parent-session" } == 1) { "duplicate required parent startup session" }
+                    val session = requireNotNull(args.getOrNull(sessionIndex + 1)) { "missing required parent session" }
+                    val timeoutIndex = args.indexOf("--parent-timeout-ms")
+                    require(timeoutIndex >= 0 && args.count { it == "--parent-timeout-ms" } == 1) { "missing or duplicate parent startup deadline" }
+                    val timeout = requireNotNull(args.getOrNull(timeoutIndex + 1)?.toLongOrNull()) { "invalid parent startup deadline" }
+                    require(timeout > 0) { "parent startup deadline must be positive" }
+                    println("MAZEWALL_PORTAL_PARENT_AUTH_PENDING")
+                    System.out.flush()
+                    check(!System.out.checkError()) { "parent startup diagnostic publication failed" }
+                    val authorizationDeadline = io.mazewall.platform.lifecycle.Deadline
+                        .afterMillis(timeout)
+                    val permit = io.mazewall.portal.PortalParentAuthorization.accept(
+                        channel.receiveControl(authorizationDeadline),
+                        session,
+                        ProcessHandle.current().pid(),
+                    )
+                    channel.sendControl(permit.acknowledgement(), authorizationDeadline)
+                }
+            },
             installContainment = { installWorkerContainment(args) },
             createDispatcher = {
                 val builder = PortalDispatcherTable.Builder()
@@ -85,8 +107,10 @@ public object PortalWorkerMain {
         installContainment: () -> Unit,
         createDispatcher: () -> PortalWorkerDispatcher,
         publishReady: () -> Unit,
+        authorizeParent: () -> Unit = {},
     ) {
         val driver = try {
+            authorizeParent()
             installContainment()
             val initialized = PortalWorkerDriver(transport, createDispatcher())
             publishReady()

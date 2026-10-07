@@ -495,10 +495,14 @@ public class ProcessBroker internal constructor(
             val server = sockets.createUnixServer(ep.path)
             synchronized(attempt) { attempt.server = server }
             check(active()) { "portal worker acquisition cancelled" }
+            val parentSession = java.util.UUID
+                .randomUUID()
+                .toString()
+                .replace("-", "")
             val spec =
             JvmChildSpec(
                 mainClass = "io.mazewall.portal.worker.PortalWorkerMain",
-                mainArgs = listOf(ep.path),
+                mainArgs = listOf(ep.path, "--parent-session", parentSession, "--parent-timeout-ms", limits.startupTimeoutMs.toString()),
                 maxHeap = workerProfile.maxHeapBytes?.toString() ?: "64m",
                 javaAgents = JavaAgentSelection.None,
                 classpath = requireWorkerClasspath(workerClasspath),
@@ -520,6 +524,9 @@ public class ProcessBroker internal constructor(
                 attempt.channel = channel
                 attempt.peer = null
             }
+            check(active()) { "portal worker acquisition cancelled before parent authorization" }
+            channel.sendControl(PortalParentAuthorization(parentSession, process.pid()).frame(), deadline)
+            PortalParentAuthorization.acceptAcknowledgement(channel.receiveControl(deadline), parentSession, process.pid())
             while (pump.ready.count > 0L) {
                 check(active()) { "portal worker acquisition cancelled" }
                 val remaining = deadline.remainingMillis()

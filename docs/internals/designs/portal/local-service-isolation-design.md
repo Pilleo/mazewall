@@ -56,7 +56,9 @@ Every manifest profile must resolve. A profile with CPU or memory limits also
 requires an application-supplied delegated cgroup v2 root. Portal validates the
 requested controllers, creates a runtime-owned child cgroup, writes limits,
 and attaches the worker PID before it can publish READY or construct guest
-services. Missing delegation, unsupported controllers, or cgroup write failure
+services. Broker launches carry a required session/PID parent authorization frame;
+the child waits for it before containment and guest initialization. The parent sends
+it only after cgroup setup succeeds. Missing delegation, unsupported controllers, or cgroup write failure
 are startup failures; Portal never falls back to an unbounded worker.
 
 Profiles do not vary the process sandbox in this release. Every worker retains

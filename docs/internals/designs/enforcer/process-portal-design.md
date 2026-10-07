@@ -69,6 +69,18 @@ or interruption cannot orphan a late child. Cleanup drains independent resources
 fatal failures, publishes `Failed`, and releases concurrent close waiters before rethrowing the
 fatal-first aggregate. `Closed` therefore never precedes acquisition completion and child reaping.
 
+Broker-launched workers now require a bounded parent startup control frame on the
+owned RPC channel before containment or guest construction. A fresh session and the
+actual child PID must match the command-line expectation; the parent sends authorization
+only after required cgroup setup and socket ownership succeed. Ordinary application
+startup proceeds only after the worker returns the matching acknowledgement; an old
+sentinel-only worker cannot satisfy that exchange. Ordinary application
+payload limits are independent of the 512-byte startup control bound. Missing, mismatched
+or cancelled authorization closes startup ownership and never reaches the guest.
+The standalone worker CLI's sentinel path is separate; it is not a fallback for a broker
+expecting parent authorization. Full artifact/manifest/policy-generation readiness records
+and operator-owned launch profiles remain the following P3 acceptance scope.
+
 Stateless worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
 is destroyed and reaped first; replenishment runs independently, is logged separately, and cannot
 replace or delay the original failure. Checkout, return, replacement, and shutdown consult the same lifecycle authority,
