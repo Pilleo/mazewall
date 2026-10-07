@@ -134,7 +134,8 @@ dependencies {
 
 ## Core API Usage
 
-The primary entry point is `ContainedExecutors`, which provides wrappers for standard `ExecutorService` instances.
+`ManagedRuntime` owns prepared synchronous worker generations. `ContainedExecutors`
+provides manual installation and adapters for caller-owned `ExecutorService` instances.
 Wrapped tasks check `InstallationReceipt.requireInstalled()` before entering their
 body. An `installed=false` bypass result or missing requested Landlock restriction
 rejects the task, even when manual-install fallback is configured. Receipt closure
@@ -154,8 +155,9 @@ The plain Seccomp native pipeline now uses one selected backend for BPF packing,
 privilege locking, raw installation, compatibility fallback, retries, and mandatory
 mode verification. CET and plain Seccomp receive the installation attempt's same
 captured backend. Global backend replacement during those stages cannot redirect
-the in-flight calls. Unified application-owned context and supervised-path capture
-are the next runtime-integration steps.
+the in-flight calls. A reusable installation environment also retains the provider,
+capability selection, fallback and self-verification gate. Supervised task registration
+uses selected caller authority, while the daemon retains its captured lifecycle owner.
 
 Landlock sessions now bind one native backend and typed capability snapshot to their
 ruleset lifetime. Path opening, rule insertion, restriction, descriptor retirement,
@@ -167,6 +169,50 @@ platform thread. Receipts require `CetOutcome.VERIFIED_CURRENT_THREAD` for that
 request. Late FFM enablement, permission-error-as-lock-proof, and process-wide CET
 claims are rejected. See the [current CET contract](../docs/internals/intel-cet-jvm-sandbox-integration.md)
 for runtime prerequisites, retained proof, and native acceptance boundaries.
+
+### Owned synchronous workers
+
+Create the runtime during trusted platform-thread application bootstrap. The process
+baseline is explicit and permanent; its executable-mapping floor must match the
+declared runtime. Prepared workers use one captured environment and require successful
+installation before readiness. Worker count and logical admission are finite.
+
+```kotlin
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+import java.time.Duration
+import java.util.concurrent.Callable
+
+ManagedRuntime.open(
+    RuntimeProfile.HOTSPOT_JIT,
+    Policy.NO_EXEC_HOTSPOT,
+    Duration.ofSeconds(10), // required preparation deadline
+    Duration.ofSeconds(10), // bounded close deadline
+).use { runtime ->
+    val domain = runtime.prepare(
+        WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(),
+        DomainLimits(workers = 4, maxAdmissions = 64),
+    )
+    val invocation = runtime.submit(domain, Callable { 42 })
+    val value = invocation.result().toCompletableFuture().get()
+    invocation.executionEnd().toCompletableFuture().get()
+}
+```
+
+These capacities are example configuration, not benchmark-derived defaults. Admission
+includes running and queued invocations. Overload rejects; protected bodies never run
+on a caller or unrelated executor. Caller future mutation does not own execution.
+`requestCancellation()` is cooperative: running work retains its lease until physical
+end. `drain(timeout)` stops admission and distinguishes complete retirement from live
+work or cleanup failure; bounded `close()` throws `IncompleteDrainException` when it
+cannot finish. Failed generations cannot be hidden by replacement capacity.
+
+The current contract is materialized synchronous bodies. Completion observers, lazy
+results and unrelated helper executors are outside that contract. Nested asynchronous
+dispatch is rejected until an approved transition is available. Thread-scoped workers
+share JVM memory/descriptors and are not a complete ACE boundary. A process baseline
+that forbids child launch also prevents later Portal or supervisor startup; establish
+required child services before that baseline or use an explicitly compatible baseline.
 
 ### 1. Wrapping an Executor
 

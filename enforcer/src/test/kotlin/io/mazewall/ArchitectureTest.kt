@@ -339,6 +339,20 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName("io.mazewall.platform.fd.FileDescriptorKt")
+            // OwnedRuntimeTest verifies these exact resource boundaries retain fatal identity,
+            // required readiness and physical cancellation/drain leases; none downgrades failures.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.api.execution.ManagedRuntime")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.api.execution.ManagedRuntime\$Companion")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.OwnedDomain")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.OwnedInvocation")
             .and()
             .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
@@ -638,6 +652,14 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.enforcer.api.execution.ExecutionEnd" to setOf(
+                "io.mazewall.enforcer.api.execution.ExecutionEnd\$NotStarted",
+                "io.mazewall.enforcer.api.execution.ExecutionEnd\$Finished",
+            ),
+            "io.mazewall.enforcer.api.execution.DrainReport" to setOf(
+                "io.mazewall.enforcer.api.execution.DrainReport\$Complete",
+                "io.mazewall.enforcer.api.execution.DrainReport\$Incomplete",
+            ),
             "io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority\$DirectoryKey" to setOf(
                 "io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority\$DirectoryKey\$Root",
                 "io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority\$DirectoryKey\$Cwd",

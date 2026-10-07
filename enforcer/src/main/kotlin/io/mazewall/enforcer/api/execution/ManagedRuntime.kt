@@ -1,0 +1,227 @@
+package io.mazewall.enforcer.api.execution
+
+import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.InstallationEnvironment
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.frozenCopy
+import io.mazewall.enforcer.diagnostics.requirePlatformThread
+import io.mazewall.enforcer.internal.execution.Deadline
+import io.mazewall.enforcer.internal.execution.OwnedDomain
+import io.mazewall.enforcer.internal.execution.RuntimeWorkerContext
+import io.mazewall.enforcer.state.ContainmentStateRegistry
+import java.time.Duration
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Callable
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Future
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+
+/**
+ * Application-owned synchronous platform workers. The explicit process baseline is permanent.
+ * Caller timeout/cancellation is not physical completion; no caller-runs or shared-worker fallback.
+ * Completion observers, lazy results and unrelated helper executors are outside the body contract.
+ */
+public class ManagedRuntime private constructor(
+    public val runtime: RuntimeProfile,
+    private val environment: InstallationEnvironment,
+    private val preparationTimeout: Duration,
+    private val closeTimeout: Duration,
+) : AutoCloseable {
+    private enum class Phase { OPEN, DRAINING, CLOSED }
+
+    private val lock = Any()
+    private var phase = Phase.OPEN
+    private val id = identities.incrementAndGet()
+    private var nextGeneration = 0L
+    private val domains = LinkedHashMap<Long, OwnedDomain>()
+    private val managerThread = AtomicReference<Thread?>()
+    private val manager = ThreadPoolExecutor(
+        1,
+        1,
+        0L,
+        TimeUnit.MILLISECONDS,
+        ArrayBlockingQueue(1),
+        ThreadFactory { task ->
+            check(managerThread.get() == null) { "A failed manager cannot be replaced by a caller" }
+            Thread
+                .ofPlatform()
+                .name("mazewall-manager-$id")
+                .inheritInheritableThreadLocals(false)
+                .unstarted(task)
+                .also { check(managerThread.compareAndSet(null, it)) }
+        },
+        ThreadPoolExecutor.AbortPolicy(),
+    )
+
+    public companion object {
+        private val identities = AtomicLong()
+
+        /** Open during trusted platform-thread bootstrap, before entering a narrower worker domain. */
+        @JvmStatic
+        @Suppress("TooGenericExceptionCaught") // startup resource boundary drains before preserving original native/fatal failure
+        public fun open(
+            runtime: RuntimeProfile,
+            baseline: Policy<PolicyScope.ProcessWideSafe, Uncompiled>,
+            preparationTimeout: Duration,
+            closeTimeout: Duration,
+        ): ManagedRuntime {
+            requirePlatformThread()
+            requirePositive(preparationTimeout)
+            requirePositive(closeTimeout)
+            requireUnrestrictedBootstrap()
+            require(!baseline.definition.enforceLandlock) { "The host baseline must have process-safe scope" }
+            require(baseline.allowMmapExec == runtime.allowsExecutableMappings) { "Process mapping floor does not match the declared runtime" }
+            val owner = ManagedRuntime(runtime, InstallationEnvironment.capture(Platform.FallbackBehavior.FAIL), preparationTimeout, closeTimeout)
+            try {
+                owner.await(
+                    owner.manager.submit {
+                    owner.environment.platform.capabilities
+                    ContainedExecutors.installOnProcess(baseline.definition.frozenCopy(), owner.environment).use { it.requireInstalled() }
+                },
+                )
+            } catch (startupFailure: Exception) {
+                owner.drain(closeTimeout).let { report -> if (report is DrainReport.Incomplete) startupFailure.addSuppressed(IncompleteDrainException(report)) }
+                throw startupFailure
+            } catch (startupFatal: Error) {
+                owner.drain(closeTimeout).let { report -> if (report is DrainReport.Incomplete) startupFatal.addSuppressed(IncompleteDrainException(report)) }
+                throw startupFatal
+            }
+            return owner
+        }
+
+        private fun requirePositive(value: Duration) {
+            require(!value.isNegative && !value.isZero && value.toNanos() > 0L) { "Timeout must be positive and finite" }
+        }
+
+        private fun requireUnrestrictedBootstrap() {
+            check(RuntimeWorkerContext.current == null) { "Cannot bootstrap from an owned worker" }
+            val local = ContainmentStateRegistry.threadState
+            check(local.filterDepth == 0 && local.landlockPolicy == null && local.installationFailure == null) { "Cannot bootstrap from a narrower or failed thread scope" }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // preparation boundary retires its generation and preserves original failure
+    public fun prepare(
+        policy: Policy<*, Uncompiled>,
+        limits: DomainLimits,
+    ): InProcessDomain {
+        requireUnrestrictedBootstrap()
+        val definition = policy.definition.frozenCopy()
+        val resourceRef = AtomicReference<OwnedDomain?>()
+        val prepared = synchronized(lock) {
+            requireOpen()
+            manager.submit(Callable { prepareOnManager(definition, limits, resourceRef) })
+        }
+        return try {
+            await(prepared)
+        } catch (preparationFailure: Exception) {
+            resourceRef.get()?.fail(preparationFailure)
+            throw preparationFailure
+        } catch (preparationFatal: Error) {
+            resourceRef.get()?.fail(preparationFatal)
+            throw preparationFatal
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // manager resource boundary retires preparation on every original failure
+    private fun prepareOnManager(
+        definition: PolicyDefinition<*>,
+        limits: DomainLimits,
+        resourceRef: AtomicReference<OwnedDomain?>,
+    ): InProcessDomain {
+        val resource = synchronized(lock) {
+            requireOpen()
+            check(domains.values.none { it.failedRetirementPending() || it.cleanupFailure.get() != null }) { "Prior failed generation still has live execution or cleanup" }
+            val generation = ++nextGeneration
+            OwnedDomain(generation, limits, definition, environment, "mazewall-domain-$id-$generation-").also {
+                domains[generation] = it
+                resourceRef.set(it)
+            }
+        }
+        return try {
+            resource.prepare(Deadline(preparationTimeout))
+            synchronized(lock) { requireOpen() }
+            InProcessDomain(this, resource)
+        } catch (preparationFailure: Exception) {
+            resource.fail(preparationFailure)
+            throw preparationFailure
+        } catch (preparationFatal: Error) {
+            resource.fail(preparationFatal)
+            throw preparationFatal
+        }
+    }
+
+    public fun <T> submit(
+        domain: InProcessDomain,
+        action: Callable<T>,
+    ): InvocationHandle<T> =
+        synchronized(lock) {
+        require(domain.owner === this && domains[domain.generation] === domain.resource) { "Domain belongs to a different runtime" }
+        requireOpen()
+        if (RuntimeWorkerContext.current != null) throw RejectedExecutionException("Nested dispatch requires an approved execution transition")
+        domain.resource.submit(action)
+    }
+
+    public fun drain(timeout: Duration): DrainReport {
+        check(RuntimeWorkerContext.current == null) { "An owned worker cannot drain itself" }
+        val deadline = Deadline(timeout)
+        val resources = synchronized(lock) {
+            if (phase == Phase.CLOSED) return DrainReport.Complete
+            phase = Phase.DRAINING
+            domains.values.toList()
+        }
+        manager.shutdownNow()
+        resources.forEach { it.beginDrain() }
+        try {
+            resources.forEach { it.awaitRetirement(deadline) }
+            manager.awaitTermination(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
+            managerThread.get()?.let { deadline.join(it) }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        val cleanup = resources.firstNotNullOfOrNull { it.cleanupFailure.get() }
+        val live = resources.sumOf { it.liveWorkers() } + if (managerThread.get()?.isAlive == true) 1 else 0
+        val unfinished = resources.sumOf { it.unfinished() }
+        if (cleanup == null && live == 0 && unfinished == 0 && manager.isTerminated && resources.all { it.retired() }) {
+            synchronized(lock) { phase = Phase.CLOSED }
+            return DrainReport.Complete
+        }
+        return DrainReport.Incomplete(unfinished, live, cleanup)
+    }
+
+    override fun close() {
+        when (val report = drain(closeTimeout)) {
+            DrainReport.Complete -> Unit
+            is DrainReport.Incomplete -> throw IncompleteDrainException(report)
+        }
+    }
+
+    private fun requireOpen() {
+        if (phase != Phase.OPEN) throw RejectedExecutionException("Runtime is not admitting")
+    }
+
+    private fun <T> await(future: Future<T>): T =
+        try {
+        future.get(preparationTimeout.toNanos(), TimeUnit.NANOSECONDS)
+    } catch (failure: ExecutionException) {
+        throw failure.cause ?: failure
+    } catch (timeout: TimeoutException) {
+        future.cancel(true)
+        throw timeout
+    } catch (interrupted: InterruptedException) {
+        future.cancel(true)
+        Thread.currentThread().interrupt()
+        throw interrupted
+    }
+}

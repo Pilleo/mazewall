@@ -60,22 +60,7 @@ internal class ContainedExecutorWrapper(
         }
     }
 
-    private fun <T> runTask(task: () -> T): T = runCatching(task).getOrElse { throw failureForCaller(it) }
-
-    private fun failureForCaller(failure: Throwable): Throwable = (failure as? Exception)?.asContainmentViolation() ?: failure
-
-    private fun Exception.asContainmentViolation(): Exception {
-        val diagnostic = ContainmentViolationDetector.diagnose(this) ?: return this
-        val structured = diagnostic.violation
-        if (this === structured) return structured
-        return ContainmentViolationException(
-            message = "Task reported a containment policy violation",
-            cause = this,
-            errno = structured?.errno,
-            syscallNr = structured?.syscallNr,
-            evidence = diagnostic.evidence,
-        )
-    }
+    private fun <T> runTask(task: () -> T): T = runCatching(task).getOrElse { throw containmentFailureForCaller(it) }
 
     override fun execute(command: Runnable) {
         delegate.execute(wrapRunnable(command))

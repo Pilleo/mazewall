@@ -170,6 +170,11 @@ public object ContainedExecutors {
         return installInternal(true, combined)
     }
 
+    internal fun installOnProcess(
+        policy: PolicyDefinition<PolicyScope.ProcessWideSafe>,
+        environment: InstallationEnvironment,
+    ): InstallationReceipt = installInternal(true, policy, environment = environment)
+
     /**
      * Installs a permanent baseline in a dedicated child process, including existing JVM threads.
      * Unlike the general process API, this internal entry accepts filesystem policies only when
@@ -450,12 +455,10 @@ public object ContainedExecutors {
                     failure = attempt.failure,
                     cetOutcome = attempt.cetOutcome,
                 )
-            LandlockStep.UNCHANGED -> activeLandlockPolicy(processWide)
+            LandlockStep.UNCHANGED -> (if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState).landlockPolicy != null
         }
         return installSeccompFilter(processWide, policy, scopingPolicy, landlockApplied, attempt)
     }
-
-    private fun activeLandlockPolicy(processWide: Boolean): Boolean = (if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState).landlockPolicy != null
 
     private fun installSeccompFilter(
         processWide: Boolean,

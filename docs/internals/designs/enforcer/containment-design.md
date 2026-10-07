@@ -479,6 +479,35 @@ Linux 7.0 (ABI 8) introduces `LANDLOCK_RESTRICT_SELF_TSYNC` which synchronizes t
 
 ---
 
+## 5a. Owned synchronous runtime generations
+
+`ManagedRuntime.open` runs explicit process-baseline installation on a trusted platform
+manager using one retained `InstallationEnvironment`. Baseline mapping-floor/runtime
+mismatch and bootstrap from narrower/failed worker scopes are rejected. The manager
+uses a bounded queue, and only that manager may construct domain workers. New workers
+do not inherit another domain through an automatic executor replacement path.
+
+Each fixed JDK executor generation requires every worker receipt before publishing
+readiness. Receipt registration is retained through physical retirement. Definitions
+use the same immutable snapshot/compiler pipeline. `DomainLimits` bounds worker count
+and admitted logical work; AbortPolicy never redirects protected work to callers.
+Generation readiness/drain/failure/retirement decisions have a pure lifecycle evaluator.
+
+Invocation result delivery and physical `ExecutionEnd` are separate minimal-stage
+views. Queued cancellation removes the never-started body and releases admission;
+running cancellation interrupts cooperatively and holds admission until body/cleanup
+ends. Worker association is synchronized against late cancellation. Failed generations
+stop admission; live failed work cannot be concealed by new capacity. Drain checks
+actual thread retirement and receipt cleanup, not only executor counts or completed
+result futures. Incomplete bounded close remains explicit and non-admitting.
+
+This API covers synchronous materialized bodies. Completion observers and arbitrary
+helper/lazy work do not inherit coverage merely from a future. Current nested dispatch
+is rejected; C8 introduces exact inline/reject transitions and observed evidence.
+Thread-scoped containment shares memory and descriptors and is not a complete ACE
+boundary. Portal ownership and immutable artifact-generation binding retain their
+separate required gates.
+
 ## 6. `PureJavaBpfEngine` Installation Sequence
 
 One immutable native-engine view owns the plain installation sequence. BPF packing,

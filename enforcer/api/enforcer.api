@@ -804,6 +804,108 @@ public final class io/mazewall/enforcer/api/YamaPtraceScope$Unknown : io/mazewal
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/mazewall/enforcer/api/execution/CancellationDisposition : java/lang/Enum {
+	public static final field ALREADY_ENDED Lio/mazewall/enforcer/api/execution/CancellationDisposition;
+	public static final field REQUESTED Lio/mazewall/enforcer/api/execution/CancellationDisposition;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/enforcer/api/execution/CancellationDisposition;
+	public static fun values ()[Lio/mazewall/enforcer/api/execution/CancellationDisposition;
+}
+
+public final class io/mazewall/enforcer/api/execution/DomainLimits {
+	public fun <init> (II)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun copy (II)Lio/mazewall/enforcer/api/execution/DomainLimits;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/DomainLimits;IIILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/DomainLimits;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMaxAdmissions ()I
+	public final fun getWorkers ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/mazewall/enforcer/api/execution/DrainReport {
+}
+
+public final class io/mazewall/enforcer/api/execution/DrainReport$Complete : io/mazewall/enforcer/api/execution/DrainReport {
+	public static final field INSTANCE Lio/mazewall/enforcer/api/execution/DrainReport$Complete;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/DrainReport$Incomplete : io/mazewall/enforcer/api/execution/DrainReport {
+	public fun <init> (IILjava/lang/Throwable;)V
+	public synthetic fun <init> (IILjava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/lang/Throwable;
+	public final fun copy (IILjava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;IILjava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCleanupFailure ()Ljava/lang/Throwable;
+	public final fun getLiveWorkers ()I
+	public final fun getUnfinishedInvocations ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class io/mazewall/enforcer/api/execution/ExecutionEnd {
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionEnd$Finished : io/mazewall/enforcer/api/execution/ExecutionEnd {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/ExecutionEnd$Finished;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ExecutionEnd$Finished;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ExecutionEnd$Finished;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFailure ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionEnd$NotStarted : io/mazewall/enforcer/api/execution/ExecutionEnd {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/ExecutionEnd$NotStarted;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ExecutionEnd$NotStarted;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ExecutionEnd$NotStarted;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFailure ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/InProcessDomain {
+	public final fun getGeneration ()J
+	public final fun getLimits ()Lio/mazewall/enforcer/api/execution/DomainLimits;
+}
+
+public final class io/mazewall/enforcer/api/execution/IncompleteDrainException : java/lang/IllegalStateException {
+	public fun <init> (Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;)V
+	public final fun getReport ()Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;
+}
+
+public abstract interface class io/mazewall/enforcer/api/execution/InvocationHandle {
+	public abstract fun executionEnd ()Ljava/util/concurrent/CompletionStage;
+	public abstract fun requestCancellation ()Lio/mazewall/enforcer/api/execution/CancellationDisposition;
+	public abstract fun result ()Ljava/util/concurrent/CompletionStage;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntime : java/lang/AutoCloseable {
+	public static final field Companion Lio/mazewall/enforcer/api/execution/ManagedRuntime$Companion;
+	public fun close ()V
+	public final fun drain (Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/DrainReport;
+	public final fun getRuntime ()Lio/mazewall/enforcer/api/RuntimeProfile;
+	public static final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
+	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
+	public final fun submit (Lio/mazewall/enforcer/api/execution/InProcessDomain;Ljava/util/concurrent/Callable;)Lio/mazewall/enforcer/api/execution/InvocationHandle;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntime$Companion {
+	public final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
+}
+
 public final class io/mazewall/enforcer/diagnostics/ContainmentDiagnostic {
 	public fun <init> (Ljava/lang/Throwable;Lio/mazewall/enforcer/api/ContainmentViolationEvidence;Lio/mazewall/enforcer/api/ContainmentViolationException;)V
 	public synthetic fun <init> (Ljava/lang/Throwable;Lio/mazewall/enforcer/api/ContainmentViolationEvidence;Lio/mazewall/enforcer/api/ContainmentViolationException;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
