@@ -11,18 +11,18 @@ for a new baseline):
 
 ```bash
 ./gradlew --init-script tests/consumers/stage.init.gradle \
-  -PconsumerVersion=0.1.0-baseline.5c369da1.c8-candidate \
+  -PconsumerVersion=0.1.0-baseline.ea0a8276 \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   :platform:publishAllPublicationsToConsumerBaselineRepository \
   :enforcer:publishAllPublicationsToConsumerBaselineRepository
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.5c369da1.c8-candidate \
+  -PconsumerVersion=0.1.0-baseline.ea0a8276 \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   :java-api:run :java-api:verifyCallableEntry :java-api:verifyScopeBoundaries :kotlin-api:run
 
 ./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.5c369da1.c8-candidate \
+  -PconsumerVersion=0.1.0-baseline.ea0a8276 \
   -PconsumerRepository="$PWD/build/consumer-repository" \
   resolveIntegrationBaselines
 ```
@@ -35,9 +35,10 @@ install artifacts into Maven Local.
 The executed actions construct and inspect policies without installation. Callable
 examples compile but are not executed. `verifyCallableEntry` independently compiles
 an uncast Java lambda against `Mazewall.callContained(runtime, domain, Callable)`.
-There is no Supplier overload on that canonical entry. The named candidate staging
-version is based on committed owned runtime `5c369da1` plus the C8 migration diff;
-stage the final source revision for release evidence.
+There is no Supplier overload on that canonical entry. The current staged baseline
+pins committed canonical-entry/owned-runtime source `ea0a8276`. Earlier candidate
+evidence used `5c369da1` plus the C8 migration diff; final-source staging and the same
+independent consumer gates subsequently passed against `ea0a8276`.
 
 Canonical construction uses `ProcessPolicyBuilder` or `WorkerPolicyBuilder` with
 an explicit runtime and list mode. The Java facade builder and its scope-changing

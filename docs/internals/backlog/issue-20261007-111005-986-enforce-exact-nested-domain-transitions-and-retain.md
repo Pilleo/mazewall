@@ -56,5 +56,11 @@ The initial API baseline was missing (`run-9282a48de72a`). Removing the retained
 
 Framework-specific context bridges, artifact bindings and remaining old low-level caller-owned surfaces retain their own migration/release gates. This issue remains open for repository review.
 
+Exact committed-source consumer follow-up: source `ea0a8276` was staged as
+`0.1.0-baseline.ea0a8276` (`run-a2fee707269d`); independent Java/Kotlin runs,
+uncast Callable compile and scope negatives passed (`run-b630ee7c39d1`). Lockfiles
+and consumer instructions pin that final source baseline. This is packaged API
+evidence, not stable-compiler, JDK22, framework or packaged-native acceptance.
+
 ---
 <!-- id: issue-20261007-111005-986-enforce-exact-nested-domain-transitions-and-retain  file: issue-20261007-111005-986-enforce-exact-nested-domain-transitions-and-retain.md -->
