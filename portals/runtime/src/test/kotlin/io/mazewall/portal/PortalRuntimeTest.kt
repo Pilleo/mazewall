@@ -15,9 +15,53 @@ import java.nio.file.Files
 import java.security.MessageDigest
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class PortalRuntimeTest {
     interface MissingService
+
+    @Test
+    fun `fatal stateful call preserves identity and terminal state loss`() {
+        val manifest = sampleManifest("worker")
+        val gate = PortalStatefulInvocationGate()
+        val fatal = AssertionError("fatal invocation")
+        val actual = assertThrows(AssertionError::class.java) { gate.invoke(manifest) { throw fatal } }
+        check(actual === fatal)
+        assertThrows(PortalStateLostException::class.java) { gate.invoke(manifest) { "must not run" } }
+    }
+
+    @Test
+    fun `overlapping stateful invocation rejects before body entry and cannot pass terminal loss`() {
+        val gate = PortalStatefulInvocationGate()
+        val manifest = sampleManifest("worker")
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val extraCalls = AtomicInteger()
+        Executors.newSingleThreadExecutor().use { worker ->
+            try {
+                val active = worker.submit {
+                    gate.invoke(manifest) {
+                        entered.countDown()
+                        check(release.await(5, TimeUnit.SECONDS))
+                        throw PortalCallException("ambiguous worker loss", PortalInvocationEvidence.UNKNOWN_COMPLETION)
+                    }
+                }
+                check(entered.await(5, TimeUnit.SECONDS))
+                val refused = assertThrows(PortalCallException::class.java) { gate.invoke(manifest) { extraCalls.incrementAndGet() } }
+                assertEquals(PortalInvocationEvidence.NOT_STARTED, refused.evidence)
+                assertEquals(0, extraCalls.get())
+                release.countDown()
+                assertThrows(java.util.concurrent.ExecutionException::class.java) { active.get(5, TimeUnit.SECONDS) }
+                assertThrows(PortalStateLostException::class.java) { gate.invoke(manifest) { extraCalls.incrementAndGet() } }
+                assertEquals(0, extraCalls.get())
+            } finally {
+                release.countDown()
+            }
+        }
+    }
 
     @Test
     fun `closed runtime rejects all lookup without starting a worker`() {
