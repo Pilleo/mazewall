@@ -181,6 +181,22 @@ duplicate fields/rules/resources and contradictory filesystem state are rejected
 The format uses canonical JSON token spelling with optional formatting whitespace
 and absolute resource paths. These documents encode policy, not review approval.
 
+### Reviewed operation documents
+
+`OperationPolicyDocument` associates a canonical policy with a fixed `OperationBinding`,
+reported missing coverage and specifically reasoned review exceptions. Binding includes
+operation ID, adapter identity, implementation digest and configured resource generation.
+`ReviewedOperationArtifact.load(document, trustedReview, expectedBinding)` requires an
+external operator-controlled digest approval and an exact configured identity match.
+Approval fields inside JSON are rejected. Missing coverage cannot be authorized by a
+global incomplete override. The digest identifies bytes; trusted reviewer configuration
+and storage access are separate responsibilities.
+
+`runtime.prepare(reviewedArtifact, limits)` accepts an approved worker policy, verifies
+runtime compatibility, retains the binding and uses the same required installer. Actual
+class/method/resource resolution is verified by the owning adapter/resource binder;
+matching document metadata alone is not proof that a filesystem object stayed unchanged.
+
 ### Owned synchronous workers
 
 Create the runtime during trusted platform-thread application bootstrap. The process

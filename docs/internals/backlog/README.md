@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 85 | *Total Resolved Issues:* 646
+*Total Active Issues:* 86 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -31,6 +31,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Issue | Title | Priority | Component |
 |---|---|---|---|
 | [issue-20261007-162843-691-reuse-unchanged-cet-fixture-compilation-with-compl](issue-20261007-162843-691-reuse-unchanged-cet-fixture-compilation-with-compl.md) | Reuse unchanged CET fixture compilation with complete local toolchain inputs | high | core |
+| [issue-20261007-153727-017-bind-reviewed-operation-documents-to-trusted-appro](issue-20261007-153727-017-bind-reviewed-operation-documents-to-trusted-appro.md) | Bind reviewed operation documents to trusted approval and exact configured identity | high | core |
 | [issue-20261007-144342-750-serialize-canonical-fixed-scope-policies-with-expl](issue-20261007-144342-750-serialize-canonical-fixed-scope-policies-with-expl.md) | Serialize canonical fixed-scope policies with explicit filesystem intent and strict versioning | high | core |
 | [issue-20261007-111005-986-enforce-exact-nested-domain-transitions-and-retain](issue-20261007-111005-986-enforce-exact-nested-domain-transitions-and-retain.md) | Enforce exact nested domain transitions and retain observed invocation failure | high | core |
 | [issue-20261007-092325-883-own-bounded-platform-worker-generations-and-physic](issue-20261007-092325-883-own-bounded-platform-worker-generations-and-physic.md) | Own bounded platform worker generations and physical invocation completion | high | core |

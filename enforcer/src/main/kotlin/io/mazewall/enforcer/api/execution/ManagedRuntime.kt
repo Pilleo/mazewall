@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.api.execution
 
+import io.mazewall.enforcer.api.CanonicalPolicyArtifact
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.api.InstallationEnvironment
@@ -7,6 +8,7 @@ import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.ReviewedOperationArtifact
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.frozenCopy
@@ -113,6 +115,18 @@ public class ManagedRuntime private constructor(
             val local = ContainmentStateRegistry.threadState
             check(local.filterDepth == 0 && local.landlockPolicy == null && local.installationFailure == null) { "Cannot bootstrap from a narrower or failed thread scope" }
         }
+    }
+
+    /** Prepare an externally reviewed, exactly configured worker operation document. */
+    public fun prepare(
+        artifact: ReviewedOperationArtifact,
+        limits: DomainLimits,
+    ): InProcessDomain {
+        val worker = artifact.document.policy as? CanonicalPolicyArtifact.Worker
+            ?: throw IllegalArgumentException("In-process domains require worker policy artifacts")
+        require(worker.runtime == runtime) { "Reviewed operation runtime does not match owner" }
+        val domain = prepare(worker.policy, limits)
+        return InProcessDomain(this, domain.resource, artifact.binding)
     }
 
     @Suppress("TooGenericExceptionCaught") // preparation boundary retires its generation and preserves original failure

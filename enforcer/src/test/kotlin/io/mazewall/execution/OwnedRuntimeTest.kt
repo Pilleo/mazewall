@@ -65,6 +65,18 @@ class OwnedRuntimeTest {
     private fun policy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
 
     @Test
+    fun `reviewed operation prepares its exact policy and retains configured binding`() {
+        open().use { runtime ->
+            val binding = OperationBinding("owned-operation", OperationAdapter.CALLABLE, "a".repeat(64), "resources-1", mapOf("entryPoint" to "call()I"))
+            val document = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy()), emptySet(), emptyMap())
+            val reviewed = ReviewedOperationArtifact.load(document.toJson(), TrustedPolicyReview("operator", document.sha256(), emptySet()), binding)
+            val domain = runtime.prepare(reviewed, DomainLimits(1, 1))
+            assertEquals("owned-operation", domain.operationBinding?.operationId)
+            assertEquals(42, Mazewall.callContained(runtime, domain, Callable { 42 }))
+        }
+    }
+
+    @Test
     fun `canonical synchronous entry nests inline on the exact active worker`() {
         open().use { runtime ->
             val domain = runtime.prepare(policy(), DomainLimits(1, 1))

@@ -105,6 +105,17 @@ public final class io/mazewall/enforcer/api/ContainmentViolationException : io/m
 	public final fun getSyscallNr ()Ljava/lang/Integer;
 }
 
+public final class io/mazewall/enforcer/api/CoverageFacet : java/lang/Enum {
+	public static final field ASYNC_EXECUTION Lio/mazewall/enforcer/api/CoverageFacet;
+	public static final field FILE_PATHS Lio/mazewall/enforcer/api/CoverageFacet;
+	public static final field NETWORK_DESTINATIONS Lio/mazewall/enforcer/api/CoverageFacet;
+	public static final field PROCESS_THREADS Lio/mazewall/enforcer/api/CoverageFacet;
+	public static final field SYSCALLS Lio/mazewall/enforcer/api/CoverageFacet;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/enforcer/api/CoverageFacet;
+	public static fun values ()[Lio/mazewall/enforcer/api/CoverageFacet;
+}
+
 public final class io/mazewall/enforcer/api/DefaultStacktraceScopingPolicy : io/mazewall/enforcer/api/StacktraceScopingPolicy {
 	public static final field INSTANCE Lio/mazewall/enforcer/api/DefaultStacktraceScopingPolicy;
 	public fun getHandlers ()Ljava/util/Map;
@@ -313,6 +324,40 @@ public final class io/mazewall/enforcer/api/Mazewall {
 	public static final field INSTANCE Lio/mazewall/enforcer/api/Mazewall;
 	public static final fun callContained (Lio/mazewall/enforcer/api/execution/ManagedRuntime;Lio/mazewall/enforcer/api/execution/InProcessDomain;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
 	public static final fun currentInvocationEvidence ()Lio/mazewall/enforcer/api/execution/InvocationEvidence;
+}
+
+public final class io/mazewall/enforcer/api/OperationAdapter : java/lang/Enum {
+	public static final field CALLABLE Lio/mazewall/enforcer/api/OperationAdapter;
+	public static final field KOOG_TOOL Lio/mazewall/enforcer/api/OperationAdapter;
+	public static final field SPRING_METHOD Lio/mazewall/enforcer/api/OperationAdapter;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/enforcer/api/OperationAdapter;
+	public static fun values ()[Lio/mazewall/enforcer/api/OperationAdapter;
+}
+
+public final class io/mazewall/enforcer/api/OperationBinding {
+	public fun <init> (Ljava/lang/String;Lio/mazewall/enforcer/api/OperationAdapter;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)V
+	public final fun getAdapter ()Lio/mazewall/enforcer/api/OperationAdapter;
+	public final fun getAdapterIdentity ()Ljava/util/Map;
+	public final fun getImplementationSha256 ()Ljava/lang/String;
+	public final fun getOperationId ()Ljava/lang/String;
+	public final fun getResourceGeneration ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/OperationPolicyDocument {
+	public static final field Companion Lio/mazewall/enforcer/api/OperationPolicyDocument$Companion;
+	public fun <init> (Lio/mazewall/enforcer/api/OperationBinding;Lio/mazewall/enforcer/api/CanonicalPolicyArtifact;Ljava/util/Set;Ljava/util/Map;)V
+	public static final fun fromJson (Ljava/lang/String;)Lio/mazewall/enforcer/api/OperationPolicyDocument;
+	public final fun getBinding ()Lio/mazewall/enforcer/api/OperationBinding;
+	public final fun getMissingCoverage ()Ljava/util/Set;
+	public final fun getPolicy ()Lio/mazewall/enforcer/api/CanonicalPolicyArtifact;
+	public final fun getReviewedExceptions ()Ljava/util/Map;
+	public final fun sha256 ()Ljava/lang/String;
+	public final fun toJson ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/OperationPolicyDocument$Companion {
+	public final fun fromJson (Ljava/lang/String;)Lio/mazewall/enforcer/api/OperationPolicyDocument;
 }
 
 public final class io/mazewall/enforcer/api/PartialInstallationException : java/lang/IllegalStateException {
@@ -551,6 +596,18 @@ public final class io/mazewall/enforcer/api/ProcessPolicyBuilder$Companion {
 	public final fun denyList (Lio/mazewall/enforcer/api/RuntimeProfile;)Lio/mazewall/enforcer/api/ProcessPolicyBuilder;
 }
 
+public final class io/mazewall/enforcer/api/ReviewedOperationArtifact {
+	public static final field Companion Lio/mazewall/enforcer/api/ReviewedOperationArtifact$Companion;
+	public final fun getBinding ()Lio/mazewall/enforcer/api/OperationBinding;
+	public final fun getDocument ()Lio/mazewall/enforcer/api/OperationPolicyDocument;
+	public final fun getReview ()Lio/mazewall/enforcer/api/TrustedPolicyReview;
+	public static final fun load (Ljava/lang/String;Lio/mazewall/enforcer/api/TrustedPolicyReview;Lio/mazewall/enforcer/api/OperationBinding;)Lio/mazewall/enforcer/api/ReviewedOperationArtifact;
+}
+
+public final class io/mazewall/enforcer/api/ReviewedOperationArtifact$Companion {
+	public final fun load (Ljava/lang/String;Lio/mazewall/enforcer/api/TrustedPolicyReview;Lio/mazewall/enforcer/api/OperationBinding;)Lio/mazewall/enforcer/api/ReviewedOperationArtifact;
+}
+
 public final class io/mazewall/enforcer/api/RuntimeProfile : java/lang/Enum {
 	public static final field HOTSPOT_JIT Lio/mazewall/enforcer/api/RuntimeProfile;
 	public static final field NATIVE_IMAGE Lio/mazewall/enforcer/api/RuntimeProfile;
@@ -693,6 +750,13 @@ public abstract interface class io/mazewall/enforcer/api/StacktraceScopingPolicy
 public final class io/mazewall/enforcer/api/Supervision {
 	public static final field INSTANCE Lio/mazewall/enforcer/api/Supervision;
 	public static final fun prepareSupervisor ()V
+}
+
+public final class io/mazewall/enforcer/api/TrustedPolicyReview {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/Set;)V
+	public final fun getAcceptedExceptions ()Ljava/util/Set;
+	public final fun getDocumentSha256 ()Ljava/lang/String;
+	public final fun getReviewer ()Ljava/lang/String;
 }
 
 public final class io/mazewall/enforcer/api/UnsupportedKernelFeatureException : java/lang/UnsupportedOperationException {
@@ -878,6 +942,7 @@ public final class io/mazewall/enforcer/api/execution/ExecutionTransitionExcepti
 public final class io/mazewall/enforcer/api/execution/InProcessDomain {
 	public final fun getGeneration ()J
 	public final fun getLimits ()Lio/mazewall/enforcer/api/execution/DomainLimits;
+	public final fun getOperationBinding ()Lio/mazewall/enforcer/api/OperationBinding;
 }
 
 public final class io/mazewall/enforcer/api/execution/IncompleteDrainException : java/lang/IllegalStateException {
@@ -911,6 +976,7 @@ public final class io/mazewall/enforcer/api/execution/ManagedRuntime : java/lang
 	public final fun getRuntime ()Lio/mazewall/enforcer/api/RuntimeProfile;
 	public static final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
 	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
+	public final fun prepare (Lio/mazewall/enforcer/api/ReviewedOperationArtifact;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun submit (Lio/mazewall/enforcer/api/execution/InProcessDomain;Ljava/util/concurrent/Callable;)Lio/mazewall/enforcer/api/execution/InvocationHandle;
 }
 

@@ -126,6 +126,23 @@ accepts canonical JSON token spelling with optional formatting whitespace; resou
 paths are absolute. The existing compiler consumes the decoded definition. Artifact
 bytes do not grant review approval, provenance trust or a resource-generation binding.
 
+### Reviewed operation binding
+
+`OperationPolicyDocument` version 1 retains canonical policy, reported missing coverage,
+specifically reasoned exceptions and a fixed `OperationBinding`. Callable, Spring-method
+and Koog-tool identity schemas are distinct framework-neutral data. An external
+operator-controlled `TrustedPolicyReview` authorizes exact canonical document bytes
+and exception facets; document approval fields are not authority. Loading also compares
+the exact configured operation, implementation digest, resource generation and adapter
+member identity before producing `ReviewedOperationArtifact`.
+
+Owned runtime preparation accepts only worker policy artifacts with matching runtime
+profile and retains their binding. This is configured identity validation; actual
+implementation/classloader/resource-object resolution remains the owning adapter and
+resource binder's required gate. Digests identify bytes rather than establishing trust
+in a reviewer. Evidence completeness is retained and never automatically relabeled
+approved by serialization or an untrusted policy/operation string.
+
 ### Preflight and Installation Results
 
 Before an irreversible operation, callers need:
