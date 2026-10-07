@@ -47,6 +47,35 @@ budget without representing a production failure. To make it mutation-testable,
 the simulator would need an explicit, configurable instruction-step bound with a
 distinct exhaustion result; do not add a test-only production bypass.
 
+## Fast iteration and cache reuse
+
+Use the owning module's named host tests while changing a contract:
+
+```bash
+./gradlew :enforcer:test --tests '*ReviewedOperationArtifactTest*' --tests '*OwnedRuntimeTest*'
+./gradlew :enforcer:checkKotlinAbi :enforcer:detektMain
+```
+
+Build and configuration caches are already enabled. Repeating the same focused
+verification on unchanged inputs reuses tests and analysis: the measured 2026-10-07
+warm run completed in 5s (`run-695d03175908`, tests/Detekt UP-TO-DATE). Changing the
+test filter changes task inputs; do not interpret an earlier focused XML report as
+complete-suite evidence. Use `--info --profile` to inspect task invalidation and
+`build/reports/profile/` rather than repeatedly running a full gate to diagnose timing.
+
+Run the full merge gate at a coherent verified checkpoint, after focused checks pass.
+During iteration, run kernel verification only for changed installation/native/protocol
+behavior or a new kernel contract. The full merge graph already schedules module
+integration suites; adding identical tasks to the same invocation does not duplicate
+their execution, but repeating the full invocation reruns externally sensitive suites.
+Do not cache kernel/endpoint success as if host configuration were ordinary source input.
+
+The CET C fixture uses local up-to-date compilation reuse with source/script and
+effective compiler/header/linker/environment inputs. The native library is not stored
+as portable cached protection evidence. `bash scripts/tests/cet_fixture_cache_test.sh`
+verifies unchanged reuse and source/header/compiler/missing-output invalidation in an
+independent Gradle fixture.
+
 ## Privileged kernel quality
 
 `./gradlew kernelCheck` runs `integrationTest` and `integrationTestFreshJvm`.

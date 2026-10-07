@@ -53,6 +53,22 @@ val compileVulnerableRop =
     tasks.register<Exec>("compileVulnerableRop") {
         group = "build"
         description = "Compiles the vulnerable C library for CET testing"
+        inputs
+            .files(
+                rootProject.file("scripts/run_cet_demo.sh"),
+                rootProject.file("scripts/cet_fixture_fingerprint.sh"),
+                rootProject.file("enforcer/src/test/c/libvulnerable_rop.c"),
+            ).withPathSensitivity(PathSensitivity.RELATIVE)
+        val compilerFingerprint =
+            providers
+                .exec {
+                    commandLine("bash", rootProject.file("scripts/cet_fixture_fingerprint.sh"))
+                }.standardOutput.asText
+                .map { it.trim() }
+        inputs.property("localCompilerFingerprint", compilerFingerprint)
+        outputs.file(rootProject.file("libvulnerable_rop.so"))
+        // Local up-to-date reuse only; a native library is not portable cached test evidence.
+        outputs.cacheIf { false }
         commandLine("bash", "$rootDir/scripts/run_cet_demo.sh")
     }
 
