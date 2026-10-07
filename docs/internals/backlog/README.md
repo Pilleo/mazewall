@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 95 | *Total Resolved Issues:* 646
+*Total Active Issues:* 96 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261007-223139-618-observe-cancellation-inside-admitted-portal-native](issue-20261007-223139-618-observe-cancellation-inside-admitted-portal-native.md) | Observe cancellation inside admitted Portal native polling | high | core |
 | [issue-20261007-221224-904-require-fresh-external-state-evidence-from-every-k](issue-20261007-221224-904-require-fresh-external-state-evidence-from-every-k.md) | Require fresh external-state evidence from every kernel integration gate | high | core |
 | [issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared](issue-20261007-222045-309-align-shared-test-compiler-classpath-with-declared.md) | Align shared test compiler classpath with declared friend JARs | high | core |
 | [issue-20261007-213121-162-publish-portable-verified-worker-resources-with-in](issue-20261007-213121-162-publish-portable-verified-worker-resources-with-in.md) | Publish portable verified worker resources with independent dependency closure | high | core |

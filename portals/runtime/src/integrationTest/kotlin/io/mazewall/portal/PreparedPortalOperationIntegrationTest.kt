@@ -104,7 +104,18 @@ class PreparedPortalOperationIntegrationTest {
         val child = ProcessHandle.of(broker.workerPids().single()).orElseThrow()
         val snapshot = LinuxNative.snapshot()
         val requestProgress = CountDownLatch(1)
+        val replyWait = CountDownLatch(1)
         LinuxNative.setEngine(object : io.mazewall.platform.native.NativeEngine by snapshot {
+            override val raw = object : io.mazewall.platform.native.RawSyscallOperations by snapshot.raw {
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                    snapshot.raw.poll(fds, nfds, timeout).also { result ->
+                        if (result is LinuxNative.SyscallResult.Success && result.value == 0L) replyWait.countDown()
+                    }
+            }
             override val memory = object : io.mazewall.platform.native.NativeMemory by snapshot.memory {
             override fun write(
                 fd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -120,6 +131,7 @@ class PreparedPortalOperationIntegrationTest {
             blockClose.set(true)
             val invocation = broker.operations.submit(Callable { broker.sleep(60_000) })
             assertTrue(requestProgress.await(5, TimeUnit.SECONDS))
+            assertTrue(replyWait.await(5, TimeUnit.SECONDS), "cancellation must happen after the actual response poll was admitted")
             assertEquals(CancellationDisposition.REQUESTED, invocation.requestCancellation())
             assertTrue(runCatching { invocation.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.isFailure)
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)

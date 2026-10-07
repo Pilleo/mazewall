@@ -133,6 +133,7 @@ internal class PortalIo(
         deadline: Deadline,
         idleAllowed: Boolean,
     ): Boolean {
+        if (Thread.currentThread().isInterrupted) throw InterruptedException("portal I/O interrupted")
         if (closing()) failIo("portal channel is closing")
         val remaining = deadline.remainingMillis()
         if (remaining <= 0) timeout(idleAllowed)
@@ -149,6 +150,7 @@ internal class PortalIo(
         deadline: Deadline,
         idleAllowed: Boolean,
     ): Boolean {
+        if (Thread.currentThread().isInterrupted) throw InterruptedException("portal I/O interrupted")
         if (closing()) failIo("portal channel is closing")
         if (deadline.isExpired()) timeout(idleAllowed)
         return true
