@@ -226,6 +226,12 @@ val rootKotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.K
 val rootKotlinCompilations = rootKotlinExtension.target.compilations
 val rootPlatformJar = project(":platform").layout.buildDirectory.file("libs/platform-${project(":platform").version}.jar")
 val rootEnforcerJar = project(":enforcer").layout.buildDirectory.file("libs/enforcer-${project(":enforcer").version}.jar")
+configurations.named("sharedTestCompileClasspath") {
+    attributes.attribute(
+        org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+        objects.named(org.gradle.api.attributes.LibraryElements.JAR),
+    )
+}
 rootKotlinCompilations.matching { it.name == "sharedTest" }.configureEach {
     compileTaskProvider.configure {
         dependsOn(":platform:jar", ":enforcer:jar")
