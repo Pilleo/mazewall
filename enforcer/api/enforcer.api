@@ -32,6 +32,33 @@ public final class io/mazewall/enforcer/api/BillOfBehaviorDto$Companion {
 	public final fun serializer ()Lkotlinx/serialization/KSerializer;
 }
 
+public abstract class io/mazewall/enforcer/api/CanonicalPolicyArtifact {
+	public static final field Companion Lio/mazewall/enforcer/api/CanonicalPolicyArtifact$Companion;
+	public synthetic fun <init> (Lio/mazewall/enforcer/api/RuntimeProfile;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public static final fun fromJson (Ljava/lang/String;)Lio/mazewall/enforcer/api/CanonicalPolicyArtifact;
+	public abstract fun getDefinition ()Lio/mazewall/enforcer/api/PolicyDefinition;
+	public final fun getRuntime ()Lio/mazewall/enforcer/api/RuntimeProfile;
+	public static final fun process (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/CanonicalPolicyArtifact$Process;
+	public final fun toJson ()Ljava/lang/String;
+	public static final fun worker (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/CanonicalPolicyArtifact$Worker;
+}
+
+public final class io/mazewall/enforcer/api/CanonicalPolicyArtifact$Companion {
+	public final fun fromJson (Ljava/lang/String;)Lio/mazewall/enforcer/api/CanonicalPolicyArtifact;
+	public final fun process (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/CanonicalPolicyArtifact$Process;
+	public final fun worker (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/CanonicalPolicyArtifact$Worker;
+}
+
+public final class io/mazewall/enforcer/api/CanonicalPolicyArtifact$Process : io/mazewall/enforcer/api/CanonicalPolicyArtifact {
+	public fun getDefinition ()Lio/mazewall/enforcer/api/PolicyDefinition;
+	public final fun getPolicy ()Lio/mazewall/enforcer/api/Policy;
+}
+
+public final class io/mazewall/enforcer/api/CanonicalPolicyArtifact$Worker : io/mazewall/enforcer/api/CanonicalPolicyArtifact {
+	public fun getDefinition ()Lio/mazewall/enforcer/api/PolicyDefinition;
+	public final fun getPolicy ()Lio/mazewall/enforcer/api/Policy;
+}
+
 public final class io/mazewall/enforcer/api/CetOutcome : java/lang/Enum {
 	public static final field NOT_REQUESTED Lio/mazewall/enforcer/api/CetOutcome;
 	public static final field UNCONFIRMED Lio/mazewall/enforcer/api/CetOutcome;

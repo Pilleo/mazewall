@@ -652,6 +652,10 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.enforcer.api.CanonicalPolicyArtifact" to setOf(
+                "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Worker",
+                "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Process",
+            ),
             "io.mazewall.enforcer.internal.execution.ExecutionTransition" to setOf(
                 "io.mazewall.enforcer.internal.execution.ExecutionTransition\$Dispatch",
                 "io.mazewall.enforcer.internal.execution.ExecutionTransition\$InlineCurrentWorker",

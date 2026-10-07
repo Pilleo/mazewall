@@ -112,6 +112,20 @@ Normal users should choose an explicit allow-list or deny-list DSL instead of ma
 
 Policy composition must use names such as `restrictFurtherWith` or `intersection`. Generic `combine` and `+` conceal the different Seccomp and Landlock composition rules and must not imply that installed permissions can expand.
 
+### Canonical policy artifacts
+
+`CanonicalPolicyArtifact` version 1 preserves fixed process/worker scope, explicit
+runtime, parameterized actions, argument flags, filesystem intent and diagnostic
+options. Active empty filesystem restriction is encoded as `DENY_ALL`, not as
+unrestricted state. Exact read/write paths remain exact and decoded permission
+collections are immutable. Process artifacts cannot carry worker filesystem state.
+
+Parsing rejects unknown/missing fields, versions/actions/scopes, duplicate fields,
+syscalls/resources, invalid action data and contradictory filesystem state. The format
+accepts canonical JSON token spelling with optional formatting whitespace; resource
+paths are absolute. The existing compiler consumes the decoded definition. Artifact
+bytes do not grant review approval, provenance trust or a resource-generation binding.
+
 ### Preflight and Installation Results
 
 Before an irreversible operation, callers need:

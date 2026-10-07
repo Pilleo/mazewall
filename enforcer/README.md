@@ -170,6 +170,17 @@ request. Late FFM enablement, permission-error-as-lock-proof, and process-wide C
 claims are rejected. See the [current CET contract](../docs/internals/intel-cet-jvm-sandbox-integration.md)
 for runtime prerequisites, retained proof, and native acceptance boundaries.
 
+### Canonical policy documents
+
+`CanonicalPolicyArtifact.worker(runtime, policy)` and `.process(runtime, policy)`
+encode versioned immutable policy documents through `toJson()`. `fromJson()` returns
+the fixed worker/process artifact type with its typed `policy`. Active `DenyAll`
+remains active after a round trip; unrestricted state, exact resource grants,
+parameterized actions and argument flags remain distinct. Unknown versions/fields,
+duplicate fields/rules/resources and contradictory filesystem state are rejected.
+The format uses canonical JSON token spelling with optional formatting whitespace
+and absolute resource paths. These documents encode policy, not review approval.
+
 ### Owned synchronous workers
 
 Create the runtime during trusted platform-thread application bootstrap. The process
