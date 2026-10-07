@@ -105,7 +105,7 @@ tasks.test {
 
 dependencies {
     api(project(":platform"))
-    implementation(project(":enforcer"))
+    api(project(":enforcer"))
     portalWorkerClasspath(project(":portals:worker"))
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)

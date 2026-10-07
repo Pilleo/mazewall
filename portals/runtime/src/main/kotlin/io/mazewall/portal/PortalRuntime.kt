@@ -25,6 +25,24 @@ public class PortalRuntime private constructor(
     private val proxies = ConcurrentHashMap<PortalServiceId, Any>()
     private val statefulGate = PortalStatefulInvocationGate()
 
+    /** Binds a host mapping to one generated service and its owned process group. */
+    public fun <S : Any, A, R> prepare(
+        type: Class<S>,
+        id: PortalServiceId,
+        call: PortalOperationCall<S, A, R>,
+    ): PreparedPortalOperation<A, R> {
+        val service = get(type, id)
+        val broker = brokerFor(registry.resolve(type, id))
+        return PreparedPortalOperation { arguments ->
+            broker.operations.submit(
+                java.util.concurrent.Callable {
+                ensureOpen()
+                call.invoke(service, arguments)
+            },
+            )
+        }
+    }
+
     public fun <T : Any> get(type: Class<T>): T {
         ensureOpen()
         return get(type, registry.resolve(type).serviceId)

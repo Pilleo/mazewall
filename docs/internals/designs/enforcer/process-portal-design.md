@@ -184,7 +184,29 @@ caps. Stateful singleton groups always use one worker. Overload and oversized re
 reject as `NOT_STARTED` before checkout or transport; the admission lease ends only when
 the synchronous broker call returns. Response headers are checked against configured
 bounds before allocating the body or receiving descriptors. Worker retirement remains
-owned independently after call delivery; admission release does not prove process exit.
+owned independently after synchronous call delivery; synchronous admission release
+does not prove process exit.
+
+`PortalRuntime.prepare(serviceClass, serviceId, PortalOperationCall)` binds a
+`PreparedPortalOperation<A,R>` to that service's existing broker. `submit(arguments)`
+returns the shared minimal `InvocationHandle<R>` with separate result and execution-end
+stages. The mapping invokes a generated host stub; mapping, input encoding and output
+decoding remain host work, not code protected by the child's policy. A mapping cannot
+substitute a different broker or return a local result without invoking its worker.
+Arguments must remain stable until mapping/encoding ends; this API does not snapshot
+arbitrary host object graphs.
+
+Broker-owned finite JDK host dispatch consumes the same admission pool as synchronous
+calls, including queued operations. Its host threads install no containment. The RPC
+deadline starts at submit and reaches checkout, transport and response without reset.
+Queued cancellation removes the task and releases admission without mapping entry.
+Running cancellation interrupts host transport and stops caller waiting, but retains
+admission and execution-end until the exact retired worker is reaped and all its known
+owners finish retirement. Pre-native cleanup failure leaves that end pending and the
+broker owns retry; it cannot be hidden by stateless capacity replenishment. Runtime
+close stops/cancels owned dispatch before retirement and joins it under the close budget.
+Closing from its own operation mapping is rejected. Converted result/end futures do not
+own the execution, and a prepared operation has no independent pool lifecycle.
 
 ### Capability ownership migration
 

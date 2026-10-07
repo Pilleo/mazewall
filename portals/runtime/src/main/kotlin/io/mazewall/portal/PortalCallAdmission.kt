@@ -13,11 +13,18 @@ internal class PortalCallAdmission(
         payloadBytes: Int,
         capabilities: Int,
     ): AutoCloseable {
-        if (payloadBytes !in 0..limits.maxRequestBytes || capabilities !in 0..limits.maxCapabilities) {
-            throw PortalCallException("Portal request exceeds configured payload/capability bounds", PortalInvocationEvidence.NOT_STARTED)
-        }
+        validate(payloadBytes, capabilities)
         if (!capacity.tryAcquire()) throw PortalCallException("Portal admission limit reached", PortalInvocationEvidence.NOT_STARTED)
         val released = AtomicBoolean()
         return AutoCloseable { if (released.compareAndSet(false, true)) capacity.release() }
+    }
+
+    fun validate(
+        payloadBytes: Int,
+        capabilities: Int,
+    ) {
+        if (payloadBytes !in 0..limits.maxRequestBytes || capabilities !in 0..limits.maxCapabilities) {
+            throw PortalCallException("Portal request exceeds configured payload/capability bounds", PortalInvocationEvidence.NOT_STARTED)
+        }
     }
 }

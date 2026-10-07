@@ -75,6 +75,7 @@ public class ProcessBroker internal constructor(
     private val nextId = AtomicInteger(1)
     private val idle = ArrayBlockingQueue<WorkerSlot>(limits.workers)
     private val admission = PortalCallAdmission(limits)
+    internal val operations = PortalOperationOwner(this, limits, admission)
     private val spawned = AtomicInteger(0)
     private val maintenance = Executors.newSingleThreadExecutor(
         Thread.ofVirtual().name("portal-broker-maintenance", 0).factory(),
@@ -237,12 +238,17 @@ public class ProcessBroker internal constructor(
         fds: List<Capability.ReadFd>,
     ): ByteArray {
         check(lifecycle == ProcessBrokerLifecycle.Running) { "broker not running: $lifecycle" }
-        return admission.enter(payload.size, fds.size).use { callAdmitted(method, payload, fds) }
+        return if (PortalInvocationRetirement.deadline(this) == null) {
+            admission.enter(payload.size, fds.size).use { callAdmitted(method, payload, fds) }
+        } else {
+            admission.validate(payload.size, fds.size)
+            callAdmitted(method, payload, fds)
+        }
     }
 
     @Suppress("TooGenericExceptionCaught") // fatal admitted calls retire their exact checked-out process before propagation
     private fun callAdmitted(method: PortalMethod, payload: ByteArray, fds: List<Capability.ReadFd>): ByteArray {
-        val deadline = Deadline.afterMillis(limits.callTimeoutMs)
+        val deadline = PortalInvocationRetirement.deadline(this) ?: Deadline.afterMillis(limits.callTimeoutMs)
         val admittedAt = System.nanoTime()
         val slot = checkoutWorker(deadline)
         val dispatchedAt = System.nanoTime()
@@ -251,6 +257,7 @@ public class ProcessBroker internal constructor(
         return try {
             val id = nextId.getAndIncrement()
             val request = PortalFrame(PortalKind.Request, id, method, PortalPayload(payload), fds.size)
+            PortalInvocationRetirement.dispatched(this)
             callState = PortalBrokerCallMachine
                 .evaluate(PortalBrokerCallState.Idle, PortalBrokerCallEvent.RequestSent(request))
                 .state
@@ -274,6 +281,7 @@ public class ProcessBroker internal constructor(
             )
         } catch (e: PortalCallException) {
             if (!returnedToPool) {
+                PortalInvocationRetirement.retain(slot.retired, e)
                 scheduleRecycle(slot)
             }
             raiseBrokerFailure(e)
@@ -281,6 +289,7 @@ public class ProcessBroker internal constructor(
             handleInterruptedCall(
                 onCleanup = {
                     if (!returnedToPool) {
+                        PortalInvocationRetirement.retain(slot.retired, interrupted)
                         scheduleRecycle(slot)
                     }
                 },
@@ -290,11 +299,13 @@ public class ProcessBroker internal constructor(
             val transportFailure = PortalBrokerCallMachine.evaluate(callState, PortalBrokerCallEvent.TransportFailed)
             check(transportFailure.state == PortalBrokerCallState.Failed)
             if (!returnedToPool) {
+                PortalInvocationRetirement.retain(slot.retired, expectedRpcFailure)
                 scheduleRecycle(slot)
             }
             throw PortalCallException("portal RPC failed", cause = expectedRpcFailure)
         } catch (fatal: Error) {
             if (!returnedToPool) {
+                PortalInvocationRetirement.retain(slot.retired, fatal)
                 val cleanup = runCatching { destroySlot(slot) }.exceptionOrNull()
                 cleanup?.takeIf { it !== fatal }?.let(fatal::addSuppressed)
                 runCatching { scheduleRecycle(slot) }.exceptionOrNull()?.takeIf { it !== fatal }?.let(fatal::addSuppressed)
@@ -312,6 +323,7 @@ public class ProcessBroker internal constructor(
 
     private fun checkoutWorker(deadline: Deadline): WorkerSlot =
         try {
+        if (deadline.remainingMillis() <= 0) raiseBrokerFailure(PortalCallException("Portal deadline expired before worker checkout", PortalInvocationEvidence.NOT_STARTED))
         idle.poll(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
             ?: throw PortalCallException("timed out waiting for an idle portal worker", PortalInvocationEvidence.NOT_STARTED)
     } catch (interrupted: InterruptedException) {
@@ -321,6 +333,7 @@ public class ProcessBroker internal constructor(
 
     @Suppress("TooGenericExceptionCaught")
     override fun close() {
+        operations.assertExternalClose()
         val preparation = prepareClose()
         preparation.waitForOtherClose?.let { operation ->
             awaitBrokerCloseOperation(operation).raiseIfFailed()
@@ -367,6 +380,7 @@ public class ProcessBroker internal constructor(
         startupToJoin: CountDownLatch?,
         deadline: Deadline,
     ): Boolean {
+        cleanup.attempt("operation dispatch shutdown") { operations.stop() }
         cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
         val maintenanceStopped = awaitMaintenance(deadline)
         retireRetainedCapabilities(cleanup)
@@ -380,7 +394,8 @@ public class ProcessBroker internal constructor(
             cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
         }
         closeRetirement.retireHandoffs(cleanup)
-        return maintenanceStopped && startupStopped && closeRetirement.allOwnedResourcesRetired(cleanup)
+        val operationsStopped = operations.await(deadline)
+        return operationsStopped && maintenanceStopped && startupStopped && closeRetirement.allOwnedResourcesRetired(cleanup)
     }
 
     /** Keeps close-only ownership retirement separate from public broker operations. */
@@ -746,6 +761,8 @@ public class ProcessBroker internal constructor(
                 mostRecentWorkerLifecycle = PortalWorkerLifecycle(PortalWorkerLifecycleState.RETIRED, slot.process.pid())
                 trackedSlots.remove(slot)
                 provisionalSlots.remove(slot)
+                val retirementFailure = outcome.failureOrNull()
+                if (retirementFailure == null) slot.retired.complete(Unit) else slot.retired.completeExceptionally(retirementFailure)
             }
             outcome.failureOrNull()?.let(::raiseBrokerFailure)
             return slot.fullyRetired
@@ -760,6 +777,7 @@ public class ProcessBroker internal constructor(
         val pump: PortalWorkerOutput,
         val cgroup: PortalCgroupHandle?,
     ) {
+        val retired = CompletableFuture<Unit>()
         var channelRetired: Boolean = false
         var serverRetired: Boolean = false
         var processDestroyed: Boolean = false
