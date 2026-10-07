@@ -325,10 +325,10 @@ class DaemonStartupRollbackTest {
             .single { constructor ->
             constructor.parameterTypes.size == 3
         }.newInstance(engine, MockSocketManager(), launcher)
-        val start = managerClass.getDeclaredMethod("getOrSpawnSharedDaemon")
+        val start = managerClass.getDeclaredMethod("getOrSpawnSharedDaemon", io.mazewall.platform.native.NativeEngine::class.java)
         val stop = managerClass.getDeclaredMethod("stop")
         return Driver(
-            start = { invokeInternal(start, manager) },
+            start = { invokeInternal(start, manager, engine) },
             stop = { invokeInternal(stop, manager) },
         )
     }
@@ -342,9 +342,10 @@ class DaemonStartupRollbackTest {
     private fun invokeInternal(
         method: java.lang.reflect.Method,
         receiver: Any,
+        vararg arguments: Any,
     ) {
         try {
-            method.invoke(receiver)
+            method.invoke(receiver, *arguments)
         } catch (failure: java.lang.reflect.InvocationTargetException) {
             throw checkNotNull(failure.cause)
         }

@@ -76,6 +76,29 @@ class SupervisorDaemonManagerTest {
         }
     }
 
+    @Test
+    fun `cached daemon authorizes supplied caller authority without using lifecycle backend`() {
+        val owner = MockNativeEngine()
+        val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))
+        val manager = SupervisorDaemonManager(owner, MockSocketManager(), launcher)
+        val caller = MockNativeEngine()
+        var authorized = 0L
+        caller.process.onPrctl = { command ->
+            if (command is io.mazewall.platform.syscall.PrctlCommand.SetPtracer) authorized = command.tracerPid
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        try {
+            val original = manager.getOrSpawnSharedDaemon()
+            owner.process.onPrctl = { LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L) }
+            val reused = manager.getOrSpawnSharedDaemon(caller)
+            assertEquals(original, reused)
+            assertEquals(9999L, authorized)
+        } finally {
+            owner.process.onPrctl = { LinuxNative.SyscallResult.Success(0L) }
+            manager.stop()
+        }
+    }
+
     @AfterEach
     fun resetContainmentState() {
         ContainmentStateRegistry.processState = ContainerState()

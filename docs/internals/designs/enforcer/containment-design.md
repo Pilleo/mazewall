@@ -360,6 +360,14 @@ cannot be collapsed into ABI-zero unsupported bypass. Standalone legacy helpers
 still select their own context; application-owned unified capture is subsequent
 runtime work.
 
+Supervised installation and cached task registration receive the attempt's selected
+native backend explicitly. Reusing a shared daemon authorizes the calling thread
+through that backend; daemon startup resources and retirement retain the manager's
+lifecycle owner. The explicit installer captures notification support before native
+callbacks. This preserves authority across Landlock-to-USER_NOTIF installation and
+does not imply unified application-owned capability/runtime or daemon-lifecycle
+capture. Registration leases remain receipt-owned and close after task execution.
+
 `ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
 of policy coverage and Seccomp engine-state rank. The interpreter retains the first
 failure without rewinding applied stages. Registry merges carry thread/process

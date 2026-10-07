@@ -30,6 +30,29 @@ class CapturedLandlockBackendNativeTest : BaseIntegrationTest() {
     }
 
     fun verifyCapturedLandlock(file: String) {
+        verifyCapturedInstallation(file, supervised = false)
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `captured backend spans Landlock and supervised installation`() {
+        val file = Files.createTempFile("captured-supervised-landlock-", ".txt")
+        try {
+            Files.writeString(file, "caller-readable")
+            IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyCapturedSupervisedInstallation", file.toString())
+        } finally {
+            Files.deleteIfExists(file)
+        }
+    }
+
+    fun verifyCapturedSupervisedInstallation(file: String) {
+        verifyCapturedInstallation(file, supervised = true)
+    }
+
+    private fun verifyCapturedInstallation(
+        file: String,
+        supervised: Boolean,
+    ) {
         System.setProperty("io.mazewall.fallback", "FAIL")
         val actual = LinuxNative.snapshot()
         val foreignCalls = AtomicInteger()
@@ -73,7 +96,17 @@ class CapturedLandlockBackendNativeTest : BaseIntegrationTest() {
         try {
             Executors.newSingleThreadExecutor().use { worker ->
                 val failure = assertFailsWith<ExecutionException> {
-                    ContainedExecutors.wrap(worker, policy).submit(Callable { Files.readString(Path.of(file)) }).get(10, TimeUnit.SECONDS)
+                    val contained = if (supervised) {
+                        val scoping = object : StacktraceScopingPolicy {
+                            override val handlers = mapOf<io.mazewall.platform.syscall.Syscall, (io.mazewall.platform.lifecycle.Tid, List<Any>, List<StackTraceElement>) -> Boolean>(
+                                io.mazewall.platform.syscall.Syscall.CONNECT to { _, _, _ -> true },
+                            )
+                        }
+                        ContainedExecutors.wrap(worker, policy, scoping)
+                    } else {
+                        ContainedExecutors.wrap(worker, policy)
+                    }
+                    contained.submit(Callable { Files.readString(Path.of(file)) }).get(20, TimeUnit.SECONDS)
                 }
                 assertTrue(
                     generateSequence<Throwable>(failure) { it.cause }.any { it is java.nio.file.AccessDeniedException },

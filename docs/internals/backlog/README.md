@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 73 | *Total Resolved Issues:* 646
+*Total Active Issues:* 74 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261007-010355-695-bind-supervised-installation-and-task-registration](issue-20261007-010355-695-bind-supervised-installation-and-task-registration.md) | Bind supervised installation and task registration to attempt native authority | high | core |
 | [issue-20261007-001406-042-capture-landlock-native-backend-and-typed-capabili](issue-20261007-001406-042-capture-landlock-native-backend-and-typed-capabili.md) | Capture Landlock native backend and typed capabilities for ruleset lifetime | high | core |
 | [issue-20261006-223832-563-pin-native-backend-through-plain-seccomp-installat](issue-20261006-223832-563-pin-native-backend-through-plain-seccomp-installat.md) | Pin native backend through plain Seccomp installation and verification | high | core |
 | [issue-20261006-212230-350-correct-cet-uapi-and-require-verified-current-thre](issue-20261006-212230-350-correct-cet-uapi-and-require-verified-current-thre.md) | Correct CET UAPI and require verified current-thread shadow-stack locking | high | core |

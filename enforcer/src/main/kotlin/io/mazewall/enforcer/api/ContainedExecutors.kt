@@ -422,7 +422,7 @@ public object ContainedExecutors {
         if (policy.hasSupervisedSyscalls) {
             io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
-                .getOrSpawnSharedDaemon()
+                .getOrSpawnSharedDaemon(attempt.native)
         }
     }
 
@@ -502,7 +502,7 @@ public object ContainedExecutors {
                         processWide = processWide,
                         requestedPolicy = combinedPolicy,
                         supervisorRegistration = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
-                            .acquireTaskSession(scopingPolicy),
+                            .acquireTaskSession(scopingPolicy, attempt.native),
                         landlockApplied = landlockApplied,
                         fallback = attempt.fallback,
                         progress = attempt.snapshot(),
@@ -668,6 +668,7 @@ public object ContainedExecutors {
                     attempt.seccompApplied = true
                     publish()
                 },
+                attempt.native,
             )
             return session
         } else {

@@ -93,12 +93,12 @@ internal class SupervisorDaemonManager(
     /**
      * Returns the existing shared daemon context or spawns a new one.
      */
-    public fun getOrSpawnSharedDaemon(): SupervisorContext {
+    public fun getOrSpawnSharedDaemon(callerNative: NativeEngine = engine): SupervisorContext {
         synchronized(daemonLock) {
             when (val handle = daemonHandle) {
                 is DaemonHandle.Running -> {
                     if (handle.context.daemonProcess.isAlive) {
-                        DaemonPtracer.authorize(engine, handle.context.daemonProcess)
+                        DaemonPtracer.authorize(callerNative, handle.context.daemonProcess)
                         return handle.context
                     }
                     markDefunct(handle.context, handle.context.daemonProcess.exitValue())

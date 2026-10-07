@@ -90,10 +90,11 @@ internal object SupervisorInstaller {
         scopingPolicy: StacktraceScopingPolicy,
         onFilterApplied: () -> Unit,
         native: NativeEngine,
+        userNotifSupported: Boolean = Platform.featureMatrix.seccompUserNotifSupported,
     ): SupervisorSession {
         requireReusableInstallations()
         ValidationListenerPreload.ensureLoaded()
-        val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon()
+        val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon(native)
         val arch = Arch.current()
 
         // Assert not a virtual thread per Loom carrier poisoning rules
@@ -116,7 +117,7 @@ internal object SupervisorInstaller {
             runtime.register(tid)
             SupervisorSeccompNotifInstaller.installOwned(
                 native = native,
-                userNotifSupported = Platform.featureMatrix.seccompUserNotifSupported,
+                userNotifSupported = userNotifSupported,
                 socketPath = context.socketPath,
                 filter = filter,
                 processWide = false,
