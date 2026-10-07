@@ -42,5 +42,11 @@ Docker gate failed the process-wide profiler subprocess and logged listener ACK
 (`run-21b6e1f2382c`). Root cause remains unproven; no profiler behavior, assertion,
 timeout or skip was changed.
 
+Recurrence during owned-runtime C7 acceptance: serial full Docker run
+`run-2bed8968d1cb` failed the same process-wide profiler subprocess with ACK
+`errno=32`; unchanged full rerun `run-48eca4d8ffb5` passed in 53s. Earlier C7
+Docker run `run-527b0e17a1b2` also passed. No profiler fix or timing diagnosis is
+claimed and no assertion/timeout/skip was changed.
+
 ---
 <!-- id: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int  file: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md -->
