@@ -56,7 +56,7 @@ public class PortalRuntimeConfig(
             grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
             limits: PortalRuntimeLimits = PortalRuntimeLimits(),
         ): PortalRuntimeConfig {
-            val generated = PortalWorkerArtifactCatalog.load(loader)
+            val generated = PortalWorkerArtifactCatalog.load(loader, workerBundleCache)
             generated.forEach { (key, generatedArtifact) ->
                 workerArtifacts[key]?.let { explicitArtifact ->
                     require(explicitArtifact == generatedArtifact) {

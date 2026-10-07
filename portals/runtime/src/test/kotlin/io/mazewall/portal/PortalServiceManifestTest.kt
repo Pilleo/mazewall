@@ -114,54 +114,74 @@ class PortalServiceManifestTest {
 
     @Test
     fun `worker artifact catalog supplies runtime configuration`() {
-        val artifact = temporaryDir.resolve("fixture-worker.zip")
-        artifact.writeText("not materialized in this test")
+        val content = "opaque worker resource"
+        val digest = java.security.MessageDigest
+            .getInstance("SHA-256")
+            .digest(content.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val name = "META-INF/mazewall/portal/worker-bundles/$digest.zip"
+        val artifact = temporaryDir.resolve(name)
+        artifact.parent.createDirectories()
+        artifact.writeText(content)
         val artifactResources = temporaryDir.resolve("META-INF/mazewall/portal/worker-artifacts").createDirectories()
         artifactResources.resolve("fixture-worker").writeText(
-            PortalWorkerArtifactCatalog.encode(PortalWorkerArtifact(artifact, "ab".repeat(32))),
+            PortalWorkerArtifactCatalog.encodeResource(name, digest),
         )
         artifactResources.resolveSibling("worker-artifacts.index").writeText("fixture-worker\n")
 
         URLClassLoader(arrayOf(temporaryDir.toUri().toURL()), null).use { loader ->
+            val loaded = PortalWorkerArtifactCatalog.load(loader, temporaryDir.resolve("cache")).getValue("fixture-worker")
+            assertEquals(digest, loaded.sha256)
             assertEquals(
-                PortalWorkerArtifact(artifact.toAbsolutePath().normalize(), "ab".repeat(32)),
-                PortalWorkerArtifactCatalog.load(loader).getValue("fixture-worker"),
+                content,
+                java.nio.file.Files
+                .readString(loaded.path),
             )
         }
     }
 
     @Test
     fun `runtime configuration discovers generated manifest and worker artifact together`() {
-        val artifact = temporaryDir.resolve("fixture-worker.zip")
-        artifact.writeText("not materialized in this test")
+        val content = "opaque worker resource"
+        val digest = java.security.MessageDigest
+            .getInstance("SHA-256")
+            .digest(content.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+        val name = "META-INF/mazewall/portal/worker-bundles/$digest.zip"
+        val artifact = temporaryDir.resolve(name)
+        artifact.parent.createDirectories()
+        artifact.writeText(content)
         val serviceResources = temporaryDir.resolve("META-INF/mazewall/portal/services").createDirectories()
         serviceResources.resolve("pdf-parser").writeText(PortalServiceManifestCodec.encode(sampleManifest()))
         serviceResources.resolveSibling("services.index").writeText("pdf-parser\n")
         val artifactResources = temporaryDir.resolve("META-INF/mazewall/portal/worker-artifacts").createDirectories()
         artifactResources.resolve("document-parser.portal-worker.jar").writeText(
-            PortalWorkerArtifactCatalog.encode(PortalWorkerArtifact(artifact, "cd".repeat(32))),
+            PortalWorkerArtifactCatalog.encodeResource(name, digest),
         )
         artifactResources.resolveSibling("worker-artifacts.index").writeText("document-parser.portal-worker.jar\n")
 
         URLClassLoader(arrayOf(temporaryDir.toUri().toURL()), null).use { loader ->
-            val config = PortalRuntimeConfig.load(loader)
+            val config = PortalRuntimeConfig.load(loader, workerBundleCache = temporaryDir.resolve("cache"))
 
             assertEquals(listOf(sampleManifest()), config.manifests)
+            val loaded = config.workerArtifacts.getValue("document-parser.portal-worker.jar")
+            assertEquals(digest, loaded.sha256)
             assertEquals(
-                PortalWorkerArtifact(artifact.toAbsolutePath().normalize(), "cd".repeat(32)),
-                config.workerArtifacts.getValue("document-parser.portal-worker.jar"),
+                content,
+                java.nio.file.Files
+                .readString(loaded.path),
             )
         }
     }
 
     @Test
-    fun `worker artifact catalog rejects a relative bundle path`() {
+    fun `worker artifact catalog rejects resource traversal`() {
         val failure =
             assertThrows(IllegalArgumentException::class.java) {
-                PortalWorkerArtifactCatalog.decode("format=1\npath=worker.zip\nsha256=${"ab".repeat(32)}\n")
+                PortalWorkerArtifactCatalog.encodeResource("META-INF/mazewall/portal/worker-bundles/../worker.zip", "ab".repeat(32))
             }
 
-        assertTrue(failure.message!!.contains("absolute"), failure.message)
+        assertTrue(failure.message!!.contains("bundle root"), failure.message)
     }
 
     private fun sampleManifest(): PortalServiceManifest =

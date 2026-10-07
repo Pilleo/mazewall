@@ -300,12 +300,6 @@ public class PortalCodegenPlugin : Plugin<Project> {
                     "portalCodegen.workerSourceSet must name a dedicated worker source set (not main or test)"
                 }
                 val worker = java.sourceSets.maybeCreate(workerName)
-                project.configurations
-                    .getByName(worker.implementationConfigurationName)
-                    .extendsFrom(project.configurations.getByName("implementation"))
-                project.configurations
-                    .getByName(worker.runtimeOnlyConfigurationName)
-                    .extendsFrom(project.configurations.getByName("runtimeOnly"))
                 val kotlinWorker = sourceSets.getByName(workerName)
                 val workerSources = kotlinWorker.javaClass.methods
                     .single { method -> method.name == "getKotlin" && method.parameterCount == 0 }

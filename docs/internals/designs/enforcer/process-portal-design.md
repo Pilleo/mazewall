@@ -266,6 +266,11 @@ Host builds emit stubs only by default. Applications opt into a dedicated guest 
 For opted-in projects, `assemble` (and therefore `build`) depends on this worker artifact, so
 ordinary verification compiles guest implementations and generated dispatchers. Host-only projects
 retain their ordinary lifecycle without a worker artifact task.
+Worker source-set dependencies are explicit and do not inherit host implementation
+or runtime-only configurations. The generated host JAR embeds the worker ZIP as
+opaque digest-addressed resource data with strict portable format-2 metadata.
+Runtime catalog resolution verifies and copies that resource before the existing
+bounded extractor builds the child classpath; no absolute build path is retained.
 Only this artifact belongs on the worker classpath; ordinary `jar` contains neither dispatchers
 nor descriptors. `main` and `test` are rejected as worker output source sets. The worker resolves
 one descriptor per configured service through its own defining classloader before constructing

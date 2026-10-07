@@ -69,14 +69,7 @@ public object WorkerBundleMaterializer {
         return source
     }
 
-    private fun verifiedCacheDirectory(cacheDirectory: Path): Path {
-        require(!Files.isSymbolicLink(cacheDirectory)) { "worker bundle cache directory must not be a symbolic link: $cacheDirectory" }
-        Files.createDirectories(cacheDirectory)
-        require(!Files.isSymbolicLink(cacheDirectory) && Files.isDirectory(cacheDirectory)) {
-            "worker bundle cache directory is not a real directory: $cacheDirectory"
-        }
-        return cacheDirectory
-    }
+    private fun verifiedCacheDirectory(cacheDirectory: Path): Path = VerifiedWorkerCache.directory(cacheDirectory)
 
     private fun cacheDirectoryName(
         artifact: PortalWorkerArtifact,

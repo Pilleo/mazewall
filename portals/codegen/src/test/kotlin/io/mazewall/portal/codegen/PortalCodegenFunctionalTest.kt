@@ -370,7 +370,18 @@ class PortalCodegenFunctionalTest {
                 ),
         )
 
-        val result = runner("publishPortalWorkerArtifactMetadata").build()
+        val hostOnly = projectDir.resolve("host-only.jar")
+        java.util.jar
+            .JarOutputStream(
+            java.nio.file.Files
+            .newOutputStream(hostOnly),
+        ).use { jar ->
+            jar.putNextEntry(java.util.jar.JarEntry("host-only-marker.txt"))
+            jar.write("must not reach worker".toByteArray())
+            jar.closeEntry()
+        }
+        projectDir.resolve("build.gradle.kts").toFile().appendText("\ndependencies { implementation(files(\"$hostOnly\")) }\n")
+        val result = runner("jar", "publishPortalWorkerArtifactMetadata").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":publishPortalWorkerArtifactMetadata")?.outcome)
         val metadata =
@@ -378,6 +389,11 @@ class PortalCodegenFunctionalTest {
                 "build/generated/portal-worker-artifacts/META-INF/mazewall/portal/worker-artifacts/fixture-worker",
             )
         assertTrue(metadata.readText().contains("sha256="), metadata.readText())
+        assertTrue(metadata.readText().startsWith("format=2\n"), metadata.readText())
+        assertFalse(metadata.readText().contains(projectDir.toString()), metadata.readText())
+        java.util.zip.ZipFile(projectDir.resolve("build/libs/portal-codegen-fixture-portal-worker.zip").toFile()).use { zip ->
+            assertFalse(zip.entries().asSequence().any { it.name.endsWith("host-only.jar") }, "host implementation dependencies must not be inherited by worker bundles")
+        }
         assertEquals(
             "fixture-worker\n",
             projectDir
@@ -385,6 +401,21 @@ class PortalCodegenFunctionalTest {
                 "build/generated/portal-worker-artifacts/META-INF/mazewall/portal/worker-artifacts.index",
             ).readText(),
         )
+        val relocated = projectDir.resolve("relocated").createDirectories()
+        java.nio.file.Files
+            .copy(projectDir.resolve("build/libs/portal-codegen-fixture.jar"), relocated.resolve("host.jar"))
+        projectDir.resolve("build").toFile().deleteRecursively()
+        java.net.URLClassLoader(arrayOf(relocated.resolve("host.jar").toUri().toURL()), null).use { loader ->
+            val artifact = io.mazewall.portal.PortalWorkerArtifactCatalog
+                .load(loader, relocated.resolve("cache"))
+                .getValue("fixture-worker")
+            val bundle = io.mazewall.portal.WorkerBundleMaterializer
+                .materialize(artifact, relocated.resolve("cache"))
+            assertTrue(bundle.classpath.all(java.nio.file.Files::isRegularFile))
+            java.util.jar.JarFile(relocated.resolve("host.jar").toFile()).use { jar ->
+                assertFalse(jar.entries().asSequence().any { it.name.contains("PortalDispatcher.class") }, "guest dispatchers must remain opaque bundle data")
+            }
+        }
     }
 
     private fun writeFixture(
@@ -465,11 +496,22 @@ class PortalCodegenFunctionalTest {
                 id("io.mazewall.portal.codegen")
             }
             repositories { mavenCentral() }
+            ${if (workerSourceSet != null && workerSourceSet !in setOf("main", "test")) "sourceSets.create(\"$workerSourceSet\")" else ""}
             dependencies {
                 implementation(files(
                     "${apiJar.toAbsolutePath()}", "$portalJar", "$platformJar", "$enforcerJar",
                     "$testApiClasses", "$javaTestApiClasses",
                 ))
+                ${if (workerSourceSet != null &&
+                workerSourceSet !in setOf(
+                    "main",
+                    "test",
+                )
+            ) {
+                    "\"${workerSourceSet}Implementation\"(files(\"${apiJar.toAbsolutePath()}\", \"$portalJar\", \"$platformJar\", \"$enforcerJar\", \"$testApiClasses\", \"$javaTestApiClasses\"))"
+                } else {
+                    ""
+                }}
             }
             portalCodegen {
                 interfaces.set(listOf($quotedServices))

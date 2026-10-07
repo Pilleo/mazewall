@@ -78,12 +78,35 @@ For Gradle consumers that opt into a dedicated worker source set, the codegen
 plugin supplies `portalWorkerBundle`. It packages the generated worker JAR and
 the declared `portal-worker` bootstrap/runtime plus worker runtime JAR
 dependencies as deterministic `lib/` entries. The
-bundle is the deployment input. `publishPortalWorkerArtifactMetadata` embeds
-its path and digest in the generated host resources, which `PortalRuntime.open()`
-loads through an explicit artifact index; callers need not maintain a worker
-classpath or dispatcher system property. An explicit registry is still allowed
-when it exactly matches generated metadata. The bundle task also emits a
-sibling `.sha256` file.
+bundle is the deployment input. `publishPortalWorkerArtifactMetadata` embeds it as
+opaque ZIP data under a digest-addressed classpath resource, with strict format-2
+resource-name/digest metadata and an explicit artifact index. No build-machine path
+is recorded. `PortalRuntimeConfig.load()` resolves exactly one bundle resource,
+copies at most 64 MiB transactionally into a verified cache file, then uses the
+existing bounded ZIP extractor. Missing/duplicate resources, unknown metadata,
+digest mismatch and symlinked cache components reject before launch. The runtime
+does not interpret format-1 local-path metadata; an application can still explicitly
+supply a local `PortalWorkerArtifact` through configuration. An explicit registry
+entry overlapping generated metadata must match the generated resolved artifact.
+The bundle task also emits a sibling `.sha256` file.
+
+Worker implementation/runtime configurations are independent of host implementation
+and runtime-only dependencies. Declare the service API and required worker runtime
+explicitly, for example in the monorepo:
+
+```kotlin
+val portalWorker by sourceSets.creating
+dependencies {
+    implementation(project(":service-api"))
+    "portalWorkerImplementation"(project(":service-api"))
+    "portalWorkerImplementation"(project(":portals:worker"))
+}
+portalCodegen { workerSourceSet.set("portalWorker") }
+```
+
+The host JAR contains stubs/manifests and opaque bundle bytes, not directly loadable
+guest dispatchers. This separates classpaths; environment authority and required
+generation-bound readiness remain their distinct launch contracts.
 
 The historical worker-classpath system property is accepted only by the
 repository's marked test execution. Production `ProcessBroker` startup requires
