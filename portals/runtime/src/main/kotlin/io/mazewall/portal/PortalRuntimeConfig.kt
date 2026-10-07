@@ -8,13 +8,17 @@ import java.nio.file.Path
  * (or an explicit application-provided override).
  */
 public class PortalRuntimeConfig(
-    public val manifests: List<PortalServiceManifest>,
-    public val workerArtifacts: Map<String, PortalWorkerArtifact> = emptyMap(),
+    manifests: List<PortalServiceManifest>,
+    workerArtifacts: Map<String, PortalWorkerArtifact> = emptyMap(),
     public val workerBundleCache: Path = defaultCacheDirectory(),
-    public val workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
+    workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
     public val cgroupRoot: Path? = null,
     public val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
 ) {
+    public val manifests: List<PortalServiceManifest> = java.util.List.copyOf(manifests)
+    public val workerArtifacts: Map<String, PortalWorkerArtifact> = java.util.Map.copyOf(workerArtifacts)
+    public val workerProfiles: Map<String, PortalWorkerProfile> = java.util.Map.copyOf(workerProfiles)
+
     internal fun profile(manifest: PortalServiceManifest): PortalWorkerProfile = workerProfiles[manifest.policyProfile] ?: throw PortalWorkerProfileUnavailableException(manifest.policyProfile)
 
     internal fun validateProfiles() {

@@ -13,12 +13,12 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.security.MessageDigest
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class PortalRuntimeTest {
     interface MissingService
@@ -31,6 +31,28 @@ class PortalRuntimeTest {
         val actual = assertThrows(AssertionError::class.java) { gate.invoke(manifest) { throw fatal } }
         check(actual === fatal)
         assertThrows(PortalStateLostException::class.java) { gate.invoke(manifest) { "must not run" } }
+    }
+
+    @Test
+    fun `runtime configuration snapshots caller-owned selection collections`() {
+        val manifest = sampleManifest("worker")
+        val manifests = mutableListOf(manifest)
+        val profile = PortalWorkerProfile()
+        val profiles = mutableMapOf("restricted" to profile)
+        val artifacts = mutableMapOf(
+            "worker" to PortalWorkerArtifact(
+                java.nio.file.Path
+            .of("/tmp/worker.zip"),
+                "a".repeat(64),
+            ),
+        )
+        val config = PortalRuntimeConfig(manifests, artifacts, workerProfiles = profiles)
+        manifests.clear()
+        profiles.clear()
+        artifacts.clear()
+        assertEquals(listOf(manifest), config.manifests)
+        assertEquals(profile, config.profile(manifest))
+        assertEquals(setOf("worker"), config.workerArtifacts.keys)
     }
 
     @Test
