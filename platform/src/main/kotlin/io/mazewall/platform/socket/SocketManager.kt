@@ -3,6 +3,7 @@ package io.mazewall.platform.socket
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.getFdOrThrow
 
 /**
@@ -47,13 +48,20 @@ internal class NativeCloseFailure internal constructor(
 /**
  * Real implementation of [SocketManager] using [LinuxNative].
  */
-internal object RealSocketManager : SocketManager {
+internal object RealSocketManager : SocketManager by NativeSocketManager(LinuxNative) {
+    internal fun capture(native: NativeEngine): SocketManager = NativeSocketManager(native)
+}
+
+/** One transport owner for acquisition, transfer and descriptor retirement. */
+private class NativeSocketManager(
+    private val native: NativeEngine,
+) : SocketManager {
     override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
         io.mazewall.ffi.networking.UnixServerSocket
-        .open(socketPath)
+        .open(socketPath, native)
 
     override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
-        val res = LinuxNative.networking.accept4(
+        val res = native.networking.accept4(
             serverFd,
             ManagedSegment.NULL,
             ManagedSegment.NULL,
@@ -64,12 +72,12 @@ internal object RealSocketManager : SocketManager {
 
     override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
         val fdVal = io.mazewall.ffi.networking.SupervisorSocketUtils
-            .connectDescriptorWithRetry(socketPath)
+            .connectDescriptorWithRetry(socketPath, native)
         return fdVal
     }
 
     override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
-        when (val result = LinuxNative.fileSystem.close(fd)) {
+        when (val result = native.fileSystem.close(fd)) {
             is LinuxNative.SyscallResult.Success -> Unit
             is LinuxNative.SyscallResult.Error -> throw NativeCloseFailure("close(fd=${fd.value}) failed: $result")
         }
@@ -84,7 +92,7 @@ internal object RealSocketManager : SocketManager {
         role: R,
     ): FileDescriptor<R, FdState.Open, FdOwnership.Owned>? {
         return io.mazewall.ffi.networking.SupervisorSocketUtils
-            .recvDescriptor(socketFd, role)
+            .recvDescriptor(socketFd, role, native)
     }
 
     override fun sendDescriptor(
@@ -92,6 +100,6 @@ internal object RealSocketManager : SocketManager {
         fdToSend: FileDescriptor<*, FdState.Open, FdOwnership>,
     ): Boolean {
         return io.mazewall.ffi.networking.SupervisorSocketUtils
-            .sendDescriptor(socketFd.value, fdToSend.value)
+            .sendDescriptor(socketFd.value, fdToSend.value, native.networking)
     }
 }

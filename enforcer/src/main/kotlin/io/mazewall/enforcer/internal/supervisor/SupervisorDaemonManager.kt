@@ -33,8 +33,8 @@ internal data class SupervisorContext(
  * Manages the lifecycle of the shared Supervisor Daemon.
  */
 internal class SupervisorDaemonManager(
-    private val engine: NativeEngine = LinuxNative,
-    private val socketManager: SocketManager = RealSocketManager,
+    private val engine: NativeEngine = LinuxNative.snapshot(),
+    private val socketManager: SocketManager = RealSocketManager.capture(engine),
     private val processLauncher: ProcessLauncher = RealProcessLauncher,
 ) {
     private val logger = Logger.getLogger(SupervisorDaemonManager::class.java.name)

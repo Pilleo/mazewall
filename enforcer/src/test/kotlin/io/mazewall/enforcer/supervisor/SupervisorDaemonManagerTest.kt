@@ -38,6 +38,70 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class SupervisorDaemonManagerTest {
     @Test
+    fun `default shutdown transport remains bound to lifecycle owner`() {
+        val owner = MockNativeEngine()
+        val ownedOpens = AtomicInteger()
+        val ownedCloses = AtomicInteger()
+        owner.networking.onSocket = { _, _, _ ->
+            ownedOpens.incrementAndGet()
+            LinuxNative.SyscallResult.Success(1000L)
+        }
+        owner.fileSystem.onClose = {
+            ownedCloses.incrementAndGet()
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        val manager = SupervisorDaemonManager(
+            engine = owner,
+            processLauncher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")),
+        )
+        val foreignCalls = AtomicInteger()
+        val foreign = MockNativeEngine().apply {
+            networking.onSocket = { _, _, _ ->
+                foreignCalls.incrementAndGet()
+                LinuxNative.SyscallResult.Error(13, -1L)
+            }
+        }
+        try {
+            manager.getOrSpawnSharedDaemon()
+            LinuxNative.setEngine(foreign)
+            manager.stop()
+            assertEquals(0, foreignCalls.get())
+            assertEquals(1, ownedOpens.get())
+            assertEquals(1, ownedCloses.get())
+        } finally {
+            manager.stop()
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `default lifecycle owner survives global replacement before startup`() {
+        val owner = MockNativeEngine()
+        LinuxNative.setEngine(owner)
+        val manager = SupervisorDaemonManager(
+            socketManager = MockSocketManager(),
+            processLauncher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")),
+        )
+        val foreignCalls = AtomicInteger()
+        LinuxNative.setEngine(
+            MockNativeEngine().apply {
+            process.onPrctl = {
+                foreignCalls.incrementAndGet()
+                LinuxNative.SyscallResult.Error(1, -1L)
+            }
+        },
+        )
+        try {
+            assertEquals(9999L, manager.getOrSpawnSharedDaemon().daemonProcess.pid())
+            manager.stop()
+            assertEquals(0, foreignCalls.get())
+        } finally {
+            manager.stop()
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
     fun `cached daemon reacquires ptrace authority after another daemon took it`() {
         val engine = MockNativeEngine()
         val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))

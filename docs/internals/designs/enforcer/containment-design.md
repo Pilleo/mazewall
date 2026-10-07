@@ -368,6 +368,12 @@ callbacks. This preserves authority across Landlock-to-USER_NOTIF installation a
 does not imply unified application-owned capability/runtime or daemon-lifecycle
 capture. Registration leases remain receipt-owned and close after task execution.
 
+The shared daemon manager now captures its lifecycle native owner at construction;
+default socket transport is bound to that owner for acquisition, transfer and
+retirement. Caller authorization remains a separate explicit selection when reusing
+the daemon. Standalone socket entry retains live behavior through the same transport
+implementation. Application-scoped shared-daemon lifetime is managed-runtime work.
+
 Optional post-install self-verification also receives the attempt's selected backend
 and enablement decision, captured before native stages. Default real/mock engine
 classification belongs to the immutable native snapshot; explicit property opt-in/out
