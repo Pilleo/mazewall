@@ -25,13 +25,12 @@ internal fun installationState(processWide: Boolean): io.mazewall.enforcer.state
 /** Fallback is selected once. Applied-stage marks are written only by successful native-stage publication. */
 internal class InstallationAttempt(
     private val processWide: Boolean,
-    val fallback: Platform.FallbackBehavior,
+    private val environment: InstallationEnvironment,
 ) {
-    val native = io.mazewall.platform.native.LinuxNative
-        .snapshot()
-    val selfVerificationEnabled = io.mazewall.seccomp.InstallSelfVerifier
-        .isEnabled(native)
-    val platform = Platform.capture(native)
+    val native get() = environment.native
+    val selfVerificationEnabled get() = environment.selfVerificationEnabled
+    val platform get() = environment.platform
+    val fallback get() = environment.fallback
     var landlockApplied: Boolean = false
     var seccompApplied: Boolean = false
     var failure: Throwable? = null

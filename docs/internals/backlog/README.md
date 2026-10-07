@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 80 | *Total Resolved Issues:* 646
+*Total Active Issues:* 81 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261007-090049-044-retain-one-installation-environment-across-dedicat](issue-20261007-090049-044-retain-one-installation-environment-across-dedicat.md) | Retain one installation environment across dedicated process preflight and install | high | core |
 | [issue-20261007-083749-261-capture-supervisor-daemon-lifecycle-backend-and-so](issue-20261007-083749-261-capture-supervisor-daemon-lifecycle-backend-and-so.md) | Capture supervisor daemon lifecycle backend and socket ownership | high | core |
 | [issue-20261007-080402-436-grant-exact-classpath-artifacts-without-admitting-](issue-20261007-080402-436-grant-exact-classpath-artifacts-without-admitting-.md) | Grant exact classpath artifacts without admitting sibling files | high | core |
 | [issue-20261007-074331-621-require-current-installation-verification-instead-](issue-20261007-074331-621-require-current-installation-verification-instead-.md) | Require current installation verification instead of program-global cached evidence | high | core |

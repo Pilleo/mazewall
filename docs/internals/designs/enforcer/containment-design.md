@@ -394,6 +394,13 @@ cache as proof for an independently selected native backend. Standalone diagnost
 entry points remain live; application-owned prepared-context lifetime is subsequent
 managed-runtime work.
 
+`InstallationEnvironment` retains native backend, captured platform, fallback and
+self-verification selection independently of mutable per-attempt progress. Dedicated
+process preflight and installation share this environment, so capability callbacks
+cannot replace the required FAIL selection between the two stages. The internal
+worker entry accepts explicit environment reuse for owned prepared runtimes; ordinary
+manual entries select a fresh environment. No ambient native override is involved.
+
 JVM runtime-read closure admits exact classpath artifact files; their parent
 directories are not implicitly granted. Actual class/resource directory entries
 remain directory grants, and file rules omit directory-only read rights. Explicit

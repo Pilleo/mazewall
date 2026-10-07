@@ -151,8 +151,9 @@ public object ContainedExecutors {
     internal fun installOnCurrentThread(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
+        environment: InstallationEnvironment = InstallationEnvironment.capture(),
     ): io.mazewall.enforcer.api.InstallationReceipt {
-        return installInternal(false, policy, scopingPolicy)
+        return installInternal(false, policy, scopingPolicy, environment)
     }
 
     /** Read-only preflight. Does not install filters. */
@@ -179,14 +180,17 @@ public object ContainedExecutors {
     // SUPPRESSION-RATIONALE: One defensive vararg composition precedes the irreversible child baseline; preserving the existing PolicyDefinition API avoids semantic changes.
     @Suppress("SpreadOperator")
     public fun installOnDedicatedProcess(vararg policies: Policy<*, Uncompiled>): io.mazewall.enforcer.api.InstallationReceipt {
-        validateLinuxAndNotVirtual()
+        io.mazewall.enforcer.diagnostics
+            .requirePlatformThread()
         requireNonQuarantinedScope()
-        check(Platform.configuredFallback() == Platform.FallbackBehavior.FAIL) { "Dedicated process containment forbids fallback" }
+        val environment = InstallationEnvironment.capture()
+        check(environment.platform.isLinux) { "Mazewall requires Linux for kernel-level containment." }
+        check(environment.fallback == Platform.FallbackBehavior.FAIL) { "Dedicated process containment forbids fallback" }
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        check(!combined.enforceLandlock || Platform.featureMatrix.landlockTsyncSupported) {
+        check(!combined.enforceLandlock || environment.platform.capabilities.matrix.landlockTsyncSupported) {
             "Dedicated process filesystem containment requires Landlock TSYNC (ABI 8+)"
         }
-        val receipt = installInternal(true, combined).requireInstalled()
+        val receipt = installInternal(true, combined, environment = environment).requireInstalled()
         check(!combined.enforceLandlock || receipt.landlockApplied) { "Dedicated process Landlock was not applied" }
         return receipt
     }
@@ -303,6 +307,7 @@ public object ContainedExecutors {
         processWide: Boolean,
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy,
+        environment: InstallationEnvironment = InstallationEnvironment.capture(),
     ): io.mazewall.enforcer.api.InstallationReceipt {
         io.mazewall.enforcer.diagnostics
             .requirePlatformThread()
@@ -310,7 +315,7 @@ public object ContainedExecutors {
         // A failed permanent listener cannot be repaired by policy planning or operator bypass.
         io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
             .requireReusableInstallations()
-        val attempt = InstallationAttempt(processWide, Platform.configuredFallback())
+        val attempt = InstallationAttempt(processWide, environment)
         if (policy.lockIntelCet) attempt.cetOutcome = CetOutcome.UNCONFIRMED
         try {
             check(!processWide || !policy.lockIntelCet) { "Process-wide shadow-stack locking is unsupported; CET controls apply to the installing platform thread" }
