@@ -130,6 +130,7 @@ trap 'rm -rf "${PROBE_DIR}"' EXIT
 }
 CONTAINER_ARGS=(
     --name "${CONTAINER_NAME}"
+    --init
     --network host
     --userns "${USER_NAMESPACE}"
     --user "${CALLER_UID}:${CALLER_GID}"

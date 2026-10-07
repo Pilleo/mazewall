@@ -69,7 +69,6 @@ behavior or a new kernel contract. The full merge graph already schedules module
 integration suites; adding identical tasks to the same invocation does not duplicate
 their execution, but repeating the full invocation reruns externally sensitive suites.
 Do not cache kernel/endpoint success as if host configuration were ordinary source input.
-
 The root test convention enforces this for `integrationTest*` Test tasks: they are
 neither up-to-date reused nor restored from the build cache. Named ordinary host
 tests retain reuse. An executable Gradle fixture checks unchanged repeat execution,
@@ -110,8 +109,12 @@ this is a cooperative test harness, not an arbitrary-process containment boundar
 `unitCheck` is the fast host-safe development gate. `build` is the full merge gate;
 kernel changes additionally require `integrationTest`, `integrationTestFreshJvm`
 and `./scripts/run_tests.sh` on a suitable host/container environment. The last
-command requires Podman. A missing runner or failed kernel test is recorded as a
+command requires a usable configured Podman or Docker engine. A missing runner or failed kernel test is recorded as a
 failed/unavailable gate, never as passing coverage.
+The runner requests an init/reaper
+so observed orphan descendants are actually reaped. Without it, fresh supervised tests
+can leave zombies under container PID 1 and correctly fail termination assertions.
+Do not treat zombies as completed ownership or relax cleanup checks to hide that failure.
 
 `refactorFirstReport` remains optional manual architectural analysis at version
 0.10.0. It analyzes committed production sources in an isolated history-preserving
