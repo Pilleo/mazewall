@@ -148,6 +148,11 @@ internal class OwnedDomain(
 
     fun retired(): Boolean = executor.isTerminated && threads.none { it.isAlive }
 
+    fun permitsInlineContinuation(): Boolean =
+        synchronized(lock) {
+        failure == null && (phase == GenerationPhase.READY || phase == GenerationPhase.DRAINING)
+    }
+
     fun failedRetirementPending(): Boolean = synchronized(lock) { failure != null && !retired() }
 
     fun liveWorkers(): Int = threads.count { it.isAlive }

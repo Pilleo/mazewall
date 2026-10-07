@@ -193,9 +193,7 @@ ManagedRuntime.open(
         WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(),
         DomainLimits(workers = 4, maxAdmissions = 64),
     )
-    val invocation = runtime.submit(domain, Callable { 42 })
-    val value = invocation.result().toCompletableFuture().get()
-    invocation.executionEnd().toCompletableFuture().get()
+    val value = Mazewall.callContained(runtime, domain, Callable { 42 })
 }
 ```
 
@@ -209,7 +207,11 @@ cannot finish. Failed generations cannot be hidden by replacement capacity.
 
 The current contract is materialized synchronous bodies. Completion observers, lazy
 results and unrelated helper executors are outside that contract. Nested asynchronous
-dispatch is rejected until an approved transition is available. Thread-scoped workers
+dispatch is rejected. Canonical synchronous calls nest inline only in the exact
+active domain; different or unknown scopes are rejected before entry. Library-observed
+nested containment/transition failure remains unsuccessful even if caught by business
+code. `Mazewall.currentInvocationEvidence()` exposes read-only current evidence and
+does not claim detection of unobserved/swallowed kernel errors. Thread-scoped workers
 share JVM memory/descriptors and are not a complete ACE boundary. A process baseline
 that forbids child launch also prevents later Portal or supervisor startup; establish
 required child services before that baseline or use an explicitly compatible baseline.

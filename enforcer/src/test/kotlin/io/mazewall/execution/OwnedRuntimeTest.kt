@@ -10,6 +10,7 @@ import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.nio.file.AccessDeniedException
 import java.time.Duration
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
@@ -21,6 +22,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OwnedRuntimeTest {
@@ -61,6 +63,86 @@ class OwnedRuntimeTest {
     private fun open(): ManagedRuntime = ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout)
 
     private fun policy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
+
+    @Test
+    fun `canonical synchronous entry nests inline on the exact active worker`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            assertEquals(
+                42,
+                Mazewall.callContained(
+                    runtime,
+                    domain,
+                    Callable {
+                val worker = Thread.currentThread()
+                checkNotNull(Mazewall.currentInvocationEvidence())
+                Mazewall.callContained(
+                    runtime,
+                    domain,
+                    Callable {
+                    assertTrue(Thread.currentThread() === worker)
+                    42
+                },
+                )
+            },
+                ),
+            )
+            assertNull(Mazewall.currentInvocationEvidence())
+        }
+    }
+
+    @Test
+    fun `caught nested containment failure remains unsuccessful and evidence is not reused`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            assertFailsWith<ContainmentViolationException> {
+                Mazewall.callContained(
+                    runtime,
+                    domain,
+                    Callable {
+                    assertFailsWith<ContainmentViolationException> {
+                        Mazewall.callContained(runtime, domain, Callable<Int> { throw AccessDeniedException("private-resource") })
+                    }
+                    assertTrue(Mazewall.currentInvocationEvidence()?.observedFailure is ContainmentViolationException)
+                    42
+                },
+                )
+            }
+            assertEquals(
+                43,
+                Mazewall.callContained(
+                    runtime,
+                    domain,
+                    Callable {
+                assertNull(Mazewall.currentInvocationEvidence()?.observedFailure)
+                43
+            },
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun `different prepared domain cannot run inline or widen a caught transition`() {
+        open().use { runtime ->
+            val first = runtime.prepare(policy(), DomainLimits(1, 1))
+            val second = runtime.prepare(policy(), DomainLimits(1, 1))
+            val entered = AtomicInteger()
+            assertFailsWith<ExecutionTransitionException> {
+                Mazewall.callContained(
+                    runtime,
+                    first,
+                    Callable {
+                    assertFailsWith<ExecutionTransitionException> {
+                        Mazewall.callContained(runtime, second, Callable { entered.incrementAndGet() })
+                    }
+                    42
+                },
+                )
+            }
+            assertEquals(0, entered.get())
+        }
+    }
 
     @Test
     fun `declared runtime cannot misreport incompatible process mapping floor`() {

@@ -283,41 +283,9 @@ public final class io/mazewall/enforcer/api/KernelFeatureMatrix$Companion {
 }
 
 public final class io/mazewall/enforcer/api/Mazewall {
-	public static final field DEFAULT_SAFE Lio/mazewall/enforcer/api/Policy;
-	public static final field NO_EXEC Lio/mazewall/enforcer/api/Policy;
-	public static final field NO_EXEC_HOTSPOT Lio/mazewall/enforcer/api/Policy;
-	public static final field NO_EXEC_NATIVE_IMAGE Lio/mazewall/enforcer/api/Policy;
-	public static final field NO_EXEC_NO_FS_WRITE Lio/mazewall/enforcer/api/Policy;
-	public static final field NO_NETWORK Lio/mazewall/enforcer/api/Policy;
-	public static final field PURE_COMPUTE Lio/mazewall/enforcer/api/Policy;
-	public static final field PURE_COMPUTE_UNSAFE Lio/mazewall/enforcer/api/Policy;
-	public static final fun assessOnCurrentThread (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationAssessment;
-	public static final fun assessOnProcess (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationAssessment;
-	public static final fun combine ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
-	public static final fun combineProcessWide ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
-	public static final fun combineThreadLocal ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/Policy;
-	public static final fun defaultSafe ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun installOnCurrentThread (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public static final fun installOnCurrentThread (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public static final fun installOnCurrentThread ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public static final fun installOnProcess (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public static final fun installOnProcess ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public static final fun newContainedCachedThreadPool (Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public static final fun newContainedFixedThreadPool (ILio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public static final fun newContainedSingleThreadExecutor (Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public static final fun noExec ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun noExecHotspot ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun noExecNativeImage ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun noExecNoFsWrite ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun noNetwork ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun pureCompute ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun pureComputeUnsafe ()Lio/mazewall/enforcer/api/Policy;
-	public static final fun runContained (Lio/mazewall/enforcer/api/Policy;Ljava/lang/Runnable;)V
-	public static final fun runContained (Lio/mazewall/enforcer/api/Policy;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
-	public static final fun runContained (Lio/mazewall/enforcer/api/Policy;Ljava/util/function/Supplier;)Ljava/lang/Object;
-	public static final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
-	public static final fun wrapContainedExecutor (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
-	public static final fun wrapExecutor (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
+	public static final field INSTANCE Lio/mazewall/enforcer/api/Mazewall;
+	public static final fun callContained (Lio/mazewall/enforcer/api/execution/ManagedRuntime;Lio/mazewall/enforcer/api/execution/InProcessDomain;Ljava/util/concurrent/Callable;)Ljava/lang/Object;
+	public static final fun currentInvocationEvidence ()Lio/mazewall/enforcer/api/execution/InvocationEvidence;
 }
 
 public final class io/mazewall/enforcer/api/PartialInstallationException : java/lang/IllegalStateException {
@@ -876,6 +844,10 @@ public final class io/mazewall/enforcer/api/execution/ExecutionEnd$NotStarted : 
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/mazewall/enforcer/api/execution/ExecutionTransitionException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
 public final class io/mazewall/enforcer/api/execution/InProcessDomain {
 	public final fun getGeneration ()J
 	public final fun getLimits ()Lio/mazewall/enforcer/api/execution/DomainLimits;
@@ -884,6 +856,19 @@ public final class io/mazewall/enforcer/api/execution/InProcessDomain {
 public final class io/mazewall/enforcer/api/execution/IncompleteDrainException : java/lang/IllegalStateException {
 	public fun <init> (Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;)V
 	public final fun getReport ()Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;
+}
+
+public final class io/mazewall/enforcer/api/execution/InvocationEvidence {
+	public fun <init> (JLjava/lang/Throwable;)V
+	public final fun component1 ()J
+	public final fun component2 ()Ljava/lang/Throwable;
+	public final fun copy (JLjava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/InvocationEvidence;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/InvocationEvidence;JLjava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/InvocationEvidence;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDomainGeneration ()J
+	public final fun getObservedFailure ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public abstract interface class io/mazewall/enforcer/api/execution/InvocationHandle {

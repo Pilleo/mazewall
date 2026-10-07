@@ -6,19 +6,21 @@ import io.mazewall.enforcer.api.Mazewall;
 import io.mazewall.enforcer.api.Policy;
 import io.mazewall.enforcer.api.PolicyScope;
 import io.mazewall.enforcer.api.PolicyState;
+import io.mazewall.enforcer.api.execution.ManagedRuntime;
+import io.mazewall.enforcer.api.execution.InProcessDomain;
 import io.mazewall.platform.syscall.Syscall;
 import java.util.concurrent.Callable;
 
 public final class JavaApiConsumer {
     private JavaApiConsumer() {}
 
-    public static String callableExample(Policy<?, ?> policy) {
-        return Mazewall.runContained(policy, (Callable<String>) () -> "contained");
+    public static String callableExample(ManagedRuntime runtime, InProcessDomain domain) {
+        return Mazewall.callContained(runtime, domain, () -> "contained");
     }
 
     public static void main(String[] args) {
         WorkerPolicyBuilder builder = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT);
-        builder.base(Mazewall.noExec());
+        builder.base(Policy.NO_EXEC_HOTSPOT);
         builder.allowFsRead("/tmp/consumer-resource");
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = builder.build();
         if (policy.getAllowedFsReadPaths().size() != 1

@@ -2,12 +2,14 @@ package io.mazewall.enforcer.internal.execution
 
 import io.mazewall.enforcer.api.execution.CancellationDisposition
 import io.mazewall.enforcer.api.execution.ExecutionEnd
+import io.mazewall.enforcer.api.execution.InvocationEvidence
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.enforcer.internal.containmentFailureForCaller
 import java.util.concurrent.Callable
 import java.util.concurrent.CancellationException
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionStage
+import java.util.concurrent.atomic.AtomicReference
 
 /** One admission lease; cancellation cannot release a running body's physical lifetime. */
 internal class OwnedInvocation<T>(
@@ -24,6 +26,13 @@ internal class OwnedInvocation<T>(
     private val ended = CompletableFuture<ExecutionEnd>()
     private val resultView = delivered.minimalCompletionStage()
     private val endView = ended.minimalCompletionStage()
+    private val observedFailure = AtomicReference<Throwable?>()
+
+    fun recordObservedFailure(failure: Throwable) {
+        observedFailure.compareAndSet(null, failure)
+    }
+
+    fun evidence(): InvocationEvidence = InvocationEvidence(owner.generation, observedFailure.get())
 
     override fun result(): CompletionStage<T> = resultView
 
@@ -85,7 +94,9 @@ internal class OwnedInvocation<T>(
         }
         var failure: Throwable? = null
         try {
-            delivered.complete(action.call())
+            val value = RuntimeWorkerContext.withInvocation(this) { action.call() }
+            observedFailure.get()?.let { throw it }
+            delivered.complete(value)
         } catch (bodyFatal: Error) {
             failure = bodyFatal
             owner.fail(bodyFatal)

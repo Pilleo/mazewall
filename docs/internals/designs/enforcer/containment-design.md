@@ -501,9 +501,19 @@ stop admission; live failed work cannot be concealed by new capacity. Drain chec
 actual thread retirement and receipt cleanup, not only executor counts or completed
 result futures. Incomplete bounded close remains explicit and non-admitting.
 
+Canonical synchronous entry is `Mazewall.callContained(runtime, domain, Callable)`.
+The pure closed transition guard dispatches from an unbound host, permits inline
+execution only in the exact active domain, and rejects different/unknown scopes.
+Logical invocation context is installed only around the body and restored in finally;
+it never overrides native authority or copies arbitrary caller ThreadLocals. Read-only
+evidence retains library-observed nested containment and transition failure, including
+when business code catches it. Normal caught business exceptions do not manufacture
+containment evidence. Unobserved/swallowed kernel errors are not detectable through
+this metadata, and uncertain permission provenance remains uncertain.
+
 This API covers synchronous materialized bodies. Completion observers and arbitrary
 helper/lazy work do not inherit coverage merely from a future. Current nested dispatch
-is rejected; C8 introduces exact inline/reject transitions and observed evidence.
+is rejected; canonical synchronous nesting uses the exact inline/reject contract above.
 Thread-scoped containment shares memory and descriptors and is not a complete ACE
 boundary. Portal ownership and immutable artifact-generation binding retain their
 separate required gates.

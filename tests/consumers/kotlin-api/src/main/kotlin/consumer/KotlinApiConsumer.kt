@@ -3,19 +3,20 @@ package consumer
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.Uncompiled
-import io.mazewall.enforcer.api.runContained
+import io.mazewall.enforcer.api.Mazewall
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+import io.mazewall.enforcer.api.execution.InProcessDomain
 import io.mazewall.enforcer.api.WorkerPolicyBuilder
 import io.mazewall.enforcer.api.RuntimeProfile
-import io.mazewall.enforcer.api.noExec
 import io.mazewall.platform.syscall.Syscall
 import java.util.concurrent.Callable
 
-fun callableExample(policy: Policy<*, *>): String =
-    runContained(policy, Callable { "contained" })
+fun callableExample(runtime: ManagedRuntime, domain: InProcessDomain): String =
+    Mazewall.callContained(runtime, domain, Callable { "contained" })
 
 fun main() {
     val policy: Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).apply {
-        base(noExec())
+        base(Policy.NO_EXEC_HOTSPOT)
         allowFsRead("/tmp/consumer-resource")
     }.build()
     check(policy.allowedFsReadPaths.size == 1)

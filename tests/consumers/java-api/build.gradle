@@ -8,21 +8,21 @@ dependencies {
 
 application { mainClass = 'consumer.JavaApiConsumer' }
 
-tasks.register('verifyCallableAmbiguity') {
+tasks.register('verifyCallableEntry') {
     dependsOn tasks.named('classes')
     doLast {
         def compiler = javax.tools.ToolProvider.systemJavaCompiler
         def diagnostics = new javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>()
         compiler.getStandardFileManager(diagnostics, null, null).withCloseable { manager ->
-            def source = manager.getJavaFileObjects(file('src/ambiguity/java/consumer/UncastCallable.java'))
-            def output = layout.buildDirectory.dir('ambiguity').get().asFile
+            def source = manager.getJavaFileObjects(file('src/callable/java/consumer/UncastCallable.java'))
+            def output = layout.buildDirectory.dir('callable').get().asFile
             output.mkdirs()
             def options = ['-classpath', sourceSets.main.compileClasspath.asPath, '-d', output.path]
             def compiled = compiler.getTask(null, manager, diagnostics, options, null, source).call()
-            if (compiled || !diagnostics.diagnostics.any { it.code == 'compiler.err.ref.ambiguous' }) {
-                throw new GradleException("Expected Callable/Supplier ambiguity, received: ${diagnostics.diagnostics}")
+            if (!compiled) {
+                throw new GradleException("Expected uncast canonical Callable entry to compile, received: ${diagnostics.diagnostics}")
             }
-            logger.lifecycle('Reproduced packaged Java Callable/Supplier overload ambiguity.')
+            logger.lifecycle('Packaged uncast canonical Callable entry compiled successfully.')
         }
     }
 }

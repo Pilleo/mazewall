@@ -51,6 +51,18 @@ class OwnedRuntimeNativeTest : BaseIntegrationTest() {
                 assertEquals(42, it.result().toCompletableFuture().get(10, TimeUnit.SECONDS))
                 assertIs<ExecutionEnd.Finished>(it.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
             }
+            assertFailsWith<ContainmentViolationException> {
+                Mazewall.callContained(
+                    runtime,
+                    domain,
+                    Callable {
+                    assertFailsWith<ContainmentViolationException> {
+                        Mazewall.callContained(runtime, domain, Callable { Files.readString(Path.of(file)) })
+                    }
+                    42
+                },
+                )
+            }
             val denied = LinuxNative.raw.syscall(Syscall.EXECVE.numberFor(Arch.current()).toLong(), NativeArg.LongArg(0L), NativeArg.LongArg(0L), NativeArg.LongArg(0L))
             assertEquals(1, assertIs<LinuxNative.SyscallResult.Error<*>>(denied).errno)
             assertEquals("caller-readable", Files.readString(Path.of(file)))

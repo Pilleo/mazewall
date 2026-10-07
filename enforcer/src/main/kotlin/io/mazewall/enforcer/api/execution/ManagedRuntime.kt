@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.api.execution
 
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.api.InstallationEnvironment
 import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.Policy
@@ -10,7 +11,10 @@ import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.frozenCopy
 import io.mazewall.enforcer.diagnostics.requirePlatformThread
+import io.mazewall.enforcer.internal.containmentFailureForCaller
 import io.mazewall.enforcer.internal.execution.Deadline
+import io.mazewall.enforcer.internal.execution.ExecutionTransition
+import io.mazewall.enforcer.internal.execution.ExecutionTransitionGuard
 import io.mazewall.enforcer.internal.execution.OwnedDomain
 import io.mazewall.enforcer.internal.execution.RuntimeWorkerContext
 import io.mazewall.enforcer.state.ContainmentStateRegistry
@@ -171,6 +175,51 @@ public class ManagedRuntime private constructor(
         requireOpen()
         if (RuntimeWorkerContext.current != null) throw RejectedExecutionException("Nested dispatch requires an approved execution transition")
         domain.resource.submit(action)
+    }
+
+    internal fun <T> callContained(
+        domain: InProcessDomain,
+        action: Callable<T>,
+    ): T {
+        synchronized(lock) {
+            require(domain.owner === this && domains[domain.generation] === domain.resource) { "Domain belongs to a different runtime" }
+        }
+        val current = RuntimeWorkerContext.current
+        val local = ContainmentStateRegistry.threadState
+        return when (ExecutionTransitionGuard.evaluate(current != null, current === domain.resource, RuntimeWorkerContext.invocation != null, local.filterDepth > 0 || local.landlockPolicy != null)) {
+            ExecutionTransition.Dispatch -> awaitInvocation(submit(domain, action))
+            ExecutionTransition.InlineCurrentWorker -> {
+                if (!domain.resource.permitsInlineContinuation()) rejectTransition()
+                callInline(action)
+            }
+            ExecutionTransition.Reject -> rejectTransition()
+        }
+    }
+
+    private fun rejectTransition(): Nothing {
+        val failure = ExecutionTransitionException("Requested domain transition is not approved for this active scope")
+        RuntimeWorkerContext.invocation?.recordObservedFailure(failure)
+        throw failure
+    }
+
+    @Suppress("TooGenericExceptionCaught") // nested body boundary uses canonical classification and retains observed enforcement failure
+    private fun <T> callInline(action: Callable<T>): T = try {
+        action.call()
+    } catch (bodyFailure: Throwable) {
+        val classified = containmentFailureForCaller(bodyFailure)
+        if (classified is ContainmentViolationException) RuntimeWorkerContext.invocation?.recordObservedFailure(classified)
+        throw classified
+    }
+
+    private fun <T> awaitInvocation(handle: InvocationHandle<T>): T =
+        try {
+        handle.result().toCompletableFuture().get()
+    } catch (failed: ExecutionException) {
+        throw failed.cause ?: failed
+    } catch (interrupted: InterruptedException) {
+        handle.requestCancellation()
+        Thread.currentThread().interrupt()
+        throw interrupted
     }
 
     public fun drain(timeout: Duration): DrainReport {
