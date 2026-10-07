@@ -388,6 +388,14 @@ cache as proof for an independently selected native backend. Standalone diagnost
 entry points remain live; application-owned prepared-context lifetime is subsequent
 managed-runtime work.
 
+JVM runtime-read closure admits exact classpath artifact files; their parent
+directories are not implicitly granted. Actual class/resource directory entries
+remain directory grants, and file rules omit directory-only read rights. Explicit
+`allowJvmClasspath()` policy construction retains the same granularity. Required
+runtime path-open or add-rule failures reject installation, retaining the errno in
+failure evidence. Prepared artifact identity/generation binding remains separate
+from this static path-granularity correction.
+
 `ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
 of policy coverage and Seccomp engine-state rank. The interpreter retains the first
 failure without rewinding applied stages. Registry merges carry thread/process

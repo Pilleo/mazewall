@@ -73,11 +73,12 @@ class LandlockFailureModeTest {
     }
 
     @Test
-    fun `test addRuleFollowSymlinks with open failure`() {
+    fun `required runtime classpath open denial rejects installation`() {
         val mock = SupportedLandlockMock()
         mock.fileSystem.openResult = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(13, -1) // EACCES
         LinuxNative.setEngine(mock)
 
+        val failure = assertFailsWith<IllegalStateException> {
         NativeArena.ofConfined().use { nativeArena ->
             with(nativeArena) {
                 Landlock.addJvmClasspathRules(
@@ -89,10 +90,12 @@ class LandlockFailureModeTest {
                 )
             }
         }
+        }
+        assertTrue(failure.message!!.contains("errno 13"))
     }
 
     @Test
-    fun `test addRuleFollowSymlinks with addRule failure`() {
+    fun `required runtime classpath rule denial rejects installation`() {
         val mock = object : SupportedLandlockMock() {
             override fun syscall(
                 nr: Long,
@@ -112,6 +115,7 @@ class LandlockFailureModeTest {
         mock.fileSystem.openResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()
         LinuxNative.setEngine(mock)
 
+        val failure = assertFailsWith<IllegalStateException> {
         NativeArena.ofConfined().use { nativeArena ->
             with(nativeArena) {
                 Landlock.addJvmClasspathRules(
@@ -123,6 +127,8 @@ class LandlockFailureModeTest {
                 )
             }
         }
+        }
+        assertTrue(failure.message!!.contains("errno 1"))
     }
 
     @Test
@@ -241,16 +247,13 @@ class LandlockFailureModeTest {
 
         // Branch: isFallback = true
         // handleInitialOpenFailure returns true if errno is 2 (ENOENT)
-        val calls = java.util.concurrent.atomic
-            .AtomicInteger(0)
         val mockFallback = SupportedLandlockMock(
             fileSystem = object : MockNativeFileSystem() {
                 override fun open(
                     path: ManagedSegment,
                     flags: io.mazewall.platform.lifecycle.OpenFlags,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                    val current = calls.incrementAndGet()
-                    return if (current == 1) {
+                    return if (path.readString(0L) == "/nonexistent/file") {
                         LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(2, -1)
                     } else {
                         LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100).testAcquisition()

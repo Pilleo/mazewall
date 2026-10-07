@@ -109,10 +109,7 @@ internal class PolicyBuilder<S : PolicyScope> internal constructor(
 
     private fun addClasspathFile(file: File) {
         if (file.exists()) {
-            val p = if (file.isDirectory) file.absolutePath else file.absoluteFile.parent
-            if (p != null) {
-                allowedFsReadPaths.add(SandboxedPath.of(p, allowNonExistent = true))
-            }
+            allowedFsReadPaths.add(SandboxedPath.of(file.absolutePath, allowNonExistent = true))
         }
     }
 

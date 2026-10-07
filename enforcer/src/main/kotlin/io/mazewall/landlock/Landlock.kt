@@ -362,9 +362,10 @@ internal object Landlock {
         classPath.split(File.pathSeparator).forEach {
             val file = File(it)
             if (file.exists()) {
-                val dir = if (file.isDirectory) file.absolutePath else file.parent
-                if (seen.add(dir)) {
-                    addRuleFollowSymlinks(ruleset, dir, accessFlags)
+                val path = file.absolutePath
+                if (seen.add(path)) {
+                    val rights = if (file.isDirectory) accessFlags else accessFlags and LANDLOCK_ACCESS_FS_READ_DIR.inv()
+                    addRuleFollowSymlinks(ruleset, path, rights)
                 }
             }
         }
@@ -388,12 +389,12 @@ internal object Landlock {
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
                     is AddRuleResult.Error -> {
-                        logger.warning("landlock_add_rule failed for JVM classpath $path with errno ${addRes.errno}")
+                        error("landlock_add_rule failed for JVM classpath $path with errno ${addRes.errno}")
                     }
                 }
             }
         }.onFailure { errno, _ ->
-            logger.warning("Could not open JVM classpath $path for landlock rule: errno $errno")
+            error("Could not open JVM classpath $path for landlock rule: errno $errno")
         }
     }
 
