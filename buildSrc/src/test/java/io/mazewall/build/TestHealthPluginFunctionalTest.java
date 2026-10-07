@@ -42,6 +42,13 @@ final class TestHealthPluginFunctionalTest {
                     useJUnitPlatform { includeTags 'needs-fresh-jvm' }
                     doFirst new io.mazewall.build.FreshJvmClassFilterAction()
                 }
+                ['integrationTest', 'integrationTestFreshJvm'].each { name ->
+                    tasks.register(name, Test) {
+                        testClassesDirs = sourceSets.test.output.classesDirs
+                        classpath = sourceSets.test.runtimeClasspath
+                        filter { includeTestsMatching 'fixture.FirstTest' }
+                    }
+                }
                 """, StandardCharsets.UTF_8);
             write(root, "src/test/java/fixture/FirstTest.java", testSource("FirstTest"));
             write(root, "src/test/java/fixture/SecondTest.java", testSource("SecondTest"));
@@ -123,6 +130,24 @@ final class TestHealthPluginFunctionalTest {
             equal(true, aggregate.contains("\"freshForks\": [\n    \n  ]"));
             equal(true, aggregate.contains("\":test\""));
             equal(true, aggregate.contains("\":secondTest\""));
+
+            BuildResult kernelFirst = run(root, "test", "integrationTest", "integrationTestFreshJvm", "--build-cache");
+            equal(TaskOutcome.UP_TO_DATE, kernelFirst.task(":test").getOutcome());
+            equal(TaskOutcome.SUCCESS, kernelFirst.task(":integrationTest").getOutcome());
+            equal(TaskOutcome.SUCCESS, kernelFirst.task(":integrationTestFreshJvm").getOutcome());
+            BuildResult kernelSecond = run(root, "test", "integrationTest", "integrationTestFreshJvm", "--build-cache");
+            equal(TaskOutcome.UP_TO_DATE, kernelSecond.task(":test").getOutcome());
+            equal(TaskOutcome.SUCCESS, kernelSecond.task(":integrationTest").getOutcome());
+            equal(TaskOutcome.SUCCESS, kernelSecond.task(":integrationTestFreshJvm").getOutcome());
+            for (String directory : List.of("build/test-results", "build/reports/tests")) {
+                Path outputs = root.resolve(directory);
+                try (var paths = Files.walk(outputs)) {
+                    for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
+                }
+            }
+            BuildResult kernelAfterDeletion = run(root, "integrationTest", "integrationTestFreshJvm", "--build-cache");
+            equal(TaskOutcome.SUCCESS, kernelAfterDeletion.task(":integrationTest").getOutcome());
+            equal(TaskOutcome.SUCCESS, kernelAfterDeletion.task(":integrationTestFreshJvm").getOutcome());
 
             BuildResult fresh = run(root, "freshTest");
             equal(TaskOutcome.SUCCESS, fresh.task(":freshTest").getOutcome());

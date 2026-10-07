@@ -8,7 +8,7 @@ import org.gradle.api.tasks.Delete;
 import org.gradle.api.tasks.TaskProvider;
 import org.gradle.api.tasks.testing.Test;
 
-/** Root convention that records fresh test forks without changing which tests a gate selects. */
+/** Root convention for fresh kernel evidence and fork health, without changing test selection. */
 public final class TestHealthPlugin implements Plugin<Project> {
     private static final String FRAGMENT_DIRECTORY = "reports/test-health/fragments";
     private static final String AGGREGATE_FILE = "reports/test-health/test-tier-health.json";
@@ -38,6 +38,11 @@ public final class TestHealthPlugin implements Plugin<Project> {
         Task aggregateTask = aggregate.get();
 
         root.allprojects(project -> project.getTasks().withType(Test.class).configureEach(test -> {
+            if (test.getName().startsWith("integrationTest")) {
+                // Source/classpath identity cannot capture the current kernel, container or permissions.
+                test.getOutputs().upToDateWhen(ignored -> false);
+                test.getOutputs().doNotCacheIf("Kernel integration tests require current external-state evidence", ignored -> true);
+            }
             test.dependsOn(prepare);
             test.systemProperty("io.mazewall.testHealth.fragmentDir", fragments.get().getAsFile().getAbsolutePath());
             test.systemProperty("io.mazewall.testHealth.module", project.getPath().isBlank() ? ":" : project.getPath());

@@ -70,6 +70,12 @@ integration suites; adding identical tasks to the same invocation does not dupli
 their execution, but repeating the full invocation reruns externally sensitive suites.
 Do not cache kernel/endpoint success as if host configuration were ordinary source input.
 
+The root test convention enforces this for `integrationTest*` Test tasks: they are
+neither up-to-date reused nor restored from the build cache. Named ordinary host
+tests retain reuse. An executable Gradle fixture checks unchanged repeat execution,
+deleted-output/cache behavior and host-test reuse; a successful container command
+with cached kernel task outputs is not current container protection evidence.
+
 The CET C fixture uses local up-to-date compilation reuse with source/script and
 effective compiler/header/linker/environment inputs. The native library is not stored
 as portable cached protection evidence. `bash scripts/tests/cet_fixture_cache_test.sh`
