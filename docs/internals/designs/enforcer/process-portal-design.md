@@ -173,6 +173,16 @@ observe cancellation at bounded intervals, independently of the thread holding t
 An expired admission fails before I/O without consuming queued bytes; it is not a worker idle
 read tick. Idle ticks apply only to an admitted receive waiting for its first header byte.
 
+`PortalRuntimeConfig.limits` captures immutable `PortalRuntimeLimits` before startup:
+worker capacity, total concurrent admissions (running plus waiting for checkout), call,
+startup and close deadlines, request/response bytes and capability count. Defaults are
+one worker, 64 admissions, 30-second deadlines and the protocol's 8 MiB/eight-descriptor
+caps. Stateful singleton groups always use one worker. Overload and oversized requests
+reject as `NOT_STARTED` before checkout or transport; the admission lease ends only when
+the synchronous broker call returns. Response headers are checked against configured
+bounds before allocating the body or receiving descriptors. Worker retirement remains
+owned independently after call delivery; admission release does not prove process exit.
+
 ### Capability ownership migration
 
 `Capability.ReadFd` is now `AutoCloseable`: broker code must use

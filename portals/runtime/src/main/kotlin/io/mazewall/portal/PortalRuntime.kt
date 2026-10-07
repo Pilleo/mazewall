@@ -21,7 +21,7 @@ public class PortalRuntime private constructor(
     }
 
     private val registry = PortalServiceRegistry(config.manifests)
-    private val brokers = PortalBrokerOwnership<ProcessBroker>(DEFAULT_CLOSE_TIMEOUT_MS)
+    private val brokers = PortalBrokerOwnership<ProcessBroker>(config.limits.closeTimeoutMs)
     private val proxies = ConcurrentHashMap<PortalServiceId, Any>()
     private val statefulGate = PortalStatefulInvocationGate()
 
@@ -93,6 +93,7 @@ public class PortalRuntime private constructor(
                     workerProfile = config.profile(manifest),
                     cgroupRoot = config.cgroupRoot,
                     grantRoots = config.grantRoots,
+                    limits = if (manifest.instanceMode == PortalInstanceMode.STATEFUL_SINGLETON) config.limits.copy(workers = 1) else config.limits,
                 )
             }) { it.start() }
     } catch (closed: PortalRuntimeClosedException) {
@@ -109,8 +110,6 @@ public class PortalRuntime private constructor(
     }
 
     public companion object {
-        private const val DEFAULT_CLOSE_TIMEOUT_MS = 30_000L
-
         @JvmStatic
         public fun open(config: PortalRuntimeConfig = PortalRuntimeConfig.load()): PortalRuntime = PortalRuntime(config)
     }

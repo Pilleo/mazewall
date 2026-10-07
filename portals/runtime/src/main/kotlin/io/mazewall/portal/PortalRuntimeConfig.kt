@@ -14,6 +14,7 @@ public class PortalRuntimeConfig(
     workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
     public val cgroupRoot: Path? = null,
     public val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
+    public val limits: PortalRuntimeLimits = PortalRuntimeLimits(),
 ) {
     public val manifests: List<PortalServiceManifest> = java.util.List.copyOf(manifests)
     public val workerArtifacts: Map<String, PortalWorkerArtifact> = java.util.Map.copyOf(workerArtifacts)
@@ -53,6 +54,7 @@ public class PortalRuntimeConfig(
             workerProfiles: Map<String, PortalWorkerProfile> = emptyMap(),
             cgroupRoot: Path? = null,
             grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
+            limits: PortalRuntimeLimits = PortalRuntimeLimits(),
         ): PortalRuntimeConfig {
             val generated = PortalWorkerArtifactCatalog.load(loader)
             generated.forEach { (key, generatedArtifact) ->
@@ -69,6 +71,7 @@ public class PortalRuntimeConfig(
                 workerProfiles = workerProfiles,
                 cgroupRoot = cgroupRoot,
                 grantRoots = grantRoots,
+                limits = limits,
             )
         }
 

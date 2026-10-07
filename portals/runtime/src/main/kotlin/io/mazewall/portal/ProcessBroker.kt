@@ -38,12 +38,10 @@ import java.util.logging.Logger
  * retryable; a caller must retain the broker until close succeeds.
  */
 public class ProcessBroker internal constructor(
-    private val poolSize: Int = 1,
-    private val callTimeoutMs: Long = 30_000L,
+    private val limits: PortalRuntimeLimits = PortalRuntimeLimits(),
     private val sockets: SocketManager = RealSocketManager,
     private val launcher: ProcessLauncher = RealProcessLauncher,
     private val workerClasspath: String = defaultWorkerClasspath(),
-    private val startupTimeoutMs: Long = 30_000L,
     /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
     private val workerExtraJvmArgs: List<String> = emptyList(),
     private val workerProfile: PortalWorkerProfile = PortalWorkerProfile(),
@@ -51,9 +49,6 @@ public class ProcessBroker internal constructor(
     private val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
 ) : AutoCloseable {
     init {
-        require(poolSize >= 1) { "poolSize must be >= 1" }
-        require(callTimeoutMs > 0) { "callTimeoutMs must be positive" }
-        require(startupTimeoutMs > 0) { "startupTimeoutMs must be positive" }
         require(!workerProfile.requiresCgroup || cgroupRoot != null) {
             "limited portal worker profile requires a delegated cgroup root"
         }
@@ -76,7 +71,8 @@ public class ProcessBroker internal constructor(
     private val cgroupController: PortalCgroupController = RealPortalCgroupController
 
     private val nextId = AtomicInteger(1)
-    private val idle = ArrayBlockingQueue<WorkerSlot>(poolSize)
+    private val idle = ArrayBlockingQueue<WorkerSlot>(limits.workers)
+    private val admission = PortalCallAdmission(limits)
     private val spawned = AtomicInteger(0)
     private val maintenance = Executors.newSingleThreadExecutor(
         Thread.ofVirtual().name("portal-broker-maintenance", 0).factory(),
@@ -123,10 +119,10 @@ public class ProcessBroker internal constructor(
             startupCancelled = false
             startupCompletion = CountDownLatch(1)
         }
-        val deadline = Deadline.afterMillis(startupTimeoutMs)
-        val acquired = ArrayList<WorkerSlot>(poolSize)
+        val deadline = Deadline.afterMillis(limits.startupTimeoutMs)
+        val acquired = ArrayList<WorkerSlot>(limits.workers)
         try {
-            repeat(poolSize) {
+            repeat(limits.workers) {
                 check(lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled) { "broker startup cancelled" }
                 val slot = spawnWorker(deadline) { lifecycle == ProcessBrokerLifecycle.Starting && !startupCancelled }
                 provisionalSlots.add(slot)
@@ -226,7 +222,7 @@ public class ProcessBroker internal constructor(
 
     internal fun crashIdleWorkerProcess() {
         val slot =
-            idle.poll(callTimeoutMs, TimeUnit.MILLISECONDS)
+            idle.poll(limits.callTimeoutMs, TimeUnit.MILLISECONDS)
                 ?: throw PortalCallException("no idle worker to crash")
         slot.process.destroyForcibly()
         idle.put(slot)
@@ -239,15 +235,14 @@ public class ProcessBroker internal constructor(
         fds: List<Capability.ReadFd>,
     ): ByteArray {
         check(lifecycle == ProcessBrokerLifecycle.Running) { "broker not running: $lifecycle" }
-        val deadline = Deadline.afterMillis(callTimeoutMs)
+        return admission.enter(payload.size, fds.size).use { callAdmitted(method, payload, fds) }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // fatal admitted calls retire their exact checked-out process before propagation
+    private fun callAdmitted(method: PortalMethod, payload: ByteArray, fds: List<Capability.ReadFd>): ByteArray {
+        val deadline = Deadline.afterMillis(limits.callTimeoutMs)
         val admittedAt = System.nanoTime()
-        val slot = try {
-            idle.poll(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
-                ?: throw PortalCallException("timed out waiting for an idle portal worker", PortalInvocationEvidence.NOT_STARTED)
-        } catch (interrupted: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw PortalCallException("interrupted while waiting for an idle portal worker", PortalInvocationEvidence.NOT_STARTED, interrupted)
-        }
+        val slot = checkoutWorker(deadline)
         val dispatchedAt = System.nanoTime()
         var returnedToPool = false
         var callState: PortalBrokerCallState = PortalBrokerCallState.Idle
@@ -279,7 +274,7 @@ public class ProcessBroker internal constructor(
             if (!returnedToPool) {
                 scheduleRecycle(slot)
             }
-            throw e
+            raiseBrokerFailure(e)
         } catch (interrupted: InterruptedException) {
             handleInterruptedCall(
                 onCleanup = {
@@ -302,7 +297,7 @@ public class ProcessBroker internal constructor(
                 cleanup?.takeIf { it !== fatal }?.let(fatal::addSuppressed)
                 runCatching { scheduleRecycle(slot) }.exceptionOrNull()?.takeIf { it !== fatal }?.let(fatal::addSuppressed)
             }
-            throw fatal
+            raiseBrokerFailure(fatal)
         } finally {
             val completedAt = System.nanoTime()
             mostRecentInvocation =
@@ -311,6 +306,15 @@ public class ProcessBroker internal constructor(
                     workerExecution = java.time.Duration.ofNanos(completedAt - dispatchedAt),
                 )
         }
+    }
+
+    private fun checkoutWorker(deadline: Deadline): WorkerSlot =
+        try {
+        idle.poll(deadline.remainingMillis().toLong(), TimeUnit.MILLISECONDS)
+            ?: throw PortalCallException("timed out waiting for an idle portal worker", PortalInvocationEvidence.NOT_STARTED)
+    } catch (interrupted: InterruptedException) {
+        Thread.currentThread().interrupt()
+        throw PortalCallException("interrupted while waiting for an idle portal worker", PortalInvocationEvidence.NOT_STARTED, interrupted)
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -422,7 +426,7 @@ public class ProcessBroker internal constructor(
             check(transition is ProcessBrokerLifecycleTransition.Advanced) { (transition as ProcessBrokerLifecycleTransition.ProtocolViolation).reason }
             lifecycle = transition.state
             startupCancelled = true
-            val operation = CloseOperation(Deadline.afterMillis(startupTimeoutMs), CompletableFuture())
+            val operation = CloseOperation(Deadline.afterMillis(limits.closeTimeoutMs), CompletableFuture())
             closeOperation = operation
             ClosePreparation.execute(startupCompletion, operation)
         }
@@ -463,7 +467,7 @@ public class ProcessBroker internal constructor(
 
     @Suppress("TooGenericExceptionCaught") // Provisional ownership must roll back on every startup failure.
     private fun spawnWorker(
-        deadline: Deadline = Deadline.afterMillis(startupTimeoutMs),
+        deadline: Deadline = Deadline.afterMillis(limits.startupTimeoutMs),
         active: () -> Boolean = { lifecycle == ProcessBrokerLifecycle.Running },
     ): WorkerSlot {
         val ep = PrivateUnixEndpoint.create(launcher, "mazewall-portal-", "portal.sock")
@@ -494,7 +498,7 @@ public class ProcessBroker internal constructor(
             synchronized(attempt) { attempt.peer = peer }
             check(process.isAlive) { "portal worker exited during handshake" }
             check(active()) { "portal worker acquisition cancelled" }
-            val channel = PortalChannel(peer, sockets)
+            val channel = PortalChannel(peer, sockets, limits.maxRequestBytes, limits.maxResponseBytes, limits.maxCapabilities)
             synchronized(attempt) {
                 attempt.channel = channel
                 attempt.peer = null

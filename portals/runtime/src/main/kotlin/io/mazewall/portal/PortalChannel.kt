@@ -39,6 +39,9 @@ internal class PortalPeerClosedException : java.io.EOFException("portal peer clo
 internal class PortalChannel(
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager = RealSocketManager,
+    private val sendPayloadLimit: Int = PortalFrame.MAX_PAYLOAD,
+    private val receivePayloadLimit: Int = PortalFrame.MAX_PAYLOAD,
+    private val capabilityLimit: Int = PortalFrame.MAX_FDS,
 ) : AutoCloseable {
     private companion object {
         const val DEFAULT_TIMEOUT_MS = 30_000L
@@ -51,6 +54,11 @@ internal class PortalChannel(
     private val received = ArrayList<Capability.ReadFd>(PortalFrame.MAX_FDS)
     private val io = PortalIo(socket) { closed.get() }
 
+    init {
+        require(sendPayloadLimit in 1..PortalFrame.MAX_PAYLOAD && receivePayloadLimit in 1..PortalFrame.MAX_PAYLOAD)
+        require(capabilityLimit in 0..PortalFrame.MAX_FDS)
+    }
+
     /**
      * Sends a frame without `SCM_RIGHTS`. Worker replies use this path.
      * Capability grants go through [sendCapabilities] (broker → worker only).
@@ -62,6 +70,7 @@ internal class PortalChannel(
         require(frame.fdCount == 0) {
             "portal frames with file descriptors must use sendCapabilities (broker → worker only)"
         }
+        require(frame.payload.size <= sendPayloadLimit) { "Portal frame exceeds configured send payload bound" }
         terminalOnFailure(deadline) {
             writeFrame(frame, deadline)
         }
@@ -73,6 +82,7 @@ internal class PortalChannel(
         deadline: Deadline,
     ) {
         require(capabilities.size == frame.fdCount)
+        require(frame.payload.size <= sendPayloadLimit && frame.fdCount <= capabilityLimit) { "Portal frame exceeds configured send bounds" }
         terminalOnFailure(deadline) {
             writeFrame(frame, deadline)
             capabilities.forEach { capability -> capability.borrowUntil(deadline, closed::get) { io.sendDescriptor(it, deadline) } }
@@ -84,6 +94,7 @@ internal class PortalChannel(
     fun receive(deadline: Deadline): Pair<PortalFrame, List<Capability.ReadFd>> {
         return terminalOnFailure(deadline) {
             val header = PortalFrame.parseHeader(io.read(PortalFrame.HEADER_SIZE, deadline, idleAllowed = true))
+            require(header.payloadLen <= receivePayloadLimit && header.fdCount <= capabilityLimit) { "Portal response exceeds configured transport bounds" }
             val payload = io.read(header.payloadLen, deadline, idleAllowed = false)
             repeat(header.fdCount) { received.add(io.receiveDescriptor(deadline)) }
             val delivery = PortalFrame(header.kind, header.requestId, header.method, PortalPayload(payload), header.fdCount) to received.toList()

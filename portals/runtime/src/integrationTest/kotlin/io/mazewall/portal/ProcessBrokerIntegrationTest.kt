@@ -87,7 +87,7 @@ class ProcessBrokerIntegrationTest {
                 return RealProcessLauncher.startProcess(args, redirectErrorStream).also { lateChild = it }
             }
         }
-        val broker = ProcessBroker(launcher = launcher, startupTimeoutMs = 100)
+        val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 100, closeTimeoutMs = 100))
         val startup = CompletableFuture.runAsync { broker.start() }
         assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
 
@@ -119,7 +119,7 @@ class ProcessBrokerIntegrationTest {
                 return RealProcessLauncher.startProcess(args, redirectErrorStream).also { lateChild = it }
             }
         }
-        val broker = ProcessBroker(launcher = launcher, startupTimeoutMs = 5_000)
+        val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 5_000))
         val startup = CompletableFuture.runAsync { broker.start() }
         assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
         val closeReturned = CountDownLatch(1)
@@ -204,7 +204,7 @@ class ProcessBrokerIntegrationTest {
                 return RealProcessLauncher.startProcess(args, redirectErrorStream).also(children::add)
             }
         }
-        val broker = ProcessBroker(poolSize = 2, launcher = launcher)
+        val broker = ProcessBroker(limits = PortalRuntimeLimits(workers = 2), launcher = launcher)
         val startup = CompletableFuture.runAsync { broker.start() }
         assertTrue(secondLaunchEntered.await(10, TimeUnit.SECONDS))
 
@@ -242,7 +242,7 @@ class ProcessBrokerIntegrationTest {
                     .close(fd)
             }
         }
-        val broker = ProcessBroker(poolSize = 2, launcher = launcher, sockets = sockets)
+        val broker = ProcessBroker(limits = PortalRuntimeLimits(workers = 2), launcher = launcher, sockets = sockets)
 
         assertThrows(IllegalStateException::class.java) { broker.start() }
         assertEquals(1, broker.provisionalWorkers(), "unfinished rollback owner must remain registered")
@@ -276,7 +276,7 @@ class ProcessBrokerIntegrationTest {
                     .close(fd)
             }
         }
-        val broker = ProcessBroker(poolSize = 2, launcher = launcher, sockets = sockets)
+        val broker = ProcessBroker(limits = PortalRuntimeLimits(workers = 2), launcher = launcher, sockets = sockets)
 
         assertSame(fatal, assertThrows(AssertionError::class.java) { broker.start() })
         assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
@@ -302,7 +302,7 @@ class ProcessBrokerIntegrationTest {
                 return RealProcessLauncher.startProcess(args, redirectErrorStream).also { first = it }
             }
         }
-        val broker = ProcessBroker(poolSize = 2, launcher = launcher)
+        val broker = ProcessBroker(limits = PortalRuntimeLimits(workers = 2), launcher = launcher)
 
         assertThrows(IllegalStateException::class.java) { broker.start() }
 
@@ -323,7 +323,7 @@ class ProcessBrokerIntegrationTest {
                 redirectErrorStream: Boolean,
             ): Process = ProcessBuilder("sh", "-c", "sleep 60").start().also { child = it }
         }
-        val broker = ProcessBroker(launcher = launcher, startupTimeoutMs = 150)
+        val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 150))
         val startedAt = System.nanoTime()
 
         assertThrows(IllegalStateException::class.java) { broker.start() }
@@ -337,7 +337,7 @@ class ProcessBrokerIntegrationTest {
 
     @Test
     fun `worker checkout consumes the same budget as the subsequent RPC`() {
-        ProcessBroker(callTimeoutMs = 2_000).use { broker ->
+        ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 2_000)).use { broker ->
             broker.start()
             val first = CompletableFuture.runAsync { broker.sleep(1_500) }
             io.mazewall.testing.awaitCondition(java.time.Duration.ofSeconds(2), "first RPC checked out the worker") { broker.idleSize() == 0 }
@@ -350,7 +350,7 @@ class ProcessBrokerIntegrationTest {
     fun `interrupted capability admission preserves interruption and never reuses the partial-frame worker`() {
         val fixture = Files.createTempFile("mazewall-portal-interrupt-", ".txt")
         Files.writeString(fixture, "blocked grant")
-        ProcessBroker(callTimeoutMs = 5_000, grantRoots = PortalGrantRoots.of(PortalGrantRoot(FIXTURE_ROOT, fixture.parent))).use { broker ->
+        ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 5_000), grantRoots = PortalGrantRoots.of(PortalGrantRoot(FIXTURE_ROOT, fixture.parent))).use { broker ->
             broker.start()
             val capability = broker.openReadOnly(FIXTURE_ROOT, fixture.fileName.toString())
             val borrowEntered = CountDownLatch(1)
@@ -398,7 +398,7 @@ class ProcessBrokerIntegrationTest {
 
     @Test
     fun `interrupted idle checkout preserves interruption without retiring an unclaimed worker`() {
-        ProcessBroker(callTimeoutMs = 5_000).use { broker ->
+        ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 5_000)).use { broker ->
             broker.start()
             val active = CompletableFuture.runAsync { broker.sleep(2_000) }
             awaitCondition(java.time.Duration.ofSeconds(2), "worker checked out") { broker.idleSize() == 0 }
@@ -474,7 +474,7 @@ class ProcessBrokerIntegrationTest {
     @Test
     fun `pool of two serves concurrent echoes`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        ProcessBroker(poolSize = 2).use { broker ->
+        ProcessBroker(limits = PortalRuntimeLimits(workers = 2)).use { broker ->
             broker.start()
             val a = CompletableFuture.supplyAsync { broker.echo("alpha") }
             val b = CompletableFuture.supplyAsync { broker.echo("beta") }
@@ -484,9 +484,24 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
+    fun `configured admission rejects overlap without consuming worker transport`() {
+        assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
+        val limits = PortalRuntimeLimits(workers = 1, maxAdmissions = 1, callTimeoutMs = 5_000L)
+        ProcessBroker(limits = limits).use { broker ->
+            broker.start()
+            val active = CompletableFuture.runAsync { broker.sleep(500) }
+            awaitCondition(description = "bounded caller checked out worker") { broker.idleSize() == 0 }
+            val rejected = assertThrows(PortalCallException::class.java) { broker.echo("must-not-send") }
+            assertEquals(PortalInvocationEvidence.NOT_STARTED, rejected.evidence)
+            active.get(5, TimeUnit.SECONDS)
+            assertEquals("after-admission", broker.echo("after-admission"))
+        }
+    }
+
+    @Test
     fun `timeout kills worker and later call succeeds`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        ProcessBroker(poolSize = 1, callTimeoutMs = 800).use { broker ->
+        ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 800)).use { broker ->
             broker.start()
             assertThrows(PortalCallException::class.java) { broker.sleep(10_000) }
             awaitCondition(java.time.Duration.ofSeconds(10), "timed-out worker replacement") { broker.idleSize() == 1 }
@@ -497,7 +512,7 @@ class ProcessBrokerIntegrationTest {
     @Test
     fun `crashed worker is replaced and later call succeeds`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        ProcessBroker(poolSize = 1).use { broker ->
+        ProcessBroker().use { broker ->
             broker.start()
             broker.crashIdleWorkerProcess()
             assertThrows(PortalCallException::class.java) { broker.echo("fail-inflight") }
@@ -550,7 +565,7 @@ class ProcessBrokerIntegrationTest {
     @Test
     fun `recycled worker is retired before asynchronous replacement`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        ProcessBroker(poolSize = 2).use { broker ->
+        ProcessBroker(limits = PortalRuntimeLimits(workers = 2)).use { broker ->
             broker.start()
             assertEquals(2, broker.trackedWorkers())
             broker.crashIdleWorkerProcess()
