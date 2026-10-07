@@ -423,6 +423,15 @@ Linux 7.0 (ABI 8) introduces `LANDLOCK_RESTRICT_SELF_TSYNC` which synchronizes t
 
 ## 6. `PureJavaBpfEngine` Installation Sequence
 
+One immutable native-engine view owns the plain installation sequence. BPF packing,
+`no_new_privs`, raw seccomp, prctl compatibility fallback, EINTR retries, and mode
+verification receive the same `NativeEngine` explicitly. The enclosing installation
+attempt supplies its captured backend to both CET and this pipeline. Standalone
+engine entry captures its own view once. No scoped ambient engine override or
+mutable singleton provider setter is used. Native I/O still crosses trait methods;
+the architecture rules recognize `snapshot()` as trait selection and independently
+ban mutable trait lookups inside the plain engine/state pipeline.
+
 For reference: the exact steps performed by `PureJavaBpfEngine.installInternal()`:
 
 ```

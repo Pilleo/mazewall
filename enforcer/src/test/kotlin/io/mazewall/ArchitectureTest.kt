@@ -104,7 +104,8 @@ class ArchitectureTest {
                             "getProcess",
                             "getMemory",
                             "getRaw",
-                            "getBpf",
+                             "getBpf",
+                            "snapshot", // immutable NativeEngine trait selection; never direct native I/O
                         "isRealEngineActive", // metadata-only probe (issue-20260823-172003), not an I/O bypass
                     )
                 }
@@ -125,6 +126,21 @@ class ArchitectureTest {
                         input.target.name != "snapshot"
             })
             .because("supervised installation must retain one caller-supplied NativeEngine for its complete lifecycle")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun plainSeccompPipelineMustUseItsCapturedNativeRuntime(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .haveNameMatching("io\\.mazewall\\.seccomp\\.(PureJavaBpfEngine|SeccompInstallationState)(\\$.*)?")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("mutable LinuxNative trait lookups inside the plain pipeline") {
+                override fun test(input: JavaMethodCall): Boolean =
+                    input.target.owner.isAssignableTo(LinuxNative::class.java) &&
+                        input.target.name in setOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw", "getBpf")
+            })
+            .because("packing, application, retries, fallback and verification must use the same captured backend")
             .check(allClasses)
     }
 

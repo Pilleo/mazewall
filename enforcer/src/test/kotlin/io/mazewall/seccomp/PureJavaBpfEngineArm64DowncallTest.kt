@@ -159,7 +159,7 @@ class PureJavaBpfEngineArm64DowncallTest {
             LinuxNative.setEngine(mockEngine)
 
             // Directly call setNoNewPrivs to test downcall compilation
-            PureJavaBpfEngine.setNoNewPrivs()
+            PureJavaBpfEngine.lockNoNewPrivileges()
 
             assertTrue(setNoNewPrivsCalled, "setNoNewPrivs should be called")
             assertTrue(prctlCommand is PrctlCommand.SetNoNewPrivs, "Command should be SetNoNewPrivs")

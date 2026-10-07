@@ -51,7 +51,7 @@ class PureJavaBpfEngineDowncallTest {
             val mockEngine = MockNativeEngine(process = mockProcess)
             LinuxNative.setEngine(mockEngine)
 
-            PureJavaBpfEngine.setNoNewPrivs()
+            PureJavaBpfEngine.lockNoNewPrivileges()
 
             assertTrue(prctlCalled)
             assertTrue(prctlCommand is PrctlCommand.SetNoNewPrivs)

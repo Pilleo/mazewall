@@ -600,7 +600,7 @@ public object ContainedExecutors {
     }
 
     private fun armIntelCet(attempt: InstallationAttempt) {
-        val native = LinuxNative.snapshot()
+        val native = attempt.native
         val owner = Thread.currentThread()
         val prior = ContainmentStateRegistry.threadState.installationEvidence.cet
         if (prior?.owner === owner && prior.nativeIdentity === native.engineIdentity) {
@@ -687,7 +687,7 @@ public object ContainedExecutors {
                     newDefaultAction,
                 ),
             )
-            PureJavaBpfEngine.installWithPublication(compiledSandbox, processWide) {
+            PureJavaBpfEngine.installWithPublication(compiledSandbox, processWide, native = attempt.native) {
                 attempt.seccompApplied = true
                 publish()
             }

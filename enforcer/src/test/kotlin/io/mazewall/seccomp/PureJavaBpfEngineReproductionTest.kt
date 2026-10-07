@@ -57,7 +57,7 @@ class PureJavaBpfEngineReproductionTest {
             PureJavaBpfEngine.install(compiled)
         }
 
-        // After the fix, this should be null because buildFilter() is called before setNoNewPrivs()
+        // After the fix, this should be null because buildFilter() is called before privilege locking.
         val calledSetNoNewPrivs = prctlCommands.any { it is PrctlCommand.SetNoNewPrivs }
         assertFalse(calledSetNoNewPrivs, "PR_SET_NO_NEW_PRIVS should NOT have been called after the fix")
     }

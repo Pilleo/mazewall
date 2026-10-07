@@ -150,6 +150,13 @@ attempt, including calls through another wrapper or an otherwise satisfied polic
 cache. Ordinary business-task failures do not quarantine successful installation.
 Applied restrictions remain in force; the caller continues to own executor shutdown.
 
+The plain Seccomp native pipeline now uses one selected backend for BPF packing,
+privilege locking, raw installation, compatibility fallback, retries, and mandatory
+mode verification. CET and plain Seccomp receive the installation attempt's same
+captured backend. Global backend replacement during those stages cannot redirect
+the in-flight calls. Application-owned capture across remaining Landlock/supervised
+paths is the next runtime-integration step.
+
 `lockIntelCet()` verifies and locks an **already-enabled SHSTK** on the installing
 platform thread. Receipts require `CetOutcome.VERIFIED_CURRENT_THREAD` for that
 request. Late FFM enablement, permission-error-as-lock-proof, and process-wide CET

@@ -27,6 +27,8 @@ internal class InstallationAttempt(
     private val processWide: Boolean,
     val fallback: Platform.FallbackBehavior,
 ) {
+    val native = io.mazewall.platform.native.LinuxNative
+        .snapshot()
     var landlockApplied: Boolean = false
     var seccompApplied: Boolean = false
     var failure: Throwable? = null

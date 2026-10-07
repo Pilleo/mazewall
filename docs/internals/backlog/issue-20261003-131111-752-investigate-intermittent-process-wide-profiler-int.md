@@ -29,5 +29,12 @@ passed, followed by an unchanged successful `./gradlew build`. Root cause is not
 established; no fix or deterministic timing diagnosis is claimed. Agentless Go
 patches are outside this JVM test's dependency graph.
 
+Recurrence during inline C3 plain-backend capture verification: full local Docker
+`test integrationTest integrationTestFreshJvm` missed `/etc/hostname`, reported ACK
+`errno=32`, and logged `Function not implemented` during shutdown cleanup. Retained
+tool log: `run-4aa254ac4356`. An unchanged full Docker rerun (`run-4e95f01a89f1`)
+passed in 46s. The matching symptom remains an open investigation; no change to
+profiler behavior, assertions, deadlines, or skips was made for this recurrence.
+
 ---
 <!-- id: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int  file: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md -->

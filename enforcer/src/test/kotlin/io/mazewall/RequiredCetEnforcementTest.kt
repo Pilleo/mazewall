@@ -33,6 +33,7 @@ class RequiredCetEnforcementTest {
     private var enableCalls = 0
     private var lockCalls = 0
     private var afterLockStatusError: Int? = null
+    private var afterLockAction: () -> Unit = {}
 
     @BeforeEach
     fun prepareRuntime() {
@@ -51,6 +52,7 @@ class RequiredCetEnforcementTest {
                     }
                     0x5003 -> {
                         lockCalls++
+                        afterLockAction()
                         lockError?.let { LinuxNative.SyscallResult.Error(it, -1L) } ?: LinuxNative.SyscallResult.Success(lockReturn)
                     }
                     else -> error("Unexpected CET mutation operation: $code")
@@ -186,6 +188,31 @@ class RequiredCetEnforcementTest {
         assertFailsWith<IllegalStateException> {
             InstallationReceipt(true, policy.definition, installed = true, cetOutcome = CetOutcome.VERIFIED_CURRENT_THREAD).requireInstalled()
         }
+    }
+
+    @Test
+    fun `CET and plain seccomp use the backend captured before feature setup`() {
+        System.setProperty("io.mazewall.fallback", "FAIL")
+        val foreignCalls = java.util.concurrent.atomic
+            .AtomicInteger()
+        val foreign = MockNativeEngine().apply {
+            onSyscall = { _, _, _, _, _, _, _ ->
+                foreignCalls.incrementAndGet()
+                LinuxNative.SyscallResult.Error(1, -1L)
+            }
+            process.onPrctl = {
+                foreignCalls.incrementAndGet()
+                LinuxNative.SyscallResult.Error(1, -1L)
+            }
+        }
+        afterLockAction = { LinuxNative.setEngine(foreign) }
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).lockIntelCet().build()
+
+        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+            receipt.requireInstalled()
+            assertEquals(CetOutcome.VERIFIED_CURRENT_THREAD, receipt.cetOutcome)
+        }
+        assertEquals(0, foreignCalls.get())
     }
 
     @Test
