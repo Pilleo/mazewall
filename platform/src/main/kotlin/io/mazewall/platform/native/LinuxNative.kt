@@ -151,6 +151,7 @@ internal class RuntimeSnapshot internal constructor(
     private val engine: NativeEngine,
 ) : NativeEngine by engine {
     public val engineIdentity: Any get() = engine
+    public val isRealEngine: Boolean get() = engine === RealNativeEngine
 }
 
 @OptIn(ExperimentalContracts::class)

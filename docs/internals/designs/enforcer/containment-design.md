@@ -368,6 +368,14 @@ callbacks. This preserves authority across Landlock-to-USER_NOTIF installation a
 does not imply unified application-owned capability/runtime or daemon-lifecycle
 capture. Registration leases remain receipt-owned and close after task execution.
 
+Optional post-install self-verification also receives the attempt's selected backend
+and enablement decision, captured before native stages. Default real/mock engine
+classification belongs to the immutable native snapshot; explicit property opt-in/out
+is read once per attempt. Liveness, denied-only and union-aware probes cannot switch
+backends during execution. Standalone verifier entry selects its own snapshot and
+gate before probing. Existing program-keyed memoization is unchanged by this capture
+slice; application-owned evidence scope remains subsequent runtime work.
+
 `ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
 of policy coverage and Seccomp engine-state rank. The interpreter retains the first
 failure without rewinding applied stages. Registry merges carry thread/process

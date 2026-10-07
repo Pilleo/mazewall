@@ -22,6 +22,7 @@ class CapturedSeccompBackendNativeTest : BaseIntegrationTest() {
 
     fun verifyCapturedRealBackend() {
         System.setProperty("io.mazewall.fallback", "FAIL")
+        System.setProperty("io.mazewall.selfVerify", "true")
         val real = LinuxNative.snapshot()
         val foreignCalls = AtomicInteger()
         val foreign = MockNativeEngine().apply {
@@ -52,6 +53,7 @@ class CapturedSeccompBackendNativeTest : BaseIntegrationTest() {
             }
             assertEquals(0, foreignCalls.get())
         } finally {
+            System.clearProperty("io.mazewall.selfVerify")
             LinuxNative.resetToDefault()
         }
     }

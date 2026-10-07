@@ -85,6 +85,66 @@ class InstallSelfVerifierTest {
     }
 
     @Test
+    fun `liveness callback cannot redirect denied probes to another backend`() {
+        val program = blacklistProgram()
+        val foreign = MockNativeEngine().apply {
+            onSyscall = { _, _, _, _, _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
+        }
+        oracleMock(program) { nr ->
+            if (nr == arch.getpid) LinuxNative.setEngine(foreign)
+            null
+        }
+
+        InstallSelfVerifier.verify(program, arch)
+    }
+
+    @Test
+    fun `installation callback cannot disable previously selected self verification`() {
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
+        val program = BpfFilter.build(Arch.current(), policy.definition)
+        val engine = oracleMock(program) { nr ->
+            if (nr == Arch.current().seccompSyscallNumber) LinuxNative.SyscallResult.Success(0L) else null
+        }
+        engine.process.onPrctl = { command ->
+            if (command is PrctlCommand.GetSeccomp) {
+                System.setProperty("io.mazewall.selfVerify", "false")
+                engine.onSyscall = { _, _, _, _, _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
+            }
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        Platform.setProvider(object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+
+            override fun hasKernelSeccompSupport(): Boolean = true
+
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1L)
+
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(8)
+
+            override fun getLandlockAbiVersion(): Int = 8
+
+            override fun probeSeccompTsync(): Boolean = true
+
+            override fun probeSeccompUserNotif(): Boolean = true
+
+            override fun probeCetSupported(): Boolean = false
+        })
+        try {
+            val failure = assertFailsWith<PartialInstallationException> {
+                ContainedExecutors.installOnCurrentThread(policy).use { it.requireInstalled() }
+            }
+            assertTrue(failure.progress.seccompApplied)
+            assertTrue(failure.cause!!.message!!.contains("liveness"))
+        } finally {
+            Platform.resetToDefault()
+            io.mazewall.enforcer.state.ContainmentStateRegistry.threadState = io.mazewall.enforcer.state
+                .ContainerState()
+            io.mazewall.enforcer.state.ContainmentStateRegistry.processState = io.mazewall.enforcer.state
+                .ContainerState()
+        }
+    }
+
+    @Test
     fun `diverging kernel verdict throws with program attached`() {
         val program = blacklistProgram()
         val connectNr = Syscall.CONNECT.numberFor(arch)

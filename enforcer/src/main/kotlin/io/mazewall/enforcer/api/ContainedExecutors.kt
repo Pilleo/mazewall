@@ -692,16 +692,16 @@ public object ContainedExecutors {
                 attempt.seccompApplied = true
                 publish()
             }
-            // Runtime self-verification (issue-20260823-172003): OPT-IN via
-            // -Dio.mazewall.selfVerify=true. Asserts the kernel honors the oracle's predictions;
-            // memoized per program identity. See InstallSelfVerifier gate KDoc for why the
-            // default is off under narrow allow-list floors.
+            // Runtime self-verification uses the attempt's captured setting and backend.
+            // Default-ON for the real engine; the property can explicitly opt in/out.
             // Union-aware verification (issue-20260824-011900): passes merged state for stacked filters
             io.mazewall.seccomp.InstallSelfVerifier.verify(
                 compiledSandbox.program,
                 arch,
                 priorFilterDepth,
                 mergedState,
+                attempt.native,
+                attempt.selfVerificationEnabled,
             )
             return AutoCloseable {}
         }
