@@ -36,5 +36,11 @@ tool log: `run-4aa254ac4356`. An unchanged full Docker rerun (`run-4e95f01a89f1`
 passed in 46s. The matching symptom remains an open investigation; no change to
 profiler behavior, assertions, deadlines, or skips was made for this recurrence.
 
+Recurrence during current-installation verifier evidence correction: full serial
+Docker gate failed the process-wide profiler subprocess and logged listener ACK
+`errno=32` (`run-64e6eb2197cd`). The unchanged full serial rerun passed in 65s
+(`run-21b6e1f2382c`). Root cause remains unproven; no profiler behavior, assertion,
+timeout or skip was changed.
+
 ---
 <!-- id: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int  file: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md -->
