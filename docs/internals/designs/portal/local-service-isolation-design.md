@@ -61,6 +61,19 @@ the child waits for it before containment and guest initialization. The parent s
 it only after cgroup setup succeeds. Missing delegation, unsupported controllers, or cgroup write failure
 are startup failures; Portal never falls back to an unbounded worker.
 
+The parent session/PID acknowledgement is distinct from final readiness. The host captures
+the verified artifact and actual ordered classpath-content generation, exact isolation-group
+manifest generation and JVM runtime identity before launch. The child measures its own
+classpath, artifact and defining-loader manifests and rejects a changed requested generation
+before guest construction. It then installs and validates the actual required receipt
+(new process-wide Seccomp and Landlock stages, no fallback, exact static baseline policy),
+constructs the group dispatcher and sends a strict bounded format-1 socket ready record.
+The host requires the exact session, child PID, protocol and measured generation plus
+required protection evidence under the existing startup deadline. Stdout READY cannot
+substitute for this record, even after a matching parent acknowledgement. The receipt
+remains owned until the worker request loop and transport physically end; closing it
+does not undo the process-lifetime kernel restrictions.
+
 Profiles do not vary the process sandbox in this release. Every worker retains
 the existing fail-closed JVM filesystem allowlist, process-creation denial, and
 network denial. Per-profile readable paths and arbitrary syscall policies remain
@@ -108,7 +121,10 @@ portalCodegen { workerSourceSet.set("portalWorker") }
 
 The host JAR contains stubs/manifests and opaque bundle bytes, not directly loadable
 guest dispatchers. This separates classpaths; environment authority and required
-generation-bound readiness remain their distinct launch contracts.
+generation-bound readiness are distinct launch contracts. Receipt-backed generation
+readiness is implemented; operator-owned launch/environment profiles and C4 real-object
+pinning between hashing, installation and class loading remain separate unclosed gates.
+This readiness slice does not claim complete P3 acceptance or adversarial-file pinning.
 
 The historical worker-classpath system property is accepted only by the
 repository's marked test execution. Production `ProcessBroker` startup requires

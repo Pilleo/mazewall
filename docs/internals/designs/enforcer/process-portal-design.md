@@ -77,9 +77,28 @@ startup proceeds only after the worker returns the matching acknowledgement; an 
 sentinel-only worker cannot satisfy that exchange. Ordinary application
 payload limits are independent of the 512-byte startup control bound. Missing, mismatched
 or cancelled authorization closes startup ownership and never reaches the guest.
+The parent ACK authorizes setup; it is not final readiness. Before launching each child,
+the broker captures an immutable generation from the verified artifact digest, ordered
+explicit classpath paths and contents, exact group manifest records, and JVM runtime
+identity (`java.runtime.version`, vendor, VM name, architecture and `java.home`). The
+worker independently measures its actual inputs and defining-loader manifests after
+authorization and compares the requested generation before containment or guest entry.
+Missing real group metadata is a failure, including in typed builtin test fixtures.
+
+Final readiness is a format-1 response on the owned RPC channel with a separate method
+identity, zero request ID/descriptors and a 512-byte maximum enforced from the header
+before body allocation. Its canonical ASCII/LF record binds session, actual child PID,
+input/manifest/runtime SHA-256 identities, the versioned static baseline policy identity,
+and required process-wide Seccomp/filesystem evidence. Unknown versions, extra or
+duplicate fields, noncanonical or mismatched records reject. The worker publishes only
+after validating the actual required installation receipt and constructing its immutable
+dispatcher table. Protection fields derive from that validated receipt, not parent flags.
+The host validates the entire record and consults a pure readiness gate before publication;
+the existing absolute startup deadline and cancellation/ownership checks still apply.
 The standalone worker CLI's sentinel path is separate; it is not a fallback for a broker
-expecting parent authorization. Full artifact/manifest/policy-generation readiness records
-and operator-owned launch profiles remain the following P3 acceptance scope.
+expecting a required record. Operator-owned launch/environment profiles and C4 physical
+object pinning across measurement, kernel installation and class loading remain separate
+unclosed gates: generation comparison is not a claim that every P3 acceptance gate is done.
 
 Stateless worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
 is destroyed and reaped first; replenishment runs independently, is logged separately, and cannot
@@ -89,16 +108,17 @@ so a slot cannot be returned after closing admission begins.
 A fatal broker call error retires and reaps its checked-out worker before propagation. The
 original error retains cleanup failures as suppressed evidence; replacement remains separate
 stateless maintenance. Each child output pump drains incrementally into at most 64 diagnostic lines of
-1,024 characters, records truncation/drop counts and stream failures, and recognizes readiness
-only from an exact complete sentinel line. Child output is never appended to a shared file or
+1,024 characters, records truncation/drop counts and stream failures. Its exact-line sentinel
+observation is diagnostic only for broker startup; only the required socket record authorizes
+publication. Child output is never appended to a shared file or
 forwarded continuously into broker logs. Startup failures carry the bounded diagnostic snapshot.
 
 The worker request loop has the closed states `AwaitingRequest → Dispatching → SendingReply`.
 `ReplySucceeded` is the only transition back to `AwaitingRequest`; `ReplyFailed` terminates the
 channel. Builtin and generated methods are resolved before one dispatch-failure boundary, which
 deliberately unwraps reflective invocation failures. Consequently a partial response write closes
-the channel and cannot be followed by an error frame. The READY sentinel is emitted only after
-containment, dispatcher publication/guest construction, and channel initialization have succeeded.
+the channel and cannot be followed by an error frame. Required readiness is sent only after
+receipt validation, dispatcher publication/guest construction, and channel initialization succeed.
 An `InvocationTargetException` is unwrapped through any target `Throwable`: ordinary exceptions
 become one error response, while fatal errors retain their identity, send no response, close owned
 capabilities and transport, and receive capability then transport cleanup failures only as
@@ -133,7 +153,11 @@ before Seccomp, records each irreversible stage, and synchronizes both across ex
 threads. Older kernels fail worker startup; there is no thread-only worker baseline.
 Dispatcher validation and guest construction follow containment. Any initialization or readiness
 publication failure closes the owned channel, preserving the original failure and suppressing
-cleanup failures. Only after READY succeeds does ownership pass to the execution driver.
+cleanup failures. Only after required readiness succeeds does transport ownership pass to the execution driver.
+The actual receipt is retained through the request loop and transport retirement, then closed
+on physical worker execution end; startup rejection also retires it. Receipt closure cannot
+undo installed Seccomp/Landlock, which remain for the OS process lifetime. No reconstructed
+receipt or parent-provided protection flag substitutes for actual installer evidence.
 Extra readable paths are deferred.
 
 `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).

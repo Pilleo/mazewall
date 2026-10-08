@@ -1,6 +1,7 @@
 package io.mazewall.portal.worker
 
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.InstallationReceipt
 import io.mazewall.enforcer.api.ProcessPolicies
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.platform.socket.RealSocketManager
@@ -49,6 +50,10 @@ public object PortalWorkerMain {
             throw failure
         }
         val transport = ChannelWorkerTransport(channel, idleTimeoutMs)
+        var generation: io.mazewall.portal.PortalWorkerGeneration? = null
+        var startupDeadline: io.mazewall.platform.lifecycle.Deadline? = null
+        val parentSession = args.indexOf("--parent-session").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
+        val group = args.indexOf("--worker-group").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
         runWorker(
             transport,
             authorizeParent = {
@@ -65,21 +70,25 @@ public object PortalWorkerMain {
                     check(!System.out.checkError()) { "parent startup diagnostic publication failed" }
                     val authorizationDeadline = io.mazewall.platform.lifecycle.Deadline
                         .afterMillis(timeout)
+                    startupDeadline = authorizationDeadline
                     val permit = io.mazewall.portal.PortalParentAuthorization.accept(
                         channel.receiveControl(authorizationDeadline),
                         session,
                         ProcessHandle.current().pid(),
                     )
                     channel.sendControl(permit.acknowledgement(), authorizationDeadline)
+                    generation = captureRequiredGeneration(args, group)
                 }
             },
             installContainment = { installWorkerContainment(args) },
+            requiredPolicy = { if (parentSession != null) staticWorkerPolicy() else null },
             createDispatcher = {
                 val builder = PortalDispatcherTable.Builder()
                 bootstrapWorkerDispatchers(
                     builder,
                     System.getProperty("io.mazewall.portal.worker.dispatchers"),
                     PortalWorkerMain::class.java.classLoader,
+                    group,
                 )
                 val dispatcherTable = builder.build()
                 PortalWorkerDispatcher { method, payload, fds ->
@@ -93,9 +102,18 @@ public object PortalWorkerMain {
                 }
             },
             publishReady = {
-                println(READY)
-                System.out.flush()
-                check(!System.out.checkError()) { "portal worker readiness publication failed" }
+                if (parentSession != null) {
+                    channel.sendControl(
+                        io.mazewall.portal
+                        .PortalWorkerReady(parentSession, ProcessHandle.current().pid(), requireNotNull(generation))
+                        .frame(),
+                            requireNotNull(startupDeadline),
+                    )
+                } else {
+                    println(READY)
+                    System.out.flush()
+                    check(!System.out.checkError()) { "portal worker readiness publication failed" }
+                }
             },
         )
     }
@@ -104,43 +122,84 @@ public object PortalWorkerMain {
     @Suppress("TooGenericExceptionCaught") // Startup failure must retire its transport even for fatal guest construction errors.
     internal fun runWorker(
         transport: PortalWorkerTransport,
-        installContainment: () -> Unit,
+        installContainment: () -> InstallationReceipt,
         createDispatcher: () -> PortalWorkerDispatcher,
-        publishReady: () -> Unit,
+        publishReady: (InstallationReceipt) -> Unit,
         authorizeParent: () -> Unit = {},
+        requiredPolicy: () -> io.mazewall.enforcer.api.PolicyDefinition<*>? = { null },
     ) {
+        var receipt: InstallationReceipt? = null
         val driver = try {
             authorizeParent()
-            installContainment()
+            receipt = installContainment()
+            receipt.requireInstalled()
+            receipt.failure?.let { throw it }
+            check(receipt.fallback == io.mazewall.enforcer.api.Platform.FallbackBehavior.FAIL) { "worker receipt forbids fallback" }
+            check(receipt.processWide && receipt.landlockApplied && receipt.progress?.processWide == true && receipt.progress?.seccompApplied == true && receipt.progress?.landlockApplied == true) {
+                "worker requires newly installed process-wide Seccomp and filesystem containment"
+            }
+            val expectedPolicy = requiredPolicy()
+            check(expectedPolicy == null || receipt.requestedPolicy == expectedPolicy) { "installed worker policy does not match static baseline" }
             val initialized = PortalWorkerDriver(transport, createDispatcher())
-            publishReady()
+            publishReady(receipt)
             initialized
         } catch (failure: Throwable) {
             runCatching(transport::close).exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
+            runCatching { receipt?.close() }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
             throw failure
         }
-        driver.run()
+        // Driver owns transport until the request loop physically ends. Receipt outlives that ownership.
+        requireNotNull(receipt).use { driver.run() }
     }
 
     internal fun publishDispatcherTable(raw: String?): PortalDispatcherPublication = PortalDispatcherRegistry.publishStrict(raw)
 
     @Suppress("SpreadOperator") // The profile decoder deliberately owns the one array forwarded to the vararg installation API.
-    internal fun installWorkerContainment(args: Array<String>) {
+    internal fun installWorkerContainment(args: Array<String>): InstallationReceipt {
         val profile = completeProfilePath(args)
         if (profile == null) {
-            ContainedExecutors.installOnDedicatedProcess(
+            return ContainedExecutors.installOnDedicatedProcess(
                 ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT),
                 ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
                 ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT),
             )
-            return
         }
         val json = java.nio.file.Files
             .readString(profile)
-        ContainedExecutors.installOnDedicatedProcess(
+        return ContainedExecutors.installOnDedicatedProcess(
             *io.mazewall.profiler.api.ProfilingResult
                 .dedicatedWorkerPoliciesFromDocument(json),
         )
+    }
+
+    private fun staticWorkerPolicy(): io.mazewall.enforcer.api.PolicyDefinition<*> =
+        io.mazewall.enforcer.api.PolicyDefinition.combine(
+            ProcessPolicies.workerFilesystem(RuntimeProfile.HOTSPOT_JIT).definition,
+            ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT).definition,
+            ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT).definition,
+        )
+
+    private fun captureRequiredGeneration(
+        args: Array<String>,
+        group: String?,
+    ): io.mazewall.portal.PortalWorkerGeneration {
+        require(completeProfilePath(args) == null) { "broker readiness requires the static worker baseline" }
+        require(args.count { it == "--worker-group" } <= 1 && args.count { it == "--worker-bundle" } <= 1) { "duplicate worker generation selector" }
+        require("--worker-group" !in args || !group.isNullOrBlank()) { "missing required worker group" }
+        val manifests = io.mazewall.portal.PortalServiceManifestCatalog
+            .load(PortalWorkerMain::class.java.classLoader)
+            .filter { group == null || it.isolationGroup == group }
+        require(group == null || manifests.isNotEmpty()) { "required worker group has no real manifest" }
+        val bundle = args.indexOf("--worker-bundle").takeIf { it >= 0 }?.let {
+            java.nio.file.Path
+            .of(requireNotNull(args.getOrNull(it + 1)))
+        }
+        val actual = io.mazewall.portal.PortalWorkerGeneration
+            .capture(System.getProperty("java.class.path"), bundle, manifests)
+        val generationIndex = args.indexOf("--worker-generation")
+        require(generationIndex >= 0 && args.count { it == "--worker-generation" } == 1) { "missing or duplicate required worker generation" }
+        require(args.getOrNull(generationIndex + 1) == "${actual.inputs}:${actual.manifests}:${actual.runtime}") { "actual worker inputs do not match required launch generation" }
+        return actual
     }
 
     internal fun completeProfilePath(args: Array<String>): java.nio.file.Path? {

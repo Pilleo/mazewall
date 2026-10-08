@@ -151,6 +151,18 @@ class PreparedPortalOperationIntegrationTest {
     }
 
     private fun configuration(limits: PortalRuntimeLimits): PortalRuntimeConfig {
+        val manifest = PortalServiceManifest(
+            PortalServiceId("owned-echo"),
+            OwnedEchoService::class.java.name,
+            "fixture.OwnedEchoImpl",
+            "fixture.OwnedEchoPortalDispatcher",
+            "builtin-echo-fixture",
+            "owned-echo",
+            PortalInstanceMode.STATELESS,
+            "restricted",
+            "worker",
+        )
+        val fixture = ownedEchoWorkerFixture(directory, manifest)
         val bundle = directory.resolve("worker.zip")
         ZipOutputStream(Files.newOutputStream(bundle)).use { zip ->
             System.getProperty("io.mazewall.portal.worker.classpath").split(java.io.File.pathSeparator).forEachIndexed { index, file ->
@@ -160,20 +172,11 @@ class PreparedPortalOperationIntegrationTest {
                 Files.copy(path, zip)
                 zip.closeEntry()
             }
+            zip.putNextEntry(ZipEntry("lib/owned-echo-fixture.jar"))
+            Files.copy(fixture, zip)
+            zip.closeEntry()
         }
         val digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(bundle)).joinToString("") { "%02x".format(it) }
-        val manifest =
-            PortalServiceManifest(
-                PortalServiceId("owned-echo"),
-                OwnedEchoService::class.java.name,
-                "fixture.OwnedEchoImpl",
-                "fixture.OwnedEchoPortalDispatcher",
-                "builtin-echo-fixture",
-                "owned-echo",
-                PortalInstanceMode.STATELESS,
-                "restricted",
-                "worker",
-            )
         return PortalRuntimeConfig(listOf(manifest), mapOf("worker" to PortalWorkerArtifact(bundle, digest)), directory.resolve("cache"), mapOf("restricted" to PortalWorkerProfile()), limits = limits)
     }
 }

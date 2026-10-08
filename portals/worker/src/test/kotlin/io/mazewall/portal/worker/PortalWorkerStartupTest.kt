@@ -7,12 +7,150 @@ import java.io.IOException
 
 class PortalWorkerStartupTest {
     @Test
+    fun `receipt lease remains owned through ready and transport physical end`() {
+        val events = mutableListOf<String>()
+        val receipt = successfulReceipt()
+        attachLease(receipt) { events += "receipt-close" }
+        PortalWorkerMain.runWorker(
+            transport(events),
+            installContainment = { receipt },
+            createDispatcher = { PortalWorkerDispatcher { _, _, _ -> ByteArray(0) } },
+            publishReady = { actual ->
+                assertSame(receipt, actual)
+                events += "ready"
+            },
+        )
+        assertEquals(listOf("ready", "receive", "close", "receipt-close"), events)
+        receipt.close()
+        assertEquals(1, events.count { it == "receipt-close" })
+    }
+
+    @Test
+    fun `missing partial thread only and policy mismatched evidence never enters guest`() {
+        val policy = successfulReceipt().requestedPolicy
+        val invalid = listOf(
+            io.mazewall.enforcer.api
+                .InstallationReceipt(
+                    false,
+                    policy,
+                    landlockApplied = true,
+                    progress = io.mazewall.enforcer.api
+                    .InstallationProgress(false, true, true),
+                ),
+            io.mazewall.enforcer.api
+                .InstallationReceipt(
+                    true,
+                    policy,
+                    landlockApplied = false,
+                    progress = io.mazewall.enforcer.api
+                    .InstallationProgress(true, false, true),
+                ),
+            io.mazewall.enforcer.api
+                .InstallationReceipt(true, policy, landlockApplied = true, progress = null),
+            io.mazewall.enforcer.api
+                .InstallationReceipt(
+                    true,
+                    policy,
+                    landlockApplied = true,
+                    progress = io.mazewall.enforcer.api
+                    .InstallationProgress(true, true, false),
+                ),
+        )
+        invalid.forEach { receipt ->
+            val events = mutableListOf<String>()
+            attachLease(receipt) { events += "receipt-close" }
+            assertThrows(IllegalStateException::class.java) {
+                PortalWorkerMain.runWorker(transport(events), { receipt }, { error("guest entered") }, { error("early readiness") })
+            }
+            assertEquals(listOf("close", "receipt-close"), events)
+        }
+        val events = mutableListOf<String>()
+        assertThrows(IllegalStateException::class.java) {
+            PortalWorkerMain.runWorker(
+                transport(events),
+                { successfulReceipt() },
+                { error("wrong-policy guest entered") },
+                { error("early readiness") },
+                requiredPolicy = {
+                    io.mazewall.enforcer.api
+                    .PolicyDefinition<io.mazewall.enforcer.api.PolicyScope.ProcessWideSafe>(allowNonThreadClone = true)
+                },
+            )
+        }
+        assertEquals(listOf("close"), events)
+    }
+
+    @Test
+    fun `fatal ready failure retires actual receipt and preserves cleanup evidence`() {
+        val events = mutableListOf<String>()
+        val receipt = successfulReceipt()
+        val fatal = AssertionError("ready failed")
+        val cleanup = IOException("receipt failed")
+        attachLease(receipt) {
+            events += "receipt-close"
+            throw cleanup
+        }
+        assertSame(
+            fatal,
+            assertThrows(AssertionError::class.java) {
+            PortalWorkerMain.runWorker(transport(events), { receipt }, { PortalWorkerDispatcher { _, _, _ -> ByteArray(0) } }, { throw fatal })
+        },
+        )
+        assertEquals(listOf("close", "receipt-close"), events)
+        assertEquals(listOf(cleanup), fatal.suppressed.toList())
+    }
+
+    // The receipt's registration constructor is enforcer-internal. Attach only a test retirement
+    // observer to the actual receipt; no replacement receipt or production lifecycle hook is used.
+    private fun attachLease(
+        receipt: io.mazewall.enforcer.api.InstallationReceipt,
+        close: () -> Unit,
+    ) {
+        receipt.javaClass
+            .getDeclaredField("supervisorRegistration")
+            .also { it.isAccessible = true }
+            .set(receipt, AutoCloseable(close))
+    }
+
+    @Test
+    fun `incomplete real receipt rejects before guest construction and readiness`() {
+        val events = mutableListOf<String>()
+        val failure = IllegalStateException("seccomp installation failed")
+        val receipt = io.mazewall.enforcer.api.InstallationReceipt(
+            processWide = true,
+            requestedPolicy = io.mazewall.enforcer.api
+                .PolicyDefinition<io.mazewall.enforcer.api.PolicyScope.ProcessWideSafe>(),
+            installed = false,
+            landlockApplied = true,
+            failure = failure,
+        )
+        assertSame(
+            failure,
+            assertThrows(IllegalStateException::class.java) {
+            PortalWorkerMain.runWorker(
+                transport(events),
+                installContainment = { receipt },
+                createDispatcher = {
+                    events += "guest"
+                    PortalWorkerDispatcher { _, _, _ -> ByteArray(0) }
+                },
+                publishReady = { events += "ready" },
+            )
+        },
+        )
+        assertEquals(listOf("close"), events)
+    }
+
+    @Test
     fun `required parent setup precedes containment and every guest initialization`() {
         val events = mutableListOf<String>()
         PortalWorkerMain.runWorker(
             transport(events),
             authorizeParent = { events += "parent" },
-            installContainment = { events += "containment" },
+            installContainment = {
+                events += "containment"
+                successfulReceipt()
+            },
             createDispatcher = {
                 events += "guest"
                 PortalWorkerDispatcher { _, _, _ -> ByteArray(0) }
@@ -47,7 +185,10 @@ class PortalWorkerStartupTest {
         val transport = transport(events)
         PortalWorkerMain.runWorker(
             transport,
-            installContainment = { events += "containment" },
+            installContainment = {
+                events += "containment"
+                successfulReceipt()
+            },
             createDispatcher = {
                 events += "guest"
                 PortalWorkerDispatcher { _, _, _ -> ByteArray(0) }
@@ -72,7 +213,10 @@ class PortalWorkerStartupTest {
                 assertThrows(AssertionError::class.java) {
                 PortalWorkerMain.runWorker(
                     transport(events, cleanup),
-                    installContainment = { step("containment") },
+                    installContainment = {
+                        step("containment")
+                        successfulReceipt()
+                    },
                     createDispatcher = {
                         step("guest")
                         PortalWorkerDispatcher { _, _, _ -> ByteArray(0) }
@@ -87,6 +231,16 @@ class PortalWorkerStartupTest {
             if (failedStage != "ready") assertFalse("ready" in events)
         }
     }
+
+    private fun successfulReceipt() =
+        io.mazewall.enforcer.api.InstallationReceipt(
+        processWide = true,
+        requestedPolicy = io.mazewall.enforcer.api
+            .PolicyDefinition<io.mazewall.enforcer.api.PolicyScope.ProcessWideSafe>(),
+        landlockApplied = true,
+        progress = io.mazewall.enforcer.api
+            .InstallationProgress(true, true, true),
+    )
 
     private fun transport(
         events: MutableList<String>,

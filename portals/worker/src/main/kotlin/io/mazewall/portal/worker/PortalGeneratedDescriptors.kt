@@ -3,14 +3,18 @@ package io.mazewall.portal.worker
 import io.mazewall.portal.PortalServiceManifestCatalog
 
 /** Resolves generated manifests and dispatchers before a worker initializes a guest implementation. */
-internal fun generatedManifestEntries(loader: ClassLoader): List<String> {
-    val manifests = PortalServiceManifestCatalog.load(loader)
+internal fun generatedManifestEntries(
+    loader: ClassLoader,
+    group: String? = null,
+): List<String> {
+    val manifests = PortalServiceManifestCatalog.load(loader).filter { group == null || it.isolationGroup == group }
+    require(group == null || manifests.isNotEmpty()) { "required worker group has no generated manifests" }
     manifests
         .groupBy { it.isolationGroup }
-        .forEach { (group, members) ->
+        .forEach { (manifestGroup, members) ->
             val launchShapes = members.map { Triple(it.workerArtifact, it.policyProfile, it.instanceMode) }.toSet()
             require(launchShapes.size == 1) {
-                "portal worker isolation group $group has incompatible worker artifact, policy profile, or instance mode"
+                "portal worker isolation group $manifestGroup has incompatible worker artifact, policy profile, or instance mode"
             }
         }
     return manifests.map { manifest ->
@@ -33,10 +37,13 @@ internal fun generatedManifestEntries(loader: ClassLoader): List<String> {
 }
 
 /** Strictly publish every generated manifest entry before the worker accepts a request. */
-internal fun PortalDispatcherTable.Builder.bootstrapGeneratedManifests(loader: ClassLoader): Int {
-    val entries = generatedManifestEntries(loader)
+internal fun PortalDispatcherTable.Builder.bootstrapGeneratedManifests(
+    loader: ClassLoader,
+    group: String? = null,
+): Int {
+    val entries = generatedManifestEntries(loader, group)
     if (entries.isEmpty()) return 0
-    val manifests = PortalServiceManifestCatalog.load(loader)
+    val manifests = PortalServiceManifestCatalog.load(loader).filter { group == null || it.isolationGroup == group }
     val factories =
         manifests
             .map { manifest ->
@@ -56,8 +63,9 @@ internal fun bootstrapWorkerDispatchers(
     builder: PortalDispatcherTable.Builder,
     legacyEntries: String?,
     loader: ClassLoader,
+    group: String? = null,
 ): Int {
-    val manifestEntries = builder.bootstrapGeneratedManifests(loader)
+    val manifestEntries = builder.bootstrapGeneratedManifests(loader, group)
     return if (manifestEntries > 0) manifestEntries else builder.bootstrapGenerated(legacyEntries, loader)
 }
 

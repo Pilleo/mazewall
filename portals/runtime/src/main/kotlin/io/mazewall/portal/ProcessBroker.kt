@@ -48,6 +48,7 @@ public class ProcessBroker internal constructor(
     private val cgroupRoot: java.nio.file.Path? = null,
     private val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
     private val instanceMode: PortalInstanceMode = PortalInstanceMode.STATELESS,
+    private val workerLaunch: PortalWorkerLaunch? = null,
 ) : AutoCloseable {
     init {
         require(instanceMode != PortalInstanceMode.STATEFUL_SINGLETON || limits.workers == 1) { "stateful Portal groups require exactly one worker" }
@@ -499,13 +500,24 @@ public class ProcessBroker internal constructor(
                 .randomUUID()
                 .toString()
                 .replace("-", "")
+            val classpath = requireWorkerClasspath(workerClasspath)
+            val manifests = workerLaunch?.manifests ?: PortalWorkerGeneration.readManifests(classpath)
+            val generation = PortalWorkerGeneration.capture(classpath, workerLaunch?.artifact?.path, manifests, workerLaunch?.artifact?.sha256)
+            val group = workerLaunch?.manifests?.firstOrNull()?.isolationGroup
+            val generationArgs = listOf("--worker-generation", "${generation.inputs}:${generation.manifests}:${generation.runtime}") +
+                group?.let { listOf("--worker-group", it) }.orEmpty() +
+                workerLaunch
+                    ?.artifact
+                    ?.path
+                    ?.let { listOf("--worker-bundle", it.toString()) }
+                    .orEmpty()
             val spec =
             JvmChildSpec(
                 mainClass = "io.mazewall.portal.worker.PortalWorkerMain",
-                mainArgs = listOf(ep.path, "--parent-session", parentSession, "--parent-timeout-ms", limits.startupTimeoutMs.toString()),
+                mainArgs = listOf(ep.path, "--parent-session", parentSession, "--parent-timeout-ms", limits.startupTimeoutMs.toString()) + generationArgs,
                 maxHeap = workerProfile.maxHeapBytes?.toString() ?: "64m",
                 javaAgents = JavaAgentSelection.None,
-                classpath = requireWorkerClasspath(workerClasspath),
+                classpath = classpath,
                 extraJvmArgs = workerExtraJvmArgs,
             )
             val process = JvmChildProcess.start(launcher, spec)
@@ -527,13 +539,10 @@ public class ProcessBroker internal constructor(
             check(active()) { "portal worker acquisition cancelled before parent authorization" }
             channel.sendControl(PortalParentAuthorization(parentSession, process.pid()).frame(), deadline)
             PortalParentAuthorization.acceptAcknowledgement(channel.receiveControl(deadline), parentSession, process.pid())
-            while (pump.ready.count > 0L) {
-                check(active()) { "portal worker acquisition cancelled" }
-                val remaining = deadline.remainingMillis()
-                check(remaining > 0) { "portal worker failed to become ready before startup deadline" }
-                pump.ready.await(minOf(remaining, LIFECYCLE_POLL_SLICE_MS).toLong(), TimeUnit.MILLISECONDS)
-            }
-            check(pump.readinessObserved) { "portal worker failed readiness validation" }
+            PortalWorkerReady.accept(channel.receiveControl(deadline), PortalWorkerReady(parentSession, process.pid(), generation))
+            check(
+                PortalReadyGate.evaluate(PortalReadyPhase.WAITING, true, active(), deadline.remainingMillis() > 0) == PortalReadyPhase.READY,
+            ) { "portal worker ready after startup cancellation or deadline" }
             check(process.isAlive) { "portal worker exited during readiness handshake" }
             check(active()) { "portal worker acquisition cancelled" }
             val slot = WorkerSlot(

@@ -43,7 +43,7 @@ internal class PortalChannel(
     private val receivePayloadLimit: Int = PortalFrame.MAX_PAYLOAD,
     private val capabilityLimit: Int = PortalFrame.MAX_FDS,
 ) : AutoCloseable {
-    private companion object {
+    internal companion object {
         const val DEFAULT_TIMEOUT_MS = 30_000L
         const val MAX_CONTROL_BYTES = 512
     }
@@ -100,7 +100,9 @@ internal class PortalChannel(
         frame: PortalFrame,
         deadline: Deadline,
     ) {
-        require(frame.method == PortalParentAuthorization.METHOD && frame.requestId == 0 && frame.fdCount == 0 && frame.payload.size <= MAX_CONTROL_BYTES) { "invalid startup control frame" }
+        require(frame.method in listOf(PortalParentAuthorization.METHOD, PortalWorkerReady.METHOD) && frame.requestId == 0 && frame.fdCount == 0 && frame.payload.size <= MAX_CONTROL_BYTES) {
+            "invalid startup control frame"
+        }
         terminalOnFailure(deadline) { writeFrame(frame, deadline) }
     }
 
