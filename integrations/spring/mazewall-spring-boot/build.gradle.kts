@@ -20,6 +20,8 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-test")
     testImplementation("org.springframework.boot:spring-boot-autoconfigure")
     testImplementation("org.assertj:assertj-core")
+    testImplementation("jakarta.annotation:jakarta.annotation-api")
+    testImplementation("javax.annotation:javax.annotation-api:1.3.2")
     testImplementation("com.h2database:h2")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -27,6 +29,10 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    doFirst {
+        // Resolve the already-owned test task classpath at execution, excluding every test output.
+        systemProperty("mazewall.spring.publicCompileClasspath", (classpath - sourceSets.test.get().output).asPath)
+    }
 }
 
 publishing {

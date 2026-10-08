@@ -22,7 +22,9 @@ public final class SpringSecurityMethodAdvice implements MethodInterceptor, Auth
     private static final String[] UNSUPPORTED = {
         "org.springframework.security.access.prepost.PreFilter", "org.springframework.security.access.prepost.PostFilter",
         "org.springframework.security.access.annotation.Secured", "jakarta.annotation.security.RolesAllowed",
-        "javax.annotation.security.RolesAllowed", "org.springframework.security.authorization.method.HandleAuthorizationDenied"
+        "javax.annotation.security.RolesAllowed", "jakarta.annotation.security.DenyAll", "jakarta.annotation.security.PermitAll",
+        "javax.annotation.security.DenyAll", "javax.annotation.security.PermitAll",
+        "org.springframework.security.authorization.method.HandleAuthorizationDenied"
     };
     private final AuthorizationManagerBeforeMethodInterceptor before = AuthorizationManagerBeforeMethodInterceptor.preAuthorize();
     private final AuthorizationManagerAfterMethodInterceptor after = AuthorizationManagerAfterMethodInterceptor.postAuthorize();

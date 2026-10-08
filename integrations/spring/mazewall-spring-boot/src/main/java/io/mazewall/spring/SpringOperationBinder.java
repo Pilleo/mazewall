@@ -79,18 +79,18 @@ public final class SpringOperationBinder {
                 : new BoundInvocationInterceptor((ManagedRuntimeDispatcher) dispatcher, jdbcGuard));
     }
 
-    /** Uncontained host-only proof of Spring binding; never native/protected readiness. */
-    public static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
+    /** Package-private test-only uncontained binding characterization; never a public required-operation entry. */
+    static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
             InvocationDispatcher dispatcher, ReviewedOperationArtifact artifact) {
         return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, null, null);
     }
 
-    public static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
+    static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
             InvocationDispatcher dispatcher, ReviewedOperationArtifact artifact, SpringTransactionGuard jdbcGuard) {
         return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, Objects.requireNonNull(jdbcGuard), null);
     }
 
-    public static SpringOperationBinder forTrustedHostCharacterizationInCommonDomain(ConfigurableListableBeanFactory beans,
+    static SpringOperationBinder forTrustedHostCharacterizationInCommonDomain(ConfigurableListableBeanFactory beans,
             InvocationDispatcher dispatcher, ReviewedOperationArtifact domainArtifact,
             ReviewedOperationArtifact operation, SpringTransactionGuard jdbcGuard) {
         requireSameFixedDomain(domainArtifact, operation);

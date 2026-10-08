@@ -40,7 +40,10 @@ or nested framework proxies are still unsupported and reject.
 
 Only standard synchronous `@PreAuthorize`/`@PostAuthorize` with upstream default
 expression handling is supported. Filtering, other annotation families and denial-return
-handlers reject at binding/recheck before target entry. Effective rollback rules must
+handlers reject at binding/recheck before target entry. This includes JSR-250
+declarations from both Jakarta and Javax namespaces:
+`RolesAllowed`, `DenyAll` and `PermitAll`; unsupported declarations are never silently
+ignored, even when their apparent intent is permissive. Effective rollback rules must
 roll back actual upstream AccessDeniedException/AuthorizationDeniedException; suppressing
 rules reject. Post-authorized methods require REQUIRED/REQUIRES_NEW/NESTED/MANDATORY,
 which establish/require a real physical JDBC transaction before target entry. SUPPORTS,

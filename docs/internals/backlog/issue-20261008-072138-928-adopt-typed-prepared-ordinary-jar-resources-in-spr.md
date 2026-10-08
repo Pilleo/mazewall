@@ -53,6 +53,16 @@ fixtures pass run-e2cac71d3ddf with real postauth SQL rollback, clean context af
 success/denial/error/cancel, retained owners and actual physical retirement. Required
 native failures never skip/fallback. Independent task9 review and Boot/demo gates stay open.
 
+**Review round1 (base9932b147):** I1 missing Jakarta/Javax DenyAll/PermitAll caused
+actual required target entry and committed H2 SQL; eight method/type cases reproduced
+with body1/SQL1 in run-d199bf5f3125 and pass with zero body/SQL effects after the four
+names are included (run-80b923c52e1c). I2 public binder host factories allowed uncontained
+required annotation binding; foreign-package Java compilation reproduced the public
+escape in the same RED run. All three forms are now package-private/test-only; public
+binding requires genuine typed ownership. The S0 public structural uncontained seam
+remains explicitly outside required binding. Final round1 host/API checks and pending
+native/rereview evidence are recorded in task9 report; issue stays open, no index edits.
+
 **Side effects:** approved optional-adapter migration removes the metadata-only lifecycle
 constructor and renames the host hash helper to classResourceSha256. No core ABI or
 dependency delta in typed adoption; optional S3 adds framework compile-only/test-only

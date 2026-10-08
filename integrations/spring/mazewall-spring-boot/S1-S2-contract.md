@@ -83,7 +83,10 @@ bytecode under agents/redefinition, already-open descriptors/mappings, shared he
 and uncontrolled mount aliases are not attested. The supported first-party deployment
 is trusted immutable ordinary JARs with no redefinition and a reviewed supported loader.
 
-Host characterization factories remain explicitly unprotected. Their tests prove
+Required-binding host characterization factories are package-private and test-only;
+they are not public annotation-binding entry points. Public required binding always
+requires a genuine-owner lifecycle. The public S0 structural host seam remains explicitly
+uncontained and does not supply reviewed required-annotation binding. Internal tests prove
 Spring behavior and state-machine semantics. The separate published
 [`spring-jdbc` consumer](../../../tests/consumers/spring-jdbc/README.md) supplies the
 ordinary-JAR native adoption proof. Its optional Security native variant and
