@@ -32,9 +32,20 @@ timeout before admission; non-filesystem domains retain their direct admission p
 Descriptors and the ruleset remain owned until workers physically retire. A failed
 generation stops admission; cooperative cancellation or caller-visible completion
 does not release its resources. Incomplete drain retains live owners. Stopped failed
-generations retire on the trusted manager before explicit recreation. Cleanup attempts
-all independent releases, retains failures, and uses existing `ResourceRetirement` /
-`CleanupFailures` fatal-first ordering. Closing never removes a living worker's filters.
+generations must finish prepared cleanup before explicit recreation. Each filesystem
+generation has one retained `PreparedRetirement` platform thread, started by the trusted
+manager before validation/worker setup. It performs no target execution or installation.
+On failure/drain it waits for actual executor termination and joins every physical
+worker, then acquires the public operation owner's validation monitor before releasing
+its shared resource set and ruleset. External/manager validation and a stalled close can
+block this cleanup owner, but never the drain caller: drain only joins it within the
+same absolute deadline and reports Incomplete while cleanup lives. The liveWorkers
+count includes this physical cleanup owner, as it already includes the runtime manager.
+No descriptor is closed underneath validation. Caller interruption cannot forget a live
+cleanup owner. Cleanup attempts all independent releases, retains failures, and uses
+existing `ResourceRetirement` / `CleanupFailures` fatal-first ordering. Native thread-start
+failure keeps rollback on the registered trusted manager; a blocked rollback remains
+visible as incomplete manager/cleanup ownership. Closing never removes living filters.
 
 ## Rights and explicit read-only recipes
 
@@ -101,11 +112,18 @@ after retirement, validation rejects the closed owner. Resource generation inclu
 requested/resolved paths, filesystem object keys, grant kinds, strict-file content
 hashes, selected class name, and selected implementation object/hash. It is an opaque
 deployment-generation identity, not a portable content-only release identifier.
+The strict recipe set is frozen once before acquisition; capture, hash/generation and
+ABI3 presence checks all derive from that same snapshot, never from later mutable input.
+Standalone validate/unconsumed close are synchronous operations without a deadline API;
+managed drain does not synchronously invoke their blocking retirement operations.
 
 ## Implementation origin and exact limits
 
 The supported implementation is an ordinary finished file JAR, maximum 256 MiB,
-loaded by the application loader or an ordinary, unsubclassed `URLClassLoader`.
+loaded by the exact bootstrap-defined OpenJDK `jdk.internal.loader.ClassLoaders$AppClassLoader`
+that is the JVM system loader, or an ordinary, unsubclassed `URLClassLoader`. Identity
+as the system loader alone is insufficient: a configured custom system loader rejects
+even if it supplies matching ordinary-JAR URLs, resource bytes and CodeSource metadata.
 The selected class's code source and class-resource URL must agree with the pinned
 JAR. Bounded loader resource bytes (maximum class 16 MiB) must match its JAR entry.
 JAR bytes are hashed through the pinned descriptor, and hashes are rechecked before
@@ -117,6 +135,12 @@ not represented by this ordinary-entry check, and custom loaders reject explicit
 Exploded *read directory grants* still work through ordinary preparation; they are not
 exploded actual-implementation attestation. Supporting other packaging needs a scoped
 extension and native/packaged acceptance, not a hash of a claimed label.
+These are still real combined Spring/Boot release requirements, not requirements erased
+by this ordinary-JAR slice. A follow-up must resolve actual nested/exploded byte/resource
+origins and supported loader behavior through retained genuine owners, preserve the
+typed additive seam, and prove executable Boot/exploded deployments before claiming
+that release gate closed. No platform/layout extension has been required for the
+ordinary-JAR review fixes.
 
 O_PATH pins the object used for rules, **not immutable content**. Hashes detect observed
 changes but cannot prevent a trusted sibling from modifying an inode between validation
@@ -140,11 +164,20 @@ executors remain outside this thread-scoped boundary.
 - `PreparedOperationResourcesTest`: real compiled JAR and selected loader, actual SHA,
   identical-byte object replacement, stale configuration/member and ABI2 rejection,
   inherited method from a different implementation artifact rejected.
+- `PreparedSystemLoaderReviewTest`: a disposable custom system loader defines different
+  bytes while serving original reviewed JAR resources; rejection plus ordinary JDK
+  application-loader acceptance. Mutable strict-set clearing during genuine native
+  acquisition remains rejected on ABI2 despite blocking named truncate syscalls.
+- `PreparedRetirementTest`: actual worker/validator lifetime, interrupted cleanup,
+  retained genuine descriptors and fatal-first close outcome without false completion.
 - Disposable `ExactClasspathGrantNativeTest`, `CanonicalPolicyArtifactNativeTest` and
   `PreparedOperationNativeTest`: sibling denial, exact pinned artifact/replacement,
   actual reviewed selected JAR, template mutation/removal/rename denial, reviewed output
   create/truncate/cross-directory rename/remove, retirement, and preopened write capability
   remaining outside the boundary followed by stale-snapshot rejection.
+  Review fixtures additionally cover bounded external/manager validation stalls,
+  retained entire FD/ruleset hierarchy, blocked genuine close/fatal outcome, and both
+  required workers' EPERM installation failures followed by real-owner retirement.
 
 Focused ABI and architecture/Detekt checks accompany the slice. Full-build/container,
 combined framework, packaged Boot and distribution gates remain coordinator-owned.

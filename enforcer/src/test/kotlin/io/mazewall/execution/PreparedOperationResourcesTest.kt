@@ -5,7 +5,12 @@ import io.mazewall.enforcer.api.OperationAdapter
 import io.mazewall.enforcer.api.OperationBinding
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.lifecycle.OpenFlags
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.NativeFileSystem
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.net.URLClassLoader
@@ -115,5 +120,43 @@ class PreparedOperationResourcesTest {
             it.closeEntry()
         }
         return jar
+    }
+
+    @Test
+    fun `mutable strict recipe cleared during acquisition still rejects ABI2 open truncate gap`() {
+        val jar = implementationJar()
+        val strict = mutableSetOf(jar)
+        val real = LinuxNative.snapshot()
+        val engine = object : NativeEngine by real {
+            override val fileSystem = object : NativeFileSystem by real.fileSystem {
+                override fun open(
+                    path: ManagedSegment,
+                    flags: OpenFlags,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    strict.clear()
+                    return real.fileSystem.open(path, flags)
+                }
+            }
+        }
+        LinuxNative.setEngine(engine)
+        try {
+            URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
+                val policy = WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.HOTSPOT_JIT)
+                    .allowFsRead(jar)
+                    .block(Syscall.RENAME, Syscall.LINK, Syscall.TRUNCATE, Syscall.FTRUNCATE, Syscall.IOCTL)
+                    .build()
+                val resolved = PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, loader.loadClass("fixture.Operation"), strict)
+                try {
+                    assertEquals(0, strict.size)
+                    val binding = OperationBinding("operation", OperationAdapter.CALLABLE, resolved.implementationSha256, resolved.resourceGeneration, mapOf("entryPoint" to "call()I"))
+                    assertFailsWith<IllegalArgumentException> { resolved.claim(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy), LinuxNative.snapshot(), 2) }
+                } finally {
+                    resolved.retire()
+                }
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
     }
 }

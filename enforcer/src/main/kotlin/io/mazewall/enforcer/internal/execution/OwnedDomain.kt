@@ -7,6 +7,7 @@ import io.mazewall.enforcer.api.InstallationReceipt
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.execution.DomainLimits
 import io.mazewall.enforcer.api.execution.InvocationHandle
+import io.mazewall.platform.fd.ResourceRetirement
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
@@ -52,8 +53,19 @@ internal class OwnedDomain(
         },
         ThreadPoolExecutor.AbortPolicy(),
     )
+    private val retirement = if (preparedLandlock != null || preparedOperation != null) {
+        PreparedRetirement(name + "resource-retirement", ::awaitPhysicalWorkers, ::releasePreparedResources, ::recordCleanupFailure)
+    } else {
+        null
+    }
 
     fun prepare(deadline: Deadline) {
+        retirement?.let { owner ->
+            ResourceRetirement.runWithRollback({ owner.start() }, {
+                executor.shutdownNow()
+                owner.releaseUnstarted()
+            })
+        }
         validateResources()
         executor.prestartAllCoreThreads()
         if (!startup.await(deadline.remainingNanos(), TimeUnit.NANOSECONDS)) fail(TimeoutException("Required worker preparation did not finish"))
@@ -134,6 +146,7 @@ internal class OwnedDomain(
             recorded
         }
         executor.shutdownNow()
+        retirement?.request()
         pending.toList().forEach { it.generationFailed(first) }
     }
 
@@ -142,32 +155,53 @@ internal class OwnedDomain(
             phase = GenerationLifecycle.evaluate(phase, GenerationEvent.DRAIN)
         }
         executor.shutdown()
+        retirement?.request()
     }
 
     fun awaitRetirement(deadline: Deadline) {
         executor.awaitTermination(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
         threads.forEach { deadline.join(it) }
+        retirement?.await(deadline)
         retireIfStopped()
     }
 
-    @Suppress("TooGenericExceptionCaught") // physical retirement owns every prepared cleanup attempt
     fun retireIfStopped() {
-        if (retired()) {
-            synchronized(lock) {
-            if (phase != GenerationPhase.CLOSED) {
-                try {
-                    preparedLandlock?.close()
-                } catch (cleanup: Throwable) {
-                    recordCleanupFailure(cleanup)
-                }
-                try {
-                    preparedOperation?.retire()
-                } catch (cleanup: Throwable) {
-                    recordCleanupFailure(cleanup)
-                }
-                phase = GenerationLifecycle.evaluate(phase, GenerationEvent.RETIRED)
-            }
+        if (physicalWorkersStopped()) {
+            retirement?.request()
+            if (retired()) synchronized(lock) { phase = GenerationLifecycle.evaluate(phase, GenerationEvent.RETIRED) }
         }
+    }
+
+    private fun releasePreparedResources() {
+        val cleanup = ResourceRetirement()
+        // Claim the public owner's validation monitor before releasing its shared resource set.
+        // A pending external validation must retain the complete descriptor/ruleset hierarchy.
+        cleanup.attempt { preparedOperation?.retire() }
+        cleanup.attempt { preparedLandlock?.close() }
+        cleanup.finish()
+    }
+
+    private fun awaitPhysicalWorkers() {
+        var interrupted = Thread.interrupted()
+        try {
+            while (!executor.isTerminated) {
+                try {
+                    executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
+            }
+            threads.forEach { worker ->
+                while (worker.isAlive) {
+                    try {
+                        worker.join()
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    }
+                }
+            }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
         }
     }
 
@@ -185,7 +219,9 @@ internal class OwnedDomain(
         }
     }
 
-    fun retired(): Boolean = executor.isTerminated && threads.none { it.isAlive }
+    private fun physicalWorkersStopped(): Boolean = executor.isTerminated && threads.none { it.isAlive }
+
+    fun retired(): Boolean = physicalWorkersStopped() && (retirement?.finished() != false)
 
     fun permitsInlineContinuation(): Boolean =
         synchronized(lock) {
@@ -194,7 +230,7 @@ internal class OwnedDomain(
 
     fun failedRetirementPending(): Boolean = synchronized(lock) { failure != null && !retired() }
 
-    fun liveWorkers(): Int = threads.count { it.isAlive }
+    fun liveWorkers(): Int = threads.count { it.isAlive } + if (retirement?.live() == true) 1 else 0
 
     fun unfinished(): Int = pending.size
 

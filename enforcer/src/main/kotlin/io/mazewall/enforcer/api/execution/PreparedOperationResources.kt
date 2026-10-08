@@ -146,13 +146,14 @@ public class PreparedOperationResources private constructor(
             require(policy.allowMmapExec == runtime.allowsExecutableMappings) { "Policy runtime mappings contradict selected runtime" }
             val definition = policy.definition.frozenCopy()
             val native = LinuxNative.snapshot()
-            val resources = PreparedResourceSet.capture(definition, native, java.util.Set.copyOf(readOnlyPaths))
+            val strictPaths = java.util.Set.copyOf(readOnlyPaths)
+            val resources = PreparedResourceSet.capture(definition, native, strictPaths)
             var artifact: ImplementationArtifact? = null
             try {
                 val selected = ImplementationArtifact.resolve(implementation, native)
                 artifact = selected
                 require(resources.allowsRead(selected.path.resolved)) { "Selected implementation artifact lacks an exact or explicitly reviewed directory read grant" }
-                return PreparedOperationResources(runtime, definition, native, resources, selected, readOnlyPaths.isNotEmpty(), CanonicalPolicyArtifact.worker(runtime, policy).toJson())
+                return PreparedOperationResources(runtime, definition, native, resources, selected, strictPaths.isNotEmpty(), CanonicalPolicyArtifact.worker(runtime, policy).toJson())
             } catch (failure: Throwable) {
                 var primary = failure
                 try {

@@ -1,8 +1,19 @@
 package io.mazewall.enforcer.api
 
 import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.DrainReport
 import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.enforcer.api.execution.PreparedOperationResources
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.NativeFileSystem
+import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Test
 import java.net.URLClassLoader
 import java.nio.ByteBuffer
@@ -13,17 +24,47 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.Duration
 import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import java.util.jar.JarEntry
 import java.util.jar.JarOutputStream
 import javax.tools.ToolProvider
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 /** Kernel restrictions run exclusively in a disposable child, never the test worker. */
 class PreparedOperationNativeTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
-    fun `actual reviewed implementation owns exact recipes through physical retirement`() {
+    fun `actual reviewed implementation owns exact recipes through physical retirement`() = withFixture("verifyBoundOperation")
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `drain deadline retains genuine descriptor hierarchy behind external validation monitor`() = withFixture("verifyValidationDeadline", "owner")
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `drain deadline retains genuine descriptor hierarchy behind blocked manager validation`() = withFixture("verifyValidationDeadline", "manager")
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `blocked real descriptor close reports bounded incomplete and retains fatal cleanup outcome`() = withFixture("verifyBlockedFatalClose")
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `all required worker installation permission failures retire genuine resource and ruleset owners`() = withFixture("verifyAllWorkerFailures")
+
+    private fun withFixture(
+        method: String,
+        vararg arguments: String,
+    ) {
         val root = Files.createTempDirectory("bound-operation-")
         try {
             val source = Files.writeString(root.resolve("Operation.java"), "package fixture; public class Operation { public int call() { return 42; } }")
@@ -37,10 +78,215 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
             Files.writeString(root.resolve("template.txt"), "template")
             Files.writeString(root.resolve("private.txt"), "private")
             Files.createDirectory(root.resolve("output"))
-            IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyBoundOperation", root.toString())
+            IsolatedProcessTester.runIsolatedMethod(javaClass.name, method, root.toString(), *arguments)
         } finally {
             Files.walk(root).use { entries -> entries.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } }
         }
+    }
+
+    fun verifyValidationDeadline(
+        rootName: String,
+        mode: String,
+    ) {
+        val root = Path.of(rootName)
+        val jar = root.resolve("operation.jar")
+        val timeout = Duration.ofSeconds(5)
+        URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
+            val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(jar).build()
+            PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, loader.loadClass("fixture.Operation"), setOf(jar)).use { resources ->
+                val binding = OperationBinding("deadline-operation", OperationAdapter.CALLABLE, resources.implementationSha256, resources.resourceGeneration, mapOf("entryPoint" to "call()I"))
+                val document = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy), emptySet(), emptyMap())
+                val reviewed = ReviewedOperationArtifact.load(document.toJson(), TrustedPolicyReview("review", document.sha256(), emptySet()), binding)
+                ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout).use { runtime ->
+                    val domain = runtime.prepare(reviewed, DomainLimits(2, 2), resources)
+                    val descriptors = resources.resources.grants.map { it.path.descriptor }
+                    val rulesets = liveRulesetPaths()
+                    assertTrue(rulesets.isNotEmpty(), "Actual owned Landlock ruleset must remain open")
+                    val entered = CountDownLatch(1)
+                    val release = CountDownLatch(1)
+                    val actionEntered = AtomicBoolean()
+                    // Deterministic stand-in for non-interruptible I/O while the real validation
+                    // monitor is owned. Actual validation and real acquisitions precede the stall.
+                    val monitor = if (mode == "owner") resources else resources.resources
+                    val validator = Thread.ofPlatform().name("review-validation-stall").start {
+                        synchronized(monitor) {
+                            if (mode == "owner") resources.validate() else resources.resources.validate()
+                            entered.countDown()
+                            release.await()
+                        }
+                    }
+                    var submitter: Thread? = null
+                    var drainer: Thread? = null
+                    try {
+                        assertTrue(entered.await(2, TimeUnit.SECONDS))
+                        if (mode == "manager") {
+                            submitter = Thread.ofPlatform().name("review-validation-submit").start {
+                                runCatching { runtime.submit(domain, Callable { actionEntered.set(true) }) }
+                            }
+                            awaitCondition(Duration.ofSeconds(2), "manager physically blocked by resource validation") {
+                                Thread.getAllStackTraces().keys.any { it.name.startsWith("mazewall-manager-") && it.state == Thread.State.BLOCKED }
+                            }
+                        }
+                        val result = FutureTask(Callable { runtime.drain(Duration.ofMillis(50)) })
+                        drainer = Thread.ofPlatform().name("review-deadline-drain").start(result)
+                        assertIs<DrainReport.Incomplete>(result.get(1, TimeUnit.SECONDS))
+                        assertFalse(domain.resource.retired(), "Validation-dependent cleanup is not physical retirement")
+                        assertTrue(descriptors.all { it.isLiveForIo() }, "Never close live validation's genuine resource descriptors")
+                        assertTrue(rulesets.all { Files.exists(it) }, "Retain ruleset ownership with the validation-dependent generation")
+                        assertIs<DrainReport.Incomplete>(runtime.drain(Duration.ofMillis(10)))
+                    } finally {
+                        release.countDown()
+                        validator.join(3000)
+                        submitter?.join(3000)
+                        drainer?.join(3000)
+                    }
+                    assertEquals(DrainReport.Complete, runtime.drain(timeout))
+                    assertTrue(descriptors.none { it.isLiveForIo() })
+                    assertTrue(rulesets.none { Files.exists(it) && Files.readSymbolicLink(it).toString().contains("landlock") })
+                    assertFalse(actionEntered.get())
+                    assertFailsWith<IllegalStateException> { resources.validate() }
+                }
+            }
+        }
+    }
+
+    private fun liveRulesetPaths(): List<Path> =
+        Files.list(Path.of("/proc/self/fd")).use { paths ->
+        paths.filter { Files.exists(it) && Files.readSymbolicLink(it).toString().contains("landlock") }.toList()
+    }
+
+    fun verifyBlockedFatalClose(rootName: String) {
+        val jar = Path.of(rootName).resolve("operation.jar")
+        val real = LinuxNative.snapshot()
+        val target = AtomicReference<FileDescriptor<*, FdState.Open, FdOwnership.Owned>?>()
+        val closing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val fatal = AssertionError("actual close finished with fatal outcome")
+        val uncaught = AtomicReference<Throwable?>()
+        LinuxNative.setEngine(object : NativeEngine by real {
+            override val fileSystem = object : NativeFileSystem by real.fileSystem {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (fd == target.get()) {
+                        closing.countDown()
+                        release.await()
+                        real.fileSystem.close(fd).getOrThrow("actual fixture close")
+                        throw fatal
+                    }
+                    return real.fileSystem.close(fd)
+                }
+            }
+        })
+        val timeout = Duration.ofSeconds(5)
+        try {
+            URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
+                val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(jar).build()
+                val resources = PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, loader.loadClass("fixture.Operation"), emptySet())
+                val runtime = ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout)
+                try {
+                    runtime.prepare(review(resources, policy), DomainLimits(2, 2), resources)
+                    val descriptors = resources.resources.grants.map { it.path.descriptor }
+                    target.set(
+                        resources.resources.grants
+                        .first { it.path.requested == jar.toAbsolutePath() }
+                        .path.descriptor,
+                    )
+                    val rulesets = liveRulesetPaths()
+                    Thread
+                        .getAllStackTraces()
+                        .keys
+                        .single { it.name.endsWith("resource-retirement") }
+                        .uncaughtExceptionHandler =
+                        Thread.UncaughtExceptionHandler { _, failure -> uncaught.set(failure) }
+                    val drain = FutureTask(Callable { runtime.drain(Duration.ofMillis(50)) })
+                    val drainer = Thread.ofPlatform().start(drain)
+                    try {
+                        assertTrue(closing.await(2, TimeUnit.SECONDS))
+                        assertIs<DrainReport.Incomplete>(drain.get(1, TimeUnit.SECONDS))
+                        assertTrue(target.get()!!.isLiveForIo(), "Blocked genuine close must retain its acquisition")
+                        assertTrue(rulesets.all { Files.exists(it) })
+                    } finally {
+                        release.countDown()
+                        drainer.join(3000)
+                    }
+                    val outcome = assertIs<DrainReport.Incomplete>(runtime.drain(timeout))
+                    assertTrue(outcome.cleanupFailure === fatal)
+                    assertTrue(uncaught.get() === fatal)
+                    assertTrue(descriptors.none { it.isLiveForIo() })
+                    assertTrue(rulesets.none { Files.exists(it) && Files.readSymbolicLink(it).toString().contains("landlock") })
+                    val failure = assertFailsWith<io.mazewall.enforcer.api.execution.IncompleteDrainException> { runtime.close() }
+                    assertTrue(failure.cause === fatal)
+                } finally {
+                    release.countDown()
+                    resources.close()
+                    runtime.drain(timeout)
+                }
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    fun verifyAllWorkerFailures(rootName: String) {
+        val jar = Path.of(rootName).resolve("operation.jar")
+        val real = LinuxNative.snapshot()
+        val attempts = AtomicInteger()
+        LinuxNative.setEngine(object : NativeEngine by real {
+            override val raw = object : RawSyscallOperations by real.raw {
+                override fun syscall(
+                    nr: Long,
+                    a1: NativeArg,
+                    a2: NativeArg,
+                    a3: NativeArg,
+                    a4: NativeArg,
+                    a5: NativeArg,
+                    a6: NativeArg,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (nr == NativeConstants.LANDLOCK_RESTRICT_SELF_NR && Thread.currentThread().name.startsWith("mazewall-domain-")) {
+                        if (attempts.incrementAndGet() == 1) {
+                            // The canonical installer serializes Landlock under processLock.
+                            // Wait for physical worker creation, not a second syscall behind that lock.
+                            awaitCondition(Duration.ofSeconds(2), "every required physical worker started before first fault") {
+                                Thread.getAllStackTraces().keys.count { it.name.startsWith("mazewall-domain-") && !it.name.endsWith("resource-retirement") } == 2
+                            }
+                        }
+                        return LinuxNative.SyscallResult.Error(1, -1L)
+                    }
+                    return real.raw.syscall(nr, a1, a2, a3, a4, a5, a6)
+                }
+            }
+        })
+        val timeout = Duration.ofSeconds(5)
+        try {
+            URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
+                val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(jar).build()
+                PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, loader.loadClass("fixture.Operation"), emptySet()).use { resources ->
+                    val descriptors = resources.resources.grants.map { it.path.descriptor }
+                    ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout).use { runtime ->
+                        val failure = assertFailsWith<IllegalStateException> { runtime.prepare(review(resources, policy), DomainLimits(2, 2), resources) }
+                        assertTrue(
+                            generateSequence<Throwable>(failure) { it.cause }.any { it.message?.contains("errno=1") == true },
+                            "Permission rejection must retain errno in original cause chain: $failure",
+                        )
+                        assertEquals(2, attempts.get())
+                        assertEquals(DrainReport.Complete, runtime.drain(timeout))
+                        assertTrue(descriptors.none { it.isLiveForIo() })
+                        assertTrue(liveRulesetPaths().isEmpty())
+                        assertFailsWith<IllegalStateException> { resources.validate() }
+                    }
+                }
+            }
+        } finally {
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    private fun review(
+        resources: PreparedOperationResources,
+        policy: Policy<PolicyScope.ThreadLocalOnly, Uncompiled>,
+    ): ReviewedOperationArtifact {
+        val binding = OperationBinding("reviewed-operation", OperationAdapter.CALLABLE, resources.implementationSha256, resources.resourceGeneration, mapOf("entryPoint" to "call()I"))
+        val document = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy), emptySet(), emptyMap())
+        return ReviewedOperationArtifact.load(document.toJson(), TrustedPolicyReview("external-review", document.sha256(), emptySet()), binding)
     }
 
     fun verifyBoundOperation(rootName: String) {

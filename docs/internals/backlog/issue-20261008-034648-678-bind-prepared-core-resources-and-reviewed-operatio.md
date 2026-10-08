@@ -33,6 +33,18 @@ before admission. Reviewed adapter entry points remain intact. Explicit strict r
 recipes reject writable overlaps/hardlink aliases; future output uses existing directories.
 Existing ResourceRetirement/CleanupFailures preserve fatal-first rollback/cleanup.
 
+## Round 1/5 review corrections
+
+S1 excludes custom system loaders by requiring the exact bootstrap-defined ordinary
+OpenJDK AppClassLoader category/system identity or exact ordinary URLClassLoader.
+S2 freezes strict paths once and derives both captured recipes and ABI guarding from
+that snapshot. Q1 retains one manager-started physical cleanup owner per filesystem
+generation; caller drain only joins within its deadline, never waits synchronously on
+validation monitors or native release. Prepared cleanup retains the full hierarchy
+through validation and actual worker end, and reports exact fatal/error outcomes.
+Named real-loader/real-descriptor host and disposable native deadline/fault regressions
+are recorded in the appended task report. Additive Spring seam signatures remain stable.
+
 Focused host/ABI/architecture/Detekt and disposable native fixtures are recorded in
 the fleet task-5 report. See designs/enforcer/prepared-resources-design.md for exact
 rights and ownership. This issue stays open for coordinator review and remaining gates.

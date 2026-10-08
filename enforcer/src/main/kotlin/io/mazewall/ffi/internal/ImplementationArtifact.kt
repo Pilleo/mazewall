@@ -76,7 +76,10 @@ internal class ImplementationArtifact private constructor(
             artifact: Path,
         ) {
             val loader = checkNotNull(type.classLoader) { "Bootstrap implementation is not a prepared application artifact" }
-            require(loader === ClassLoader.getSystemClassLoader() || loader.javaClass == URLClassLoader::class.java) {
+            val ordinaryApplicationLoader = loader === ClassLoader.getSystemClassLoader() &&
+                loader.javaClass.classLoader == null &&
+                loader.javaClass.name == "jdk.internal.loader.ClassLoaders\$AppClassLoader"
+            require(ordinaryApplicationLoader || loader.javaClass == URLClassLoader::class.java) {
                 "Implementation classloader is unsupported; requires application loader or ordinary URLClassLoader"
             }
             check(Class.forName(type.name, false, loader) === type) { "Selected classloader does not resolve the actual implementation class" }

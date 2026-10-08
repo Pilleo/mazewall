@@ -353,6 +353,11 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.OwnedInvocation")
+            // Retained cleanup thread reports every failure and preserves fatal identity;
+            // deadline and genuine-FD retirement tests cover its physical-end boundary.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.PreparedRetirement")
             // Prepared acquisitions aggregate rollback/retirement failures and rethrow;
             // real-FD and prepared-operation tests cover failure propagation, not fallback.
             .and()
