@@ -15,17 +15,26 @@ internal class PortalGenerationCaptures {
         active: () -> Boolean,
         action: (PortalMeasurementBudget) -> T,
     ): T {
-        val capture = Capture { action(PortalMeasurementBudget(deadline, active)) }
+        val cancelled = java.util.concurrent.atomic
+            .AtomicBoolean()
+        val authority = { active() && !cancelled.get() }
+        val capture = Capture(cancelled) {
+            val budget = PortalMeasurementBudget(deadline, authority)
+            budget.check()
+            action(budget)
+        }
         owners.add(capture)
         try {
-            PortalMeasurementBudget(deadline, active).check()
+            PortalMeasurementBudget(deadline, authority).check()
             capture.thread.start()
-            while (!capture.ended.await(POLL_MS, TimeUnit.MILLISECONDS)) PortalMeasurementBudget(deadline, active).check()
-            PortalMeasurementBudget(deadline, active).check()
-            return capture.result.join().getOrThrow()
+            while (!capture.ended.await(POLL_MS, TimeUnit.MILLISECONDS)) PortalMeasurementBudget(deadline, authority).check()
+            PortalMeasurementBudget(deadline, authority).check()
+            val outcome = capture.result.join()
+            capture.resultObserved = true
+            return outcome.getOrThrow()
         } finally {
             capture.cancel()
-            if (capture.thread.state == Thread.State.NEW || capture.ended.count == 0L) owners.remove(capture)
+            if (capture.mayForget) owners.remove(capture)
         }
     }
 
@@ -35,12 +44,16 @@ internal class PortalGenerationCaptures {
         cancel()
         var fatal: Throwable? = null
         owners.toList().forEach { capture ->
-            if (capture.ended.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS)) {
+            if (capture.awaitPhysicalEnd(deadline)) {
                 owners.remove(capture)
                 val outcome = capture.result.join().exceptionOrNull()
-                if (outcome is Error) {
+                if (outcome is Error && !capture.resultObserved) {
                     fatal = io.mazewall.platform.fd.CleanupFailures
                     .merge(fatal, outcome)
+                }
+                capture.cancelFailure.get()?.let {
+                    fatal = io.mazewall.platform.fd.CleanupFailures
+                    .merge(fatal, it)
                 }
             }
         }
@@ -51,10 +64,16 @@ internal class PortalGenerationCaptures {
     internal val retainedCount: Int get() = owners.size
 
     private class Capture<T>(
+        private val cancelled: java.util.concurrent.atomic.AtomicBoolean,
         action: () -> T,
     ) {
         val ended = CountDownLatch(1)
         val result = CompletableFuture<Result<T>>()
+
+        @Volatile var resultObserved = false
+        private val cancellationEnded = CountDownLatch(1)
+        val cancelFailure = java.util.concurrent.atomic
+            .AtomicReference<Throwable?>()
         val thread: Thread = Thread.ofPlatform().daemon(true).name("portal-generation-capture").unstarted {
             try {
                 result.complete(runCatching(action))
@@ -63,7 +82,53 @@ internal class PortalGenerationCaptures {
             }
         }
 
-        fun cancel() = thread.interrupt()
+        private val cancellation = Thread.ofPlatform().daemon(true).name("portal-generation-cancel").unstarted {
+            try {
+                // Thread.interrupt may synchronously execute a channel's blocking close.
+                // Its callback is physical IO too, never startup/control-plane work.
+                cancelFailure.set(runCatching(thread::interrupt).exceptionOrNull())
+            } finally {
+                cancellationEnded.countDown()
+            }
+        }
+
+        val physicallyEnded: Boolean get() = !thread.isAlive && !cancellation.isAlive && (thread.state == Thread.State.NEW || ended.count == 0L) && cancellationEnded.count == 0L
+
+        val mayForget: Boolean get() = physicallyEnded &&
+            cancelFailure.get() == null &&
+            (resultObserved || result.getNow(null)?.exceptionOrNull() !is Error)
+
+        fun awaitPhysicalEnd(deadline: Deadline): Boolean {
+            if (!ended.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS)) return false
+            if (!cancellationEnded.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS)) return false
+            joinWithin(thread, deadline)
+            joinWithin(cancellation, deadline)
+            return physicallyEnded
+        }
+
+        private fun joinWithin(
+            owner: Thread,
+            deadline: Deadline,
+        ) {
+            val remaining = deadline.remainingMillis()
+            if (owner.isAlive && remaining > 0) owner.join(remaining.toLong())
+        }
+
+        @Suppress("TooGenericExceptionCaught") // Failed cancellation-thread acquisition must publish its actual outcome and end boundary.
+        fun cancel() {
+            if (!cancelled.compareAndSet(false, true)) return
+            if (thread.state == Thread.State.NEW || ended.count == 0L) {
+                cancellationEnded.countDown()
+            } else {
+                try {
+                    cancellation.start()
+                } catch (failure: Throwable) {
+                    cancelFailure.set(failure)
+                    cancellationEnded.countDown()
+                    throw failure
+                }
+            }
+        }
     }
 
     private companion object {

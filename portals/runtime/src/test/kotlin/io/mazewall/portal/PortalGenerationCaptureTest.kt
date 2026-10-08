@@ -14,6 +14,80 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class PortalGenerationCaptureTest {
     @Test
+    fun `completed unobserved fatal is retained when cancellation wins result delivery`() {
+        val captures = PortalGenerationCaptures()
+        val active = java.util.concurrent.atomic
+            .AtomicBoolean(true)
+        val source = java.util.concurrent.atomic
+            .AtomicReference<Thread>()
+        val fatal = AssertionError("completed but not delivered")
+        val authority = {
+            if (active.get()) {
+                true
+            } else {
+                source.get().join(1000) // Deterministically make the physical thread already ended.
+                false
+            }
+        }
+        assertThrows(IllegalStateException::class.java) {
+            captures.measure(Deadline.afterMillis(2000), authority) {
+                source.set(Thread.currentThread())
+                active.set(false)
+                throw fatal
+            }
+        }
+        assertEquals(1, captures.retainedCount)
+        assertSame(fatal, assertThrows(AssertionError::class.java) { captures.retire(Deadline.afterMillis(1000)) })
+        assertEquals(0, captures.retainedCount)
+    }
+
+    @Test
+    fun `blocking interrupt channel close callback cannot stall startup deadline or fabricate physical end`() {
+        val captures = PortalGenerationCaptures()
+        val reading = CountDownLatch(1)
+        val closing = CountDownLatch(1)
+        val releaseRead = CountDownLatch(1)
+        val releaseClose = CountDownLatch(1)
+        val channel = object : java.nio.channels.spi.AbstractInterruptibleChannel() {
+            fun read() {
+                begin()
+                try {
+                    reading.countDown()
+                    var released = false
+                    while (!released) {
+                        try {
+                            releaseRead.await()
+                            released = true
+                        } catch (_: InterruptedException) {
+                            // physical read remains
+                        }
+                    }
+                } finally {
+                    end(false)
+                }
+            }
+
+            override fun implCloseChannel() {
+                closing.countDown()
+                releaseClose.await() // FileChannel native close can likewise wait on native IO.
+            }
+        }
+        val startup = CompletableFuture.supplyAsync { runCatching { captures.measure(Deadline.afterMillis(100), { true }) { channel.read() } }.exceptionOrNull() }
+        try {
+            assertTrue(reading.await(2, TimeUnit.SECONDS))
+            assertTrue(closing.await(2, TimeUnit.SECONDS))
+            assertInstanceOf(IllegalStateException::class.java, startup.get(500, TimeUnit.MILLISECONDS), "interrupt callback is also physically owned blocking work")
+            assertEquals(1, captures.retainedCount)
+            assertFalse(captures.retire(Deadline.afterMillis(10)))
+        } finally {
+            releaseRead.countDown()
+            releaseClose.countDown()
+            startup.get(2, TimeUnit.SECONDS)
+            assertTrue(captures.retire(Deadline.afterMillis(1000)))
+        }
+    }
+
+    @Test
     fun `late fatal capture outcome remains observable at physical owner retirement`() {
         val captures = PortalGenerationCaptures()
         val entered = CountDownLatch(1)

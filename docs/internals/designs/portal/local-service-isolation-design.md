@@ -83,6 +83,9 @@ deferred to C4 concurrent pinning. Generation measurement uses bounded work and 
 absolute startup/cancellation authority. Its physical blocking-I/O task remains owned if
 interruption cannot end a filesystem operation; close remains retryable until it actually
 ends. Deadline/cancellation returns do not launch a late child when that task later completes.
+Cancellation callbacks are also physically owned asynchronous work: interrupting a channel
+may wait on native I/O in its close callback. Close joins both the measurement and callback
+threads under its budget and retains ownership while either remains alive.
 
 Profiles do not vary the process sandbox in this release. Every worker retains
 the existing fail-closed JVM filesystem allowlist, process-creation denial, and

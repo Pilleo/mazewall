@@ -170,7 +170,10 @@ This cache integrity check is separate from concurrent C4 object pinning. Host m
 uses the acquisition's absolute startup deadline and active authority, with bounded
 classpath text/count, traversal depth/entries, metadata and total bytes. Blocking I/O runs
 in a separately registered physical platform-thread owner; interruptible FileChannel reads
-are cancelled on expiry/close. Result timeout never proves physical I/O end: an operation
+are cancelled on expiry/close. Since Thread.interrupt can itself synchronously run a
+blocking channel-close callback, cancellation has its own registered physical thread;
+both capture and cancellation threads must terminate/join before ownership retires.
+Result timeout never proves physical I/O end: an operation
 which does not respond to interruption remains owned and prevents Closed until later
 retirement succeeds. Only the startup caller can launch, after a final deadline/active
 check; late measurement completion has no launch effect.
