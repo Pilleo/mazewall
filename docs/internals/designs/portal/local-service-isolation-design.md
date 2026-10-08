@@ -71,7 +71,8 @@ constructs the group dispatcher and sends a strict bounded format-1 socket ready
 The host requires the exact session, child PID, protocol and measured generation plus
 required protection evidence under the existing startup deadline. Stdout READY cannot
 substitute for this record, even after a matching parent acknowledgement. The receipt
-remains owned until the worker request loop and transport physically end; closing it
+remains owned through worker request-loop/transport end and until physical JVM shutdown,
+even if guest-created non-daemon threads outlive main or initialization fails; closing it
 does not undo the process-lifetime kernel restrictions.
 
 Profiles do not vary the process sandbox in this release. Every worker retains

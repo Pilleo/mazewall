@@ -7,6 +7,40 @@ import java.io.IOException
 
 class PortalWorkerStartupTest {
     @Test
+    fun `process receipt survives main return until actual shutdown boundary`() {
+        val events = mutableListOf<String>()
+        lateinit var shutdown: Thread
+        val lifetime = PortalWorkerProcessReceiptLifetime { shutdown = it }
+        val receipt = successfulReceipt()
+        attachLease(receipt) { events += "receipt-close" }
+        PortalWorkerMain.runWorker(transport(events), { receipt }, { PortalWorkerDispatcher { _, _, _ -> ByteArray(0) } }, { events += "ready" }, receiptLifetime = lifetime)
+        assertEquals(listOf("ready", "receive", "close"), events, "non-daemon guest threads may keep the real JVM alive after main returns")
+        shutdown.run()
+        assertEquals(listOf("ready", "receive", "close", "receipt-close"), events)
+        shutdown.run()
+        assertEquals(1, events.count { it == "receipt-close" })
+    }
+
+    @Test
+    fun `failed process startup also retains actual receipt until physical shutdown`() {
+        val events = mutableListOf<String>()
+        lateinit var shutdown: Thread
+        val lifetime = PortalWorkerProcessReceiptLifetime { shutdown = it }
+        val receipt = successfulReceipt()
+        attachLease(receipt) { events += "receipt-close" }
+        val fatal = AssertionError("guest constructor failed after starting a thread")
+        assertSame(
+            fatal,
+            assertThrows(AssertionError::class.java) {
+            PortalWorkerMain.runWorker(transport(events), { receipt }, { throw fatal }, { error("must not publish") }, receiptLifetime = lifetime)
+        },
+        )
+        assertEquals(listOf("close"), events)
+        shutdown.run()
+        assertEquals(listOf("close", "receipt-close"), events)
+    }
+
+    @Test
     fun `receipt lease remains owned through ready and transport physical end`() {
         val events = mutableListOf<String>()
         val receipt = successfulReceipt()

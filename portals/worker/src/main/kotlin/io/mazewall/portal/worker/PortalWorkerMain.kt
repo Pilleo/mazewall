@@ -41,6 +41,7 @@ public object PortalWorkerMain {
             .getProperty("io.mazewall.portal.worker.idleTimeoutMs")
             ?.toLongOrNull() ?: 30_000L
         require(idleTimeoutMs > 0) { "portal worker idle timeout must be positive" }
+        val receiptLifetime = PortalWorkerProcessReceiptLifetime()
         val sockets = RealSocketManager
         val connected = sockets.connect(args[0])
         val channel = try {
@@ -56,6 +57,7 @@ public object PortalWorkerMain {
         val group = args.indexOf("--worker-group").takeIf { it >= 0 }?.let { args.getOrNull(it + 1) }
         runWorker(
             transport,
+            receiptLifetime = receiptLifetime,
             authorizeParent = {
                 val sessionIndex = args.indexOf("--parent-session")
                 if (sessionIndex >= 0) {
@@ -127,11 +129,13 @@ public object PortalWorkerMain {
         publishReady: (InstallationReceipt) -> Unit,
         authorizeParent: () -> Unit = {},
         requiredPolicy: () -> io.mazewall.enforcer.api.PolicyDefinition<*>? = { null },
+        receiptLifetime: PortalWorkerReceiptLifetime = PortalWorkerReceiptLifetime.Execution,
     ) {
         var receipt: InstallationReceipt? = null
         val driver = try {
             authorizeParent()
             receipt = installContainment()
+            receiptLifetime.retain(receipt)
             receipt.requireInstalled()
             receipt.failure?.let { throw it }
             check(receipt.fallback == io.mazewall.enforcer.api.Platform.FallbackBehavior.FAIL) { "worker receipt forbids fallback" }
@@ -145,11 +149,25 @@ public object PortalWorkerMain {
             initialized
         } catch (failure: Throwable) {
             runCatching(transport::close).exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
-            runCatching { receipt?.close() }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
+            runCatching { receipt?.let(receiptLifetime::executionEnded) }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
             throw failure
         }
-        // Driver owns transport until the request loop physically ends. Receipt outlives that ownership.
-        requireNotNull(receipt).use { driver.run() }
+        // Main return need not end a JVM containing guest-created non-daemon threads.
+        finishWorkerExecution(driver, requireNotNull(receipt), receiptLifetime)
+    }
+
+    private fun finishWorkerExecution(
+        driver: PortalWorkerDriver,
+        actualReceipt: InstallationReceipt,
+        receiptLifetime: PortalWorkerReceiptLifetime,
+    ) {
+        val failure = runCatching { driver.run() }.exceptionOrNull()
+        val retirementFailure = runCatching { receiptLifetime.executionEnded(actualReceipt) }.exceptionOrNull()
+        if (failure != null) {
+            retirementFailure?.takeIf { it !== failure }?.let(failure::addSuppressed)
+            throw failure
+        }
+        retirementFailure?.let { throw it }
     }
 
     internal fun publishDispatcherTable(raw: String?): PortalDispatcherPublication = PortalDispatcherRegistry.publishStrict(raw)

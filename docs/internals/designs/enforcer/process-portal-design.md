@@ -154,8 +154,10 @@ threads. Older kernels fail worker startup; there is no thread-only worker basel
 Dispatcher validation and guest construction follow containment. Any initialization or readiness
 publication failure closes the owned channel, preserving the original failure and suppressing
 cleanup failures. Only after required readiness succeeds does transport ownership pass to the execution driver.
-The actual receipt is retained through the request loop and transport retirement, then closed
-on physical worker execution end; startup rejection also retires it. Receipt closure cannot
+The actual receipt is retained through the request loop and transport retirement and by a
+pre-registered JVM shutdown owner until physical process shutdown, including startup rejection.
+Main return does not prove process exit when guests create non-daemon JVM threads. In-process
+driver embeddings retire at their synchronous execution end. Receipt closure cannot
 undo installed Seccomp/Landlock, which remain for the OS process lifetime. No reconstructed
 receipt or parent-provided protection flag substitutes for actual installer evidence.
 Extra readable paths are deferred.
