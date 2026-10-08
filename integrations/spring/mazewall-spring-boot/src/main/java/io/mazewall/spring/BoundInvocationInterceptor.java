@@ -35,6 +35,7 @@ import org.springframework.transaction.interceptor.TransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.core.BridgeMethodResolver;
 
 /** Explicit S0 boundary; binding is not manifest approval or protected readiness. */
 public final class BoundInvocationInterceptor implements MethodInterceptor {
@@ -42,6 +43,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
     private final InvocationDispatcher dispatcher;
     private final Advisor dispatchAdvisor = new DispatchAdvisor(this);
     private volatile Placement proof;
+    private Runnable bindingGuard = () -> {};
 
     /** Production construction requires the final adapter backed by an actual owned runtime/domain. */
     public BoundInvocationInterceptor(InvocationDispatcher dispatcher) {
@@ -85,6 +87,21 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         return proxy;
     }
 
+    /** Bind the actual registered frozen proxy; configuration installs this guard before publication. */
+    synchronized void bindRegisteredProxy(Object proxy, List<Method> methods) throws Exception {
+        if (!(proxy instanceof Advised advised) || !advised.isFrozen() || advised.getAdvisors().length != 4
+                || advised.getAdvisors()[0] != dispatchAdvisor) {
+            throw rejected("Registered frozen proxy must already have this dispatch guard and reviewed advice");
+        }
+        Advisor[] retained = advised.getAdvisors();
+        bind(proxy, retained[1], retained[2], retained[3], methods);
+    }
+
+    synchronized void requireBindingGuard(Runnable guard) {
+        if (proof != null) throw rejected("Cannot replace binding guard after binding");
+        bindingGuard = Objects.requireNonNull(guard);
+    }
+
     // Module-internal structural validator. Public entry owns fresh proxy construction,
     // so an earlier cached chain cannot disagree with the binding snapshot.
     synchronized void bind(Object proxy, Advisor transaction, Advisor diagnosis,
@@ -116,9 +133,10 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         Set<Method> approved = Set.copyOf(methods);
         if (approved.isEmpty()) throw rejected("No approved synchronous methods");
         for (Method method : approved) {
+            Method implementation = BridgeMethodResolver.findBridgedMethod(AopUtils.getMostSpecificMethod(method, target.getClass()));
             if (!method.getDeclaringClass().isInterface()
                     || !advised.isInterfaceProxied(method.getDeclaringClass())
-                    || !materialized(method.getReturnType()) || method.isSynthetic()
+                    || !materialized(implementation.getReturnType()) || (method.isSynthetic() && !method.isBridge())
                     || Arrays.stream(method.getParameterTypes()).anyMatch(
                             type -> type.getName().equals("kotlin.coroutines.Continuation"))) {
                 throw rejected("Unproved method or result shape: " + method);
@@ -134,7 +152,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         Map<Method, TransactionSnapshot> definitions = approved.stream().collect(Collectors.toUnmodifiableMap(
                 method -> method, method -> transactionDefinition(attributes, method, target.getClass())));
         Placement candidate = new Placement(proxy, advised, source, target, advisors, advice,
-                approved, tx, manager, attributes, definitions);
+                approved, tx, manager, attributes, definitions, bindingGuard);
         candidate.validate();
         proof = candidate;
     }
@@ -247,8 +265,9 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
     private record Placement(Object proxy, Advised advised, TargetSource source, Object target,
                              List<Advisor> advisors, List<Object> advice, Set<Method> methods,
                              TransactionInterceptor transaction, TransactionManager manager,
-                             TransactionAttributeSource attributes, Map<Method, TransactionSnapshot> definitions) {
+                             TransactionAttributeSource attributes, Map<Method, TransactionSnapshot> definitions, Runnable bindingGuard) {
         void validate() {
+            bindingGuard.run();
             if (!advised.isFrozen() || advised.getTargetSource() != source
                     || advised.isExposeProxy() || advised.isPreFiltered()) {
                 throw rejected("Proxy is mutable, replaced, exposed or prefiltered");
