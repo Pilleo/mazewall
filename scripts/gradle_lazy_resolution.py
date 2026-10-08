@@ -338,45 +338,59 @@ def resolve_source_path(path: Path) -> tuple[Path, bool]:
     """Resolve aliases componentwise without accessing external/private targets."""
     import os
     import stat
+    from collections import deque
 
     root = Path.cwd().resolve()
     requested = path
-    candidate = Path(os.path.abspath(path))
     links = set()
+
+    def anchored_parts(raw: str) -> list[str]:
+        parts = [part for part in raw.split("/") if part]
+        if raw.startswith("/"):
+            prefix = list(root.parts[1:])
+            if parts[:len(prefix)] != prefix:
+                raise ValueError("alias leaves checkout")
+            parts = parts[len(prefix):]
+        return parts
+
     try:
-        while True:
-            relative = candidate.relative_to(root)
-            ancestor = root
-            restarted = False
-            for position, component in enumerate(relative.parts):
-                ancestor /= component
-                metadata = os.lstat(ancestor)
-                if not stat.S_ISLNK(metadata.st_mode):
-                    continue
+        pending = deque(anchored_parts(os.fspath(path)))
+        cursor = root
+        while pending:
+            part = pending.popleft()
+            if part == ".":
+                continue
+            if part == "..":
+                if cursor == root:
+                    raise ValueError("alias leaves checkout")
+                cursor = cursor.parent
+                continue
+            if links and part in {".git", ".gradle", ".worktrees", "build"}:
+                raise ValueError("alias crosses generated/private boundary")
+            candidate = cursor / part
+            metadata = os.lstat(candidate)
+            if stat.S_ISLNK(metadata.st_mode):
                 identity = (metadata.st_dev, metadata.st_ino)
                 if identity in links or len(links) >= 40:
                     raise ValueError("alias cycle or 40-link resolution bound")
                 links.add(identity)
-                target = Path(os.readlink(ancestor))
-                if not target.is_absolute():
-                    target = ancestor.parent / target
-                target = Path(os.path.abspath(target))
-                candidate = target.joinpath(*relative.parts[position + 1:])
-                target_relative = candidate.relative_to(root)
-                if {".git", ".gradle", ".worktrees", "build"}.intersection(target_relative.parts):
-                    raise ValueError("alias crosses generated/private boundary")
-                restarted = True
-                break
-            if restarted:
+                target = os.readlink(candidate)
+                target_parts = anchored_parts(target)
+                if target.startswith("/"):
+                    cursor = root
+                # Expand at the reached link before consuming any later '..'.
+                pending.extendleft(reversed(target_parts))
                 continue
-            metadata = os.lstat(candidate)
+            cursor = candidate
+            if pending and not stat.S_ISDIR(metadata.st_mode):
+                raise NotADirectoryError(20, "Not a directory", str(cursor))
             if links:
                 if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
                     raise ValueError("unsupported target type")
                 required = os.R_OK | (os.X_OK if stat.S_ISDIR(metadata.st_mode) else 0)
-                if not os.access(candidate, required, effective_ids=True):
-                    raise PermissionError(13, "Permission denied", str(candidate))
-            return candidate.relative_to(root), bool(links)
+                if not os.access(cursor, required, effective_ids=True):
+                    raise PermissionError(13, "Permission denied", str(cursor))
+        return cursor.relative_to(root), bool(links)
     except (OSError, ValueError) as error:
         if links:
             raise ValueError(f"Unsupported source symlink: {requested}: {error}") from error

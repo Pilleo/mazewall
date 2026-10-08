@@ -292,10 +292,112 @@ class SourceDiscoveryTest(unittest.TestCase):
         link.symlink_to(self.directory / "real-target", target_is_directory=True)
         self.assert_eager("real-target/build.gradle.kts")
 
+    def test_alias_expands_symlink_before_parent_component(self):
+        self.write(".gitignore", "/hidden/\n/real-target/\n")
+        self.write("hidden/module/build.gradle.kts", EAGER)
+        self.write("real-target/module/build.gradle.kts", ACTION)
+        (self.directory / "hidden/deep").mkdir()
+        (self.directory / "real-target/pivot").symlink_to(
+            "../hidden/deep", target_is_directory=True
+        )
+        (self.directory / "adapter").symlink_to(
+            "real-target/pivot/../module", target_is_directory=True
+        )
+        self.assert_eager("hidden/module/build.gradle.kts")
+
     def test_gradle_file_alias_uses_link_language_and_checks_target(self):
         target = self.write("target.txt", EAGER)
         (self.directory / "alias.gradle.kts").symlink_to(target)
         self.assert_eager("alias.gradle.kts")
+
+    def test_alias_dot_and_absolute_targets_expand_before_parent(self):
+        self.write(".gitignore", "/hidden/\n/real-target/\n")
+        self.write("hidden/module/build.gradle.kts", EAGER)
+        self.write("real-target/module/build.gradle.kts", ACTION)
+        (self.directory / "hidden/deep").mkdir()
+        (self.directory / "real-target/pivot").symlink_to(
+            "../hidden/./deep", target_is_directory=True
+        )
+        link = self.directory / "adapter"
+        for target in ("./real-target/./pivot/../module",
+                       str(self.directory) + "/real-target/./pivot/../module"):
+            with self.subTest(target=target):
+                link.symlink_to(target, target_is_directory=True)
+                try:
+                    self.assert_eager("hidden/module/build.gradle.kts")
+                finally:
+                    link.unlink()
+
+    def test_alias_absolute_nested_target_expands_before_parent(self):
+        self.write(".gitignore", "/hidden/\n/real-target/\n")
+        self.write("hidden/module/build.gradle.kts", EAGER)
+        self.write("real-target/module/build.gradle.kts", ACTION)
+        (self.directory / "hidden/deep").mkdir()
+        (self.directory / "real-target/pivot").symlink_to(
+            str(self.directory) + "/hidden/./deep", target_is_directory=True
+        )
+        (self.directory / "adapter").symlink_to(
+            "real-target/pivot/../module", target_is_directory=True
+        )
+        self.assert_eager("hidden/module/build.gradle.kts")
+
+    def test_alias_non_directory_before_parent_is_rejected(self):
+        self.write(".gitignore", "/real-target/\n")
+        self.write("real-target/file", "not a directory\n")
+        self.write("real-target/module/build.gradle.kts", ACTION)
+        (self.directory / "adapter").symlink_to(
+            "real-target/file/../module", target_is_directory=True
+        )
+        self.assert_link_rejected("adapter")
+        self.assertIn("Not a directory", self.scan().stderr)
+
+    def test_alias_parent_cannot_hide_private_traversal(self):
+        self.write("module/build.gradle.kts", ACTION)
+        for private in (".git", ".gradle", ".worktrees", "build"):
+            (self.directory / private).mkdir(exist_ok=True)
+            link = self.directory / "adapter"
+            for target in (f"{private}/../module",
+                           str(self.directory) + f"/./{private}/../module"):
+                with self.subTest(private=private, target=target):
+                    link.symlink_to(target, target_is_directory=True)
+                    try:
+                        self.assert_link_rejected("adapter")
+                        self.assertIn("private boundary", self.scan().stderr)
+                    finally:
+                        link.unlink()
+
+    def test_alias_parent_cannot_hide_external_traversal(self):
+        self.write("module/build.gradle.kts", ACTION)
+        (self.directory / "adapter").symlink_to(
+            "../" + self.directory.name + "/module", target_is_directory=True
+        )
+        self.assert_link_rejected("adapter")
+        self.assertIn("leaves checkout", self.scan().stderr)
+
+    def test_alias_parent_cannot_hide_nested_external_target(self):
+        self.write(".gitignore", "/real-target/\n")
+        self.write("real-target/module/build.gradle.kts", ACTION)
+        with tempfile.TemporaryDirectory(prefix="mazewall-external-pivot-") as external:
+            (self.directory / "real-target/pivot").symlink_to(
+                external, target_is_directory=True
+            )
+            (self.directory / "adapter").symlink_to(
+                "real-target/pivot/../module", target_is_directory=True
+            )
+            self.assert_link_rejected("adapter")
+            self.assertIn("leaves checkout", self.scan().stderr)
+
+    def test_alias_parent_cannot_hide_unreadable_intermediate_directory(self):
+        self.write(".gitignore", "/real-target/\n")
+        self.write("real-target/module/build.gradle.kts", ACTION)
+        intermediate = self.directory / "real-target/private"
+        intermediate.mkdir()
+        self.deny(intermediate)
+        (self.directory / "adapter").symlink_to(
+            "real-target/private/../module", target_is_directory=True
+        )
+        self.assert_link_rejected("adapter")
+        self.assertIn("Permission denied", self.scan().stderr)
 
     def test_repeated_aliases_do_not_skip_physical_source_coverage(self):
         self.write("real-target/build.gradle.kts", EAGER)

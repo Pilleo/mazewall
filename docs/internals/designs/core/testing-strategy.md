@@ -65,6 +65,16 @@ and cyclic targets fail with concrete errors. Resolution is bounded to40 distinc
 link identities. Valid file aliases retain the link's Gradle language/diagnostic
 path while reading its verified physical target.
 
+Resolution consumes components in filesystem order: a reached symlink's raw
+target is expanded before any later `..`, rather than lexically collapsing the
+whole target with `abspath`. Absolute targets must begin with the physical
+checkout's exact component prefix; no external prefix is traversed to admit an
+equivalent spelling. Dot components within that anchor are supported. A parent
+component cannot erase a private/root boundary crossing, an unreadable intermediate
+directory, or a non-directory traversal. The 44 real-filesystem methods include
+the symlink-before-parent eager-source regression with a clean lexical decoy,
+relative/dot/absolute variants and explicit boundary/permission failures.
+
 Directory aliases visit physical `(device,inode)` identities. Repeated aliases do
 not suppress real Gradle source: an active alias forces coverage of its target even
 when normal local VCS ignores hide that physical directory. Normal and forced

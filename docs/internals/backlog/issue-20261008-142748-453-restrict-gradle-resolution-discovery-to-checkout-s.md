@@ -125,5 +125,35 @@ containment or a full parser. Existing name-based untracked build exclusions and
 local VCS scratch declarations remain explicit bounds. Keep issue open until
 independent/coordinator combined acceptance; index stays coordinator-owned.
 
+## V1 continuation — ordered alias traversal
+
+At base `2f9a59952686f546cb243ad620106449b897fa1b`, lexical `abspath`
+collapsed `real-target/pivot/../module` to a clean decoy before expanding
+`pivot -> ../hidden/deep`. Actual filesystem resolution reaches the ignored
+`hidden/module` eager script. Selected production-entrypoint RED
+`run-8124e7b09fb6`: one failure, expected eager exit1 versus silent exit0.
+Expanded base-resolver RED `run-b865979ecb26`:44 methods,16 failures including
+subtests; the36 original methods passed.
+
+The resolver now expands raw link targets at the reached component, processes
+later parents only afterward, and rejects root/private traversal before target
+access. Intermediate directories must be readable/searchable; non-directories
+cannot be traversed even if a later parent would lexically erase them. Absolute
+targets use the exact physical checkout prefix without whole-path resolution.
+Link identity/40-link bounds, directory graph visitation and default-index
+authority remain unchanged.
+
+GREEN `run-67cc1d2e243d`:44/44 filesystem methods,98/98 lexical fixtures, actual
+checkout scanner exit0 and `git diff --check`, no skips. Fixtures cover the real
+parent regression, dot/absolute target spellings, non-directory-before-parent,
+private/external traversal with clean decoys, and an unreadable intermediate.
+Frozen parser prefix (everything before `def source_inventory()`) is base-identical,
+SHA256 `82edcb5fd1b22e52c9df30ee4d441e12364225141498c89d8ab9894a74182575`;
+98-fixture file SHA256 `37d5cec54ca46deeb3384d3ea6a0715ca131f0c369ff31d7f7e22243b021ce68`.
+This remains stable-checkout verification with TOCTOU exposure, not FD-relative
+containment. No source/cache/link changes, parser broadening or index-policy
+changes. Keep open for independent review/coordinator acceptance; final private
+commit and full unchanged locked-hook evidence are in the task-3 AO artifact report.
+
 ---
 <!-- id: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s  file: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s.md -->
