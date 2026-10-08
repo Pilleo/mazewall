@@ -95,7 +95,8 @@ class Lexer:
             elif self.groovy and self.source.startswith("$/", i):
                 self.string("$/", "/$", True)
             elif self.groovy and char == "/" and (
-                not self.tokens or self.tokens[-1].text in ("=", "(", "[", ",", ":", "return")
+                next((token.text for token in reversed(self.tokens) if token.text != "\n"), None)
+                in (None, "=", "(", "[", ",", ":", "return")
             ):
                 self.string("/", "/", True)
             elif char == "\n":
@@ -133,6 +134,32 @@ def delimiter_pairs(tokens: list[Token]) -> dict[int, int]:
     return pairs
 
 
+def after_execution_expression(text: list[str], pairs: dict[int, int], call: int, body: int) -> int:
+    """Find a known call's end, including only matched grouping parentheses.
+
+    An enclosing helper call is not grouping: its returned value's consumer is
+    not necessarily a consumer of the provider argument (no call-graph analysis).
+    """
+    start = call
+    while start >= 2 and text[start - 1] == "." and re.fullmatch(r"[A-Za-z_$][\w$]*", text[start - 2]):
+        start -= 2
+    end = pairs[body]
+    # Closure supplied as the sole parenthesized call argument, rather than a
+    # trailing lambda. Do not skip a parenthesis belonging to any other scope.
+    if body - 1 == call + 1 and text[body - 1] == "(" and pairs[body - 1] == end + 1:
+        end += 1
+    while start > 0 and text[start - 1] == "(" and pairs[start - 1] == end + 1:
+        opening = start - 1
+        before = text[opening - 1] if opening > 0 else ""
+        if before in (")", "]") or (
+            re.fullmatch(r"[A-Za-z_$][\w$]*", before) and before not in ("return", "throw")
+        ):
+            break
+        start = opening
+        end += 1
+    return end + 1
+
+
 def deferred_ranges(tokens: list[Token], pairs: dict[int, int]) -> list[tuple[int, int]]:
     text = [token.text for token in tokens]
     ranges = []
@@ -147,9 +174,7 @@ def deferred_ranges(tokens: list[Token], pairs: dict[int, int]) -> list[tuple[in
                 name = text[previous]
                 is_provider = previous >= 2 and text[previous - 2:previous] == ["providers", "."]
                 is_declaration = previous > 0 and text[previous - 1] in ("fun", "def", "void")
-                after = pairs[i] + 1
-                if after < len(text) and text[after] == ")":
-                    after += 1
+                after = after_execution_expression(text, pairs, previous, i)
                 invoked = (after < len(text) and text[after] == "(") or text[after:after + 2] in (
                     [".", "call"], [".", "invoke"],
                 )
@@ -228,7 +253,7 @@ def findings(source: str, groovy: bool) -> list[int]:
             # is registration; configurations.getByName(...).files is consumption.
             start = i - 2
             while start >= 0:
-                if text[start] == ")":
+                if text[start] in (")", "]"):
                     start = pairs[start] - 1
                 elif start >= 2 and text[start - 1] == ".":
                     start -= 2
