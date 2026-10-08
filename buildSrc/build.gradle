@@ -30,6 +30,9 @@ tasks.register('verificationActionsTest', JavaExec) {
     inputs.file(layout.projectDirectory.file('../build.gradle.kts'))
         .withPropertyName('rootVerificationTaskWiring')
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(layout.projectDirectory.file('../gradle/libs.versions.toml'))
+        .withPropertyName('rootVerificationPluginCatalog')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file(verificationActionsMarker)
     args(verificationActionsMarker.get().asFile.absolutePath)
     doFirst {

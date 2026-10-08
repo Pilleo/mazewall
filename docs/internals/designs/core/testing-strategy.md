@@ -49,6 +49,23 @@ distinct exhaustion result; do not add a test-only production bypass.
 
 ## Fast iteration and cache reuse
 
+Root verification follows source plugins rather than optional module paths.
+Non-demo grouping projects retain lazy child `build` and `check` dependencies
+without acquiring Java source sets or typed Kotlin analysis. Actual Java modules
+retain tests, SpotBugs and coverage gates; Kotlin JVM modules additionally retain
+`detektMain`. This includes optional Java-only Spring and Kotlin Koog leaves.
+Conventional source modules retain early Java task providers because core build
+scripts query sibling providers before evaluation. Plugin callbacks also admit
+source-free Java starters and modules that declare custom source roots.
+Root `unitCheck` and `kernelCheck` select only child gates that actually exist.
+
+`./gradlew -p buildSrc verificationActionsTest` executes the production root
+convention in a real TestKit fixture with implicit/explicit grouping projects,
+Java and Kotlin leaves. It checks child gate selection and executes real Java
+tests, SpotBugs and typed Detekt; injected test and analyzer failures must fail.
+The existing aggregate fixture separately proves configuration-cache reuse,
+and native freshness fixtures remain mandatory in the same executable harness.
+
 Use the owning module's named host tests while changing a contract:
 
 ```bash
