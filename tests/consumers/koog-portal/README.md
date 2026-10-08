@@ -112,6 +112,8 @@ production manifests/ZIP. `--native-fixture` checks the separate native package.
 
 ```bash
 python3 tests/consumers/koog-portal/bootstrap-test.py
+python3 tests/consumers/koog-portal/producer-exclusion-test.py
+python3 tests/consumers/koog-portal/fixture-ownership-test.py
 ```
 
 This test acquires the fleet lock itself. It executes actual Gradle builds,
@@ -120,8 +122,14 @@ verifies its real plugin JAR contents after refresh, rejects missing/changed JAR
 wrong-worktree/version/missing receipts and cached demo evaluation, and injects
 an actual producer build failure plus a missing selected task. Producer failure
 must not admit the second stage; each failure must propagate its original output
-and nonzero status. Temporary inputs/artifacts are restored; individual Gradle
-logs remain under the printed `/tmp/koog-bootstrap-tests.*` evidence directory.
+and nonzero status. Inputs are exclusively created and mutated through retained
+owned descriptors; exact no-clobber restoration attempts preserve unknown
+replacements and original backups rather than deleting or overwriting them.
+The ownership fault suite verifies real filesystem replacement/race conflicts.
+The exclusion suite adds real Kotlin source and requires rejection of direct
+excluded/conditionally skipped compilation plus all supported wrapper exclusion
+forms before the selected stage. Individual logs/recovery files remain under the
+printed same-filesystem `build/task10-evidence/round1/` evidence directories.
 
 ## Evidence and remaining gates
 

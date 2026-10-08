@@ -50,6 +50,9 @@ actual plugin JAR and resolved runtime closure. Both builds disable configuratio
 caching so receipt checks always run. Each producer run refreshes the receipt;
 the demo rejects another worktree's receipt, missing/changed JARs or any changed,
 added or removed producer input (including root/catalog version changes).
+Task exclusions (`-x` / `--exclude-task`) are rejected in either wrapper phase.
+Direct export also rejects exclusions and unexpectedly skipped producer tasks;
+an old JAR cannot be certified using new source hashes after skipped compilation.
 Direct Gradle opt-in requires a prior producer build and `--no-configuration-cache`.
 For serialized fleet verification, wrap the entire command in the shared lock.
 

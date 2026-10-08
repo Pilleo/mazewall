@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Executable checks of the real Gradle bootstrap; no generator/backend substitution."""
 import fcntl
-import os
+import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
@@ -9,7 +9,12 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[3]
 LOCK = Path("/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-06-mazewall-integration-foundation-plan/verification.lock")
-EVIDENCE = Path(tempfile.mkdtemp(prefix="koog-bootstrap-tests."))
+EVIDENCE_PARENT = ROOT / "build/task10-evidence/round1"
+EVIDENCE_PARENT.mkdir(parents=True, exist_ok=True)
+EVIDENCE = Path(tempfile.mkdtemp(prefix="koog-bootstrap-tests.", dir=EVIDENCE_PARENT))
+spec = importlib.util.spec_from_file_location("fixture_files", Path(__file__).with_name("fixture-files.py"))
+owned = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(owned)
 RECEIPT = ROOT / "build/portal-codegen/plugin-classpath.properties"
 PLUGIN = ROOT / "portals/codegen/build/libs/codegen-0.1.0-SNAPSHOT.jar"
 WRAPPER = ["bash", str(ROOT / "scripts/koog-build.sh"), "--console=plain"]
@@ -21,7 +26,7 @@ def run(label, command, expected=0, message=None):
     global SEQUENCE
     SEQUENCE += 1
     output = EVIDENCE / f"{SEQUENCE:02d}-{label}.log"
-    with output.open("w") as stream:
+    with output.open("x") as stream:
         result = subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, timeout=240)
     text = output.read_text()
     assert result.returncode == expected, (label, result.returncode, output)
@@ -44,37 +49,43 @@ def check():
     resource = ROOT / "portals/codegen/src/main/resources/task10-freshness-probe.txt"
     assert not resource.exists()
     created_parent = not resource.parent.exists()
-    resource.parent.mkdir(exist_ok=True)
+    if created_parent:
+        resource.parent.mkdir()
+    resource_file = owned.OwnedFile(resource, "actual producer resource v1\n", EVIDENCE / "resource-recovery.txt")
     try:
-        resource.write_text("actual producer resource v1\n")
         run("added-source-rejected", DIRECT + ["help"], 1, "Stale Portal plugin producer sources")
         run("added-source-refreshed", WRAPPER + ["--", ":demos:koog-contained-tool:portalCheck"])
         with zipfile.ZipFile(PLUGIN) as jar:
             assert jar.read(resource.name) == resource.read_bytes()
-        resource.write_text("actual producer resource v2\n")
+        resource_file.write("actual producer resource v2\n")
         run("modified-source-rejected", DIRECT + ["help"], 1, "Stale Portal plugin producer sources")
-        resource.unlink()
+        resource_file.retire()
+        resource_file = None
         run("removed-source-rejected", DIRECT + ["help"], 1, "Stale Portal plugin producer sources")
     finally:
-        if resource.exists():
-            resource.unlink()
-        if created_parent:
-            resource.parent.rmdir()
+        if resource_file is not None:
+            resource_file.retire()
+        # Keep the empty directory: its pathname could have been replaced by an
+        # unknown actor, and no removal is needed for the exact file inventory.
         run("source-removal-refreshed", WRAPPER + ["--", ":demos:koog-contained-tool:portalCheck"])
     with zipfile.ZipFile(PLUGIN) as jar:
         assert resource.name not in jar.namelist()
 
     original = RECEIPT.read_bytes()
     assert b"version=0.1.0-SNAPSHOT" in original
+    receipt_backup = owned.BorrowedFile(RECEIPT, EVIDENCE / "original-receipt.properties")
+    receipt_file = None
     try:
-        RECEIPT.write_bytes(original.replace(b"version=0.1.0-SNAPSHOT", b"version=0.1.0-stale"))
+        receipt_file = owned.OwnedFile(RECEIPT, original, EVIDENCE / "mutated-receipt.properties")
+        receipt_file.write(original.replace(b"version=0.1.0-SNAPSHOT", b"version=0.1.0-stale"))
         run("version-rejected", DIRECT + ["help"], 1, "Stale Portal plugin producer version")
-        RECEIPT.write_bytes(original.replace(str(ROOT).encode(), b"/different/worktree"))
+        receipt_file.write(original.replace(str(ROOT).encode(), b"/different/worktree"))
         run("other-worktree-rejected", DIRECT + ["help"], 1, "Portal plugin receipt belongs")
-        RECEIPT.unlink()
+        receipt_file.retire()
+        receipt_file = None
         run("missing-receipt-rejected", DIRECT + ["help"], 1, "Build the actual Portal plugin first")
     finally:
-        RECEIPT.write_bytes(original)
+        owned.restore_all(*(([receipt_file.retire] if receipt_file is not None else []) + [receipt_backup.restore]))
 
     # Change the effective root/compiled artifact version through the existing
     # repository/version staging selector, rather than editing coordinator files.
@@ -88,31 +99,23 @@ def check():
     run("default-build-version-refreshed", WRAPPER + ["--", ":demos:koog-contained-tool:portalCheck"])
     original = RECEIPT.read_bytes()
 
-    backup = PLUGIN.with_suffix(".jar.task10-test-hidden")
-    assert not backup.exists()
-    identity = (PLUGIN.stat().st_dev, PLUGIN.stat().st_ino)
-    os.rename(PLUGIN, backup)
-    replacement_identity = None
+    plugin_backup = owned.BorrowedFile(PLUGIN, EVIDENCE / "original-plugin.jar")
+    plugin_file = None
     try:
         run("missing-actual-jar-rejected", DIRECT + ["help"], 1, "Stale/missing Portal plugin artifact")
-        changed = bytearray(backup.read_bytes())
+        changed = bytearray(plugin_backup.data)
         changed[-1] ^= 1
-        with PLUGIN.open("xb") as stream:
-            stream.write(changed)
-        replacement_identity = (PLUGIN.stat().st_dev, PLUGIN.stat().st_ino)
+        plugin_file = owned.OwnedFile(PLUGIN, changed, EVIDENCE / "mutated-plugin.jar")
         run("changed-actual-jar-rejected", DIRECT + ["help"], 1, "Stale/missing Portal plugin artifact")
     finally:
-        if replacement_identity is not None:
-            assert (PLUGIN.stat().st_dev, PLUGIN.stat().st_ino) == replacement_identity
-            PLUGIN.unlink()
-        assert not PLUGIN.exists(), f"Preserve conflicting output and recoverable backup: {backup}"
-        assert (backup.stat().st_dev, backup.stat().st_ino) == identity
-        os.rename(backup, PLUGIN)
+        owned.restore_all(*(([plugin_file.retire] if plugin_file is not None else []) + [plugin_backup.restore]))
 
     failure = EVIDENCE / "producer-failure.init.gradle"
-    failure.write_text("settingsEvaluated { settings ->\n"
+    failure_content = ("settingsEvaluated { settings ->\n"
                        " if (settings.startParameter.projectProperties['koogBootstrap'] == 'true')\n"
                        "  throw new GradleException('TASK10_ACTUAL_PRODUCER_FAILURE')\n}\n")
+    with failure.open("x") as stream:
+        stream.write(failure_content)
     failed = run("producer-failure-propagates", WRAPPER + ["-I", str(failure), "--", "help"], 1,
                  "TASK10_ACTUAL_PRODUCER_FAILURE")
     assert "KOOG_STAGE selected" not in failed

@@ -106,10 +106,28 @@ abstract class ExportPortalPluginClasspath : DefaultTask() {
 
     @get:Input abstract val producerRevision: Property<String>
 
+    @get:Input abstract val excludedProducerTasks: ListProperty<String>
+
     @get:OutputFile abstract val receipt: RegularFileProperty
 
     @TaskAction
     fun export() {
+        require(excludedProducerTasks.get().isEmpty()) {
+            "Portal plugin export forbids task exclusions: producer compilation must not be skipped"
+        }
+        // The resolved graph includes implicit input dependencies that a manual
+        // taskDependencies traversal misses. Verify them before issuing a receipt.
+        project.gradle.taskGraph.allTasks.forEach { task ->
+            if (task.name in setOf("compileKotlin", "compileJava", "processResources", "jar")) {
+                val validSkip =
+                    task.state.skipMessage in setOf("UP-TO-DATE", "FROM-CACHE") ||
+                        (task.state.noSource && task.name != "compileKotlin")
+                require(task.state.executed && (!task.state.skipped || validSkip)) {
+                    "Portal plugin producer task did not execute: ${task.path} (${task.state.skipMessage})"
+                }
+            }
+        }
+
         fun digest(file: File): String =
             MessageDigest
                 .getInstance("SHA-256")
@@ -150,6 +168,7 @@ abstract class ExportPortalPluginClasspath : DefaultTask() {
 }
 
 tasks.register<ExportPortalPluginClasspath>("exportPluginClasspath") {
+    notCompatibleWithConfigurationCache("Fresh producer verification requires the live execution graph")
     group = "build"
     description = "Build and export the actual Portal plugin classpath with source/content freshness checks"
     pluginClasspath.from(tasks.named<Jar>("jar").flatMap { it.archiveFile }, configurations.runtimeClasspath)
@@ -165,6 +184,7 @@ tasks.register<ExportPortalPluginClasspath>("exportPluginClasspath") {
     producerRoot.set(rootProject.projectDir.canonicalPath)
     producerVersion.set(provider { project.version.toString() })
     producerRevision.set(providers.gradleProperty("portalCodegenRevision").orElse("working-tree"))
+    excludedProducerTasks.set(gradle.startParameter.excludedTaskNames.toList())
     receipt.set(rootProject.layout.buildDirectory.file("portal-codegen/plugin-classpath.properties"))
     // Always reissue after the producer tasks; source inventory also covers additions/deletions.
     outputs.upToDateWhen { false }

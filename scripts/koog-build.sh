@@ -10,7 +10,7 @@ while (($#)); do
         shared+=("$1"); value_pending=0; shift; continue
     fi
     case "$1" in
-        -PincludeKoogIntegration*|-PkoogBootstrap*|-PportalCodegenRevision*|--configuration-cache|--configuration-cache=*|-p|--project-dir*|-b|--build-file*|-c|--settings-file*)
+        -x*|--exclude-task|--exclude-task=*|-PincludeKoogIntegration*|-PkoogBootstrap*|-PportalCodegenRevision*|--configuration-cache|--configuration-cache=*|-p|--project-dir*|-b|--build-file*|-c|--settings-file*)
             printf 'Bootstrap-owned/conflicting Gradle argument: %s\n' "$1" >&2; exit 64 ;;
         -I|--init-script|-g|--gradle-user-home|--project-cache-dir|--console|--max-workers|--warning-mode|--dependency-verification)
             shared+=("$1"); value_pending=1 ;;
@@ -25,7 +25,7 @@ if ((value_pending)) || (($# == 0)); then
 fi
 for arg in "$@"; do
     case "$arg" in
-        -PincludeKoogIntegration*|-PkoogBootstrap*|-PportalCodegenRevision*|--configuration-cache|--configuration-cache=*|-p|--project-dir*|-b|--build-file*|-c|--settings-file*)
+        -x*|--exclude-task|--exclude-task=*|-PincludeKoogIntegration*|-PkoogBootstrap*|-PportalCodegenRevision*|--configuration-cache|--configuration-cache=*|-p|--project-dir*|-b|--build-file*|-c|--settings-file*)
             printf 'Bootstrap-owned/conflicting Gradle argument: %s\n' "$arg" >&2; exit 64 ;;
     esac
 done
