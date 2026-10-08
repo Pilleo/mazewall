@@ -5,6 +5,35 @@ is meaningful only when its tier is named.
 
 ## Host-safe unit quality
 
+### Gradle resolution scanner
+
+`bash scripts/check_gradle_lazy_resolution.sh` scans Kotlin and Groovy Gradle
+scripts in the caller's checkout. The Python-standard-library lexer recognizes
+the bodies of `doFirst`/`doLast`, `providers.provider`, `@TaskAction` methods,
+and declared `asArguments` methods. Nested bodies retain their enclosing action
+context; action/provider call arguments remain configuration-time expressions.
+Immediately invoked closure arguments and immediately consumed provider bodies
+are not deferred. Comments and literal strings cannot change brace context;
+`${...}` expressions and Groovy shorthand GString interpolation remain code.
+
+Outside those bodies, `.asPath` and `.singleFile` consumption fails with a file
+and line diagnostic. Configuration-origin `.files`/`.getFiles()` consumption
+also fails; `inputs.files(configuration)` remains lazy input registration.
+`bash scripts/tests/gradle_lazy_resolution_test.sh` executes the production
+entrypoint against disposable positive and negative scripts, including the
+multiline Spring action regression. Run this focused shell check when changing
+the scanner; it is independent of native/kernel verification.
+
+This is a bounded lexical guard, not a compiler or Gradle type resolver. It does
+not follow helper calls, dynamic DSL dispatch, reassignment, provider aliases
+consumed later, or arbitrary configuration aliases across statements. `.files`
+tracking recognizes direct `configurations` receiver chains and simple same-line
+`val`/`var`/`def` bindings, not every FileCollection. Other resolution APIs are
+outside this guard. Shadowed action/provider/method names require manual review.
+Unterminated comments/strings/interpolations and unbalanced delimiters fail the
+scan rather than granting an exemption. A passing scan establishes only these
+source-level contracts.
+
 `./gradlew unitCheck` runs the ordinary `test` source set and verifies only
 `build/jacoco/test.exec`. It is the required gate for CI runners that cannot
 create a seccomp listener, install Landlock, or use Podman. Unit tests model
