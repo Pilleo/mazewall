@@ -47,6 +47,17 @@ existing `ResourceRetirement` / `CleanupFailures` fatal-first ordering. Native t
 failure keeps rollback on the registered trusted manager; a blocked rollback remains
 visible as incomplete manager/cleanup ownership. Closing never removes living filters.
 
+Retirement publishes one immutable `PreparedRetirementOutcome` after release and
+failure retention, carrying release-attempt status and exact failure together. Physical
+thread exit remains a separate prerequisite: publication alone is not retirement.
+Domain drain observations establish worker/cleanup physical completion before sampling
+retained outcomes; manager physical end is established before collecting domain snapshots.
+The pure `DrainLifecycle` decision only permits Complete from terminal successful
+snapshots. A captured pending state cannot be upgraded by later zero-live metrics. Late
+ordinary/fatal failures keep the runtime DRAINING and remain visible on every later
+drain/close; no earlier cached null may permanently mark the runtime CLOSED. All
+observation/decision work is nonblocking and adds no wait under the runtime root lock.
+
 ## Rights and explicit read-only recipes
 
 Ordinary read allowances, directory reads, and automatic runtime grants are **positive
@@ -178,6 +189,11 @@ executors remain outside this thread-scoped boundary.
   Review fixtures additionally cover bounded external/manager validation stalls,
   retained entire FD/ruleset hierarchy, blocked genuine close/fatal outcome, and both
   required workers' EPERM installation failures followed by real-owner retirement.
+  A fixture-only barrier on actual worker-reference metric observation additionally
+  forces genuine cleanup failure/physical exit between the old null-failure sample and
+  the completion predicate; ordinary/fatal cases require truthful first/later drains and
+  failing close. Pure lifecycle tests cover conservative pending and terminal errors;
+  atomic terminal tests distinguish release failures from an unreleased wait-abort owner.
 
 Focused ABI and architecture/Detekt checks accompany the slice. Full-build/container,
 combined framework, packaged Boot and distribution gates remain coordinator-owned.

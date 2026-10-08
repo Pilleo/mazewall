@@ -102,5 +102,29 @@ class PreparedRetirementTest {
         assertTrue(observed.get() === fatal)
         assertTrue(uncaught.get() === fatal)
         assertTrue(fatal.suppressed.any { it === ordinary })
+        val terminal = requireNotNull(retirement.outcome())
+        assertTrue(terminal.releaseAttempted)
+        assertTrue(terminal.failure === fatal, "Atomic physical-end publication must retain the exact fatal outcome")
+    }
+
+    @Test
+    fun `physical wait abort publishes failure without pretending genuine resource was released`() {
+        val pin = PreparedPath.open(Files.writeString(directory.resolve("unreleased"), "data"), LinuxNative.snapshot())
+        val failure = IllegalStateException("physical worker wait aborted")
+        val recorded = AtomicReference<Throwable?>()
+        val retirement = PreparedRetirement("prepared-retirement-abort-${pin.descriptor.value}", { throw failure }, { pin.close() }, { recorded.set(it) })
+        retirement.start()
+        try {
+            retirement.request()
+            retirement.await(Deadline(Duration.ofSeconds(3)))
+            assertFalse(retirement.finished())
+            val terminal = requireNotNull(retirement.outcome())
+            assertFalse(terminal.releaseAttempted)
+            assertTrue(terminal.failure === failure)
+            assertTrue(recorded.get() === failure)
+            assertTrue(pin.descriptor.isLiveForIo(), "An aborted wait cannot discard a genuine unreleased owner")
+        } finally {
+            pin.close()
+        }
     }
 }

@@ -45,6 +45,13 @@ through validation and actual worker end, and reports exact fatal/error outcomes
 Named real-loader/real-descriptor host and disposable native deadline/fault regressions
 are recorded in the appended task report. Additive Spring seam signatures remain stable.
 
+Round2/5 R1 corrects asynchronous failure/retirement observation ordering. An immutable
+atomic terminal release outcome retains exact failure; manager and worker/cleanup
+physical completion precede failure snapshots. Pure drain lifecycle never combines an
+earlier null with later completion to publish CLOSED. Actual-owner ordinary/fatal late
+completion barriers reproduce the original false first/later Complete and successful
+close, then verify failure persistence after correction. No additional packaging scope.
+
 Focused host/ABI/architecture/Detekt and disposable native fixtures are recorded in
 the fleet task-5 report. See designs/enforcer/prepared-resources-design.md for exact
 rights and ownership. This issue stays open for coordinator review and remaining gates.

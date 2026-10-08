@@ -1,6 +1,13 @@
 package io.mazewall.enforcer.internal.execution
 
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
+
+/** Published once, after release and failure retention; physical thread end is checked separately. */
+internal data class PreparedRetirementOutcome(
+    val releaseAttempted: Boolean,
+    val failure: Throwable?,
+)
 
 /** Trusted bootstrap starts this retained cleanup owner; caller deadlines never run blocking release. */
 internal class PreparedRetirement(
@@ -12,7 +19,7 @@ internal class PreparedRetirement(
     private val bootstrap = Thread.currentThread()
     private val requested = CountDownLatch(1)
 
-    @Volatile private var releaseFinished = false
+    private val publication = AtomicReference<PreparedRetirementOutcome?>()
     private val thread = Thread
         .ofPlatform()
         .name(name)
@@ -28,7 +35,9 @@ internal class PreparedRetirement(
 
     fun await(deadline: Deadline) = deadline.join(thread)
 
-    fun finished(): Boolean = releaseFinished && !thread.isAlive
+    fun outcome(): PreparedRetirementOutcome? = if (thread.isAlive) null else publication.get()
+
+    fun finished(): Boolean = outcome()?.releaseAttempted == true
 
     fun live(): Boolean = thread.isAlive
 
@@ -39,18 +48,26 @@ internal class PreparedRetirement(
             request()
             return
         }
+        var attempted = false
+        var problem: Throwable? = null
         try {
             awaitWorkers()
-            finishRelease()
+            attempted = true
+            release()
         } catch (failure: Throwable) {
+            problem = failure
             recordFailure(failure)
             throw failure
+        } finally {
+            publication.set(PreparedRetirementOutcome(attempted, problem))
         }
     }
 
     @Suppress("TooGenericExceptionCaught") // retained physical cleanup boundary never downgrades failure
     private fun run() {
         var interrupted = false
+        var attempted = false
+        var problem: Throwable? = null
         try {
             while (requested.count != 0L) {
                 try {
@@ -60,22 +77,18 @@ internal class PreparedRetirement(
                 }
             }
             awaitWorkers()
-            finishRelease()
+            attempted = true
+            release()
         } catch (fatal: Error) {
+            problem = fatal
             recordFailure(fatal)
             throw fatal
         } catch (failure: Throwable) {
+            problem = failure
             recordFailure(failure)
         } finally {
+            publication.set(PreparedRetirementOutcome(attempted, problem))
             if (interrupted) Thread.currentThread().interrupt()
-        }
-    }
-
-    private fun finishRelease() {
-        try {
-            release()
-        } finally {
-            releaseFinished = true
         }
     }
 }

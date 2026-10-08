@@ -310,14 +310,17 @@ public class ManagedRuntime private constructor(
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
-        val cleanup = resources.firstNotNullOfOrNull { it.cleanupFailure.get() }
-        val live = resources.sumOf { it.liveWorkers() } + if (managerThread.get()?.isAlive == true) 1 else 0
-        val unfinished = resources.sumOf { it.unfinished() }
-        if (cleanup == null && live == 0 && unfinished == 0 && manager.isTerminated && resources.all { it.retired() }) {
+        // The manager can publish rollback outcomes too: establish its physical end
+        // before collecting terminal domain/failure observations. Never reuse an
+        // earlier null failure alongside a later successful retirement observation.
+        val managerLive = managerThread.get()?.isAlive == true
+        val managerStopped = !managerLive && manager.isTerminated
+        val outcome = io.mazewall.enforcer.internal.execution.DrainLifecycle
+            .evaluate(managerStopped, managerLive, resources.map { it.drainSnapshot() })
+        if (outcome == DrainReport.Complete) {
             synchronized(lock) { phase = Phase.CLOSED }
-            return DrainReport.Complete
         }
-        return DrainReport.Incomplete(unfinished, live, cleanup)
+        return outcome
     }
 
     override fun close() {

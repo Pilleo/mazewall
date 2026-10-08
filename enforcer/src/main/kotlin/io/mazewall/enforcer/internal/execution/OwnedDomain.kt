@@ -223,6 +223,21 @@ internal class OwnedDomain(
 
     fun retired(): Boolean = physicalWorkersStopped() && (retirement?.finished() != false)
 
+    fun drainSnapshot(): DomainDrainSnapshot {
+        // All asynchronous failure producers must physically end before a successful
+        // observation. Later completion cannot upgrade this captured pending state.
+        val workersStopped = physicalWorkersStopped()
+        val outcome = retirement?.outcome()
+        val retired = workersStopped && (retirement == null || outcome?.releaseAttempted == true)
+        val live = liveWorkers()
+        val retained = cleanupFailure.get()
+        val failure = outcome?.failure?.let {
+            io.mazewall.platform.fd.CleanupFailures
+            .merge(retained, it)
+        } ?: retained
+        return DomainDrainSnapshot(retired, live, unfinished(), failure)
+    }
+
     fun permitsInlineContinuation(): Boolean =
         synchronized(lock) {
         failure == null && (phase == GenerationPhase.READY || phase == GenerationPhase.DRAINING)

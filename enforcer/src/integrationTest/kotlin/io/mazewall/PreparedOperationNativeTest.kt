@@ -24,6 +24,7 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.time.Duration
 import java.util.concurrent.Callable
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
@@ -56,6 +57,14 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
     fun `blocked real descriptor close reports bounded incomplete and retains fatal cleanup outcome`() = withFixture("verifyBlockedFatalClose")
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `late ordinary owner failure between drain samples never closes runtime or hides later failure`() = withFixture("verifyLateFailure", "ordinary")
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `late fatal owner failure between drain samples never closes runtime or hides later failure`() = withFixture("verifyLateFailure", "fatal")
 
     @Test
     @EnabledIfLinuxAndSupported
@@ -155,13 +164,24 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
         paths.filter { Files.exists(it) && Files.readSymbolicLink(it).toString().contains("landlock") }.toList()
     }
 
-    fun verifyBlockedFatalClose(rootName: String) {
+    fun verifyBlockedFatalClose(rootName: String) = verifyCloseOutcome(rootName, false, true)
+
+    fun verifyLateFailure(
+        rootName: String,
+        kind: String,
+    ) = verifyCloseOutcome(rootName, true, kind == "fatal")
+
+    private fun verifyCloseOutcome(
+        rootName: String,
+        lateCompletion: Boolean,
+        fatalFailure: Boolean,
+    ) {
         val jar = Path.of(rootName).resolve("operation.jar")
         val real = LinuxNative.snapshot()
         val target = AtomicReference<FileDescriptor<*, FdState.Open, FdOwnership.Owned>?>()
         val closing = CountDownLatch(1)
         val release = CountDownLatch(1)
-        val fatal = AssertionError("actual close finished with fatal outcome")
+        val fatal: Throwable = if (fatalFailure) AssertionError("actual close finished with fatal outcome") else IllegalStateException("actual close finished with ordinary failure")
         val uncaught = AtomicReference<Throwable?>()
         LinuxNative.setEngine(object : NativeEngine by real {
             override val fileSystem = object : NativeFileSystem by real.fileSystem {
@@ -183,7 +203,7 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
                 val resources = PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, loader.loadClass("fixture.Operation"), emptySet())
                 val runtime = ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout)
                 try {
-                    runtime.prepare(review(resources, policy), DomainLimits(2, 2), resources)
+                    val domain = runtime.prepare(review(resources, policy), DomainLimits(2, 2), resources)
                     val descriptors = resources.resources.grants.map { it.path.descriptor }
                     target.set(
                         resources.resources.grants
@@ -191,12 +211,43 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
                         .path.descriptor,
                     )
                     val rulesets = liveRulesetPaths()
-                    Thread
-                        .getAllStackTraces()
-                        .keys
-                        .single { it.name.endsWith("resource-retirement") }
-                        .uncaughtExceptionHandler =
+                    val cleanupOwner = Thread.getAllStackTraces().keys.single { it.name.endsWith("resource-retirement") }
+                    cleanupOwner.uncaughtExceptionHandler =
                         Thread.UncaughtExceptionHandler { _, failure -> uncaught.set(failure) }
+                    if (lateCompletion) {
+                        // Wrap the existing real worker references only. The test barrier pauses
+                        // diagnostic sampling, reproducing CPU suspension after the old null read.
+                        // No production hook, fake worker, invented FD or release substitution.
+                        val field = domain.resource.javaClass
+                            .getDeclaredField("threads")
+                            .apply { isAccessible = true }
+
+                        @Suppress("UNCHECKED_CAST")
+                        val actual = field.get(domain.resource) as CopyOnWriteArrayList<Thread>
+                        val observed = AtomicBoolean()
+                        field.set(
+                            domain.resource,
+                            LateDrainMetricThreads(actual) {
+                            assertTrue(closing.await(2, TimeUnit.SECONDS))
+                            observed.set(true)
+                            release.countDown()
+                            cleanupOwner.join(3000)
+                            assertFalse(cleanupOwner.isAlive, "Late failing genuine cleanup must physically end before metrics resume")
+                        },
+                        )
+                        val first = runtime.drain(Duration.ofMillis(50))
+                        val later = runtime.drain(Duration.ZERO)
+                        val closeFailure = runCatching { runtime.close() }.exceptionOrNull()
+                        assertTrue(observed.get(), "Force completion between historical failure and physical samples")
+                        assertTrue(
+                            first is DrainReport.Incomplete && later is DrainReport.Incomplete && later.cleanupFailure === fatal && closeFailure?.cause === fatal,
+                            "Never hide late owner failure: first=$first later=$later close=$closeFailure",
+                        )
+                        assertTrue(descriptors.none { it.isLiveForIo() })
+                        assertTrue(rulesets.none { Files.exists(it) && Files.readSymbolicLink(it).toString().contains("landlock") })
+                        if (fatalFailure) assertTrue(uncaught.get() === fatal)
+                        return
+                    }
                     val drain = FutureTask(Callable { runtime.drain(Duration.ofMillis(50)) })
                     val drainer = Thread.ofPlatform().start(drain)
                     try {
@@ -223,6 +274,22 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
             }
         } finally {
             LinuxNative.resetToDefault()
+        }
+    }
+
+    private class LateDrainMetricThreads(
+        actual: CopyOnWriteArrayList<Thread>,
+        private val atMetric: () -> Unit,
+    ) : CopyOnWriteArrayList<Thread>(actual) {
+        private val armed = AtomicBoolean(true)
+
+        override fun iterator(): MutableIterator<Thread> {
+            if (Thread.currentThread().stackTrace.any { it.className == "io.mazewall.enforcer.internal.execution.OwnedDomain" && it.methodName == "liveWorkers" } &&
+                armed.compareAndSet(true, false)
+            ) {
+                    atMetric()
+                }
+            return super.iterator()
         }
     }
 
