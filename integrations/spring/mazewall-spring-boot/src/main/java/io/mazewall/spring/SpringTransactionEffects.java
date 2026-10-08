@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /** One retained worker transaction-chain completion report, independent of caller result delivery. */
 public final class SpringTransactionEffects {
@@ -48,12 +49,15 @@ public final class SpringTransactionEffects {
         return scope;
     }
 
+    static Scope currentIfPresent() { return CURRENT.get(); }
+
     static final class Scope {
         final long id;
         final Thread worker;
         final List<Effect> transactions = new ArrayList<>();
         Throwable recordedFailure;
         ContainmentDiagnostic diagnostic;
+        SavepointRollback savepointRollback;
         Scope(long id, Thread worker) { this.id = id; this.worker = worker; }
         Effect add(Kind kind) {
             Effect effect = new Effect(transactions.size() + 1L, kind, worker.threadId());
@@ -63,6 +67,39 @@ public final class SpringTransactionEffects {
         void record(Throwable failure, ContainmentDiagnostic evidence) {
             if (recordedFailure == null) { recordedFailure = failure; diagnostic = evidence; }
         }
+        SavepointRollback beginSavepointRollback() {
+            savepointRollback = new SavepointRollback(savepointRollback);
+            return savepointRollback;
+        }
+        void requestSavepointRollback(Effect effect, Supplier<List<Effect>> affected) {
+            // Spring notifies BEFORE Connection.rollback(savepoint). Intent alone
+            // cannot stamp success or a completion thread.
+            affected.get().forEach(Effect::requestRollback);
+            if (savepointRollback != null) savepointRollback.observe(effect, affected);
+        }
+        void finishSavepointRollback(SavepointRollback attempt, boolean succeeded) {
+            try {
+                for (var affected : attempt.affected) {
+                    for (var effect : affected.get()) {
+                        effect.requestRollback();
+                        if (succeeded && !attempt.ambiguous) effect.complete(Outcome.ROLLED_BACK);
+                    }
+                }
+            } finally { savepointRollback = attempt.parent; }
+        }
+    }
+
+    static final class SavepointRollback {
+        final SavepointRollback parent;
+        Effect intent;
+        boolean ambiguous;
+        final List<Supplier<List<Effect>>> affected = new ArrayList<>();
+        SavepointRollback(SavepointRollback parent) { this.parent = parent; }
+        void observe(Effect effect, Supplier<List<Effect>> subtree) {
+            if (intent != null && intent != effect) ambiguous = true;
+            intent = effect;
+            affected.add(subtree);
+        }
     }
 
     static final class Effect {
@@ -71,7 +108,15 @@ public final class SpringTransactionEffects {
         final long worker;
         Outcome outcome = Outcome.UNKNOWN;
         Long completionThread;
+        boolean rollbackRequested;
         Effect(long id, Kind kind, long worker) { this.id = id; this.kind = kind; this.worker = worker; }
+        void requestRollback() {
+            rollbackRequested = true;
+            if (outcome != Outcome.ROLLED_BACK) {
+                outcome = Outcome.UNKNOWN;
+                completionThread = null;
+            }
+        }
         void complete(Outcome actual) {
             if (Thread.currentThread().threadId() != worker) throw new IllegalStateException("Transaction completion left its physical worker");
             outcome = actual;

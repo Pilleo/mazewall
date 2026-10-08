@@ -47,5 +47,17 @@ digest alignment, native owned JDBC/denial/cancellation proof, reviewed S1/S2,
 packaged consumer/Boot origin support and S3. Issue remains open; coordinator owns
 backlog row/count integration. No archive or release-ready claim.
 
+**Review round 1 corrections:** S1-1 public-only discovery omitted required non-public
+declarations. Behavioral red/green now covers package-private singleton scope and bound
+private/protected/inherited required declarations, retaining interface/bridge behavior.
+S2-1 savepoint notification preceded actual JDBC rollback; intent now remains UNKNOWN
+until the exact Spring held-savepoint completion path confirms success. Real rollback-
+to-savepoint faults, caught outer commit/uncertainty/full rollback and same-physical-
+transaction descendants are verified; independent REQUIRES_NEW commit remains intact.
+Related fixture correction binds JdbcTemplate and manager to the SAME fault-wrapped
+datasource and asserts active resource identity. Earlier fault-mode raw-datasource
+logs alone are not managed SQL-effect proof. TASK5-ADOPTION-PLAN.md defines the gated
+typed-owner/JAR adoption and coordinator/root update without copying unreviewed core.
+
 ---
 <!-- id: issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati  file: issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md -->

@@ -157,7 +157,12 @@ public final class SpringTransactionGuard implements MethodInterceptor {
         @Override public void savepoint(Object savepoint) { savepoints.put(savepoint, scope.add(SpringTransactionEffects.Kind.SAVEPOINT)); }
         @Override public void savepointRollback(Object savepoint) {
             var effect = savepoints.get(savepoint);
-            if (effect != null) effect.complete(SpringTransactionEffects.Outcome.ROLLED_BACK);
+            if (effect != null) scope.requestSavepointRollback(effect,
+                    // Savepoints created after this still-held savepoint belong to
+                    // its nested work in this SAME physical transaction. Re-read
+                    // after completion to include callback-created descendants;
+                    // independent REQUIRES_NEW transactions have another map.
+                    () -> savepoints.values().stream().filter(descendant -> descendant.id >= effect.id).toList());
         }
         @Override public void afterCompletion(int status) {
             SpringTransactionEffects.Outcome outcome = switch (status) {
@@ -167,7 +172,13 @@ public final class SpringTransactionGuard implements MethodInterceptor {
             };
             transaction.complete(outcome);
             for (var effect : savepoints.values()) {
-                if (effect.outcome != SpringTransactionEffects.Outcome.ROLLED_BACK) effect.complete(outcome);
+                if (effect.outcome != SpringTransactionEffects.Outcome.ROLLED_BACK) {
+                    // A confirmed whole-transaction rollback also undoes savepoint
+                    // work. Commit/uncertainty cannot confirm a failed or unobserved
+                    // savepoint rollback, even if Spring notified its intent.
+                    effect.complete(effect.rollbackRequested && outcome != SpringTransactionEffects.Outcome.ROLLED_BACK
+                            ? SpringTransactionEffects.Outcome.UNKNOWN : outcome);
+                }
             }
         }
     }
@@ -200,6 +211,23 @@ public final class SpringTransactionGuard implements MethodInterceptor {
                 throw rejected("Effective transaction does not select the reviewed qualified manager");
             }
             return qualifiedManager;
+        }
+        @Override protected void completeTransactionAfterThrowing(TransactionInfo info, InvocationCallback invocation, Throwable failure) {
+            SpringTransactionEffects.Scope scope = SpringTransactionEffects.currentIfPresent();
+            boolean heldSavepointRollback = info != null && info.getTransactionManager() == qualifiedManager
+                    && info.getTransactionStatus() != null && info.getTransactionStatus().hasSavepoint()
+                    && info.getTransactionAttribute() != null && info.getTransactionAttribute().rollbackOn(failure);
+            var attempt = heldSavepointRollback && scope != null ? scope.beginSavepointRollback() : null;
+            boolean succeeded = false;
+            try {
+                // Keep Spring's actual rollback/rules/callback/exception semantics.
+                // Normal return from this exact manager's held-savepoint rollback
+                // path confirms JDBC success; a callback by itself does not.
+                super.completeTransactionAfterThrowing(info, invocation, failure);
+                succeeded = true;
+            } finally {
+                if (attempt != null) scope.finishSavepointRollback(attempt, succeeded);
+            }
         }
     }
 

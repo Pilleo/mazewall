@@ -23,6 +23,7 @@ import org.springframework.aop.target.SingletonTargetSource;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.core.BridgeMethodResolver;
 import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.util.ClassUtils;
 
 /** Explicit trusted configuration binds one reviewed operation to one actual registered singleton proxy. */
 public final class SpringOperationBinder {
@@ -171,14 +172,10 @@ public final class SpringOperationBinder {
             if (!beans.containsSingleton(name)) throw rejected("Required scope contains an uninitialized/scoped bean: " + name);
             Object bean = beans.getBean(name);
             Class<?> type = AopUtils.getTargetClass(bean);
-            for (Method method : type.getMethods()) {
-                if (AnnotatedElementUtils.hasAnnotation(method, MazewallOperation.class) && bean != boundBean) {
+            for (Method method : operationDeclarations(bean)) {
+                Method actual = BridgeMethodResolver.findBridgedMethod(AopUtils.getMostSpecificMethod(method, type));
+                if (operationMarker(method, actual) != null && bean != boundBean) {
                     throw rejected("Required annotated bean is unbound: " + name + ":" + methodDescriptor(method));
-                }
-                if (AnnotatedElementUtils.hasAnnotation(method, MazewallOperation.class) && bean == boundBean
-                        && !methodDescriptor(BridgeMethodResolver.findBridgedMethod(method)).equals(
-                        preparedArtifact.getBinding().getAdapterIdentity().get("methodDescriptor"))) {
-                    throw rejected("Required annotated overload is unbound: " + name);
                 }
             }
             if (bean == boundBean) validateAnnotatedMethods(bean, preparedArtifact);
@@ -187,19 +184,53 @@ public final class SpringOperationBinder {
 
     private static void validateAnnotatedMethods(Object bean, ReviewedOperationArtifact artifact) {
         Class<?> type = AopUtils.getTargetClass(bean);
-        List<Method> methods = new ArrayList<>(List.of(type.getMethods()));
+        Set<Method> reachable = new java.util.HashSet<>();
         if (bean instanceof Advised advised) {
-            for (Class<?> contract : advised.getProxiedInterfaces()) methods.addAll(List.of(contract.getMethods()));
+            for (Class<?> contract : advised.getProxiedInterfaces()) {
+                for (Method method : contract.getMethods()) {
+                    if (Modifier.isPublic(method.getModifiers()) && !Modifier.isStatic(method.getModifiers())) {
+                        reachable.add(BridgeMethodResolver.findBridgedMethod(AopUtils.getMostSpecificMethod(method, type)));
+                    }
+                }
+            }
         }
-        for (Method method : methods) {
+        for (Method method : operationDeclarations(bean)) {
             Method actual = BridgeMethodResolver.findBridgedMethod(AopUtils.getMostSpecificMethod(method, type));
-            MazewallOperation marker = AnnotatedElementUtils.findMergedAnnotation(method, MazewallOperation.class);
-            if (marker == null) marker = AnnotatedElementUtils.findMergedAnnotation(actual, MazewallOperation.class);
+            MazewallOperation marker = operationMarker(method, actual);
+            if (marker != null && (!Modifier.isPublic(method.getModifiers()) || Modifier.isStatic(method.getModifiers())
+                    || !Modifier.isPublic(actual.getModifiers()) || Modifier.isStatic(actual.getModifiers())
+                    || Modifier.isFinal(actual.getModifiers()) || !reachable.contains(actual))) {
+                throw rejected("Unproxyable required declaration has no admitted interface operation: " + method);
+            }
             if (marker != null && (!marker.value().equals(artifact.getBinding().getOperationId())
                     || !methodDescriptor(actual).equals(artifact.getBinding().getAdapterIdentity().get("methodDescriptor")))) {
                 throw rejected("Required annotated operation/overload has no exact review: " + methodDescriptor(actual));
             }
         }
+    }
+
+    private static List<Method> operationDeclarations(Object bean) {
+        Class<?> type = AopUtils.getTargetClass(bean);
+        List<Method> declarations = new ArrayList<>();
+        // getMethods() omits precisely the non-public required declarations that
+        // a JDK proxy cannot protect. Inspect them without making them accessible.
+        for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
+            declarations.addAll(List.of(current.getDeclaredMethods()));
+        }
+        Set<Class<?>> contracts = new java.util.LinkedHashSet<>(List.of(ClassUtils.getAllInterfacesForClass(type)));
+        if (bean instanceof Advised advised) {
+            for (Class<?> contract : advised.getProxiedInterfaces()) {
+                contracts.add(contract);
+                contracts.addAll(List.of(ClassUtils.getAllInterfacesForClass(contract)));
+            }
+        }
+        for (Class<?> contract : contracts) declarations.addAll(List.of(contract.getDeclaredMethods()));
+        return declarations;
+    }
+
+    private static MazewallOperation operationMarker(Method declaration, Method actual) {
+        MazewallOperation marker = AnnotatedElementUtils.findMergedAnnotation(declaration, MazewallOperation.class);
+        return marker != null ? marker : AnnotatedElementUtils.findMergedAnnotation(actual, MazewallOperation.class);
     }
 
     public static String methodDescriptor(Method method) {

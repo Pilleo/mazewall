@@ -26,6 +26,10 @@ implementation class name, bridged JVM method descriptor and class-resource SHA-
 `validateRequiredBindings` on the explicit protected bean scope before traffic.
 Unmatched required annotations/overloads, lazy/scoped/uninitialized beans, final
 methods, missing reviews, substituted objects/loaders/bytes and advisor drift fail.
+Discovery inspects declared implementation/interface methods across the hierarchy,
+including inherited private/protected/package declarations. Required non-public,
+static, final or non-interface-mappable declarations reject; they are never silently
+optional infrastructure. Unannotated private superclass shadows remain unmarked.
 Only the existing scalar/string/byte-array synchronous result allowlist is supported;
 erased generic entries are checked against their actual bridged target result.
 
@@ -63,6 +67,10 @@ must compare its finished-JAR identity with the trusted review instead of substi
 the current class-resource digest. The first task-5 resolver rejects exploded/nested
 origins; Spring Boot/exploded support is a separate explicit blocker. An application
 using the current metadata-only path has not closed that release gate.
+
+[TASK5-ADOPTION-PLAN.md](TASK5-ADOPTION-PLAN.md) specifies the exact follow-up,
+transfer/cleanup, selected-Class/common-origin limits and coordinator/root update.
+It is gated on core review, not adoption of unreviewed source or resource/JAR proof.
 
 ## S2 qualified synchronous JDBC advice
 
@@ -113,8 +121,15 @@ ID, transaction/savepoint outcomes, original execution failure and diagnostic. I
 not a complete audit stream, a caller-delivery receipt, or the runtime's physical
 `executionEnd()`/cleanup/drain result. Database outcomes come from actual
 `afterCompletion` callbacks: COMMITTED, ROLLED_BACK or UNKNOWN. Independently committed
-REQUIRES_NEW work stays committed when the outer fails. Savepoint rollback is separate
-from outer commit; driver commit uncertainty remains UNKNOWN. AfterCommit failures
+REQUIRES_NEW work stays committed when the outer fails. A savepoint callback indicates
+rollback INTENT before JDBC rollback; it does not stamp success/completion. The
+exact-manager interceptor brackets Spring's real held-savepoint rollback path and
+confirms an unambiguous intent only after successful return. Failed/unobserved/
+ambiguous attempts remain UNKNOWN if the outer commits or is uncertain. Confirmed
+whole-transaction rollback also confirms undone nested work. Confirmed ancestor
+savepoint rollback covers later-created descendants in that same physical transaction;
+independent REQUIRES_NEW work has a separate physical owner/map. Savepoint rollback is
+separate from outer commit; driver commit uncertainty remains UNKNOWN. AfterCommit failures
 remain COMMITTED. Nontransactional/autocommit database work has no fabricated rollback
 receipt. Files/network effects have no JDBC rollback guarantee.
 
@@ -128,3 +143,9 @@ afterCommit failure, hidden manager substitution and datasource identity drift.
 Caller interruption while the host worker remains active demonstrates why result
 delivery and database completion cannot be conflated. This fixture is explicitly
 uncontained; native owned-runtime cancellation and kernel denial are separate gates.
+Fault-wrapped JDBC tests use the EXACT same datasource for JdbcTemplate and manager,
+and assert its transaction resource is bound before transactional SQL. A real
+rollback(savepoint) fault caught before outer commit leaves the write present and
+its receipt UNKNOWN; combined commit uncertainty remains UNKNOWN. Full outer rollback
+and ancestor/descendant rollback use actual SQL-state assertions, preserving independent
+REQUIRES_NEW commit. These are real connection/manager tests, not mock assurances.

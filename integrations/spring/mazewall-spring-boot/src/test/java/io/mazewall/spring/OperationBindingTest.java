@@ -21,7 +21,10 @@ import org.springframework.transaction.interceptor.TransactionInterceptor;
 class OperationBindingTest {
     interface Generic<T> { T run(); }
     interface Operation extends Generic<String> { @Override String run(); }
-    static class Bean implements Operation {
+    static class InfrastructureBase {
+        private String run() { return "unannotated infrastructure, not an overridden operation"; }
+    }
+    static class Bean extends InfrastructureBase implements Operation {
         final AtomicInteger calls = new AtomicInteger();
         @MazewallOperation("write") public String run() { calls.incrementAndGet(); return "same bean"; }
     }
@@ -36,6 +39,20 @@ class OperationBindingTest {
     static class InterfaceMarkedBean implements MarkedContract {
         @Override public String execute() { return "unbound"; }
     }
+    static class PackageRequiredOnly {
+        @MazewallOperation("package-required") String hidden() { return "unbound"; }
+    }
+    static class PrivateRequired extends Bean {
+        @MazewallOperation("private-required") private String hidden() { return "unbound"; }
+    }
+    static class ProtectedRequired extends Bean {
+        @MazewallOperation("protected-required") protected String hidden() { return "unbound"; }
+    }
+    static class InheritedRequired extends ProtectedRequired {}
+    static class PrivateBaseRequired extends Bean {
+        @MazewallOperation("private-base-required") private String hidden() { return "unbound"; }
+    }
+    static class InheritedPrivateRequired extends PrivateBaseRequired {}
 
     static ReviewedOperationArtifact artifact(Object target, Method implementation, String beanName, String hash) {
         var binding = new OperationBinding("write", OperationAdapter.SPRING_METHOD, hash, "resources-v1",
@@ -189,6 +206,34 @@ class OperationBindingTest {
             fixture.beans.registerSingleton("interfaceOnly", new InterfaceMarkedBean());
             assertThrows(IllegalStateException.class,
                     () -> fixture.binder().validateRequiredBindings(List.of("operation", "interfaceOnly")));
+        }
+    }
+
+    @Test void unboundPackagePrivateRequiredSingletonCannotBeSilentlyOmitted() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.beans.registerSingleton("packageRequired", new PackageRequiredOnly());
+            assertThrows(IllegalStateException.class,
+                    () -> fixture.binder().validateRequiredBindings(List.of("packageRequired")));
+        }
+    }
+
+    @Test void reviewedPublicOperationCannotHidePrivateProtectedOrInheritedRequiredDeclaration() throws Exception {
+        for (Bean target : List.of(new PrivateRequired(), new ProtectedRequired(), new InheritedRequired(), new InheritedPrivateRequired())) {
+            try (var fixture = new Fixture(target)) {
+                assertThrows(IllegalStateException.class, () -> fixture.binder().bind(
+                        fixture.approval(fixture.proxy, target.getClass().getClassLoader(), fixture.artifact)),
+                        target.getClass().getName());
+                assertEquals(0, target.calls.get());
+            }
+        }
+    }
+
+    @Test void unannotatedPrivateSuperclassShadowDoesNotBecomeRequiredBySubclassAnnotation() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.binder().bind(fixture.approval(fixture.proxy, Bean.class.getClassLoader(), fixture.artifact));
+            fixture.binder().validateRequiredBindings(List.of("operation"));
+            assertEquals("same bean", ((Operation) fixture.proxy).run());
+            assertEquals(1, fixture.target.calls.get());
         }
     }
 }

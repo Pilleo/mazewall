@@ -56,6 +56,10 @@ class JdbcTransactionTest {
         String insert(String name) {
             bodyThreads.add(Thread.currentThread().threadId());
             activeTransactions.add(TransactionSynchronizationManager.isActualTransactionActive());
+            if (TransactionSynchronizationManager.isActualTransactionActive()) {
+                assertTrue(TransactionSynchronizationManager.hasResource(jdbc.getDataSource()),
+                        "SQL must use the exact datasource resource bound by the real JDBC manager");
+            }
             jdbc.update("insert into effects(name) values (?)", name);
             innerBody.run();
             return name;
@@ -82,7 +86,7 @@ class JdbcTransactionTest {
         public String checked() throws Exception { insert("checked"); throw checkedBusiness; }
     }
 
-    enum Fault { NONE, COMMIT_FAILURE, NO_SAVEPOINTS, EQUAL_DATA_SOURCE }
+    enum Fault { NONE, COMMIT_FAILURE, NO_SAVEPOINTS, EQUAL_DATA_SOURCE, SAVEPOINT_ROLLBACK_FAILURE, SAVEPOINT_AND_COMMIT_FAILURE }
 
     static final class Fixture implements AutoCloseable {
         final AdvisorPlacementTest.HostDispatch dispatch = new AdvisorPlacementTest.HostDispatch(new ArrayList<>());
@@ -100,8 +104,6 @@ class JdbcTransactionTest {
         Fixture(boolean jdbcManager, boolean includeIncompatible) throws Exception { this(jdbcManager, includeIncompatible, Fault.NONE); }
         Fixture(boolean jdbcManager, boolean includeIncompatible, Fault fault) throws Exception {
             dataSource.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1");
-            jdbc = new JdbcTemplate(dataSource);
-            jdbc.execute("create table effects(name varchar(40))");
             javax.sql.DataSource actual = fault == Fault.NONE ? dataSource : new org.springframework.jdbc.datasource.AbstractDataSource() {
                 @Override public java.sql.Connection getConnection() throws java.sql.SQLException { return faultConnection(dataSource.getConnection(), fault); }
                 @Override public java.sql.Connection getConnection(String username, String password) throws java.sql.SQLException {
@@ -110,6 +112,11 @@ class JdbcTransactionTest {
                 @Override public boolean equals(Object other) { return fault == Fault.EQUAL_DATA_SOURCE ? other instanceof javax.sql.DataSource : this == other; }
                 @Override public int hashCode() { return fault == Fault.EQUAL_DATA_SOURCE ? 1 : System.identityHashCode(this); }
             };
+            // The fault-wrapped datasource must be the SAME resource key used by
+            // JDBC and the manager; using the raw delegate here would autocommit
+            // on another connection and invalidate transaction-effect assertions.
+            jdbc = new JdbcTemplate(actual);
+            jdbc.execute("create table effects(name varchar(40))");
             manager = jdbcManager ? new JdbcTransactionManager(actual) : new DataSourceTransactionManager(actual);
             beans.registerSingleton("jdbc", manager);
             guard = new SpringTransactionGuard(beans, "jdbc", effects);
@@ -142,8 +149,12 @@ class JdbcTransactionTest {
     static java.sql.Connection faultConnection(java.sql.Connection connection, Fault fault) {
         return (java.sql.Connection) java.lang.reflect.Proxy.newProxyInstance(JdbcTransactionTest.class.getClassLoader(),
                 new Class<?>[]{java.sql.Connection.class}, (proxy, method, arguments) -> {
-                    if (fault == Fault.COMMIT_FAILURE && method.getName().equals("commit")) {
+                    if ((fault == Fault.COMMIT_FAILURE || fault == Fault.SAVEPOINT_AND_COMMIT_FAILURE) && method.getName().equals("commit")) {
                         throw new java.sql.SQLException("driver commit acknowledgement failed");
+                    }
+                    if ((fault == Fault.SAVEPOINT_ROLLBACK_FAILURE || fault == Fault.SAVEPOINT_AND_COMMIT_FAILURE)
+                            && method.getName().equals("rollback") && arguments != null && arguments.length == 1) {
+                        throw new java.sql.SQLException("driver rollback to savepoint failed");
                     }
                     try {
                         Object value = method.invoke(connection, arguments);
@@ -420,6 +431,80 @@ class JdbcTransactionTest {
             assertSame(fatal, assertThrows(LinkageError.class, fixture.proxy::outer));
             assertSame(fatal, fixture.dispatchFailure.get(), "the runtime must see Error, not an unchecked rollback wrapper");
             assertEquals(0, fixture.count("outer"));
+        }
+    }
+
+    @ParameterizedTest @EnumSource(value = Fault.class, names = {"SAVEPOINT_ROLLBACK_FAILURE", "SAVEPOINT_AND_COMMIT_FAILURE"})
+    void failedSavepointRollbackIsUnknownAfterCaughtFailureAndOuterCompletion(Fault fault) throws Exception {
+        try (var fixture = new Fixture(false, false, fault)) {
+            var business = new IllegalArgumentException("ordinary nested business failure");
+            var rollbackFailure = new java.util.concurrent.atomic.AtomicReference<org.springframework.transaction.TransactionSystemException>();
+            fixture.bean.outerBody = () -> {
+                fixture.bean.innerBody = () -> { throw business; };
+                try {
+                    rollbackFailure.set(assertThrows(org.springframework.transaction.TransactionSystemException.class, fixture.proxy::nested));
+                } finally { fixture.bean.innerBody = () -> {}; }
+            };
+            if (fault == Fault.SAVEPOINT_AND_COMMIT_FAILURE) {
+                assertThrows(org.springframework.transaction.TransactionSystemException.class, fixture.proxy::outer);
+            } else {
+                assertEquals("outer", fixture.proxy.outer());
+                assertEquals(1, fixture.count("nested"), "a failed real rollback-to-savepoint leaves the write to commit with its outer transaction");
+                assertEquals(1, fixture.count("outer"));
+            }
+            assertSame(business, rollbackFailure.get().getApplicationException());
+            assertInstanceOf(java.sql.SQLException.class, rollbackFailure.get().getCause());
+            var report = fixture.effects.lastCompletion();
+            assertEquals(fault == Fault.SAVEPOINT_AND_COMMIT_FAILURE ? SpringTransactionEffects.Outcome.UNKNOWN
+                    : SpringTransactionEffects.Outcome.COMMITTED, report.transactions().getFirst().outcome());
+            var savepoint = report.transactions().getLast();
+            assertEquals(SpringTransactionEffects.Kind.SAVEPOINT, savepoint.kind());
+            assertEquals(SpringTransactionEffects.Outcome.UNKNOWN, savepoint.outcome());
+        }
+    }
+
+    @Test void confirmedAncestorSavepointRollbackAlsoUndoesSuccessfulNestedDescendantButNotRequiresNew() throws Exception {
+        try (var fixture = new Fixture(false)) {
+            var business = new IllegalArgumentException("parent nested business failure");
+            var nestedBodies = new java.util.concurrent.atomic.AtomicInteger();
+            fixture.bean.outerBody = () -> {
+                fixture.bean.innerBody = () -> {
+                    if (nestedBodies.incrementAndGet() == 1) {
+                        fixture.proxy.nested();
+                        fixture.proxy.requiresNew();
+                        throw business;
+                    }
+                };
+                try { assertSame(business, assertThrows(IllegalArgumentException.class, fixture.proxy::nested)); }
+                finally { fixture.bean.innerBody = () -> {}; }
+            };
+            fixture.proxy.outer();
+            assertEquals(1, fixture.count("outer"));
+            assertEquals(0, fixture.count("nested"));
+            assertEquals(1, fixture.count("requiresNew"));
+            var effects = fixture.effects.lastCompletion().transactions();
+            assertEquals(List.of(SpringTransactionEffects.Outcome.ROLLED_BACK, SpringTransactionEffects.Outcome.ROLLED_BACK),
+                    effects.stream().filter(effect -> effect.kind() == SpringTransactionEffects.Kind.SAVEPOINT)
+                            .map(SpringTransactionEffects.TransactionEffect::outcome).toList());
+            assertTrue(effects.stream().filter(effect -> effect.kind() == SpringTransactionEffects.Kind.TRANSACTION)
+                    .allMatch(effect -> effect.outcome() == SpringTransactionEffects.Outcome.COMMITTED));
+        }
+    }
+
+    @Test void fullOuterRollbackConfirmsUndoneWorkEvenWhenItsSavepointRollbackFailed() throws Exception {
+        try (var fixture = new Fixture(false, false, Fault.SAVEPOINT_ROLLBACK_FAILURE)) {
+            var nestedBusiness = new IllegalArgumentException("nested failed");
+            var outerBusiness = new IllegalArgumentException("outer failed");
+            fixture.bean.outerBody = () -> {
+                fixture.bean.innerBody = () -> { throw nestedBusiness; };
+                try { assertThrows(org.springframework.transaction.TransactionSystemException.class, fixture.proxy::nested); }
+                finally { fixture.bean.innerBody = () -> {}; }
+                throw outerBusiness;
+            };
+            assertSame(outerBusiness, assertThrows(IllegalArgumentException.class, fixture.proxy::outer));
+            assertEquals(0, fixture.jdbc.queryForObject("select count(*) from effects", Integer.class));
+            assertTrue(fixture.effects.lastCompletion().transactions().stream()
+                    .allMatch(effect -> effect.outcome() == SpringTransactionEffects.Outcome.ROLLED_BACK));
         }
     }
 }
