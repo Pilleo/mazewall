@@ -148,9 +148,16 @@ public object PortalWorkerMain {
             publishReady(receipt)
             initialized
         } catch (failure: Throwable) {
-            runCatching(transport::close).exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
-            runCatching { receipt?.let(receiptLifetime::executionEnded) }.exceptionOrNull()?.takeIf { it !== failure }?.let(failure::addSuppressed)
-            throw failure
+            var terminal = failure
+            runCatching(transport::close).exceptionOrNull()?.let {
+                terminal = io.mazewall.platform.fd.CleanupFailures
+                .merge(terminal, it)
+            }
+            runCatching { receipt?.let(receiptLifetime::executionEnded) }.exceptionOrNull()?.let {
+                terminal = io.mazewall.platform.fd.CleanupFailures
+                .merge(terminal, it)
+            }
+            throw terminal
         }
         // Main return need not end a JVM containing guest-created non-daemon threads.
         finishWorkerExecution(driver, requireNotNull(receipt), receiptLifetime)
@@ -163,11 +170,11 @@ public object PortalWorkerMain {
     ) {
         val failure = runCatching { driver.run() }.exceptionOrNull()
         val retirementFailure = runCatching { receiptLifetime.executionEnded(actualReceipt) }.exceptionOrNull()
-        if (failure != null) {
-            retirementFailure?.takeIf { it !== failure }?.let(failure::addSuppressed)
-            throw failure
-        }
-        retirementFailure?.let { throw it }
+        val terminal = retirementFailure?.let {
+            io.mazewall.platform.fd.CleanupFailures
+            .merge(failure, it)
+        } ?: failure
+        terminal?.let { throw it }
     }
 
     internal fun publishDispatcherTable(raw: String?): PortalDispatcherPublication = PortalDispatcherRegistry.publishStrict(raw)

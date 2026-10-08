@@ -71,9 +71,18 @@ constructs the group dispatcher and sends a strict bounded format-1 socket ready
 The host requires the exact session, child PID, protocol and measured generation plus
 required protection evidence under the existing startup deadline. Stdout READY cannot
 substitute for this record, even after a matching parent acknowledgement. The receipt
-remains owned through worker request-loop/transport end and until physical JVM shutdown,
-even if guest-created non-daemon threads outlive main or initialization fails; closing it
-does not undo the process-lifetime kernel restrictions.
+remains strongly rooted for the entire OS process lifetime, even if guest-created non-daemon
+threads outlive main, initialization fails, or other shutdown hooks complete. The static
+unsupervised baseline has no Java close/clear at hook completion. OS death reclaims native
+resources; this does not claim Java receipt retirement or supervised-lease release.
+
+Before launch, the host verifies the complete cached file set and each file's digest against
+entries of the unchanged verified archive, then requires the exact archive JAR classpath.
+Stable cache replacement, missing/extra files and symlinks fail; this association is not
+deferred to C4 concurrent pinning. Generation measurement uses bounded work and the same
+absolute startup/cancellation authority. Its physical blocking-I/O task remains owned if
+interruption cannot end a filesystem operation; close remains retryable until it actually
+ends. Deadline/cancellation returns do not launch a late child when that task later completes.
 
 Profiles do not vary the process sandbox in this release. Every worker retains
 the existing fail-closed JVM filesystem allowlist, process-creation denial, and

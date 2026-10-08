@@ -10,13 +10,14 @@ import javax.tools.ToolProvider
 internal fun ownedEchoWorkerFixture(
     directory: Path,
     manifest: PortalServiceManifest,
+    echoExpression: String = "value",
 ): Path {
     val source = Files.createDirectory(directory.resolve("fixture-source"))
     val classes = Files.createDirectory(directory.resolve("fixture-classes"))
     val sources = mapOf(
         "OwnedEchoService.java" to "package io.mazewall.portal; public interface OwnedEchoService { String echo(String value); }",
         "OwnedEchoImpl.java" to
-            "package fixture; public class OwnedEchoImpl implements io.mazewall.portal.OwnedEchoService { public OwnedEchoImpl() {} public String echo(String value) { return value; } }",
+            "package fixture; public class OwnedEchoImpl implements io.mazewall.portal.OwnedEchoService { public OwnedEchoImpl() {} public String echo(String value) { return $echoExpression; } }",
         "OwnedEchoPortalDispatcher.java" to """
             package fixture;
             public class OwnedEchoPortalDispatcher {

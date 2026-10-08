@@ -19,26 +19,25 @@ internal interface PortalWorkerReceiptLifetime {
 
 /**
  * A guest may create non-daemon JVM threads. Main/request-loop return therefore does not
- * prove process exit. Register before acquisition and retain the exact receipt until JVM
- * shutdown, including startup rejection. Kernel restrictions survive receipt retirement.
+ * prove process exit, nor does completion of any shutdown hook. The static baseline is
+ * irreversible and unsupervised: keep its actual receipt strongly rooted for the complete
+ * OS process lifetime. There is deliberately no Java close/clear at shutdown; physical
+ * death reclaims the process's native resources, not a fictitious Java retirement event.
  */
-internal class PortalWorkerProcessReceiptLifetime(
-    registerShutdown: (Thread) -> Unit = { Runtime.getRuntime().addShutdownHook(it) },
-) : PortalWorkerReceiptLifetime {
+internal class PortalWorkerProcessReceiptLifetime : PortalWorkerReceiptLifetime {
     private val receipt = AtomicReference<InstallationReceipt?>()
 
-    init {
-        registerShutdown(
-            Thread.ofPlatform().name("portal-worker-receipt-retirement").unstarted {
-            receipt.getAndSet(null)?.close()
-        },
-        )
+    companion object {
+        private val processReceipts = java.util.concurrent.ConcurrentHashMap
+            .newKeySet<InstallationReceipt>()
     }
 
     override fun retain(receipt: InstallationReceipt) {
+        check(!receipt.requestedPolicy.hasSupervisedSyscalls) { "process-lifetime receipt owner requires the unsupervised static baseline" }
         check(this.receipt.compareAndSet(null, receipt)) { "worker process already owns an installation receipt" }
+        processReceipts.add(receipt)
     }
 
-    // The shutdown hook retains ownership even if the main loop or guest initialization fails.
+    // Neither main failure nor other shutdown work constitutes physical process end.
     override fun executionEnded(receipt: InstallationReceipt) = Unit
 }

@@ -154,12 +154,26 @@ threads. Older kernels fail worker startup; there is no thread-only worker basel
 Dispatcher validation and guest construction follow containment. Any initialization or readiness
 publication failure closes the owned channel, preserving the original failure and suppressing
 cleanup failures. Only after required readiness succeeds does transport ownership pass to the execution driver.
-The actual receipt is retained through the request loop and transport retirement and by a
-pre-registered JVM shutdown owner until physical process shutdown, including startup rejection.
+The actual unsupervised static-baseline receipt is strongly rooted for the full OS process
+lifetime, including startup rejection. There is no Java close/clear on shutdown-hook entry
+or completion: other hooks and guest threads may still execute. Physical death reclaims OS
+resources; this is not Java-level receipt retirement or supervised-lease release evidence.
 Main return does not prove process exit when guests create non-daemon JVM threads. In-process
 driver embeddings retire at their synchronous execution end. Receipt closure cannot
 undo installed Seccomp/Landlock, which remain for the OS process lifetime. No reconstructed
 receipt or parent-provided protection flag substitutes for actual installer evidence.
+
+Cached launch files are checked against per-entry SHA-256 values measured from the verified
+archive, including the complete expected file set and exact sorted `lib/*.jar` classpath.
+Stable extra, missing, replaced or symlinked cache entries reject before generation capture.
+This cache integrity check is separate from concurrent C4 object pinning. Host measurement
+uses the acquisition's absolute startup deadline and active authority, with bounded
+classpath text/count, traversal depth/entries, metadata and total bytes. Blocking I/O runs
+in a separately registered physical platform-thread owner; interruptible FileChannel reads
+are cancelled on expiry/close. Result timeout never proves physical I/O end: an operation
+which does not respond to interruption remains owned and prevents Closed until later
+retirement succeeds. Only the startup caller can launch, after a final deadline/active
+check; late measurement completion has no launch effect.
 Extra readable paths are deferred.
 
 `read`/`write` on inherited FDs remain legal; see [security-considerations.md](../core/security-considerations.md).

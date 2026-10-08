@@ -17,6 +17,28 @@ import java.util.zip.ZipOutputStream
 
 class WorkerBundleMaterializerTest {
     @Test
+    fun `stable replaced missing and extra cache jars cannot be blessed by unchanged archive`() {
+        for (mutation in listOf("replace", "missing", "extra")) {
+            val source = zipOf("lib/worker.jar" to byteArrayOf(1, 2, 3), "metadata.txt" to "unchanged schema".toByteArray())
+            val artifact = PortalWorkerArtifact(source, sha256(source))
+            val cache = Files.createTempDirectory("portal-integrity")
+            val first = WorkerBundleMaterializer.materialize(artifact, cache)
+            val jar = first.classpath.single()
+            when (mutation) {
+                "replace" -> Files.write(jar, byteArrayOf(4, 5, 6))
+                "missing" -> Files.delete(jar)
+                "extra" -> Files.write(jar.parent.resolve("extra.jar"), byteArrayOf(7))
+            }
+            assertThrows(IllegalArgumentException::class.java, { WorkerBundleMaterializer.materialize(artifact, cache) }, mutation)
+            assertThrows(IllegalArgumentException::class.java, {
+                WorkerBundleMaterializer.verifyLaunch(artifact, first.classpath.joinToString(java.io.File.pathSeparator), PortalMeasurementBudget())
+            }, "pre-generation $mutation")
+            assertTrue(Files.readString(first.directory.resolve("metadata.txt")) == "unchanged schema")
+            assertTrue(sha256(source) == artifact.sha256)
+        }
+    }
+
+    @Test
     fun `rejects an artifact whose digest does not match`() {
         val artifact = Files.createTempFile("portal-worker", ".jar")
         Files.writeString(artifact, "not a worker bundle")

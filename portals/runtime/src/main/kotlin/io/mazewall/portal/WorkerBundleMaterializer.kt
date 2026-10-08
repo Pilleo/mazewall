@@ -35,29 +35,34 @@ public object WorkerBundleMaterializer {
         val source = verifiedArtifact(artifact)
         val cache = verifiedCacheDirectory(cacheDirectory)
         val destination = cache.resolve(cacheDirectoryName(artifact, cacheKey)).normalize()
-        if (Files.exists(destination)) return materializedBundle(destination, artifact.sha256)
+        if (Files.exists(destination)) return verifiedMaterialization(source, destination, artifact.sha256)
         val staging = Files.createTempDirectory(cache, ".worker-")
         try {
             extractBundle(source, staging)
             Files.writeString(staging.resolve(completionMarker), artifact.sha256.lowercase())
             publish(staging, destination, artifact.sha256)
-            return materializedBundle(destination, artifact.sha256)
+            return verifiedMaterialization(source, destination, artifact.sha256)
         } catch (failure: Throwable) {
             staging.toFile().deleteRecursively()
             throw failure
         }
     }
 
-    private fun verifiedArtifact(artifact: PortalWorkerArtifact): Path {
+    internal fun verifiedArtifact(
+        artifact: PortalWorkerArtifact,
+        budget: PortalMeasurementBudget = PortalMeasurementBudget(),
+    ): Path {
         val source = artifact.path.toAbsolutePath().normalize()
+        budget.check()
         if (Files.isSymbolicLink(source) || !Files.isRegularFile(source) || !Files.isReadable(source)) {
             throw PortalWorkerArtifactUnavailableException(PortalServiceId("worker"), source.toString())
         }
+        require(Files.size(source) <= maximumUncompressedBytes) { "worker artifact exceeds compressed byte bound" }
         val digest = MessageDigest.getInstance("SHA-256")
-        Files.newInputStream(source).use { stream ->
+        budget.file(source) { stream ->
             val buffer = ByteArray(8_192)
             while (true) {
-                val read = stream.read(buffer)
+                val read = budget.read(stream, buffer)
                 if (read < 0) break
                 if (read > 0) digest.update(buffer, 0, read)
             }
@@ -67,6 +72,26 @@ public object WorkerBundleMaterializer {
             throw PortalWorkerArtifactUnavailableException(PortalServiceId("worker"), source.toString())
         }
         return source
+    }
+
+    private fun verifiedMaterialization(
+        source: Path,
+        destination: Path,
+        digest: String,
+    ): MaterializedWorkerBundle = materializedBundle(destination, digest).also { WorkerBundleIntegrity.verify(source, it.directory, it.classpath, PortalMeasurementBudget()) }
+
+    internal fun verifyLaunch(
+        artifact: PortalWorkerArtifact,
+        classpath: String,
+        budget: PortalMeasurementBudget,
+    ) {
+        budget.check()
+        require(classpath.length <= PortalMeasurementBudget.MAX_CLASSPATH_CHARS) { "worker classpath exceeds character bound" }
+        val paths = classpath.split(java.io.File.pathSeparator).map(Path::of)
+        require(paths.isNotEmpty() && paths.size <= PortalMeasurementBudget.MAX_CLASSPATH_ENTRIES) { "invalid verified launch classpath" }
+        val directory = requireNotNull(paths.first().parent?.parent) { "worker classpath has no cache root" }
+        verifiedPublishedBundle(directory, artifact.sha256, budget)
+        WorkerBundleIntegrity.verify(verifiedArtifact(artifact, budget), directory, paths, budget)
     }
 
     private fun verifiedCacheDirectory(cacheDirectory: Path): Path = VerifiedWorkerCache.directory(cacheDirectory)
@@ -166,13 +191,9 @@ public object WorkerBundleMaterializer {
     private fun classpathEntries(bundle: Path): List<Path> {
         val libraryDirectory = bundle.resolve("lib")
         require(Files.isDirectory(libraryDirectory)) { "worker bundle does not contain a lib directory: $bundle" }
-        val libraries =
-            Files.list(libraryDirectory).use { entries ->
-                entries
-                    .filter { !Files.isSymbolicLink(it) && Files.isRegularFile(it) && it.fileName.toString().endsWith(".jar") }
-                    .sorted()
-                    .toList()
-            }
+        val contents = Files.list(libraryDirectory).use { it.limit((maximumEntryCount + 1).toLong()).toList() }
+        require(contents.size <= maximumEntryCount) { "worker cache contains too many library entries" }
+        val libraries = contents.filter { !Files.isSymbolicLink(it) && Files.isRegularFile(it) && it.fileName.toString().endsWith(".jar") }.sorted()
         require(libraries.isNotEmpty()) { "worker bundle does not contain any worker jars: $bundle" }
         return libraries
     }
@@ -180,6 +201,7 @@ public object WorkerBundleMaterializer {
     private fun verifiedPublishedBundle(
         destination: Path,
         digest: String,
+        budget: PortalMeasurementBudget = PortalMeasurementBudget(),
     ): Path {
         require(!Files.isSymbolicLink(destination) && Files.isDirectory(destination)) {
             "worker bundle cache target is not a directory: $destination"
@@ -188,7 +210,8 @@ public object WorkerBundleMaterializer {
         require(!Files.isSymbolicLink(marker) && Files.isRegularFile(marker)) {
             "worker bundle cache target is unpublished: $destination"
         }
-        require(Files.readString(marker) == digest.lowercase()) {
+        val markerText = budget.file(marker) { it.readNBytes(65).toString(Charsets.US_ASCII) }
+        require(markerText == digest.lowercase()) {
             "worker bundle cache target has an unexpected digest: $destination"
         }
         return destination

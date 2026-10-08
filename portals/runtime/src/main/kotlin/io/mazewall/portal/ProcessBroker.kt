@@ -99,6 +99,7 @@ public class ProcessBroker internal constructor(
     private val startupRetirement = StartupRetirement(sockets, cgroupController)
     private val closeRetirement = CloseRetirement()
     private val socketAcceptance = SocketAcceptance()
+    private val generationCaptures = PortalGenerationCaptures()
 
     @Volatile private var mostRecentInvocation: PortalInvocationTiming? = null
 
@@ -383,6 +384,7 @@ public class ProcessBroker internal constructor(
     ): Boolean {
         cleanup.attempt("operation dispatch shutdown") { operations.stop() }
         cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
+        generationCaptures.cancel()
         val maintenanceStopped = awaitMaintenance(deadline)
         retireRetainedCapabilities(cleanup)
         closeRetirement.retireHandoffs(cleanup)
@@ -396,7 +398,9 @@ public class ProcessBroker internal constructor(
         }
         closeRetirement.retireHandoffs(cleanup)
         val operationsStopped = operations.await(deadline)
-        return operationsStopped && maintenanceStopped && startupStopped && closeRetirement.allOwnedResourcesRetired(cleanup)
+        var capturesStopped = false
+        cleanup.attempt("generation capture ownership") { capturesStopped = generationCaptures.retire(deadline) }
+        return capturesStopped && operationsStopped && maintenanceStopped && startupStopped && closeRetirement.allOwnedResourcesRetired(cleanup)
     }
 
     /** Keeps close-only ownership retirement separate from public broker operations. */
@@ -501,8 +505,9 @@ public class ProcessBroker internal constructor(
                 .toString()
                 .replace("-", "")
             val classpath = requireWorkerClasspath(workerClasspath)
-            val manifests = workerLaunch?.manifests ?: PortalWorkerGeneration.readManifests(classpath)
-            val generation = PortalWorkerGeneration.capture(classpath, workerLaunch?.artifact?.path, manifests, workerLaunch?.artifact?.sha256)
+            val generation = generationCaptures.measure(deadline, active) { budget ->
+                (workerLaunch?.measurement ?: PortalGenerationMeasurement.Actual).measure(classpath, workerLaunch, budget)
+            }
             val group = workerLaunch?.manifests?.firstOrNull()?.isolationGroup
             val generationArgs = listOf("--worker-generation", "${generation.inputs}:${generation.manifests}:${generation.runtime}") +
                 group?.let { listOf("--worker-group", it) }.orEmpty() +
@@ -520,6 +525,7 @@ public class ProcessBroker internal constructor(
                 classpath = classpath,
                 extraJvmArgs = workerExtraJvmArgs,
             )
+            PortalMeasurementBudget(deadline, active).check()
             val process = JvmChildProcess.start(launcher, spec)
             synchronized(attempt) { attempt.process = process }
             val cgroup = cgroupRoot?.let { root -> cgroupController.createAndAttach(root, process.pid(), workerProfile) }
