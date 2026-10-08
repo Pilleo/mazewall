@@ -2,7 +2,7 @@ package consumer
 
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
-import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.PolicyState
 import io.mazewall.enforcer.api.Mazewall
 import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.enforcer.api.execution.InProcessDomain
@@ -15,7 +15,7 @@ fun callableExample(runtime: ManagedRuntime, domain: InProcessDomain): String =
     Mazewall.callContained(runtime, domain, Callable { "contained" })
 
 fun main() {
-    val policy: Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).apply {
+    val policy: Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).apply {
         base(Policy.NO_EXEC_HOTSPOT)
         allowFsRead("/tmp/consumer-resource")
     }.build()

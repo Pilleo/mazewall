@@ -1,9 +1,9 @@
 plugins {
-    id 'org.jetbrains.kotlin.jvm' version '2.4.20-Beta1'
+    id 'org.jetbrains.kotlin.jvm'
     id 'application'
 }
 
-kotlin { jvmToolchain(25) }
+kotlin { jvmToolchain(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger()) }
 
 dependencies {
     implementation "io.mazewall:enforcer:${providers.gradleProperty('consumerVersion').get()}"

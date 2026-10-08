@@ -1,6 +1,6 @@
 plugins { id 'application' }
 
-java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+java { toolchain { languageVersion = JavaLanguageVersion.of(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger()) } }
 
 dependencies {
     implementation "io.mazewall:enforcer:${providers.gradleProperty('consumerVersion').get()}"
@@ -8,42 +8,14 @@ dependencies {
 
 application { mainClass = 'consumer.JavaApiConsumer' }
 
-tasks.register('verifyCallableEntry') {
-    dependsOn tasks.named('classes')
-    doLast {
-        def compiler = javax.tools.ToolProvider.systemJavaCompiler
-        def diagnostics = new javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>()
-        compiler.getStandardFileManager(diagnostics, null, null).withCloseable { manager ->
-            def source = manager.getJavaFileObjects(file('src/callable/java/consumer/UncastCallable.java'))
-            def output = layout.buildDirectory.dir('callable').get().asFile
-            output.mkdirs()
-            def options = ['-classpath', sourceSets.main.compileClasspath.asPath, '-d', output.path]
-            def compiled = compiler.getTask(null, manager, diagnostics, options, null, source).call()
-            if (!compiled) {
-                throw new GradleException("Expected uncast canonical Callable entry to compile, received: ${diagnostics.diagnostics}")
-            }
-            logger.lifecycle('Packaged uncast canonical Callable entry compiled successfully.')
-        }
-    }
-}
-
-tasks.register('verifyScopeBoundaries') {
-    dependsOn tasks.named('classes')
-    doLast {
-        def compiler = javax.tools.ToolProvider.systemJavaCompiler
-        [ProcessFilesystem: 'compiler.err.cant.resolve.location.args', WorkerAsProcess: 'compiler.err.prob.found.req'].each { name, expectedCode ->
-            def diagnostics = new javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>()
-            compiler.getStandardFileManager(diagnostics, null, null).withCloseable { manager ->
-                def source = manager.getJavaFileObjects(file("src/scope/java/consumer/${name}.java"))
-                def output = layout.buildDirectory.dir("scope/${name}").get().asFile
-                output.mkdirs()
-                def options = ['-classpath', sourceSets.main.compileClasspath.asPath, '-d', output.path]
-                def compiled = compiler.getTask(null, manager, diagnostics, options, null, source).call()
-                if (compiled || !diagnostics.diagnostics.any { it.code == expectedCode }) {
-                    throw new GradleException("Expected scope rejection ${expectedCode}, received: ${diagnostics.diagnostics}")
-                }
-            }
-        }
-        logger.lifecycle('Packaged process/worker compile-time scope boundaries passed.')
+['verifyCallableEntry': 'callable', 'verifyScopeBoundaries': 'scope'].each { taskName, fixture ->
+    tasks.register(taskName, JavaExec) {
+        dependsOn tasks.named('classes')
+        javaLauncher = javaToolchains.launcherFor(java.toolchain)
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'consumer.VerifyCompilation'
+        args fixture, sourceSets.main.compileClasspath.asPath,
+            file("src/${fixture}/java/consumer").absolutePath,
+            layout.buildDirectory.dir(fixture).get().asFile.absolutePath
     }
 }

@@ -1,76 +1,75 @@
-# Packaged integration consumer baselines
+# Independent packaged consumer gates
 
-This is an independent Gradle build: no project dependencies, composite builds,
-source directories, or repository classpath are injected. Both consumers depend
-only on the staged `io.mazewall:enforcer` publication. MazeWall coordinates are
-resolved exclusively from the supplied file repository; external dependencies
-use Maven Central.
+This separate Gradle build consumes real pinned `io.mazewall:enforcer` and
+`io.mazewall:platform` Maven publications from an explicit file repository.
+External artifacts resolve from Maven Central. It has no included source builds
+or project dependencies; the gates reject dependency edges selecting projects
+and require the MazeWall JAR paths to match the supplied repository/version.
 
-Run from the repository root (replace the version suffix with the source revision
-for a new baseline):
+The default consumer compiler is **stable Kotlin 2.4.20**, independently of the
+producer's **2.4.20-Beta1**. No metadata or prerelease skip flags are used.
+`consumerKotlinVersion` accepts only a pinned stable release. `consumerJdk`
+selects the compilation and execution toolchain, including diagnostic javac.
+Foojay can supply JDK22 if needed.
+
+## Stage and check a new exact revision
+
+From a clean, isolated worktree, record its revision and stage only local Maven
+publications. All Gradle operations below acquire the shared fleet lock.
 
 ```bash
-./gradlew --init-script tests/consumers/stage.init.gradle \
-  -PconsumerVersion=0.1.0-baseline.ea0a8276 \
-  -PconsumerRepository="$PWD/build/consumer-repository" \
+revision=$(git rev-parse HEAD)
+version="0.1.0-candidate.${revision:0:8}"
+repository="$PWD/build/fleet-consumer-repository/${revision:0:8}"
+lock=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-06-mazewall-integration-foundation-plan/verification.lock
+
+flock "$lock" ./gradlew --console=plain --no-build-cache \
+  --no-configuration-cache --rerun-tasks \
+  --init-script tests/consumers/stage.init.gradle \
+  -PconsumerVersion="$version" -PconsumerRepository="$repository" \
   :platform:publishAllPublicationsToConsumerBaselineRepository \
   :enforcer:publishAllPublicationsToConsumerBaselineRepository
 
-./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.ea0a8276 \
-  -PconsumerRepository="$PWD/build/consumer-repository" \
-  :java-api:run :java-api:verifyCallableEntry :java-api:verifyScopeBoundaries :kotlin-api:run
+# Explicitly generate locks for a new coordinate; review the new lockfiles.
+./scripts/check_integration_consumers.sh --repository "$repository" \
+  --version "$version" --write-locks --evidence-dir "$PWD/build/consumer-lock-generation"
 
-./gradlew -p tests/consumers \
-  -PconsumerVersion=0.1.0-baseline.ea0a8276 \
-  -PconsumerRepository="$PWD/build/consumer-repository" \
-  resolveIntegrationBaselines
+# Acceptance uses the recorded locks without rewriting them.
+./scripts/check_integration_consumers.sh --repository "$repository" \
+  --version "$version" --evidence-dir "$PWD/build/consumer-acceptance"
 ```
 
-The staging init script assigns the same pinned version to project dependency
-metadata and publications. It adds a local publication destination; the commands
-select only that destination. It does not publish to a remote repository or
-install artifacts into Maven Local.
+The script acquires that same lock internally for its entire matrix. It does not
+publish anything. The init script adds only the selected file publication target;
+the staging commands do not select remote publication or Maven Local tasks.
 
-The executed actions construct and inspect policies without installation. Callable
-examples compile but are not executed. `verifyCallableEntry` independently compiles
-an uncast Java lambda against `Mazewall.callContained(runtime, domain, Callable)`.
-There is no Supplier overload on that canonical entry. The current staged baseline
-pins committed canonical-entry/owned-runtime source `ea0a8276`. Earlier candidate
-evidence used `5c369da1` plus the C8 migration diff; final-source staging and the same
-independent consumer gates subsequently passed against `ea0a8276`.
+Each JDK22/JDK25 row cleans both consumer outputs, disables build/configuration
+caches, logs the actual compiler and resolved artifact paths, compiles and runs
+Java/Kotlin policy construction, independently compiles an **uncast** Callable
+lambda, and requires actual javac rejection of process filesystem configuration
+and worker-to-process policy assignment. Negative fixtures require exactly one
+expected error, so missing symbols/classes cannot masquerade as scope rejection.
+Callable entry examples compile but do not install containment or execute work.
+Policies use canonical fixed-scope builders and `PolicyState.Uncompiled`.
 
-Canonical construction uses `ProcessPolicyBuilder` or `WorkerPolicyBuilder` with
-an explicit runtime and list mode. The Java facade builder and its scope-changing
-`buildProcessWide()` method are removed. `verifyScopeBoundaries` requires actual
-javac rejection of process filesystem mutators and assignment of a worker policy
-to a process-policy variable.
-The nested `Policy.Builder`, its `builder()`/`threadLocalBuilder()` factories, and
-the list-spec facades are also removed. These consumers use only the canonical
-fixed-scope construction paths.
+The version probes resolve upstream Koog **1.3.0** and Boot **4.1.1**, both alone
+and with the staged candidate. They log selected versions, including serialization
+and compiler-library differences. Graph resolution is not adapter compilation or
+framework runtime evidence.
 
-## Compatibility evidence
+## Recorded candidate and historical locks
 
-- Wrapper: Gradle 9.6.1, reused from the main repository.
-- Consumer runtime/toolchain: JDK 25; tested host is Oracle GraalVM
-  `25.4.4.1.1+1.1` (HotSpot `25.0.4.1.1+1-LTS-jvmci-25.4-b23`).
-- Kotlin consumer/compiler: `2.4.20-Beta1`, matching current producer metadata.
-  This is a prerelease-compiler baseline, not evidence of stable-Kotlin consumer
-  compatibility. No metadata/prerelease skip flags are used.
-- Core resolved versions: coroutines `1.10.2`, serialization JSON `1.9.0`.
-- Integration resolution probes: upstream Koog `ai.koog:agents-tools:1.3.0` and
-  Spring Boot `4.1.1` BOM with Spring AOP/JDBC. Dependency resolution alone is not
-  adapter compilation, advisor-chain, JDBC, or native-protection evidence.
-  The Koog graph resolves Kotlin `2.3.10`, coroutines `1.10.2`, and serialization
-  `1.10.0`; the Boot BOM resolves Spring `7.0.9`. Koog's serialization version
-  differs from core's `1.9.0`; the combined adapter compile/runtime gate remains
-  required before accepting that upgrade in an integration module.
-- Publication tested: local staged Maven repository under `build/consumer-repository`.
-  This does not establish Maven Central or GitHub Packages availability.
+The checked-in candidate locks under
+`locks/0.1.0-candidate.39cd5ce0/kotlin-2.4.20/` correspond to committed producer
+revision `39cd5ce060a5310ec64b42de56873bb85ac6b6e6`. Both JDK rows passed with stable
+Kotlin 2.4.20. See the [compatibility manifest](../../docs/internals/reviews/integration-compatibility-manifest.md)
+for exact artifacts, commands and limitations.
 
-Kernel enforcement, stable compiler compatibility, JDK 22 consumer execution,
-packaged Portal tools, and Spring application behavior have separate release gates.
+The original `gradle.lockfile` files preserve the historical
+`0.1.0-baseline.ea0a8276`/prerelease-compiler baseline unchanged. New candidates and
+stable compiler versions get separate strict lockfiles; do not overwrite the
+historical locks to make a new candidate resolve.
 
-Dependency lockfiles pin the resolved consumer and integration-probe graphs.
-When intentionally staging another source version, rerun the commands with
-`--write-locks` and review the lockfile diff.
+Native packaged enforcement, Portal executables, merged-final-source publication,
+and framework application behavior belong to subsequent coordinated release
+gates. No remote repository availability is established by this local gate.
