@@ -57,14 +57,26 @@ linked-worktree default indexes, untracked modules and source symlinks.
 Permission fixtures require an unprivileged UID and refuse
 false root-user permission proof; they never change user cache directories.
 
-Symlink coverage uses an explicit no-follow rejection policy. Indexed links and
-link ancestors of selected source fail with `Unsupported source symlink`; a
-nonignored visible link also fails even without a Gradle suffix, because its
-opaque target could be a subproject directory. Targets are not read, resolved or
-traversed, including external, dangling, unreadable or generated/private targets.
-Indexed source cannot be hidden behind local scratch ignore rules. This
-conservative policy can reject existing non-Gradle links too; a rejected tree has
-not passed source coverage. No folder-wide exception is added to make it pass.
+Source aliases follow the coordinator's bounded-within-checkout policy. Resolution
+checks link components before target access; targets and remaining path suffixes
+must stay inside physical CWD and outside `.git`, `.gradle`, `.worktrees` and
+conventional `build` namespaces. External, dangling, unsupported-type, unreadable
+and cyclic targets fail with concrete errors. Resolution is bounded to40 distinct
+link identities. Valid file aliases retain the link's Gradle language/diagnostic
+path while reading its verified physical target.
+
+Directory aliases visit physical `(device,inode)` identities. Repeated aliases do
+not suppress real Gradle source: an active alias forces coverage of its target even
+when normal local VCS ignores hide that physical directory. Normal and forced
+coverage each expand a physical directory at most once; a directory-edge graph
+rejects cycles even across already-visited sibling aliases. Indexed source and
+links remain authoritative under the actual default Git index. Legitimate contained
+aliases with only non-Gradle files pass; no project/source-folder exception is used.
+
+Read targets are re-resolved before source IO. This is a readonly verification of
+a stable checkout, not FD-relative race-proof containment against concurrent
+filesystem mutation; complete parser/interprocedural and native claims remain out
+of scope. Existing user links/cache ownership/content are never repaired or removed.
 
 Inventory bounds are explicit: untracked paths named `build` are conventionally
 pruned, not proven to be generated. An untracked legitimate module/source package

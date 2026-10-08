@@ -97,5 +97,33 @@ must resolve actual-checkout coverage/acceptance explicitly; do not label this
 tree as passing or add module-wide exclusions. Full round5 report retains exact
 commands, final verification and fix HEAD.
 
+## Coordinator bounded-alias ruling
+
+Progress.md lines180–186 supersede blanket link rejection: contained source aliases
+must be covered using visited physical directory identities; user links remain
+untouched. The actual experiment link resolves to an in-checkout profiler directory
+with main.go only, not a Gradle source read.
+
+Round6 resolves link components within physical CWD, rejecting escape/private/build
+boundaries before target access; requires regular-file/directory target readability,
+rejects dangling/unsupported/cyclic targets and bounds40 link identities. Directory
+aliases force real Gradle coverage despite physical-target VCS ignore rules;
+visited identity/mode prevents repeated expansion while a directory-edge graph
+detects cycles even across visited siblings. File aliases retain language/path
+semantics. Actual default-index authority and parser98 bytes remain unchanged.
+
+Executable RED run-9f24dc0a7a2e:31 FS methods,12 failures/subtest failures againstc77
+blanket rejection. Immediate GREEN run-cf61e90219ed:31/31 cases; actual current ROOT
+scanner run-938105edc449 now exits0 with user links unchanged. Final GREEN
+run-90dd8dd7e90f:36/36 FS methods and98/98 unchanged parser cases, no skips.
+Read-only audit run-f8bf0a55afd7:33 assigned +36 combined-main source scripts;
+actual scanners clean, no generated/private siblings, indexes/link text unchanged;
+parser prefix byte-identical. Full exact commands/fix HEAD in round6 report.
+
+This is a stable-checkout readonly verification contract, not race-proof/native
+containment or a full parser. Existing name-based untracked build exclusions and
+local VCS scratch declarations remain explicit bounds. Keep issue open until
+independent/coordinator combined acceptance; index stays coordinator-owned.
+
 ---
 <!-- id: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s  file: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s.md -->

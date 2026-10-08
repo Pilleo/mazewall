@@ -206,7 +206,7 @@ class SourceDiscoveryTest(unittest.TestCase):
         self.assertIn("Unsupported source symlink:", result.stderr)
         self.assertIn(name, result.stderr)
 
-    def test_source_file_links_rejected_tracked_and_untracked(self):
+    def test_contained_source_file_links_checked_tracked_and_untracked(self):
         for tracked in (False, True):
             with self.subTest(tracked=tracked):
                 target = self.write("regular-target.txt", ACTION)
@@ -216,17 +216,17 @@ class SourceDiscoveryTest(unittest.TestCase):
                 if tracked:
                     self.git("add", "--", name)
                 try:
-                    self.assert_link_rejected(name)
+                    self.assert_clean()
                 finally:
                     link.unlink()
 
-    def test_source_directory_link_rejected(self):
+    def test_contained_source_directory_link_checked(self):
         self.write("adapter-source/build.gradle.kts", ACTION)
         name = "integrations/local-adapter"
         link = self.directory / name
         link.parent.mkdir()
         link.symlink_to(self.directory / "adapter-source", target_is_directory=True)
-        self.assert_link_rejected(name)
+        self.assert_clean()
 
     def test_dangling_source_link_rejected(self):
         name = "dangling.gradle.kts"
@@ -257,7 +257,7 @@ class SourceDiscoveryTest(unittest.TestCase):
             (self.directory / name).symlink_to(target)
             self.assert_link_rejected(name)
 
-    def test_indexed_source_ancestor_link_rejected_even_if_ignored(self):
+    def test_indexed_source_ancestor_alias_checked_even_if_ignored(self):
         name = "tracked-source/build.gradle.kts"
         self.write(name, ACTION)
         self.git("add", "--", name)
@@ -266,15 +266,110 @@ class SourceDiscoveryTest(unittest.TestCase):
         target = self.directory / "real-target"
         original.rename(target)
         original.symlink_to(target, target_is_directory=True)
-        self.assert_link_rejected("tracked-source")
+        self.assert_clean()
 
-    def test_indexed_ignored_directory_link_rejected(self):
+    def test_indexed_ignored_directory_alias_checked(self):
         target = self.write("real-target/build.gradle.kts", ACTION).parent
         name = "linked-adapter"
         (self.directory / name).symlink_to(target, target_is_directory=True)
         self.git("add", "--", name)
         self.write(".gitignore", "/linked-adapter\n/real-target/\n")
-        self.assert_link_rejected(name)
+        self.assert_clean()
+
+    def test_actual_rootalias_shape_without_gradle_source_is_legitimate(self):
+        target = self.write("profiler/hotspot-agentless/cmd/mw-gadget-build/main.go", "package main\n").parent
+        link = self.directory / "experiments/hotspot-agentless/cmd/mw-gadget-build"
+        link.parent.mkdir(parents=True)
+        link.symlink_to("../../../profiler/hotspot-agentless/cmd/mw-gadget-build", target_is_directory=True)
+        self.git("add", "--", str(link.relative_to(self.directory)))
+        self.assertTrue(target.is_dir())
+        self.assert_clean()
+
+    def test_directory_alias_never_hides_eager_gradle_in_ignored_target(self):
+        self.write("real-target/build.gradle.kts", EAGER)
+        self.write(".gitignore", "/real-target/\n")
+        link = self.directory / "visible-adapter"
+        link.symlink_to(self.directory / "real-target", target_is_directory=True)
+        self.assert_eager("real-target/build.gradle.kts")
+
+    def test_gradle_file_alias_uses_link_language_and_checks_target(self):
+        target = self.write("target.txt", EAGER)
+        (self.directory / "alias.gradle.kts").symlink_to(target)
+        self.assert_eager("alias.gradle.kts")
+
+    def test_repeated_aliases_do_not_skip_physical_source_coverage(self):
+        self.write("real-target/build.gradle.kts", EAGER)
+        self.write(".gitignore", "/real-target/\n")
+        for name in ("first-adapter", "second-adapter"):
+            (self.directory / name).symlink_to(self.directory / "real-target", target_is_directory=True)
+        self.assert_eager("real-target/build.gradle.kts")
+
+    def test_directory_alias_cycle_is_bounded_failure(self):
+        target = self.write("real-target/main.go", "package main\n").parent
+        (target / "back-to-root").symlink_to(self.directory, target_is_directory=True)
+        (self.directory / "adapter").symlink_to(target, target_is_directory=True)
+        result = self.scan()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("cycle", result.stderr.lower())
+
+    def test_file_alias_cycle_is_bounded_failure(self):
+        (self.directory / "first.gradle.kts").symlink_to("second.gradle.kts")
+        (self.directory / "second.gradle.kts").symlink_to("first.gradle.kts")
+        result = self.scan()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("cycle", result.stderr.lower())
+
+    def test_directory_alias_unreadable_source_still_fails(self):
+        target = self.write("real-target/build.gradle.kts", ACTION)
+        self.write(".gitignore", "/real-target/\n")
+        self.deny(target)
+        (self.directory / "adapter").symlink_to(target.parent, target_is_directory=True)
+        result = self.scan()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("Permission denied", result.stderr)
+        self.assertIn("build.gradle.kts", result.stderr)
+
+    def test_alias_cannot_cross_into_generated_build_target(self):
+        target = self.write("build/generated/build.gradle.kts", ACTION).parent
+        (self.directory / "adapter").symlink_to(target, target_is_directory=True)
+        self.assert_link_rejected("adapter")
+
+    def test_alias_graph_cycle_between_repeated_physical_directories_fails(self):
+        first = self.write("first/main.go", "package main\n").parent
+        second = self.write("second/main.go", "package main\n").parent
+        (first / "second").symlink_to(second, target_is_directory=True)
+        (second / "first").symlink_to(first, target_is_directory=True)
+        result = self.scan()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("directory cycle", result.stderr.lower())
+
+    def test_gradle_file_alias_retains_groovy_literal_language(self):
+        target = self.write("target.txt", "def pattern = /literal .asPath/\n")
+        (self.directory / "alias.gradle").symlink_to(target)
+        self.assert_clean()
+
+    def test_indexed_alias_suffix_cannot_enter_generated_target(self):
+        name = "tracked-adapter/build/private/build.gradle.kts"
+        self.write(name, ACTION)
+        self.git("add", "--", name)
+        original = self.directory / "tracked-adapter"
+        physical = self.directory / "physical-adapter"
+        original.rename(physical)
+        original.symlink_to(physical, target_is_directory=True)
+        self.assert_link_rejected("tracked-adapter")
+
+    def test_alias_target_directory_unreadable_still_fails(self):
+        target = self.write("real-target/build.gradle.kts", ACTION).parent
+        self.write(".gitignore", "/real-target/\n")
+        self.deny(target)
+        (self.directory / "adapter").symlink_to(target, target_is_directory=True)
+        self.assert_link_rejected("adapter")
+
+    def test_alias_unsupported_target_type_fails_without_opening_it(self):
+        target = self.directory / "owned-pipe"
+        os.mkfifo(target)
+        (self.directory / "alias.gradle.kts").symlink_to(target)
+        self.assert_link_rejected("alias.gradle.kts")
 
     def test_linked_worktree_uses_its_default_index(self):
         repository = self.directory

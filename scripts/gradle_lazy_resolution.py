@@ -311,9 +311,10 @@ def source_inventory() -> tuple[list[Path], int]:
     }
     # VCS/cache/worktree state is never source, even if accidentally indexed.
     paths = {path for path in paths if not {".git", ".gradle", ".worktrees"}.intersection(path.parts)}
-    status = reject_source_symlinks(paths | indexed_links, git_environment)
+    covered, status = alias_source_inventory(paths | indexed_links, git_environment)
     if status:
         return [], status
+    paths |= covered
     return sorted(paths), 0
 
 
@@ -333,59 +334,130 @@ def default_git_environment() -> tuple[dict[str, str] | None, int]:
     return environment, 0
 
 
-def reject_source_symlinks(indexed_paths: set[Path], git_environment: dict[str, str] | None) -> int:
-    """No-follow policy: reject opaque links in covered source, never inspect targets.
+def resolve_source_path(path: Path) -> tuple[Path, bool]:
+    """Resolve aliases componentwise without accessing external/private targets."""
+    import os
+    import stat
 
-    All visible nonignored links are potentially subproject directories. Indexed
-    links and ancestors cannot disappear behind untracked-scratch ignore rules.
-    """
+    root = Path.cwd().resolve()
+    requested = path
+    candidate = Path(os.path.abspath(path))
+    links = set()
+    try:
+        while True:
+            relative = candidate.relative_to(root)
+            ancestor = root
+            restarted = False
+            for position, component in enumerate(relative.parts):
+                ancestor /= component
+                metadata = os.lstat(ancestor)
+                if not stat.S_ISLNK(metadata.st_mode):
+                    continue
+                identity = (metadata.st_dev, metadata.st_ino)
+                if identity in links or len(links) >= 40:
+                    raise ValueError("alias cycle or 40-link resolution bound")
+                links.add(identity)
+                target = Path(os.readlink(ancestor))
+                if not target.is_absolute():
+                    target = ancestor.parent / target
+                target = Path(os.path.abspath(target))
+                candidate = target.joinpath(*relative.parts[position + 1:])
+                target_relative = candidate.relative_to(root)
+                if {".git", ".gradle", ".worktrees", "build"}.intersection(target_relative.parts):
+                    raise ValueError("alias crosses generated/private boundary")
+                restarted = True
+                break
+            if restarted:
+                continue
+            metadata = os.lstat(candidate)
+            if links:
+                if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):
+                    raise ValueError("unsupported target type")
+                required = os.R_OK | (os.X_OK if stat.S_ISDIR(metadata.st_mode) else 0)
+                if not os.access(candidate, required, effective_ids=True):
+                    raise PermissionError(13, "Permission denied", str(candidate))
+            return candidate.relative_to(root), bool(links)
+    except (OSError, ValueError) as error:
+        if links:
+            raise ValueError(f"Unsupported source symlink: {requested}: {error}") from error
+        raise
+
+
+def alias_source_inventory(indexed_paths: set[Path], git_environment: dict[str, str] | None) -> tuple[set[Path], int]:
+    """Visit bounded physical directories; aliases force real target source coverage."""
     import os
     import stat
 
     private = {".git", ".gradle", ".worktrees"}
+    covered = set()
+    pending = [(Path("."), False)]
+    visited = set()
+    edges = {}
+    names = {}
     try:
         for path in sorted(indexed_paths):
             if private.intersection(path.parts):
                 continue
-            ancestor = Path(".")
-            for component in path.parts:
-                ancestor /= component
-                if stat.S_ISLNK(os.lstat(ancestor).st_mode):
-                    print(f"Unsupported source symlink: {ancestor} (indexed source: {path})", file=sys.stderr)
-                    return 2
-        pending = [Path(".")]
+            physical, aliased = resolve_source_path(path)
+            if aliased and physical.is_dir():
+                pending.append((physical, True))
+            elif path.name.endswith((".gradle", ".gradle.kts")):
+                covered.add(path)
         while pending:
-            directories = []
-            links = []
-            for directory in pending:
-                with os.scandir(directory) as entries:
-                    for entry in entries:
-                        path = Path(entry.path)
-                        if entry.name in private or entry.name == "build":
-                            continue
-                        if entry.is_symlink():
-                            links.append(path)
-                        elif entry.is_dir(follow_symlinks=False):
-                            directories.append(path)
+            directory, forced = pending.pop()
+            metadata = os.stat(directory, follow_symlinks=False)
+            identity = (metadata.st_dev, metadata.st_ino)
+            key = (identity, forced)
+            if key in visited or (not forced and (identity, True) in visited):
+                continue
+            visited.add(key)
+            names[identity] = directory
+            edges.setdefault(identity, set())
+            with os.scandir(directory) as entries:
+                candidates = [(Path(entry.path), entry.is_symlink())
+                              for entry in entries if entry.name not in private and entry.name != "build"]
             ignored = set()
-            candidates = directories + links
-            if git_environment is not None and candidates:
+            if git_environment is not None and candidates and not forced:
                 selection = subprocess.run(
                     ["git", "--no-optional-locks", "check-ignore", "--no-index", "-z", "--stdin"],
-                    input=b"".join(os.fsencode(path) + b"\0" for path in candidates),
+                    input=b"".join(os.fsencode(path) + b"\0" for path, _ in candidates),
                     stdout=subprocess.PIPE, env=git_environment, check=False,
                 )
                 if selection.returncode not in (0, 1):
-                    return selection.returncode
+                    return set(), selection.returncode
                 ignored = {Path(os.fsdecode(path)) for path in selection.stdout.split(b"\0") if path}
-            for path in sorted(set(links) - ignored):
-                print(f"Unsupported source symlink: {path}", file=sys.stderr)
-                return 2
-            pending = [path for path in directories if path not in ignored]
-    except OSError as error:
+            for path, linked in candidates:
+                if path in ignored:
+                    continue
+                physical, aliased = resolve_source_path(path) if linked else (path, False)
+                target_metadata = os.stat(physical, follow_symlinks=False)
+                if stat.S_ISDIR(target_metadata.st_mode):
+                    child = (target_metadata.st_dev, target_metadata.st_ino)
+                    edges[identity].add(child)
+                    pending.append((physical, forced or aliased))
+                elif path.name.endswith((".gradle", ".gradle.kts")):
+                    covered.add(path)
+        colors = {}
+        for start in edges:
+            if colors.get(start):
+                continue
+            colors[start] = 1
+            stack = [(start, iter(edges[start]))]
+            while stack:
+                node, children = stack[-1]
+                child = next(children, None)
+                if child is None:
+                    colors[node] = 2
+                    stack.pop()
+                elif colors.get(child) == 1:
+                    raise ValueError(f"Unsupported source symlink: directory cycle at {names.get(child, child)}")
+                elif not colors.get(child):
+                    colors[child] = 1
+                    stack.append((child, iter(edges.get(child, ()))))
+    except (OSError, ValueError) as error:
         print(f"Gradle source inventory failed: {error}", file=sys.stderr)
-        return 2
-    return 0
+        return set(), 2
+    return covered, 0
 
 
 def main() -> int:
@@ -395,8 +467,9 @@ def main() -> int:
     bad = False
     for path in paths:
         try:
-            source = path.read_text()
-        except OSError as error:
+            physical, _ = resolve_source_path(path)
+            source = physical.read_text()
+        except (OSError, ValueError) as error:
             print(f"Gradle source read failed: {path}: {error}", file=sys.stderr)
             bad = True
             continue
