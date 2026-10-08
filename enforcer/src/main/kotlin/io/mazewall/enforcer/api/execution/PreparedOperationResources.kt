@@ -21,7 +21,7 @@ import java.security.MessageDigest
 import java.util.HexFormat
 
 /**
- * Genuine resource acquisitions and measured finished-JAR identity, resolved before review/setup.
+ * Genuine resource acquisitions and measured deployment identity, resolved before review/setup.
  * Compare identities with external trusted expectations; digests never supply review authority.
  * Successful preparation transfers cleanup to the runtime until physical retirement. Closing this
  * value afterwards does not revoke its domain. Unconsumed values must be closed by the caller.
@@ -45,7 +45,7 @@ public class PreparedOperationResources private constructor(
     public val resourceGeneration: String = HexFormat.of().formatHex(
         MessageDigest
             .getInstance("SHA-256")
-        .digest((resources.generation + "\u0000" + artifact.path.identity + "\u0000" + artifact.type.name + "\u0000" + implementationSha256).toByteArray()),
+        .digest((resources.generation + "\u0000" + artifact.generation + "\u0000" + artifact.type.name + "\u0000" + implementationSha256).toByteArray()),
     )
 
     /** Revalidates retained object identities and selected content snapshots without installing. */
@@ -95,12 +95,7 @@ public class PreparedOperationResources private constructor(
         ) {
             "Reviewed JVM method descriptor does not resolve on actual implementation"
         }
-        val source = method.declaringClass.protectionDomain
-            ?.codeSource
-            ?.location
-        require(source != null && source.protocol == "file" && Path.of(source.toURI()).toRealPath() == artifact.path.resolved) {
-            "Reviewed method implementation originates outside the selected artifact"
-        }
+        artifact.requireMemberOrigin(method.declaringClass)
     }
 
     @Synchronized
@@ -131,13 +126,16 @@ public class PreparedOperationResources private constructor(
         private const val TRUNCATE_ABI = 3
 
         /**
-         * Resolve existing exact grants and an ordinary finished JAR (maximum 256 MiB).
+         * Resolve exact grants and an ordinary/Boot finished JAR or explicit exploded tree (256 MiB).
          * Strict read-only paths must be explicitly readable and cannot overlap writable grants.
          * Future output requires an explicitly allowed existing directory. Directory identities
          * cover the directory object, not an immutable recursive snapshot of its descendants.
          * With writable grants, strict read-only recipes require singly-linked regular files;
          * directory recipes reject because descendant writable aliases cannot be excluded.
-         * Nested Boot JARs, exploded origins and custom loaders currently reject explicitly.
+         * Exploded trees require explicit directory reads, no descendant symlinks and bounded
+         * complete snapshots. Boot supports the pinned 4.1.1 launcher hierarchy in one finished
+         * outer JAR, application classes and one-level stored nested libraries. Other loaders,
+         * versioned resources and unsupported packaging reject; no dependency on Spring is needed.
          */
         @JvmStatic
         @Suppress("TooGenericExceptionCaught") // acquisition boundary owns all rollback before publication
@@ -150,7 +148,7 @@ public class PreparedOperationResources private constructor(
             val resources = PreparedResourceSet.capture(definition, native, strictPaths)
             var artifact: ImplementationArtifact? = null
             try {
-                val selected = ImplementationArtifact.resolve(implementation, native)
+                val selected = ImplementationArtifact.resolve(implementation, native, resources::allowsExplicitDirectoryRead)
                 artifact = selected
                 require(resources.allowsRead(selected.path.resolved)) { "Selected implementation artifact lacks an exact or explicitly reviewed directory read grant" }
                 return PreparedOperationResources(runtime, definition, native, resources, selected, strictPaths.isNotEmpty(), CanonicalPolicyArtifact.worker(runtime, policy).toJson())

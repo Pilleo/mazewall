@@ -41,6 +41,8 @@ internal class PreparedResourceSet private constructor(
 
     fun allowsRead(path: Path): Boolean = grants.any { it.read && (it.path.resolved == path || it.path.directory && path.startsWith(it.path.resolved)) }
 
+    fun allowsExplicitDirectoryRead(path: Path): Boolean = grants.any { it.read && !it.execute && it.path.directory && (it.path.resolved == path || path.startsWith(it.path.resolved)) }
+
     @Suppress("TooGenericExceptionCaught") // every acquisition has one close attempt; retain all cleanup failures
     @Synchronized
     override fun close() {
