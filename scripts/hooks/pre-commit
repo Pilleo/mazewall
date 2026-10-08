@@ -87,8 +87,17 @@ echo "==> Test tasks to run: ${TEST_TASKS[*]}"
 # in this checkout can otherwise race on those files and surface as EOF/missing-result
 # failures unrelated to either change.  Serialize only this shared-output gate.
 PRECOMMIT_TEST_LOCK=/tmp/mazewall-precommit-test.lock
-if ! flock -w 900 "$PRECOMMIT_TEST_LOCK" \
-    ./gradlew "${TEST_TASKS[@]}" -x check --no-configuration-cache --no-parallel > /tmp/mazewall-precommit-test.log 2>&1; then
+if ! (
+  # Audits above need the committing repository's Git context. Gradle tests may
+  # operate on foreign repositories, so drop only Git's repository-local names
+  # in this subprocess; preserve the hook context and all other environment.
+  GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars) || exit $?
+  for name in $GIT_LOCAL_ENV_VARS; do
+    unset "$name" || exit $?
+  done
+  flock -w 900 "$PRECOMMIT_TEST_LOCK" \
+    ./gradlew "${TEST_TASKS[@]}" -x check --no-configuration-cache --no-parallel
+) > /tmp/mazewall-precommit-test.log 2>&1; then
   echo "--- Failing tests ---"
   grep -E "FAILED$|FAILED |e: " /tmp/mazewall-precommit-test.log | head -20 || true
   echo "-------------------"

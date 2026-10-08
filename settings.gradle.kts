@@ -44,6 +44,11 @@ include(":demos:cli-demo")
 include(":demos:vulnerable-web-app")
 include(":demos:agent-sandbox-demo")
 
+// Incubating framework adapters are verified explicitly without changing core dependencies.
+if (providers.gradleProperty("includeSpringIntegration").orNull == "true") {
+    include(":integrations:spring:mazewall-spring-boot")
+}
+
 // :tools:orchestrator stays out of the default build so in-flight work there
 // cannot fail ./gradlew build. Opt in:
 //   ./gradlew :tools:orchestrator:test -PincludeOrchestrator=true
