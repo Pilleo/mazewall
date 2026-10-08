@@ -460,6 +460,38 @@ class SourceDiscoveryTest(unittest.TestCase):
         original.symlink_to(physical, target_is_directory=True)
         self.assert_link_rejected("tracked-adapter")
 
+    def test_indexed_alias_under_generated_ancestor_is_rejected(self):
+        name = "build/alias.gradle.kts"
+        self.write("build/target.txt", ACTION)
+        (self.directory / name).symlink_to("target.txt")
+        self.git("add", "--", name)
+        self.assert_link_rejected(name)
+
+    def test_indexed_regular_source_under_build_package_remains_covered(self):
+        name = "app/build/build.gradle.kts"
+        self.write(name, EAGER)
+        self.git("add", "--", name)
+        self.assert_eager(name)
+
+    def test_file_alias_targets_ending_in_slash_are_rejected(self):
+        target = self.write("regular-target.txt", ACTION)
+        for name, raw_target in (
+            ("relative-slash.gradle.kts", "regular-target.txt/"),
+            ("absolute-slash.gradle.kts", str(target) + "/"),
+        ):
+            with self.subTest(target=raw_target):
+                (self.directory / name).symlink_to(raw_target)
+                try:
+                    self.assert_link_rejected(name)
+                    self.assertIn("Not a directory", self.scan().stderr)
+                finally:
+                    (self.directory / name).unlink()
+
+    def test_directory_alias_target_ending_in_slash_is_valid(self):
+        self.write("real-target/build.gradle.kts", ACTION)
+        (self.directory / "directory-slash.gradle.kts").symlink_to("real-target/")
+        self.assert_clean()
+
     def test_alias_target_directory_unreadable_still_fails(self):
         target = self.write("real-target/build.gradle.kts", ACTION).parent
         self.write(".gitignore", "/real-target/\n")
