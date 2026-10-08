@@ -1,0 +1,6 @@
+// Task-owned host fixture: no root settings/catalog edits and no compiler overrides.
+settingsEvaluated { settings ->
+    if (new File(settings.settingsDir, 'enforcer/build.gradle.kts').isFile()) {
+        settings.include(':integrations:spring:mazewall-spring-boot')
+    }
+}
