@@ -30,6 +30,29 @@ including an independent copy of the original eager consumer's line17.
 Run this focused shell check when changing
 the scanner; it is independent of native/kernel verification.
 
+Source discovery is a separate contract. The scanner first enumerates CWD files
+with explicit pruning for `.git`, `.gradle`, generated `build` directories and
+`.worktrees`, then selects `.gradle`/`.gradle.kts` suffixes. Filename inclusion
+globs must not force traversal of private/generated state. Checkout-local VCS
+ignore rules exclude untracked scratch; ripgrep config, `.ignore`, global and
+parent ignore rules cannot hide normal source. There are no integration, test or
+orchestrator source-folder exclusions.
+
+In a Git checkout root, a verified read-only Git index augments discovery so
+tracked source is checked even when ignore rules match (including a tracked
+`src/.../build` source package). Git top-level must match the caller's CWD;
+foreign Git context fails rather than selecting another checkout. Git optional
+locks are disabled. VCS/cache/worktree state is never source. Non-Git source
+snapshots use the same explicit filesystem discovery. Directory enumeration
+errors and source read/permission failures remain nonzero scan failures; no
+cache ownership, permissions or content are repaired by the scanner.
+
+`python3 scripts/tests/gradle_source_discovery_test.py` exercises the production
+entrypoint with real temporary Git/source files, unreadable generated directories,
+unreadable real source, tracked ignored scripts, untracked module scripts and
+foreign Git context. Permission fixtures require an unprivileged UID and refuse
+false root-user permission proof; they never change user cache directories.
+
 This is a bounded lexical guard, not a compiler or Gradle type resolver. It does
 not follow helper calls, dynamic DSL dispatch, reassignment, provider aliases
 consumed later, or arbitrary configuration aliases across statements. `.files`

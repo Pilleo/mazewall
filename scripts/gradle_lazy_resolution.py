@@ -265,21 +265,60 @@ def findings(source: str, groovy: bool) -> list[int]:
     return sorted(set(result))
 
 
-def main() -> int:
-    # Keep ripgrep's checkout/ignore behavior; NUL separators support spaces in paths.
+def source_inventory() -> tuple[list[Path], int]:
+    """Select real CWD source, pruning state before traversing its directories.
+
+    Filename inclusion globs can override traversal/ignore behavior, so enumerate
+    ordinary files first and select script suffixes afterward. A verified checkout
+    index also supplies tracked source that local ignore rules might hide.
+    """
+    tracked = b""
+    if Path(".git").exists():
+        checkout = subprocess.run(
+            ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"],
+            stdout=subprocess.PIPE, check=False,
+        )
+        if checkout.returncode:
+            return [], checkout.returncode
+        if Path(checkout.stdout.decode().removesuffix("\n")).resolve() != Path.cwd().resolve():
+            print("Gradle source inventory failed: Git context is not the caller's checkout", file=sys.stderr)
+            return [], 2
+        indexed = subprocess.run(
+            ["git", "--no-optional-locks", "ls-files", "--cached", "-z", "--", "*.gradle", "*.gradle.kts"],
+            stdout=subprocess.PIPE, check=False,
+        )
+        if indexed.returncode:
+            return [], indexed.returncode
+        tracked = indexed.stdout
     discovered = subprocess.run(
-        ["rg", "--files", "-0", "--glob", "*.gradle.kts", "--glob", "*.gradle",
-         "--glob", "!tools/orchestrator/**", "--glob", "!**/build/**", "."],
+        ["rg", "--no-config", "--files", "-0", "--hidden", "--no-ignore-dot",
+         "--no-ignore-global", "--no-ignore-parent", "--glob", "!**/.git/**",
+         "--glob", "!**/.gradle/**", "--glob", "!**/build/**", "--glob", "!**/.worktrees/**", "."],
         stdout=subprocess.PIPE, check=False,
     )
     if discovered.returncode not in (0, 1):
-        return discovered.returncode
+        return [], discovered.returncode
+    paths = {
+        Path(filename.decode()) for filename in (tracked + discovered.stdout).split(b"\0")
+        if filename and filename.endswith((b".gradle", b".gradle.kts"))
+    }
+    # VCS/cache/worktree state is never source, even if accidentally indexed.
+    paths = {path for path in paths if not {".git", ".gradle", ".worktrees"}.intersection(path.parts)}
+    return sorted(paths), 0
+
+
+def main() -> int:
+    paths, status = source_inventory()
+    if status:
+        return status
     bad = False
-    for filename in sorted(discovered.stdout.split(b"\0")):
-        if not filename:
+    for path in paths:
+        try:
+            source = path.read_text()
+        except OSError as error:
+            print(f"Gradle source read failed: {path}: {error}", file=sys.stderr)
+            bad = True
             continue
-        path = Path(filename.decode())
-        source = path.read_text()
         try:
             lines = findings(source, path.suffix == ".gradle")
         except ValueError as error:
