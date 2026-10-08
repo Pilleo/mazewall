@@ -1,0 +1,47 @@
+import java.io.File
+
+plugins { kotlin("jvm"); kotlin("plugin.serialization") }
+kotlin { jvmToolchain(25) }
+val candidate = providers.gradleProperty("consumerVersion").get()
+val repository = providers.gradleProperty("consumerRepository").get()
+repositories {
+    maven { url = uri(repository); content { includeGroup("io.mazewall") } }
+    mavenCentral { content { excludeGroup("io.mazewall") } }
+}
+dependencyLocking { lockAllConfigurations(); lockMode = LockMode.STRICT }
+dependencies {
+    implementation("io.mazewall:koog-contained-tool:$candidate")
+    implementation("io.mazewall:denied-api:$candidate")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+}
+
+tasks.register<JavaExec>("nativeProbe") {
+    dependsOn("classes")
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.consumer.koog.KoogPortalProbeKt")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
+tasks.register<Sync>("stageFreshProbe") {
+    dependsOn("jar")
+    from(sourceSets.main.get().runtimeClasspath.filter { it.isFile && it.extension == "jar" })
+    from(tasks.named<Jar>("jar").flatMap { it.archiveFile })
+    into(layout.buildDirectory.dir("fresh-probe/lib"))
+}
+
+tasks.register("verifyPublishedClosure") {
+    val graph = configurations.runtimeClasspath.get()
+    inputs.files(graph)
+    doLast {
+        val rootId = graph.incoming.resolutionResult.rootComponent.get().id
+        check(graph.incoming.resolutionResult.allComponents.none { it.id is org.gradle.api.artifacts.component.ProjectComponentIdentifier && it.id != rootId }) {
+            "consumer must resolve published modules without sibling source builds"
+        }
+        graph.resolvedConfiguration.resolvedArtifacts.filter { it.moduleVersion.id.group == "io.mazewall" }.forEach {
+            check(it.moduleVersion.id.version == candidate)
+            check(it.file.canonicalPath.startsWith(file(repository).canonicalPath + File.separator))
+            println("PUBLISHED ${it.moduleVersion.id} ${it.file.name}")
+        }
+    }
+}
