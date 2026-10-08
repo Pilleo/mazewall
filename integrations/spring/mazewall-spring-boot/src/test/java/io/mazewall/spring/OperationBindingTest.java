@@ -32,6 +32,10 @@ class OperationBindingTest {
     static class FinalMethod extends Bean {
         @Override @MazewallOperation("write") public final String run() { return "final"; }
     }
+    interface MarkedContract { @MazewallOperation("interface-required") String execute(); }
+    static class InterfaceMarkedBean implements MarkedContract {
+        @Override public String execute() { return "unbound"; }
+    }
 
     static ReviewedOperationArtifact artifact(Object target, Method implementation, String beanName, String hash) {
         var binding = new OperationBinding("write", OperationAdapter.SPRING_METHOD, hash, "resources-v1",
@@ -176,6 +180,15 @@ class OperationBindingTest {
         try (var fixture = new Fixture(new FinalMethod())) {
             assertThrows(IllegalStateException.class, () -> fixture.binder().bind(
                     fixture.approval(fixture.proxy, Bean.class.getClassLoader(), fixture.artifact)));
+        }
+    }
+
+    @Test void interfaceOnlyRequiredAnnotationCannotSilentlyRemainUnbound() throws Exception {
+        try (var fixture = new Fixture()) {
+            fixture.binder().bind(fixture.approval(fixture.proxy, Bean.class.getClassLoader(), fixture.artifact));
+            fixture.beans.registerSingleton("interfaceOnly", new InterfaceMarkedBean());
+            assertThrows(IllegalStateException.class,
+                    () -> fixture.binder().validateRequiredBindings(List.of("operation", "interfaceOnly")));
         }
     }
 }

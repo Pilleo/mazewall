@@ -8,7 +8,7 @@ component: "spring-integration"
 target_modules: ["integrations:spring:mazewall-spring-boot"]
 target_files: ["integrations/spring/mazewall-spring-boot/src/main/java/io/mazewall/spring/SpringOperationBinder.java"]
 target_symbols: ["SpringOperationBinder", "DomainLifecycle", "SpringTransactionGuard"]
-open_questions: false
+open_questions: true
 ---
 
 # 🟡 [Severity: MEDIUM]: Bind approved synchronous Spring singleton operations and JDBC outcomes
@@ -31,6 +31,21 @@ proof from metadata or mocks. Task 6 owns adapter changes; task 5 owns preparati
 `build/fleet-spring-release-evidence/s1-green-2.log`; bridge regression failed in the
 preceding executable red run. See module S1-S2-contract.md for the exact limitations
 and the required preparation seam. No native protection/resource pinning claim.
+
+**S2 evidence:** real H2 2.4.240 / Spring7.0.9 under BOM4.1.1; both supported
+qualified managers, all seven propagations, savepoints, diagnosis/beforeCommit,
+business semantics, delivery separation and committed/rolled-back/unknown outcomes.
+Security behavioral red cases proved hidden BeanFactory qualified-manager substitution,
+equals-based datasource drift and a fatal rollback wrapper hiding Error from the
+owned dispatcher; corresponding adapter fixes retain standard Spring transaction
+implementation and restore fatal identity on-worker. Composed reviewed beans share
+an explicitly approved identical fixed policy/resource generation; no unions.
+Full focused host/analysis evidence and logs are in task-6-checkpoint/report.
+
+**Remaining:** task-5 typed PreparedOperationResources integration and finished-JAR
+digest alignment, native owned JDBC/denial/cancellation proof, reviewed S1/S2,
+packaged consumer/Boot origin support and S3. Issue remains open; coordinator owns
+backlog row/count integration. No archive or release-ready claim.
 
 ---
 <!-- id: issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati  file: issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md -->

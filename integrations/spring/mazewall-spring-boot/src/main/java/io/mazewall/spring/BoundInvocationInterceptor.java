@@ -41,17 +41,24 @@ import org.springframework.core.BridgeMethodResolver;
 public final class BoundInvocationInterceptor implements MethodInterceptor {
     private static final ThreadLocal<ExecutionContext> ACTIVE = new ThreadLocal<>();
     private final InvocationDispatcher dispatcher;
+    private final SpringTransactionGuard jdbcGuard;
     private final Advisor dispatchAdvisor = new DispatchAdvisor(this);
     private volatile Placement proof;
     private Runnable bindingGuard = () -> {};
 
     /** Production construction requires the final adapter backed by an actual owned runtime/domain. */
     public BoundInvocationInterceptor(InvocationDispatcher dispatcher) {
-        this(dispatcher, false);
+        this(dispatcher, false, null);
     }
 
-    private BoundInvocationInterceptor(InvocationDispatcher dispatcher, boolean trustedHostCharacterization) {
+    public BoundInvocationInterceptor(ManagedRuntimeDispatcher dispatcher, SpringTransactionGuard jdbcGuard) {
+        this(dispatcher, false, Objects.requireNonNull(jdbcGuard));
+    }
+
+    private BoundInvocationInterceptor(InvocationDispatcher dispatcher, boolean trustedHostCharacterization,
+                                       SpringTransactionGuard jdbcGuard) {
         this.dispatcher = Objects.requireNonNull(dispatcher);
+        this.jdbcGuard = jdbcGuard;
         if (!trustedHostCharacterization && !(dispatcher instanceof ManagedRuntimeDispatcher)) {
             throw new IllegalArgumentException("Production Spring dispatch requires ManagedRuntimeDispatcher; "
                     + "arbitrary dispatch is available only through forTrustedHostCharacterization");
@@ -64,7 +71,12 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
      * This factory neither grants an ownership capability nor establishes native protection.
      */
     public static BoundInvocationInterceptor forTrustedHostCharacterization(InvocationDispatcher dispatcher) {
-        return new BoundInvocationInterceptor(dispatcher, true);
+        return new BoundInvocationInterceptor(dispatcher, true, null);
+    }
+
+    public static BoundInvocationInterceptor forTrustedHostCharacterization(InvocationDispatcher dispatcher,
+                                                                           SpringTransactionGuard jdbcGuard) {
+        return new BoundInvocationInterceptor(dispatcher, true, Objects.requireNonNull(jdbcGuard));
     }
 
     /**
@@ -122,8 +134,12 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         if (advisors.size() != 4 || advisors.getFirst() != dispatchAdvisor
                 || advisors.get(1) != transaction || advisors.get(2) != diagnosis
                 || advisors.get(3) != authorization
-                || transaction.getAdvice().getClass() != TransactionInterceptor.class) {
+                || (jdbcGuard == null ? transaction.getAdvice().getClass() != TransactionInterceptor.class
+                : transaction != jdbcGuard.transactionAdvisor())) {
             throw rejected("Required order: dispatch, transaction, diagnosis, authorization");
+        }
+        if (jdbcGuard != null && diagnosis != jdbcGuard.diagnosisAdvisor()) {
+            throw rejected("S2 diagnosis must be the exact JDBC commit/evidence guard");
         }
         List<Object> advice = advisors.stream().map(advisor -> (Object) advisor.getAdvice()).toList();
         if (advice.stream().anyMatch(item -> !(item instanceof MethodInterceptor))
@@ -146,19 +162,27 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         TransactionManager manager = tx.getTransactionManager();
         TransactionAttributeSource attributes = tx.getTransactionAttributeSource();
         if (!(manager instanceof PlatformTransactionManager) || attributes == null
-                || attributes.getClass() != MatchAlwaysTransactionAttributeSource.class) {
+                || (jdbcGuard == null && attributes.getClass() != MatchAlwaysTransactionAttributeSource.class)) {
             throw rejected("S0 requires one explicit synchronous transaction manager and attributes");
         }
         Map<Method, TransactionSnapshot> definitions = approved.stream().collect(Collectors.toUnmodifiableMap(
-                method -> method, method -> transactionDefinition(attributes, method, target.getClass())));
+                method -> method, method -> transactionDefinition(attributes, method, target.getClass(), jdbcGuard, manager)));
         Placement candidate = new Placement(proxy, advised, source, target, advisors, advice,
-                approved, tx, manager, attributes, definitions, bindingGuard);
+                approved, tx, manager, attributes, definitions, bindingGuard, jdbcGuard);
         candidate.validate();
         proof = candidate;
     }
 
     @Override
     public Object invoke(MethodInvocation invocation) throws Throwable {
+        try {
+            return invokeProved(invocation);
+        } catch (TransactionalFailureBridge bridge) {
+            throw bridge.original(); // Rollback has already completed; preserve original caller identity.
+        }
+    }
+
+    private Object invokeProved(MethodInvocation invocation) throws Throwable {
         Placement current = proof;
         if (current == null) throw rejected("Boundary has no placement proof");
         if (invocation.getClass() != ReflectiveMethodInvocation.class
@@ -181,7 +205,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         AtomicBoolean entered = new AtomicBoolean();
         InvocationDispatcher.Body proceedOnce = () -> {
             if (!entered.compareAndSet(false, true)) throw rejected("Dispatcher attempted invocation replay");
-            return clone.proceed();
+            return preserveFatalIdentity(clone::proceed);
         };
         // A Spring clone resumes AFTER this interceptor, preserving the remaining chain.
         if (active != null) {
@@ -208,11 +232,24 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
             current.validate(); // Recheck after queueing, before any transaction/body entry.
             ACTIVE.set(new ExecutionContext(dispatcher, current.manager, Thread.currentThread()));
             try {
-                return proceedOnce.proceed();
+                return jdbcGuard == null ? proceedOnce.proceed() : preserveFatalIdentity(() -> jdbcGuard.execute(proceedOnce,
+                        dispatcher instanceof ManagedRuntimeDispatcher owned ? owned.generation() : null));
             } finally {
                 ACTIVE.remove();
             }
         });
+    }
+
+    private static Object preserveFatalIdentity(InvocationDispatcher.Body body) throws Throwable {
+        try {
+            return body.proceed();
+        } catch (TransactionalFailureBridge bridge) {
+            // The transaction has seen the unchecked rollback bridge. The owned runtime
+            // must now see the original Error to fail/retire its generation, even if
+            // application code catches a nested fatal failure on this same worker.
+            if (bridge.original() instanceof Error fatal) throw fatal;
+            throw bridge;
+        }
     }
 
     private static boolean materialized(Class<?> type) {
@@ -228,11 +265,13 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         return new IllegalStateException("Unproved Spring invocation: " + reason);
     }
 
-    private static TransactionSnapshot transactionDefinition(TransactionAttributeSource source, Method method, Class<?> target) {
+    private static TransactionSnapshot transactionDefinition(TransactionAttributeSource source, Method method, Class<?> target,
+                                                            SpringTransactionGuard jdbcGuard, TransactionManager manager) {
+        if (jdbcGuard != null) jdbcGuard.validate(manager, source, method, target);
         TransactionAttribute attribute = source.getTransactionAttribute(method, target);
         if (attribute == null || attribute.getClass() != RuleBasedTransactionAttribute.class
-                || attribute.getPropagationBehavior() != TransactionDefinition.PROPAGATION_REQUIRED
-                || attribute.getQualifier() != null) {
+                || (jdbcGuard == null && (attribute.getPropagationBehavior() != TransactionDefinition.PROPAGATION_REQUIRED
+                || attribute.getQualifier() != null))) {
             throw rejected("S0 requires explicit unqualified REQUIRED transaction metadata: " + method);
         }
         RuleBasedTransactionAttribute ruleBased = (RuleBasedTransactionAttribute) attribute;
@@ -265,7 +304,8 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
     private record Placement(Object proxy, Advised advised, TargetSource source, Object target,
                              List<Advisor> advisors, List<Object> advice, Set<Method> methods,
                              TransactionInterceptor transaction, TransactionManager manager,
-                             TransactionAttributeSource attributes, Map<Method, TransactionSnapshot> definitions, Runnable bindingGuard) {
+                             TransactionAttributeSource attributes, Map<Method, TransactionSnapshot> definitions, Runnable bindingGuard,
+                             SpringTransactionGuard jdbcGuard) {
         void validate() {
             bindingGuard.run();
             if (!advised.isFrozen() || advised.getTargetSource() != source
@@ -288,7 +328,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
                 }
             }
             for (Method method : methods) {
-                if (!transactionDefinition(attributes, method, target.getClass()).equals(definitions.get(method))) {
+                if (!transactionDefinition(attributes, method, target.getClass(), jdbcGuard, manager).equals(definitions.get(method))) {
                     throw rejected("Effective transaction definition changed: " + method);
                 }
                 List<Object> resolved = DefaultAdvisorChainFactory.INSTANCE

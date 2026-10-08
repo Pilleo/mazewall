@@ -1,9 +1,13 @@
-# Spring S0: synchronous advisor placement
+# Spring: explicit synchronous binding and JDBC placement
 
-This optional integration establishes **host-tested Spring advisor placement**.
-It is the S0 foundation, with programmatic construction and no Boot starter or
+This optional integration establishes **host-tested Spring binding, lifecycle,
+advisor placement and real embedded JDBC effects** (S0–S2). It has programmatic construction and no Boot starter or
 automatic installation. It uses Spring Boot **4.1.1** dependency management and
-Spring **7.0.9**, on JDK **25**. Spring remains outside core.
+Spring **7.0.9**, on JDK **25**. H2 **2.4.240** is test-only. Spring remains outside core.
+
+See [S1-S2-contract.md](S1-S2-contract.md) for the explicit reviewed binding/lifecycle
+and qualified JDBC entry, evidence limits and remaining resource/native gates.
+The entry below is the narrower retained S0 placement API.
 
 ## Programmatic entry
 
@@ -63,7 +67,7 @@ and before transaction completion. The host tests demonstrate rollback for
 business failure and a post-authorization denial using a real Spring transaction
 interceptor and an instrumented host transaction manager.
 
-Only explicitly listed interface methods returning primitives/void, primitive
+Only explicitly listed interface methods whose actual bridged implementations return primitives/void, primitive
 wrappers, `String`, or `byte[]` are admitted. Unknown methods, suspend signatures,
 lazy/reactive/opaque shapes, CGLIB, nested proxy topology, dynamic pointcuts,
 additional advice, and mutable/unproved chains are rejected. Advisor/advice,
@@ -107,18 +111,26 @@ native path or fatal generation retirement. Host execution of its extracted
 Callable adaptation is evidence for that bridge only. Kernel failures remain
 failures; there is no fallback or replay.
 
-S1 must bind approved manifests, bean identities/descriptors, lifecycle and
-effective annotations. S2 must prove JDBC propagation, containment diagnosis and
-commit/effect gates. S3 must integrate optional Security context, actual method
-security, starter and packaged Boot evidence. No S1–S3 completion is implied here.
+`OperationBindingTest` and `DomainLifecycleTest` exercise S1 exact registered bean,
+defining loader/class-resource digest, bridged descriptor, required annotations,
+review metadata and bounded retained lifecycle ownership. `JdbcTransactionTest`
+uses real H2 connections and actual qualified Spring JDBC advice for all seven
+propagations, rollback/commit/unknown outcomes, savepoints, caught diagnosed failures,
+beforeCommit gating and caller-delivery separation. `ReviewedJdbcBindingTest`
+composes reviewed bindings and independently committed inner JDBC work on one worker.
+These are host regressions, not native ownership/protection/resource pinning proof.
+S3 Security context/method security/starter and packaged Boot acceptance await review.
 
 Direct references/self-invocation, shared heap, preopened descriptors, independent
 executors, construction/init and late work are outside the proxy body boundary.
 In-process containment is not an arbitrary-code isolation boundary. Closing a
 runtime or receipt does not uninstall permanent restrictions from live threads.
 
-## Focused verification before root integration
+## Focused verification
 
-Use the task-owned init fixture documented in
-`tests/consumers/spring-advisor/README.md`. The coordinator owns the optional root
-include patch; default root settings and compiler remain unchanged.
+```bash
+./gradlew -PincludeSpringIntegration=true :integrations:spring:mazewall-spring-boot:test \
+  :integrations:spring:mazewall-spring-boot:spotbugsMain
+```
+
+In the fleet, every invocation is wrapped with the shared verification lock.

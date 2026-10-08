@@ -21,6 +21,8 @@ public final class ManagedRuntimeDispatcher implements InvocationDispatcher {
         return Mazewall.callContained(runtime, domain, callable(body));
     }
 
+    long generation() { return domain.getGeneration(); }
+
     // Shared Callable adaptation is directly host-characterizable without native runtime setup.
     static Callable<Object> callable(Body body) {
         return () -> {

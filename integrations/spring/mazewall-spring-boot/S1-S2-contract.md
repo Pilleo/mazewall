@@ -34,6 +34,12 @@ required annotated operation is rejected rather than partially protected. Multip
 contexts own independent binders/lifecycles. Direct object access, constructors,
 initializers, unrelated executors and unbound infrastructure are outside this scope.
 
+For independently reviewed beans in a common domain, use the explicit
+`SpringOperationBinder.inApprovedCommonDomain` factory with the SAME lifecycle and
+shared JDBC guard. It requires identical canonical fixed policy/runtime and resource
+generation. Each operation still validates its own exact bean, method, hash and
+review. This is trusted application grouping, not automatic policy combination.
+
 ### Evidence limits and required core seam
 
 The defining loader's class resource is checked against the reviewed digest. This
@@ -50,3 +56,75 @@ explicit trusted application configuration, not fields inferred from the documen
 Host characterization factories are explicitly unprotected. Their tests prove
 Spring behavior and state-machine ownership, not native readiness. S3 starter,
 method Security and packaged/native release acceptance require subsequent review.
+
+Core task 5 is adding `PreparedOperationResources` and a typed preparation overload.
+Once integrated, the lifecycle must consume that actual owner, and production binding
+must compare its finished-JAR identity with the trusted review instead of substituting
+the current class-resource digest. The first task-5 resolver rejects exploded/nested
+origins; Spring Boot/exploded support is a separate explicit blocker. An application
+using the current metadata-only path has not closed that release gate.
+
+## S2 qualified synchronous JDBC advice
+
+Register one qualified `DataSourceTransactionManager` or `JdbcTransactionManager`
+singleton. Construct a `SpringTransactionGuard(beanFactory, "jdbc", effects)` and
+use its `transactionAdvisor()` and `diagnosisAdvisor()` in that order after dispatch.
+The transaction advisor is a final subclass of Spring's real interceptor: Spring
+retains propagation, savepoint, suspend/resume, commit and rollback behavior; the
+selection override pins the actual qualified manager. A normal interceptor's public
+manager getter is insufficient because hidden BeanFactory qualification can select
+another manager. Unsupported existing transaction advisors are rejected explicitly.
+The exact existing configured advisors/proxy are retained at binding and invocation.
+
+Every approved method must use effective annotation-based `@Transactional` metadata
+with the exact configured manager qualifier. All seven propagations are admitted;
+NESTED requires enabled JDBC savepoints and a driver that actually supports them.
+An unsupported driver fails before the nested target body. Effective manager,
+datasource reference/configuration, source, attributes, rollback matchers and advisor
+identities are rechecked before dispatch and on the worker. Concurrent configuration
+mutation/hot reload remains unsupported. JPA, XA and reactive managers are rejected.
+
+External active transactions, synchronization and bound resources are rejected before
+the hop. Nested approved calls share the exact physical worker, dispatcher and manager;
+cross-domain calls reject. No connections or arbitrary ThreadLocals are transferred.
+Production JDBC entry also checks the public invocation evidence's prepared generation
+inside the owned worker before transaction entry.
+
+Diagnosis runs inside transaction advice and records the first diagnosed failure for
+the logical invocation. An unchecked rollback bridge prevents a diagnosed checked
+permission failure from receiving Spring's ordinary checked-business commit behavior.
+The original Throwable is restored after transaction completion in host execution;
+production core may classify/wrap it while preserving the original cause/evidence.
+Fatal Error identity is restored ON THE WORKER before the runtime sees it, preserving
+fatal-generation handling. Effective no-rollback rules conflicting with protected
+failure semantics reject at binding. Ordinary checked/runtime business semantics
+remain Spring's normal semantics.
+
+Catching a library-diagnosed inner failure does not erase it. The guard checks retained
+diagnosis plus `Mazewall.currentInvocationEvidence()` and registers a `beforeCommit`
+gate at lowest precedence. It prevents commit of still-active supported transactions
+when that evidence is observed. `beforeCompletion` is not a rollback veto. Same-order
+or later callbacks and unobserved swallowed ERRNO cannot be universally diagnosed;
+there is no such detection claim. Generic AccessDenied/EACCES evidence remains inferred.
+
+`SpringTransactionEffects.lastCompletion()` retains ONE immutable report for the most
+recently completed supported worker transaction chain, with an invocation ID, worker
+ID, transaction/savepoint outcomes, original execution failure and diagnostic. It is
+not a complete audit stream, a caller-delivery receipt, or the runtime's physical
+`executionEnd()`/cleanup/drain result. Database outcomes come from actual
+`afterCompletion` callbacks: COMMITTED, ROLLED_BACK or UNKNOWN. Independently committed
+REQUIRES_NEW work stays committed when the outer fails. Savepoint rollback is separate
+from outer commit; driver commit uncertainty remains UNKNOWN. AfterCommit failures
+remain COMMITTED. Nontransactional/autocommit database work has no fabricated rollback
+receipt. Files/network effects have no JDBC rollback guarantee.
+
+### Host evidence
+
+Actual H2 and both supported manager implementations exercise all seven propagations,
+normal checked-business commit, runtime-business rollback, nested savepoint rollback,
+unsupported savepoints, caught diagnosed checked failures in REQUIRED/REQUIRES_NEW/
+NESTED/NOT_SUPPORTED, earlier beforeCommit callback diagnosis, driver commit failure,
+afterCommit failure, hidden manager substitution and datasource identity drift.
+Caller interruption while the host worker remains active demonstrates why result
+delivery and database completion cannot be conflated. This fixture is explicitly
+uncontained; native owned-runtime cancellation and kernel denial are separate gates.

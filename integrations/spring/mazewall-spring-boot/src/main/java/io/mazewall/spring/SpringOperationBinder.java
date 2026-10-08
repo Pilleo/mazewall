@@ -48,23 +48,57 @@ public final class SpringOperationBinder {
     private Object boundBean;
 
     public SpringOperationBinder(ConfigurableListableBeanFactory beans, DomainLifecycle lifecycle) {
-        this(beans, Objects.requireNonNull(lifecycle.artifact()), lifecycle::dispatcher, false);
+        this(beans, Objects.requireNonNull(lifecycle.artifact()), lifecycle::dispatcher, false, null);
+    }
+
+    public SpringOperationBinder(ConfigurableListableBeanFactory beans, DomainLifecycle lifecycle, SpringTransactionGuard jdbcGuard) {
+        this(beans, Objects.requireNonNull(lifecycle.artifact()), lifecycle::dispatcher, false, Objects.requireNonNull(jdbcGuard));
+    }
+
+    /** Explicit trusted grouping: independently reviewed entries share this exact lifecycle's fixed policy. */
+    public static SpringOperationBinder inApprovedCommonDomain(ConfigurableListableBeanFactory beans, DomainLifecycle lifecycle,
+            ReviewedOperationArtifact operation, SpringTransactionGuard jdbcGuard) {
+        requireSameFixedDomain(lifecycle.artifact(), operation);
+        return new SpringOperationBinder(beans, operation, lifecycle::dispatcher, false, Objects.requireNonNull(jdbcGuard));
     }
 
     private SpringOperationBinder(ConfigurableListableBeanFactory beans, ReviewedOperationArtifact artifact,
-                                  Supplier<InvocationDispatcher> readiness, boolean trustedHost) {
+                                  Supplier<InvocationDispatcher> readiness, boolean trustedHost, SpringTransactionGuard jdbcGuard) {
         this.beans = Objects.requireNonNull(beans);
         this.preparedArtifact = Objects.requireNonNull(artifact);
         this.readiness = readiness;
         InvocationDispatcher dispatcher = readiness.get(); // Fail required inactive protection explicitly.
-        boundary = trustedHost ? BoundInvocationInterceptor.forTrustedHostCharacterization(dispatcher)
-                : new BoundInvocationInterceptor(dispatcher);
+        boundary = jdbcGuard == null ? (trustedHost ? BoundInvocationInterceptor.forTrustedHostCharacterization(dispatcher)
+                : new BoundInvocationInterceptor(dispatcher)) : (trustedHost
+                ? BoundInvocationInterceptor.forTrustedHostCharacterization(dispatcher, jdbcGuard)
+                : new BoundInvocationInterceptor((ManagedRuntimeDispatcher) dispatcher, jdbcGuard));
     }
 
     /** Uncontained host-only proof of Spring binding; never native/protected readiness. */
     public static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
             InvocationDispatcher dispatcher, ReviewedOperationArtifact artifact) {
-        return new SpringOperationBinder(beans, artifact, () -> dispatcher, true);
+        return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, null);
+    }
+
+    public static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
+            InvocationDispatcher dispatcher, ReviewedOperationArtifact artifact, SpringTransactionGuard jdbcGuard) {
+        return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, Objects.requireNonNull(jdbcGuard));
+    }
+
+    public static SpringOperationBinder forTrustedHostCharacterizationInCommonDomain(ConfigurableListableBeanFactory beans,
+            InvocationDispatcher dispatcher, ReviewedOperationArtifact domainArtifact,
+            ReviewedOperationArtifact operation, SpringTransactionGuard jdbcGuard) {
+        requireSameFixedDomain(domainArtifact, operation);
+        return new SpringOperationBinder(beans, operation, () -> dispatcher, true, Objects.requireNonNull(jdbcGuard));
+    }
+
+    private static void requireSameFixedDomain(ReviewedOperationArtifact domain, ReviewedOperationArtifact operation) {
+        Objects.requireNonNull(domain);
+        Objects.requireNonNull(operation);
+        if (!domain.getDocument().getPolicy().toJson().equals(operation.getDocument().getPolicy().toJson())
+                || !domain.getBinding().getResourceGeneration().equals(operation.getBinding().getResourceGeneration())) {
+            throw rejected("Approved common-domain operations must share the exact fixed policy/runtime/resource generation");
+        }
     }
 
     /** Install in the existing application's ProxyFactory BEFORE publication and freeze that factory. */
