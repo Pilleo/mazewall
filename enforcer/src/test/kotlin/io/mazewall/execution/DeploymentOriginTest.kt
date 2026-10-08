@@ -216,6 +216,35 @@ class DeploymentOriginTest {
         val jar = DeploymentPackagingFixture.boot(directory, false, inherited = true)
         assertTrue(DeploymentPackagingFixture.launch(jar, "reject-member", jar.toString()).contains("REJECTED_MEMBER"))
     }
+
+    @Test
+    fun `real Boot central only duplicate resource names reject despite unique local names`() = rejectCentral("central-duplicate")
+
+    @Test
+    fun `real Boot central only traversal resource name rejects despite legal local names`() = rejectCentral("central-traversal")
+
+    @Test
+    fun `real Boot central local resource name inconsistency rejects`() = rejectCentral("central-name")
+
+    @Test
+    fun `real Boot central entries cannot alias another local header offset`() = rejectCentral("central-offset")
+
+    @Test
+    fun `real Boot central CRC cannot disagree with valid local content CRC`() = rejectCentral("central-crc")
+
+    @Test
+    fun `real Boot central size cannot disagree with local data descriptor`() = rejectCentral("central-size")
+
+    @Test
+    fun `real Boot central declared expansion cannot exceed bounded byte budget`() = rejectCentral("central-budget")
+
+    @Test
+    fun `real Boot central count cannot hide an additional record`() = rejectCentral("central-count")
+
+    private fun rejectCentral(mutation: String) {
+        val jar = DeploymentPackagingFixture.boot(directory, true, nestedMutation = mutation)
+        assertTrue(DeploymentPackagingFixture.launch(jar, mutation, jar.toString()).contains("REJECTED_CENTRAL"))
+    }
 }
 
 /** Invoked through real Boot startup, with actual defining loader and selected Class. */
@@ -227,6 +256,12 @@ object DeploymentOriginProbe {
     ) {
         val jar = Path.of(arguments[1])
         val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(jar).build()
+        if (arguments[0].startsWith("central-")) {
+            assertEquals(42, selected.getMethod("call").invoke(selected.getConstructor().newInstance()))
+            assertFailsWith<IllegalArgumentException> { PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, selected, emptySet()) }
+            println("REJECTED_CENTRAL")
+            return
+        }
         if (arguments[0] == "reject-loader") {
             val failure = assertFailsWith<IllegalArgumentException> { PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, selected, emptySet()) }
             assertTrue(checkNotNull(failure.message).contains("Unsupported Boot loader implementation bytes"))

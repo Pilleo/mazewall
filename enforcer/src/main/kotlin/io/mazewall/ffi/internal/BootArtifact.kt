@@ -63,21 +63,23 @@ internal object BootArtifact {
         name: String,
     ): ByteArray =
         ZipInputStream(ByteArrayInputStream(bytes)).use { input ->
+        val central = NestedZipTable(bytes).validate()
         val names = mutableSetOf<String>()
-        var expanded = 0L
         var selected: ByteArray? = null
         var entry = input.nextEntry
         while (entry != null) {
             ArtifactBytes.requireEntryName(entry.name)
             require(names.size < ArtifactBytes.MAX_ENTRIES && names.add(entry.name)) { "Ambiguous or oversized nested JAR entry table" }
-            val content = ArtifactBytes.read(input, (ArtifactBytes.MAX_ARTIFACT_BYTES - expanded).toInt())
-            expanded += content.size
+            val record = requireNotNull(central[entry.name]) { "Nested ZIP local entry is absent from central table" }
+            val content = ArtifactBytes.read(input, record.size)
+            require(content.size == record.size && entry.crc == record.crc && entry.compressedSize == record.compressed.toLong()) { "Nested ZIP streamed content disagrees with central record" }
             if (entry.name == name) {
                 require(content.size <= ArtifactBytes.MAX_CLASS_BYTES) { "Selected nested class exceeds bounded identity budget" }
                 selected = content
             }
             entry = input.nextEntry
         }
+        require(names == central.keys) { "Nested ZIP streamed entry set disagrees with central table" }
         checkNotNull(selected) { "Selected class is absent from pinned nested library" }
     }
 

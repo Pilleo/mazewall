@@ -95,9 +95,14 @@ internal object DeploymentPackagingFixture {
                     write(nested, "application.properties", Files.readAllBytes(classes.resolve("application.properties")))
                     if (nestedMutation == "traversal") write(nested, "../outside.txt", "escape".toByteArray())
                     if (nestedMutation == "duplicate") write(nested, "fixture/Duplicate.class", Files.readAllBytes(classes.resolve("fixture/Operation.class")))
+                    if (nestedMutation?.startsWith("central-") == true) {
+                        write(nested, "first.properties", "first".toByteArray())
+                        write(nested, "other.properties", "other".toByteArray())
+                    }
                 }
                 val innerBytes = inner.toByteArray()
                 if (nestedMutation == "duplicate") replaceEntryName(innerBytes, "fixture/Duplicate.class", "fixture/Operation.class")
+                if (nestedMutation?.startsWith("central-") == true) mutateCentralOnly(innerBytes, nestedMutation)
                 write(output, "BOOT-INF/lib/operation.jar", innerBytes, true)
             } else {
                 write(output, "BOOT-INF/classes/fixture/Operation.class", Files.readAllBytes(classes.resolve("fixture/Operation.class")))
@@ -121,6 +126,41 @@ internal object DeploymentPackagingFixture {
         val after = replacement.toByteArray()
         assertEquals(before.size, after.size)
         bytes.indices.filter { offset -> offset + before.size <= bytes.size && before.indices.all { bytes[offset + it] == before[it] } }.forEach { offset -> after.copyInto(bytes, offset) }
+    }
+
+    private fun mutateCentralOnly(
+        bytes: ByteArray,
+        mutation: String,
+    ) {
+        val buffer = java.nio.ByteBuffer
+            .wrap(bytes)
+            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val records = bytes.indices.filter { it + 46 <= bytes.size && buffer.getInt(it) == 0x02014b50 }
+        val original = "other.properties".toByteArray()
+        val record = records.single { offset ->
+            val length = buffer.getShort(offset + 28).toInt() and 0xffff
+            length == original.size && original.indices.all { bytes[offset + 46 + it] == original[it] }
+        }
+        when (mutation) {
+            "central-duplicate" -> "first.properties".toByteArray().copyInto(bytes, record + 46)
+            "central-traversal" -> "../xx.properties".toByteArray().copyInto(bytes, record + 46)
+            "central-name" -> "third.properties".toByteArray().copyInto(bytes, record + 46)
+            "central-crc" -> buffer.putInt(record + 16, buffer.getInt(record + 16) xor 1)
+            "central-size" -> buffer.putInt(record + 24, buffer.getInt(record + 24) + 1)
+            "central-budget" -> buffer.putInt(record + 24, 256 * 1024 * 1024 + 1)
+            "central-count" -> {
+                val end = bytes.indices.last { it + 22 <= bytes.size && buffer.getInt(it) == 0x06054b50 }
+                buffer.putShort(end + 8, (records.size - 1).toShort())
+                buffer.putShort(end + 10, (records.size - 1).toShort())
+            }
+            "central-offset" -> {
+                val name = "first.properties".toByteArray()
+                val first = records.single { offset -> name.indices.all { bytes[offset + 46 + it] == name[it] } }
+                buffer.putInt(record + 42, buffer.getInt(first + 42))
+            }
+            else -> error("Unknown central-only fixture mutation")
+        }
+        // Local headers and data remain untouched: only loader-facing central records change.
     }
 
     fun launch(

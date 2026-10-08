@@ -195,6 +195,17 @@ then its bounded unambiguous entry table and selected class bytes are checked. I
 expansion is bounded to 256 MiB and 4096 entries; selected classes are at most 16 MiB.
 Traversal/duplicate entries and multiply nested or versioned resource origins reject.
 
+Selected inner libraries additionally require a consistent bounded ZIP32 central directory
+and local entry table. The central namespace used by Boot must have unique legal names,
+bounded declared sizes/counts and exact one-to-one contiguous local-header mappings.
+Local/central names, flags, methods, CRCs, sizes and data descriptors must agree; streamed
+content is checked against central metadata as well as the JDK's local CRC validation.
+Central-only duplicate/traversal names, aliased offsets, unindexed records, inconsistent
+counts/metadata and out-of-bounds structures reject. ZIP64/split/encrypted archives and
+alternate Unicode-name extra fields are unsupported and reject rather than acquiring a
+second interpretation of the namespace. Validation operates on the same bounded owned
+inner bytes; no temporary artifact, loader dependency or extra descriptor is introduced.
+
 `implementationSha256` is the digest of the **entire actual finished outer JAR**, including
 launcher, application/resource and inner library bytes. It is not the selected class/inner
 JAR hash, manifest label or sidecar echo. Resource generation additionally binds the actual

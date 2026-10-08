@@ -39,6 +39,16 @@ report/checkpoint; this issue stays open pending independent review and combined
 Supported closure/byte grammar and loader-release bounds: prepared-resources-design.md.
 No declaration that combined framework/publication or physical bytecode-attestation gates pass.
 
+**Round1 review S1:** local ZipInputStream entry checks alone did not validate the
+central namespace used by Boot. Real central-only duplicate/traversal/name/offset
+mutations reproduced acceptance (RED run-1df6fc913989,4 failures). Correction uses
+bounded central/local ZIP32 consistency checks over the same owned inner bytes,
+including central name uniqueness, exact local mappings and metadata/descriptors,
+plus streamed size/CRC comparisons. Initial GREEN run-733eccb868d7; final evidence
+run-b8a6b3ad9d3a/audit run-367896c85b7e:106 focused host/13 native, zero
+failures/errors/skips, ABI/Detekt PASS. Fix revision recorded in shared Task8 report;
+issue remains open for independent rereview. No API/origin/owner expansion.
+
 **Coordinator index proposal:** add this open HIGH enforcer issue; open count +1.
 Task writer intentionally does not edit backlog README/index.
 
