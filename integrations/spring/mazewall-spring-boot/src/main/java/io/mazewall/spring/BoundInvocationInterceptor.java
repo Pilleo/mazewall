@@ -166,7 +166,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
             throw rejected("S0 requires one explicit synchronous transaction manager and attributes");
         }
         Map<Method, TransactionSnapshot> definitions = approved.stream().collect(Collectors.toUnmodifiableMap(
-                method -> method, method -> transactionDefinition(attributes, method, target.getClass(), jdbcGuard, manager)));
+                method -> method, method -> transactionDefinition(attributes, method, target.getClass(), jdbcGuard, manager, advice.get(3))));
         Placement candidate = new Placement(proxy, advised, source, target, advisors, advice,
                 approved, tx, manager, attributes, definitions, bindingGuard, jdbcGuard);
         candidate.validate();
@@ -266,7 +266,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
     }
 
     private static TransactionSnapshot transactionDefinition(TransactionAttributeSource source, Method method, Class<?> target,
-                                                            SpringTransactionGuard jdbcGuard, TransactionManager manager) {
+                                                            SpringTransactionGuard jdbcGuard, TransactionManager manager, Object authorizationAdvice) {
         if (jdbcGuard != null) jdbcGuard.validate(manager, source, method, target);
         TransactionAttribute attribute = source.getTransactionAttribute(method, target);
         if (attribute == null || attribute.getClass() != RuleBasedTransactionAttribute.class
@@ -275,6 +275,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
             throw rejected("S0 requires explicit unqualified REQUIRED transaction metadata: " + method);
         }
         RuleBasedTransactionAttribute ruleBased = (RuleBasedTransactionAttribute) attribute;
+        if (authorizationAdvice instanceof AuthorizationRollbackContract contract) contract.validateRollback(attribute, method, target);
         return new TransactionSnapshot(attribute.getPropagationBehavior(), attribute.getIsolationLevel(),
                 attribute.getTimeout(), attribute.isReadOnly(), attribute.getName(), attribute.getQualifier(),
                 ruleBased.getDescriptor(), ruleBased.getTimeoutString(), List.copyOf(attribute.getLabels()),
@@ -328,7 +329,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
                 }
             }
             for (Method method : methods) {
-                if (!transactionDefinition(attributes, method, target.getClass(), jdbcGuard, manager).equals(definitions.get(method))) {
+                if (!transactionDefinition(attributes, method, target.getClass(), jdbcGuard, manager, advice.get(3)).equals(definitions.get(method))) {
                     throw rejected("Effective transaction definition changed: " + method);
                 }
                 List<Object> resolved = DefaultAdvisorChainFactory.INSTANCE

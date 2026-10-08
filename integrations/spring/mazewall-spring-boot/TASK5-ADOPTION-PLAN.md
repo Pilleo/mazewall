@@ -3,10 +3,13 @@
 Authority: the reviewed task5 stable typed contract and reviewed S0/S1/S2 fixes are
 integrated in supplied task9 baseline `92da1536`. Task9 consumes the actual owner
 directly, without copied core, reflection shims or a writer merge. The original plan
-below records that contract and broader release gates. Ordinary-JAR adoption evidence:
+below records that contract and broader release gates. Initial ordinary-JAR adoption evidence:
 73 retained host tests/SpotBugs and the published `tests/consumers/spring-jdbc` native
 fixture, including actual JDBC/denial/cancel/physical retirement and uncaptured origins.
 Independent task9 review and Boot/exploded/task8 combined gates remain open.
+The optional [S3 contract](S3-contract.md) adds per-invocation Security and normal
+starter evidence, including its separate published ordinary-JAR native fixture;
+it does not close executable Boot/demo/combined-release gates.
 
 ## Integrated public contract
 

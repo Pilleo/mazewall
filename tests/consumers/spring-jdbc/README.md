@@ -31,6 +31,15 @@ Assertions cover:
   demonstrate physical end separately from caller delivery.
 - Stop-before-start and externally reviewed stale implementation digest close actual
   unclaimed resources; failed preparation never becomes ready.
+- Published normal starter can run the same fixture without Security; the ordinary
+  consumer explicitly asserts Security absence/no linkage at runtime.
+- Explicit `verifySecurityNative` uses a separate ordinary finished security JAR and
+  actual overridden implementation Class/typed owner/external review. Actual upstream
+  Pre/PostAuthorize denies Bob after SQL but before commit, rolls back real rows, then
+  Admin reuses the same worker. Ordinary error, filesystem denial and virtual-caller
+  cancel each restore clean context; real captured-worker physical retirement is separate.
+  It uses the actual public bridge. Fixture-only instrumentation observes before/after
+  context and does not invent worker/descriptor ownership or emulate kernel success.
 
 No assumptions/skips/fallbacks: required native feature, permission or assertion failure
 fails the command. This is ordinary-JAR proof only. Executable nested Boot and exploded
@@ -58,3 +67,29 @@ Run every command under the fleet's shared verification lock. In the assigned wo
 External authority and candidate files live in this consumer's `build/native-proof`.
 Regenerate/approve after changing any JAR or deployment resource identity. Never supply
 a class-resource digest as a finished-JAR digest. No Docker or full-build gate is implied.
+
+## Optional normal starter / Security native variant
+
+Include only the task-owned starter using the init script while the root settings
+patch awaits coordinator integration; publish real normal JARs to a fresh local version:
+
+```bash
+./gradlew -PincludeSpringIntegration=true \
+  -I tests/consumers/spring-jdbc/optional-modules.init.gradle \
+  -I tests/consumers/stage.init.gradle \
+  -PconsumerVersion=0.1.0-task9.s3-final \
+  -PconsumerRepository="$PWD/build/task9-s3-final-maven" \
+  :platform:publishMavenJavaPublicationToConsumerBaselineRepository \
+  :enforcer:publishMavenJavaPublicationToConsumerBaselineRepository \
+  :integrations:spring:mazewall-spring-boot:publishMavenJavaPublicationToConsumerBaselineRepository \
+  :integrations:spring:mazewall-spring-boot-starter:publishMavenJavaPublicationToConsumerBaselineRepository
+
+./gradlew -p tests/consumers/spring-jdbc -PuseStarter=true \
+  -PconsumerVersion=0.1.0-task9.s3-final \
+  -PconsumerRepository="$PWD/build/task9-s3-final-maven" verifyNative verifySecurityNative
+```
+
+The optional Security source set adds Security7.1.1 explicitly; the ordinary source
+set/runtime remains Security-free. Its external authority files live in
+`build/security-native-proof`. Neither path launches a Boot executable or claims
+nested-origin support. Wrap all fleet commands in the shared verification lock.

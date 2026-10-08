@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.h2.jdbcx.JdbcDataSource;
 import org.springframework.aop.framework.Advised;
+import org.springframework.aop.Advisor;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
@@ -34,7 +35,7 @@ public final class NativeJdbcConsumer {
 
     public interface Operation { String run(String mode) throws Exception; }
 
-    public static final class JdbcOperation implements Operation {
+    public static class JdbcOperation implements Operation {
         final JdbcTemplate jdbc;
         final Path template;
         final Path sibling;
@@ -61,10 +62,11 @@ public final class NativeJdbcConsumer {
             check(evidence != null, "Actual owned runtime evidence required");
             jdbc.update("insert into effects(name) values (?)", mode);
             switch (mode) {
-                case "approved": return jdbc.queryForObject("select name from effects where name = ?", String.class, mode)
+                case "approved", "postDenied", "afterDenied": return jdbc.queryForObject("select name from effects where name = ?", String.class, mode)
                         + ":" + Files.readString(template);
                 case "mutate": Files.writeString(template, "forbidden mutation"); return "UNEXPECTED";
                 case "sibling": return Files.readString(sibling);
+                case "business": throw new IllegalArgumentException("ordinary fixture business failure");
                 case "cancel":
                     entered.countDown();
                     try {
@@ -92,10 +94,25 @@ public final class NativeJdbcConsumer {
         public String run(String mode) { throw new AssertionError("Uncaptured implementation must never execute"); }
     }
 
+    /** Fixture-only optional collaborator; no Security type in the ordinary consumer's contract/linkage. */
+    public interface SecurityFixture {
+        Class<? extends JdbcOperation> implementation();
+        JdbcOperation target(JdbcTemplate jdbc, Path template, Path sibling);
+        InvocationContextBridge contexts();
+        Advisor authorization();
+        void principal(String name);
+        void verifyAlternating(Operation proxy, JdbcOperation target, JdbcTemplate jdbc, SpringTransactionEffects effects) throws Exception;
+        void verifyRestoration();
+    }
+
     public static void main(String[] args) throws Exception {
         check(args.length == 2, "measure|verify <fixtureRoot>");
         Path root = Path.of(args[1]).toRealPath();
-        Path jar = Path.of(JdbcOperation.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath();
+        boolean securityMode = args[0].equals("measure-security") || args[0].equals("verify-security");
+        SecurityFixture security = securityMode ? (SecurityFixture) Class.forName("consumer.spring.SecurityNativeFixture")
+                .getConstructor().newInstance() : null;
+        Class<?> implementation = security == null ? JdbcOperation.class : security.implementation();
+        Path jar = Path.of(implementation.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath();
         if (args[0].equals("reject-exploded")) {
             check(Files.isDirectory(jar), "Actual exploded CodeSource directory required");
             var explodedPolicy = WorkerPolicyBuilder.denyList(PROFILE).allowFsRead(jar).build();
@@ -109,16 +126,22 @@ public final class NativeJdbcConsumer {
             return;
         }
         check(Files.isRegularFile(jar) && jar.toString().endsWith(".jar"), "Actual finished ordinary implementation JAR required");
-        check(JdbcOperation.class.getClassLoader() == ClassLoader.getSystemClassLoader(), "Supported ordinary JDK app loader");
+        check(implementation.getClassLoader() == ClassLoader.getSystemClassLoader(), "Supported ordinary JDK app loader");
+        if (!securityMode) {
+            try {
+                Class.forName("org.springframework.security.core.context.SecurityContextHolder");
+                throw new AssertionError("Ordinary adapter/starter must not force Security at runtime");
+            } catch (ClassNotFoundException absent) { System.out.println("PUBLISHED_SECURITY_ABSENCE_NO_LINKAGE"); }
+        }
         var policy = WorkerPolicyBuilder.denyList(PROFILE).allowFsRead(jar, root.resolve("template.txt")).build();
         Class<?> foreignClass = Class.forName("consumer.spring.ForeignJdbcOperation");
         check(!foreignClass.getProtectionDomain().getCodeSource().getLocation().equals(
                 JdbcOperation.class.getProtectionDomain().getCodeSource().getLocation()), "Actual second implementation origin required");
-        var resources = PreparedOperationResources.resolve(PROFILE, policy, JdbcOperation.class, Set.of(jar, root.resolve("template.txt")));
+        var resources = PreparedOperationResources.resolve(PROFILE, policy, implementation, Set.of(jar, root.resolve("template.txt")));
         try (resources) { // Resolution/review/binding failures must close unconsumed acquisitions as well.
-        if (args[0].equals("measure")) {
+        if (args[0].equals("measure") || args[0].equals("measure-security")) {
             try (resources) {
-                var binding = binding(resources.getImplementationSha256(), resources.getResourceGeneration(), JdbcOperation.class, "operation");
+                var binding = binding(resources.getImplementationSha256(), resources.getResourceGeneration(), implementation, "operation");
                 var candidate = new OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(PROFILE, policy), Set.of(), Map.of());
                 Files.writeString(root.resolve("candidate.json"), candidate.toJson());
                 Files.writeString(root.resolve("candidate-generation.txt"), resources.getResourceGeneration());
@@ -129,21 +152,21 @@ public final class NativeJdbcConsumer {
                         foreignClass, "foreign"), candidate.getPolicy(), Set.of(), Map.of());
                 Files.writeString(root.resolve("foreign-candidate.json"), foreign.toJson());
                 var stale = new OperationPolicyDocument(binding("0".repeat(64), resources.getResourceGeneration(),
-                        JdbcOperation.class, "operation"), candidate.getPolicy(), Set.of(), Map.of());
+                        implementation, "operation"), candidate.getPolicy(), Set.of(), Map.of());
                 Files.writeString(root.resolve("stale-candidate.json"), stale.toJson());
                 System.out.println("MEASURED_CANDIDATE_ONLY jar=" + resources.getImplementationSha256()
                         + " generation=" + resources.getResourceGeneration());
             }
             return;
         }
-        check(args[0].equals("verify"), "Unsupported fixture mode");
+        check(args[0].equals("verify") || args[0].equals("verify-security"), "Unsupported fixture mode");
         Properties authority = new Properties();
         try (var input = Files.newInputStream(root.resolve("trusted-review.properties"))) { authority.load(input); }
         String json = Files.readString(root.resolve("candidate.json"));
-        var expected = binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), JdbcOperation.class, "operation");
+        var expected = binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), implementation, "operation");
         var review = new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("documentSha256"), Set.of());
         var artifact = ReviewedOperationArtifact.load(json, review, expected);
-        check(!resources.getImplementationSha256().equals(SpringOperationBinder.classResourceSha256(JdbcOperation.class)),
+        check(!resources.getImplementationSha256().equals(SpringOperationBinder.classResourceSha256(implementation)),
                 "Finished JAR hash must not be substituted with selected class hash");
         check(resources.getImplementationSha256().equals(authority.getProperty("jarSha256")), "External finished JAR expectation");
         var otherReview = new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("otherDocumentSha256"), Set.of());
@@ -154,9 +177,9 @@ public final class NativeJdbcConsumer {
                 binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), foreignClass, "foreign"));
         var staleArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("stale-candidate.json")),
                 new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("staleDocumentSha256"), Set.of()),
-                binding("0".repeat(64), authority.getProperty("resourceGeneration"), JdbcOperation.class, "operation"));
-        verify(root, resources, artifact, otherArtifact, foreignArtifact, foreignClass);
-        verifyUnusedAndFailedOwnerCleanup(policy, Set.of(jar, root.resolve("template.txt")), artifact, staleArtifact);
+                binding("0".repeat(64), authority.getProperty("resourceGeneration"), implementation, "operation"));
+        verify(root, resources, artifact, otherArtifact, foreignArtifact, foreignClass, security);
+        verifyUnusedAndFailedOwnerCleanup(policy, Set.of(jar, root.resolve("template.txt")), artifact, staleArtifact, implementation);
         }
     }
 
@@ -167,7 +190,7 @@ public final class NativeJdbcConsumer {
 
     private static void verify(Path root, PreparedOperationResources resources, ReviewedOperationArtifact artifact,
                                ReviewedOperationArtifact otherArtifact, ReviewedOperationArtifact foreignArtifact,
-                               Class<?> foreignClass) throws Exception {
+                               Class<?> foreignClass, SecurityFixture security) throws Exception {
         JdbcDataSource data = new JdbcDataSource();
         data.setURL("jdbc:h2:mem:ordinaryJar;DB_CLOSE_DELAY=-1");
         JdbcTemplate jdbc = new JdbcTemplate(data);
@@ -181,17 +204,21 @@ public final class NativeJdbcConsumer {
         var guard = new SpringTransactionGuard(beans, "jdbc", effects);
         // Explicit trusted application bootstrap: never installed by starter/binder/lifecycle.
         try (var runtime = ManagedRuntime.open(PROFILE, Policy.NO_EXEC_HOTSPOT, BUDGET, BUDGET)) {
-            var lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 4), resources, Duration.ofMillis(50));
+            var lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 4), resources, Duration.ofMillis(50),
+                    security == null ? InvocationContextBridge.none() : security.contexts());
             lifecycle.start();
             resources.close(); // Transferred close cannot revoke genuine live worker ownership.
             var binder = new SpringOperationBinder(beans, lifecycle, guard);
-            var target = new JdbcOperation(jdbc, root.resolve("template.txt"), root.resolve("sibling.txt"));
-            Operation proxy = proxy(beans, "operation", target, binder, guard);
+            var target = security == null ? new JdbcOperation(jdbc, root.resolve("template.txt"), root.resolve("sibling.txt"))
+                    : security.target(jdbc, root.resolve("template.txt"), root.resolve("sibling.txt"));
+            Operation proxy = proxy(beans, "operation", target, binder, guard, security == null ?
+                    new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()) : security.authorization());
             var advisors = ((Advised) proxy).getAdvisors();
             binder.bind(approval(artifact, proxy));
             binder.validateRequiredBindings(List.of("operation"));
             check(beans.getBean("operation") == proxy, "Actual registered singleton retained");
             check(java.util.Arrays.equals(advisors, ((Advised) proxy).getAdvisors()), "Original advisors retained");
+            if (security != null) security.principal("admin");
             check(proxy.run("approved").equals("approved:approved template"), "Actual native owned call and JdbcTemplate result");
             check(target.worker != Thread.currentThread(), "Worker offload");
             check(effects.lastCompletion().transactions().getFirst().outcome() == SpringTransactionEffects.Outcome.COMMITTED,
@@ -203,7 +230,9 @@ public final class NativeJdbcConsumer {
             deny(proxy, "sibling", jdbc, effects);
             check(Files.readString(root.resolve("template.txt")).equals("approved template"), "Denied template mutation left bytes intact");
             check(jdbc.queryForList("select name from effects", String.class).equals(List.of("approved")), "Denied SQL was rolled back");
-            verifyCancellation(proxy, target, lifecycle, resources, jdbc, effects);
+            if (security != null) security.verifyAlternating(proxy, target, jdbc, effects);
+            verifyCancellation(proxy, target, lifecycle, resources, jdbc, effects, security);
+            if (security != null) security.verifyRestoration();
             System.out.println("NATIVE_ORDINARY_JAR_PASS approved/JDBC/template-denial/sibling-denial/cancel/physical-retirement");
         } finally {
             resources.close();
@@ -219,11 +248,17 @@ public final class NativeJdbcConsumer {
 
     private static Operation proxy(DefaultListableBeanFactory beans, String name, Operation target,
                                    SpringOperationBinder binder, SpringTransactionGuard guard) {
+        return proxy(beans, name, target, binder, guard,
+                new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()));
+    }
+
+    private static Operation proxy(DefaultListableBeanFactory beans, String name, Operation target,
+                                   SpringOperationBinder binder, SpringTransactionGuard guard, Advisor authorization) {
         var factory = new ProxyFactory(target);
         factory.addAdvisor(binder.dispatchAdvisor());
         factory.addAdvisor(guard.transactionAdvisor());
         factory.addAdvisor(guard.diagnosisAdvisor());
-        factory.addAdvisor(new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()));
+        factory.addAdvisor(authorization);
         factory.setFrozen(true);
         Operation proxy = (Operation) factory.getProxy();
         beans.registerSingleton(name, proxy);
@@ -245,15 +280,15 @@ public final class NativeJdbcConsumer {
     }
 
     private static void verifyUnusedAndFailedOwnerCleanup(Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy,
-            Set<Path> strictPaths, ReviewedOperationArtifact artifact, ReviewedOperationArtifact staleArtifact) {
-        var unused = PreparedOperationResources.resolve(PROFILE, policy, JdbcOperation.class, strictPaths);
+            Set<Path> strictPaths, ReviewedOperationArtifact artifact, ReviewedOperationArtifact staleArtifact, Class<?> implementation) {
+        var unused = PreparedOperationResources.resolve(PROFILE, policy, implementation, strictPaths);
         try (var runtime = ManagedRuntime.open(PROFILE, Policy.NO_EXEC_HOTSPOT, BUDGET, BUDGET)) {
             var lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 1), unused, BUDGET);
             lifecycle.stop(); // Never claimed: lifecycle closes the genuine acquisitions.
             assertClosed(unused);
             check(lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Never-started lifecycle drains explicit owner");
         } finally { unused.close(); }
-        var failed = PreparedOperationResources.resolve(PROFILE, policy, JdbcOperation.class, strictPaths);
+        var failed = PreparedOperationResources.resolve(PROFILE, policy, implementation, strictPaths);
         try (var runtime = ManagedRuntime.open(PROFILE, Policy.NO_EXEC_HOTSPOT, BUDGET, BUDGET)) {
             var lifecycle = new DomainLifecycle(runtime, staleArtifact, new DomainLimits(1, 1), failed, BUDGET);
             try { lifecycle.start(); throw new AssertionError("Stale external implementation expectation accepted"); }
@@ -287,9 +322,10 @@ public final class NativeJdbcConsumer {
     }
 
     private static void verifyCancellation(Operation proxy, JdbcOperation target, DomainLifecycle lifecycle,
-            PreparedOperationResources resources, JdbcTemplate jdbc, SpringTransactionEffects effects) throws Exception {
+            PreparedOperationResources resources, JdbcTemplate jdbc, SpringTransactionEffects effects, SecurityFixture security) throws Exception {
         AtomicReference<Throwable> callerFailure = new AtomicReference<>();
         Thread caller = Thread.ofVirtual().name("fixture-virtual-servlet-caller").start(() -> {
+            if (security != null) security.principal("admin");
             try { proxy.run("cancel"); callerFailure.set(new AssertionError("Cancelled call returned success")); }
             catch (Throwable failure) { callerFailure.set(failure); }
         });

@@ -27,10 +27,17 @@ public final class DomainLifecycle implements SmartLifecycle {
     /** Takes responsibility for the genuine owner after successful construction; no metadata-only fallback. */
     public DomainLifecycle(ManagedRuntime owner, ReviewedOperationArtifact artifact, DomainLimits limits,
                            PreparedOperationResources resources, Duration timeout) {
-        this(() -> new ManagedRuntimeDispatcher(owner, owner.prepare(artifact, limits, resources)), owner::drain,
+        this(owner, artifact, limits, resources, timeout, InvocationContextBridge.none());
+    }
+
+    /** Explicit optional context delegation; capture happens for each call before the owned-worker hop. */
+    public DomainLifecycle(ManagedRuntime owner, ReviewedOperationArtifact artifact, DomainLimits limits,
+                           PreparedOperationResources resources, Duration timeout, InvocationContextBridge contexts) {
+        this(() -> new ManagedRuntimeDispatcher(owner, owner.prepare(artifact, limits, resources), contexts), owner::drain,
                 timeout, Objects.requireNonNull(artifact), Objects.requireNonNull(resources));
         Objects.requireNonNull(owner);
         Objects.requireNonNull(limits);
+        Objects.requireNonNull(contexts);
     }
 
     private DomainLifecycle(Supplier<InvocationDispatcher> prepare, Function<Duration, DrainReport> drain,

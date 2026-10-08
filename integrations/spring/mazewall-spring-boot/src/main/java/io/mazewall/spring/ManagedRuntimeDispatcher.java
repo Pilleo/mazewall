@@ -10,15 +10,21 @@ import java.util.concurrent.Callable;
 public final class ManagedRuntimeDispatcher implements InvocationDispatcher {
     private final ManagedRuntime runtime;
     private final InProcessDomain domain;
+    private final InvocationContextBridge contexts;
 
     public ManagedRuntimeDispatcher(ManagedRuntime runtime, InProcessDomain domain) {
+        this(runtime, domain, InvocationContextBridge.none());
+    }
+
+    public ManagedRuntimeDispatcher(ManagedRuntime runtime, InProcessDomain domain, InvocationContextBridge contexts) {
         this.runtime = Objects.requireNonNull(runtime);
         this.domain = Objects.requireNonNull(domain);
+        this.contexts = Objects.requireNonNull(contexts);
     }
 
     @Override
     public Object call(Body body) {
-        return Mazewall.callContained(runtime, domain, callable(body));
+        return Mazewall.callContained(runtime, domain, Objects.requireNonNull(contexts.capture(callable(body))));
     }
 
     long generation() { return domain.getGeneration(); }

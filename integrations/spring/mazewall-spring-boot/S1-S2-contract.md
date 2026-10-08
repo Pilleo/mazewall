@@ -86,8 +86,9 @@ is trusted immutable ordinary JARs with no redefinition and a reviewed supported
 Host characterization factories remain explicitly unprotected. Their tests prove
 Spring behavior and state-machine semantics. The separate published
 [`spring-jdbc` consumer](../../../tests/consumers/spring-jdbc/README.md) supplies the
-ordinary-JAR native adoption proof. It does not close S3 Security/starter or executable
-Boot/exploded acceptance. Unsupported nested/exploded/custom-loader origins reject
+ordinary-JAR native adoption proof. Its optional Security native variant and
+[S3 contract](S3-contract.md) add supported delegation/normal-starter proof, while
+executable Boot/exploded acceptance remains open. Unsupported nested/exploded/custom-loader origins reject
 through core; task8's extension is not copied or assumed reviewed here.
 
 [TASK5-ADOPTION-PLAN.md](TASK5-ADOPTION-PLAN.md) specifies the exact follow-up,
