@@ -49,7 +49,7 @@ class ReviewedJdbcBindingTest {
     }
     static ReviewedOperationArtifact review(Object target, String name, CanonicalPolicyArtifact policy, String generation) throws Exception {
         var binding = new OperationBinding(name, OperationAdapter.SPRING_METHOD,
-                SpringOperationBinder.implementationSha256(target.getClass()), generation,
+                SpringOperationBinder.classResourceSha256(target.getClass()), generation,
                 Map.of("beanName", name, "className", target.getClass().getName(), "methodDescriptor", "run()Ljava/lang/String;"));
         var document = new OperationPolicyDocument(binding, policy, Set.of(), Map.of());
         return ReviewedOperationArtifact.load(document.toJson(), new TrustedPolicyReview("application review", document.sha256(), Set.of()), binding);

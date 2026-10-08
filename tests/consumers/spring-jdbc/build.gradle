@@ -1,0 +1,86 @@
+plugins { id 'java' }
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+
+repositories {
+    maven {
+        url = uri(providers.gradleProperty('consumerRepository').get())
+        content { includeGroup 'io.mazewall' }
+    }
+    mavenCentral { content { excludeGroup 'io.mazewall' } }
+}
+
+dependencies {
+    implementation "io.mazewall:mazewall-spring-boot:${providers.gradleProperty('consumerVersion').get()}"
+    implementation platform('org.springframework.boot:spring-boot-dependencies:4.1.1')
+    implementation 'com.h2database:h2'
+}
+
+sourceSets {
+    other {
+        compileClasspath = sourceSets.main.output + configurations.compileClasspath
+    }
+}
+tasks.register('otherJar', Jar) {
+    dependsOn tasks.named('otherClasses')
+    archiveClassifier = 'other-origin'
+    from sourceSets.other.output
+}
+
+def proofRoot = layout.buildDirectory.dir('native-proof')
+def packagedClasspath = files(tasks.jar.archiveFile, tasks.named('otherJar').flatMap { it.archiveFile }, configurations.runtimeClasspath)
+def digest = { File file ->
+    java.security.MessageDigest.getInstance('SHA-256').digest(file.bytes).encodeHex().toString()
+}
+
+tasks.register('measureCandidate', JavaExec) {
+    dependsOn tasks.jar, tasks.named('otherJar')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = packagedClasspath
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    doFirst {
+        def root = proofRoot.get().asFile
+        root.mkdirs()
+        new File(root, 'template.txt').text = 'approved template'
+        new File(root, 'sibling.txt').text = 'private sibling'
+        args 'measure', root.absolutePath
+    }
+}
+
+// Explicit test-review authority is OUTSIDE the implementation JVM and after the finished JAR.
+// This harness approves its known fixed fixture; production must supply its own trusted review.
+tasks.register('approveFixture') {
+    dependsOn tasks.named('measureCandidate')
+    doLast {
+        def root = proofRoot.get().asFile
+        def authority = new Properties()
+        authority.setProperty('jarSha256', digest(tasks.jar.archiveFile.get().asFile))
+        authority.setProperty('documentSha256', digest(new File(root, 'candidate.json')))
+        authority.setProperty('otherDocumentSha256', digest(new File(root, 'other-candidate.json')))
+        authority.setProperty('foreignDocumentSha256', digest(new File(root, 'foreign-candidate.json')))
+        authority.setProperty('staleDocumentSha256', digest(new File(root, 'stale-candidate.json')))
+        authority.setProperty('resourceGeneration', new File(root, 'candidate-generation.txt').text)
+        authority.setProperty('reviewer', 'external-known-fixture-test-reviewer')
+        new File(root, 'trusted-review.properties').withOutputStream { authority.store(it, 'Trusted fixture approval, not production authority') }
+    }
+}
+
+tasks.register('verifyNative', JavaExec) {
+    dependsOn tasks.named('approveFixture'), tasks.named('rejectExploded')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = packagedClasspath
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    args 'verify', proofRoot.get().asFile.absolutePath
+}
+
+tasks.register('rejectExploded', JavaExec) {
+    dependsOn tasks.classes
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    // This fixture has no main resources; do not declare Gradle's nonexistent NO-SOURCE output as required runtime input.
+    classpath = files(sourceSets.main.output.classesDirs, configurations.runtimeClasspath)
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    args 'reject-exploded', layout.buildDirectory.get().asFile.absolutePath
+}

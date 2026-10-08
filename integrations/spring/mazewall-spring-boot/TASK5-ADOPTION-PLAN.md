@@ -1,11 +1,14 @@
-# Task 5 typed-owner adoption plan — gated, not implemented
+# Task 5 typed-owner adoption contract — ordinary-JAR task9 implementation
 
-Authority: task-5-report.md public contract for core revision `d0f91001`, which is
-UNDER REVIEW. Coordinator approval/integration of the reviewed core revision is a
-prerequisite. This plan does not copy source, add reflection shims or merge core.
-S1/S2 host fixes do not close production acceptance.
+Authority: the reviewed task5 stable typed contract and reviewed S0/S1/S2 fixes are
+integrated in supplied task9 baseline `92da1536`. Task9 consumes the actual owner
+directly, without copied core, reflection shims or a writer merge. The original plan
+below records that contract and broader release gates. Ordinary-JAR adoption evidence:
+73 retained host tests/SpotBugs and the published `tests/consumers/spring-jdbc` native
+fixture, including actual JDBC/denial/cancel/physical retirement and uncaptured origins.
+Independent task9 review and Boot/exploded/task8 combined gates remain open.
 
-## Public contract to consume after approval
+## Integrated public contract
 
 ```text
 PreparedOperationResources.resolve(
@@ -21,7 +24,7 @@ and runtime closure, not a portable artifact version. The typed owner/core suppl
 class/loader/JAR/member agreement and resource lifetime. Trusted immutable deployment
 without redefinition remains required; this is not defined-bytecode attestation.
 
-## Next separately reviewed adapter slice
+## Adapter requirements implemented for ordinary JARs
 
 1. Inspect the existing registered singleton/static target without invoking it.
    Select its actual implementation `Class`/defining loader and bridged public
@@ -42,8 +45,8 @@ without redefinition remains required; this is not defined-bytecode attestation.
 4. Bind actual target `Class` identity to `resources.implementationClass` and its
    defining loader to the external expectation. Compare reviewed SHA/generation to
    the owner's finished-JAR identity. Preserve descriptor/registered proxy/advisors.
-   The current `implementationSha256(Class)` class-resource helper must not be the
-   production JAR verifier or fallback. Core revalidates actual resources at
+   The host helper is now explicitly named `classResourceSha256(Class)` and is not
+   the production JAR verifier or fallback. Core revalidates actual resources at
    preparation/dispatch; metadata equality is not a replacement.
 5. Successful preparation consumes one owner once. Close unconsumed owners on
    abandoned resolution/review/preparation, preserving original/fatal failures.
@@ -63,7 +66,7 @@ without redefinition remains required; this is not defined-bytecode attestation.
    origins and unsupported loaders reject until a separate reviewed resolver supports
    them. Never substitute class hashing or allow an artifact's parent directory.
 
-## Required verification after the reviewed API is present
+## Verification and remaining combined gates
 
 - Compile against integrated public ABI, without unreviewed sibling source/stubs
   or compiler metadata-skip flags.
@@ -83,18 +86,19 @@ without redefinition remains required; this is not defined-bytecode attestation.
 
 ## Required coordinator/root update
 
-1. Review task-5 and task-6 fixes, then integrate the APPROVED core ABI/owner revision
-   and scoped Spring commits into a common baseline through the serial review path.
-   Supply that baseline for the typed adoption slice. No writer cherry-pick of
-   unreviewed core is requested.
+1. Task5/task6 approval and common baseline are supplied. Review the task9 scoped
+   adoption revision independently before combined-release declarations. No writer
+   cherry-pick of unreviewed core is requested.
 2. `includeSpringIntegration=true` wiring and BOM4.1.1 already exist at this base;
    no new settings/catalog/version patch is needed. Coordinator must include the
    optional Spring flag in its owning merge/release checks: the default commit hook
    does not run the optional adapter suite.
 3. Coordinator owns backlog index/count for the open task-6 issue
    `issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md`
-   and task-5 issue. Retain X1/native/JAR/Boot blockers in the ledger; host greens
-   do not justify archive. Root/index were not edited by this writer.
+   and task5/task9 issues. Record ordinary-JAR adoption evidence separately from
+   Boot/exploded/S3/combined gates; host greens do not justify archive. Root/index
+   were not edited by this writer.
 4. Coordinator owns combined/native/packaged and later full-build/container gates.
    Actual Gradle/commit commands remain under the shared lock. S3 starts only after
-   reviewed S1/S2. No native/JAR/Boot acceptance is claimed by this plan.
+   reviewed S1/S2. The ordinary-JAR fixture is actual native evidence; it is not
+   executable Boot, exploded-origin or complete combined-release proof.

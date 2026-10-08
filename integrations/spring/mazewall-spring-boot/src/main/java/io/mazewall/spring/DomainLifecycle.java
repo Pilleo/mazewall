@@ -5,6 +5,7 @@ import io.mazewall.enforcer.api.execution.DomainLimits;
 import io.mazewall.enforcer.api.execution.DrainReport;
 import io.mazewall.enforcer.api.execution.IncompleteDrainException;
 import io.mazewall.enforcer.api.execution.ManagedRuntime;
+import io.mazewall.enforcer.api.execution.PreparedOperationResources;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Function;
@@ -18,30 +19,34 @@ public final class DomainLifecycle implements SmartLifecycle {
     private final Function<Duration, DrainReport> drain;
     private final Duration timeout;
     private final ReviewedOperationArtifact artifact;
+    private final PreparedOperationResources resources;
     private State state = State.NEW;
     private InvocationDispatcher dispatcher;
     private DrainReport lastDrain;
 
-    public DomainLifecycle(ManagedRuntime owner, ReviewedOperationArtifact artifact, DomainLimits limits, Duration timeout) {
-        this(() -> new ManagedRuntimeDispatcher(owner, owner.prepare(artifact, limits)), owner::drain,
-                timeout, Objects.requireNonNull(artifact));
+    /** Takes responsibility for the genuine owner after successful construction; no metadata-only fallback. */
+    public DomainLifecycle(ManagedRuntime owner, ReviewedOperationArtifact artifact, DomainLimits limits,
+                           PreparedOperationResources resources, Duration timeout) {
+        this(() -> new ManagedRuntimeDispatcher(owner, owner.prepare(artifact, limits, resources)), owner::drain,
+                timeout, Objects.requireNonNull(artifact), Objects.requireNonNull(resources));
         Objects.requireNonNull(owner);
         Objects.requireNonNull(limits);
     }
 
     private DomainLifecycle(Supplier<InvocationDispatcher> prepare, Function<Duration, DrainReport> drain,
-                            Duration timeout, ReviewedOperationArtifact artifact) {
+                            Duration timeout, ReviewedOperationArtifact artifact, PreparedOperationResources resources) {
         this.prepare = Objects.requireNonNull(prepare);
         this.drain = Objects.requireNonNull(drain);
         this.timeout = Objects.requireNonNull(timeout);
         if (timeout.isNegative() || timeout.isZero()) throw new IllegalArgumentException("Positive bounded drain required");
         this.artifact = artifact;
+        this.resources = resources;
     }
 
     /** Unprotected lifecycle state characterization; not a production preparation capability. */
     static DomainLifecycle forTrustedHostCharacterization(Supplier<InvocationDispatcher> prepare,
             Function<Duration, DrainReport> drain, Duration timeout) {
-        return new DomainLifecycle(prepare, drain, timeout, null);
+        return new DomainLifecycle(prepare, drain, timeout, null, null);
     }
 
     @Override public synchronized void start() {
@@ -52,20 +57,28 @@ public final class DomainLifecycle implements SmartLifecycle {
             state = State.READY;
         } catch (RuntimeException | Error failure) {
             state = State.FAILED;
+            Throwable primary = failure;
+            try {
+                if (resources != null) resources.close(); // Unclaimed owner closes; transferred owner stays with runtime.
+            } catch (RuntimeException | Error cleanup) {
+                primary = retainCleanup(primary, cleanup);
+            }
             try {
                 lastDrain = drain.apply(timeout);
                 if (lastDrain instanceof DrainReport.Incomplete incomplete) {
-                    failure.addSuppressed(new IncompleteDrainException(incomplete));
+                    primary.addSuppressed(new IncompleteDrainException(incomplete));
                 }
             } catch (RuntimeException | Error cleanup) {
-                if (cleanup != failure) failure.addSuppressed(cleanup);
+                primary = retainCleanup(primary, cleanup);
             }
-            throw failure;
+            if (primary instanceof Error fatal) throw fatal;
+            throw (RuntimeException) primary;
         }
     }
 
     @Override public synchronized void stop() {
         if (state == State.CLOSED) return;
+        if (state == State.NEW && resources != null) resources.close();
         state = State.DRAINING;
         // Retain prepare/drain closures (and their exact owner) even on timeout or failure.
         lastDrain = Objects.requireNonNull(drain.apply(timeout));
@@ -85,4 +98,15 @@ public final class DomainLifecycle implements SmartLifecycle {
         return dispatcher;
     }
     ReviewedOperationArtifact artifact() { return artifact; }
+    PreparedOperationResources resources() { return Objects.requireNonNull(resources, "Production requires actual prepared resources"); }
+
+    private static Throwable retainCleanup(Throwable primary, Throwable cleanup) {
+        if (primary == cleanup) return primary;
+        if (cleanup instanceof Error && !(primary instanceof Error)) {
+            cleanup.addSuppressed(primary);
+            return cleanup;
+        }
+        primary.addSuppressed(cleanup);
+        return primary;
+    }
 }

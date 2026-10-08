@@ -3,6 +3,7 @@ package io.mazewall.spring;
 import io.mazewall.enforcer.api.OperationAdapter;
 import io.mazewall.enforcer.api.ReviewedOperationArtifact;
 import io.mazewall.enforcer.api.RuntimeProfile;
+import io.mazewall.enforcer.api.execution.PreparedOperationResources;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.invoke.MethodType;
@@ -46,28 +47,31 @@ public final class SpringOperationBinder {
     private final ReviewedOperationArtifact preparedArtifact;
     private final Supplier<InvocationDispatcher> readiness;
     private final BoundInvocationInterceptor boundary;
+    private final PreparedOperationResources resources;
     private Object boundBean;
 
     public SpringOperationBinder(ConfigurableListableBeanFactory beans, DomainLifecycle lifecycle) {
-        this(beans, Objects.requireNonNull(lifecycle.artifact()), lifecycle::dispatcher, false, null);
+        this(beans, Objects.requireNonNull(lifecycle.artifact()), lifecycle::dispatcher, false, null, lifecycle.resources());
     }
 
     public SpringOperationBinder(ConfigurableListableBeanFactory beans, DomainLifecycle lifecycle, SpringTransactionGuard jdbcGuard) {
-        this(beans, Objects.requireNonNull(lifecycle.artifact()), lifecycle::dispatcher, false, Objects.requireNonNull(jdbcGuard));
+        this(beans, Objects.requireNonNull(lifecycle.artifact()), lifecycle::dispatcher, false, Objects.requireNonNull(jdbcGuard), lifecycle.resources());
     }
 
     /** Explicit trusted grouping: independently reviewed entries share this exact lifecycle's fixed policy. */
     public static SpringOperationBinder inApprovedCommonDomain(ConfigurableListableBeanFactory beans, DomainLifecycle lifecycle,
             ReviewedOperationArtifact operation, SpringTransactionGuard jdbcGuard) {
         requireSameFixedDomain(lifecycle.artifact(), operation);
-        return new SpringOperationBinder(beans, operation, lifecycle::dispatcher, false, Objects.requireNonNull(jdbcGuard));
+        return new SpringOperationBinder(beans, operation, lifecycle::dispatcher, false, Objects.requireNonNull(jdbcGuard), lifecycle.resources());
     }
 
     private SpringOperationBinder(ConfigurableListableBeanFactory beans, ReviewedOperationArtifact artifact,
-                                  Supplier<InvocationDispatcher> readiness, boolean trustedHost, SpringTransactionGuard jdbcGuard) {
+                                  Supplier<InvocationDispatcher> readiness, boolean trustedHost, SpringTransactionGuard jdbcGuard,
+                                  PreparedOperationResources resources) {
         this.beans = Objects.requireNonNull(beans);
         this.preparedArtifact = Objects.requireNonNull(artifact);
         this.readiness = readiness;
+        this.resources = trustedHost ? null : Objects.requireNonNull(resources);
         InvocationDispatcher dispatcher = readiness.get(); // Fail required inactive protection explicitly.
         boundary = jdbcGuard == null ? (trustedHost ? BoundInvocationInterceptor.forTrustedHostCharacterization(dispatcher)
                 : new BoundInvocationInterceptor(dispatcher)) : (trustedHost
@@ -78,19 +82,19 @@ public final class SpringOperationBinder {
     /** Uncontained host-only proof of Spring binding; never native/protected readiness. */
     public static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
             InvocationDispatcher dispatcher, ReviewedOperationArtifact artifact) {
-        return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, null);
+        return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, null, null);
     }
 
     public static SpringOperationBinder forTrustedHostCharacterization(ConfigurableListableBeanFactory beans,
             InvocationDispatcher dispatcher, ReviewedOperationArtifact artifact, SpringTransactionGuard jdbcGuard) {
-        return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, Objects.requireNonNull(jdbcGuard));
+        return new SpringOperationBinder(beans, artifact, () -> dispatcher, true, Objects.requireNonNull(jdbcGuard), null);
     }
 
     public static SpringOperationBinder forTrustedHostCharacterizationInCommonDomain(ConfigurableListableBeanFactory beans,
             InvocationDispatcher dispatcher, ReviewedOperationArtifact domainArtifact,
             ReviewedOperationArtifact operation, SpringTransactionGuard jdbcGuard) {
         requireSameFixedDomain(domainArtifact, operation);
-        return new SpringOperationBinder(beans, operation, () -> dispatcher, true, Objects.requireNonNull(jdbcGuard));
+        return new SpringOperationBinder(beans, operation, () -> dispatcher, true, Objects.requireNonNull(jdbcGuard), null);
     }
 
     private static void requireSameFixedDomain(ReviewedOperationArtifact domain, ReviewedOperationArtifact operation) {
@@ -134,9 +138,20 @@ public final class SpringOperationBinder {
         Object target = advised.getTargetSource().getTarget(); // Inspection only; never raw-target invocation.
         if (target == null || AopUtils.isAopProxy(target)) throw rejected("Nested proxy topology unsupported");
         Class<?> type = target.getClass();
+        if (resources != null) {
+            // One selected Class is the reviewed core owner contract. Another actual origin/class
+            // cannot be admitted merely because a common-domain document repeats its generation.
+            if (resources.getImplementationClass() != type
+                    || resources.getRuntime() != approval.runtime()
+                    || !resources.getResourceGeneration().equals(approval.resourceGeneration())) {
+                throw rejected("Actual target is not included in the prepared implementation/resource owner");
+            }
+            resources.validate();
+        }
         if (type.getClassLoader() != approval.expectedClassLoader()
                 || !type.getName().equals(binding.getAdapterIdentity().get("className"))
-                || !implementationSha256(type).equals(binding.getImplementationSha256())) {
+                || !(resources == null ? classResourceSha256(type) : resources.getImplementationSha256())
+                    .equals(binding.getImplementationSha256())) {
             throw rejected("Actual implementation class/classloader/bytes differ from trusted review");
         }
         List<Method> approved = new ArrayList<>();
@@ -144,6 +159,9 @@ public final class SpringOperationBinder {
             for (Method method : contract.getMethods()) {
                 Method actual = BridgeMethodResolver.findBridgedMethod(AopUtils.getMostSpecificMethod(method, type));
                 if (!methodDescriptor(actual).equals(binding.getAdapterIdentity().get("methodDescriptor"))) continue;
+                if (resources != null && !sameOrdinaryJarOrigin(type, actual.getDeclaringClass())) {
+                    throw rejected("Actual method implementation is outside the prepared ordinary JAR");
+                }
                 MazewallOperation marker = AnnotatedElementUtils.findMergedAnnotation(actual, MazewallOperation.class);
                 if (marker == null) marker = AnnotatedElementUtils.findMergedAnnotation(method, MazewallOperation.class);
                 if (marker == null || !marker.value().equals(binding.getOperationId())
@@ -237,8 +255,8 @@ public final class SpringOperationBinder {
         return method.getName() + MethodType.methodType(method.getReturnType(), method.getParameterTypes()).descriptorString();
     }
 
-    /** SHA-256 of the exact implementation class resource supplied by its defining loader. */
-    public static String implementationSha256(Class<?> implementation) throws IOException {
+    /** Host characterization only: a defining-loader class resource digest is NOT a finished-JAR identity. */
+    public static String classResourceSha256(Class<?> implementation) throws IOException {
         String resource = "/" + implementation.getName().replace('.', '/') + ".class";
         try (InputStream input = implementation.getResourceAsStream(resource)) {
             if (input == null) throw rejected("Implementation bytes cannot be resolved: " + implementation.getName());
@@ -249,6 +267,13 @@ public final class SpringOperationBinder {
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("JDK SHA-256 unavailable", impossible);
         }
+    }
+
+    private static boolean sameOrdinaryJarOrigin(Class<?> selected, Class<?> declaring) {
+        var selectedSource = selected.getProtectionDomain().getCodeSource();
+        var declaringSource = declaring.getProtectionDomain().getCodeSource();
+        return selected.getClassLoader() == declaring.getClassLoader() && selectedSource != null && declaringSource != null
+                && selectedSource.getLocation().equals(declaringSource.getLocation());
     }
 
     private static IllegalStateException rejected(String message) {

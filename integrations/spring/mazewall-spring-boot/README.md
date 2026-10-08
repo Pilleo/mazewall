@@ -1,12 +1,13 @@
 # Spring: explicit synchronous binding and JDBC placement
 
-This optional integration establishes **host-tested Spring binding, lifecycle,
-advisor placement and real embedded JDBC effects** (S0–S2). It has programmatic construction and no Boot starter or
+This optional integration establishes **typed ordinary-JAR Spring binding, lifecycle,
+advisor placement and real embedded JDBC effects** (S0–S2), with a disposable published
+ordinary-JAR native fixture. It has programmatic construction and no Boot starter or
 automatic installation. It uses Spring Boot **4.1.1** dependency management and
 Spring **7.0.9**, on JDK **25**. H2 **2.4.240** is test-only. Spring remains outside core.
 
 See [S1-S2-contract.md](S1-S2-contract.md) for the explicit reviewed binding/lifecycle
-and qualified JDBC entry, evidence limits and remaining resource/native gates.
+and qualified JDBC entry, evidence limits and remaining Boot/S3 release gates.
 The entry below is the narrower retained S0 placement API.
 
 ## Programmatic entry
@@ -119,7 +120,14 @@ propagations, rollback/commit/unknown outcomes, savepoints, caught diagnosed fai
 beforeCommit gating and caller-delivery separation. `ReviewedJdbcBindingTest`
 composes reviewed bindings and independently committed inner JDBC work on one worker.
 These are host regressions, not native ownership/protection/resource pinning proof.
-S3 Security context/method security/starter and packaged Boot acceptance await review.
+The separate [published ordinary-JAR consumer](../../../tests/consumers/spring-jdbc/README.md)
+uses genuine typed resources and a trusted external test-review step. It proves actual
+owned-worker JDBC data, denied template mutation/sibling opens, transaction rollback,
+virtual-caller cooperative cancellation, retained incomplete drain and actual physical
+worker/resource retirement. Generic permission diagnostics remain inferred. Its
+multiple-origin negative fixtures reject uncaptured Classes from the same and another
+actual JAR despite repeated fixed-policy/generation metadata. S3 Security/starter and
+executable Boot/exploded acceptance remain open; unsupported origins reject.
 
 Direct references/self-invocation, shared heap, preopened descriptors, independent
 executors, construction/init and late work are outside the proxy body boundary.

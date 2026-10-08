@@ -3,7 +3,7 @@
 ## S1 binding and ownership
 
 `DomainLifecycle` accepts an application-bootstrapped `ManagedRuntime`, a trusted
-`ReviewedOperationArtifact`, finite `DomainLimits`, and a positive drain budget.
+`ReviewedOperationArtifact`, finite `DomainLimits`, genuine `PreparedOperationResources`, and a positive drain budget.
 Call `start()` explicitly before constructing the binder. It prepares through the
 public runtime API, never installs a process baseline or selects a fallback.
 `isAutoStartup()` is false. A failed or retired lifecycle requires a new explicit
@@ -19,9 +19,9 @@ that registered proxy; it does not replace it, clone its target, or invoke a raw
 target. It requires the already-reviewed S0 chain and rejects nested proxy topology.
 
 Application-owned `Approval` pins the actual registered bean reference, defining
-classloader, runtime, resource-generation metadata and both BODY and
+classloader, runtime, externally reviewed deployment resource generation and both BODY and
 TRANSACTION_COMPLETION phases. The reviewed document separately pins bean name,
-implementation class name, bridged JVM method descriptor and class-resource SHA-256.
+implementation class name, bridged JVM method descriptor and actual finished-JAR SHA-256.
 `@MazewallOperation` is a required marker, not policy approval. Call
 `validateRequiredBindings` on the explicit protected bean scope before traffic.
 Unmatched required annotations/overloads, lazy/scoped/uninitialized beans, final
@@ -42,35 +42,58 @@ For independently reviewed beans in a common domain, use the explicit
 `SpringOperationBinder.inApprovedCommonDomain` factory with the SAME lifecycle and
 shared JDBC guard. It requires identical canonical fixed policy/runtime and resource
 generation. Each operation still validates its own exact bean, method, hash and
-review. This is trusted application grouping, not automatic policy combination.
+review. The current genuine owner captures one selected Class. Production grouping
+rejects another implementation Class, even from the same JAR, rather than pretending
+metadata equality includes multiple actual origins. Same selected Class/same reviewed
+descriptor may have separately approved singleton identities. A broader multi-origin
+owner requires a reviewed core extension. This is trusted grouping, not policy combination.
 
-### Evidence limits and required core seam
+### Typed preparation and evidence limits
 
-The defining loader's class resource is checked against the reviewed digest. This
-does not prove that arbitrary custom loaders return the bytes used to define a
-class, nor pin a finished implementation JAR or filesystem object. Core task 5
-owns actual implementation/resource resolution and descriptor retention through
-worker preparation. Required minimal seam: preparation must accept/validate the
-resolved implementation identity plus defining classloader and actual prepared
-resource generation, retaining the owned resources for the domain's physical
-lifetime. The existing metadata-only `prepare(artifact, limits)` is consumed, but
-is not represented as that proof. Covered phases and expected object/loader are
-explicit trusted application configuration, not fields inferred from the document.
+Resolve through the reviewed public core contract during trusted platform bootstrap:
 
-Host characterization factories are explicitly unprotected. Their tests prove
-Spring behavior and state-machine ownership, not native readiness. S3 starter,
-method Security and packaged/native release acceptance require subsequent review.
+```java
+var resources = PreparedOperationResources.resolve(runtimeProfile, reviewedWorkerPolicy,
+        actualImplementationClass, strictReadOnlyPaths);
+// Compare with EXTERNAL trusted finished-JAR SHA/generation/bean/method expectations.
+var artifact = ReviewedOperationArtifact.load(document, trustedReview, expectedBinding);
+var lifecycle = new DomainLifecycle(applicationOwnedRuntime, artifact, limits, resources, drainBudget);
+lifecycle.start();
+```
 
-Core task 5 is adding `PreparedOperationResources` and a typed preparation overload.
-Once integrated, the lifecycle must consume that actual owner, and production binding
-must compare its finished-JAR identity with the trusted review instead of substituting
-the current class-resource digest. The first task-5 resolver rejects exploded/nested
-origins; Spring Boot/exploded support is a separate explicit blocker. An application
-using the current metadata-only path has not closed that release gate.
+Resolution captures genuine exact-path/runtime acquisitions and measures the ordinary
+finished JAR. The lifecycle calls `runtime.prepare(artifact, limits, resources)` with
+that typed owner. Successful construction gives the lifecycle responsibility for an
+unclaimed owner; stop-before-start and preparation failure close it. Successful prepare
+transfers the owner once to the runtime. Caller close then cannot revoke live workers.
+Incomplete drain retains the runtime/owner and is retried explicitly; no physical-end
+claim is made from a caller result or bounded stop callback.
+
+Production binding compares the selected actual Class/loader, finished-JAR digest and
+actual deployment generation, and checks effective member origin. The metadata-only
+lifecycle constructor has been removed under the approved migration. There is no
+fallback when resource resolution or strong preparation rejects. The renamed helper
+`classResourceSha256` belongs only to explicit uncontained host characterization;
+its hash is never substituted for a production JAR hash. Covered phases and expected
+bean/loader remain external trusted configuration.
+
+O_PATH pins objects, not immutable bytes. Validation detects observed changes but
+cannot exclude concurrent sibling mutation between validation/execution. Defined
+bytecode under agents/redefinition, already-open descriptors/mappings, shared heap
+and uncontrolled mount aliases are not attested. The supported first-party deployment
+is trusted immutable ordinary JARs with no redefinition and a reviewed supported loader.
+
+Host characterization factories remain explicitly unprotected. Their tests prove
+Spring behavior and state-machine semantics. The separate published
+[`spring-jdbc` consumer](../../../tests/consumers/spring-jdbc/README.md) supplies the
+ordinary-JAR native adoption proof. It does not close S3 Security/starter or executable
+Boot/exploded acceptance. Unsupported nested/exploded/custom-loader origins reject
+through core; task8's extension is not copied or assumed reviewed here.
 
 [TASK5-ADOPTION-PLAN.md](TASK5-ADOPTION-PLAN.md) specifies the exact follow-up,
 transfer/cleanup, selected-Class/common-origin limits and coordinator/root update.
-It is gated on core review, not adoption of unreviewed source or resource/JAR proof.
+Its initial review dependency is integrated in the supplied task9 baseline; remaining
+combined-release gates are explicit.
 
 ## S2 qualified synchronous JDBC advice
 

@@ -75,7 +75,7 @@ class OperationBindingTest {
         Fixture() throws Exception { this(new Bean()); }
         Fixture(Bean target) throws Exception {
             this.target = target;
-            artifact = artifact(target, target.getClass().getMethod("run"), "operation", SpringOperationBinder.implementationSha256(target.getClass()));
+            artifact = artifact(target, target.getClass().getMethod("run"), "operation", SpringOperationBinder.classResourceSha256(target.getClass()));
             binder = SpringOperationBinder.forTrustedHostCharacterization(beans, dispatch, artifact);
             var attributes = new MatchAlwaysTransactionAttributeSource();
             attributes.setTransactionAttribute(new RuleBasedTransactionAttribute());
