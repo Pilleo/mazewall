@@ -518,6 +518,23 @@ class ProcessBrokerIntegrationTest {
     }
 
     @Test
+    fun `stateful crash preserves lifetime spawn count captured before loss through joined close`() {
+        ProcessBroker(instanceMode = PortalInstanceMode.STATEFUL_SINGLETON).use { broker ->
+            broker.start()
+            assertEquals("before-crash", broker.echo("before-crash"))
+            val original = ProcessHandle.of(broker.workerPids().single()).orElseThrow()
+            val beforeCrash = broker.spawnedWorkers()
+            assertEquals(1, beforeCrash)
+            broker.crashIdleWorkerProcess()
+            val failure = assertThrows(PortalCallException::class.java) { broker.echo("must-not-replay") }
+            assertEquals(PortalInvocationEvidence.UNKNOWN_COMPLETION, failure.evidence)
+            broker.close() // Joins the physical maintenance owner, not a timed process snapshot.
+            assertFalse(original.isAlive)
+            assertEquals(beforeCrash, broker.spawnedWorkers(), "no replacement, including short-lived or pre-delivery spawns")
+        }
+    }
+
+    @Test
     fun `timeout kills worker and later call succeeds`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 800)).use { broker ->

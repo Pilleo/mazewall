@@ -5,6 +5,12 @@
 argument/result validators. `execute` submits once, suspends awaiting the owned
 result stage and forwards coroutine cancellation to that same handle.
 
+`PreparedPortalOperation` exposes only public `submit`; its Java constructor is
+genuinely package-private, not merely Kotlin-internal/JVM-public. Ordinary external
+Java/Kotlin consumers obtain it through `PortalRuntime.prepare`. Host mapping
+remains outside protection, and this boundary is not hostile-host reflection or
+classpath-injection isolation.
+
 There is no in-process fallback, retry or replay. In particular, an unknown
 remote outcome is not permission to repeat an operation. A stateful singleton
 that loses its worker rejects subsequent calls until the application explicitly

@@ -23,6 +23,12 @@ tasks.register<JavaExec>("nativeProbe") {
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
+tasks.register<JavaExec>("verifyOperationRoot") {
+    dependsOn("classes")
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("io.mazewall.consumer.koog.OperationRootProbeKt")
+}
+
 tasks.register<Sync>("stageFreshProbe") {
     dependsOn("jar")
     from(sourceSets.main.get().runtimeClasspath.filter { it.isFile && it.extension == "jar" })

@@ -5,9 +5,9 @@ status: "open"
 priority: high
 dependencies: []
 component: "integrations"
-target_modules: ["integrations:koog", "demos:koog-contained-tool"]
-target_files: ["integrations/koog/src/main/kotlin/io/mazewall/koog/PortalToolAdapter.kt"]
-target_symbols: ["PortalToolAdapter"]
+target_modules: ["integrations:koog", "demos:koog-contained-tool", "portals:runtime"]
+target_files: ["integrations/koog/src/main/kotlin/io/mazewall/koog/PortalToolAdapter.kt", "portals/runtime/src/main/kotlin/io/mazewall/portal/PreparedPortalOperation.kt", "portals/runtime/src/main/java/io/mazewall/portal/PreparedPortalOperation.java"]
+target_symbols: ["PortalToolAdapter", "PreparedPortalOperation"]
 open_questions: false
 ---
 
@@ -48,6 +48,29 @@ opaque generated worker bundle with independent guest dependencies.
 **Remaining:**
 Root include/plugin-resolution and production runtime publication require the
 coordinator patch in task-7-report.md. Keep this item open pending integration.
+
+**Round 1 review remediation:**
+- S1 authorized minimal runtime-root correction: PreparedPortalOperation is now
+  a final public Java facade with a genuinely package-private constructor and
+  unchanged public submit. Runtime.prepare still constructs it in-package;
+  test-only fake construction is not present in production artifacts. External
+  javac negative rejects only constructor access; external public-submit positive
+  and real runtime/generated-service dispatch remain passing.
+- Q1 native runner now registers complete object-identity move ownership before
+  effect, attempts every restore independently, refuses exact destination conflicts
+  and unowned/missing backups, and never nests/overwrites unknown output. Native
+  status remains primary while cleanup failures aggregate/report separately.
+  Ten executable filesystem/process fault-injection cases pass, including
+  raced destination, replaced backup, simultaneous native/restore failure,
+  post-effect hide error, missing parent and catchable signal/descendant cleanup,
+  including a signal before the owned launcher establishes its session.
+- Q2 original child/owner snapshot is captured before crash. New focused native
+  broker regression compares a monotonic lifetime spawn count captured before
+  crash after joined close, catching short-lived/pre-delivery reconstruction.
+- No other Portal/P3/core/root production source changed. New facade classfile
+  targets Java22 (major66); producer remains Beta1, consumer stable2.4.20/JDK25.
+  Root/plugin/runtime-publication integration and operator/C4/human release gates
+  are still coordinator-owned and pending. See round1 evidence in shared report.
 
 ---
 <!-- id: issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge  file: issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge.md -->

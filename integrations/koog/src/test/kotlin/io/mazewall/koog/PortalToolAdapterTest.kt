@@ -6,6 +6,7 @@ import io.mazewall.enforcer.api.execution.CancellationDisposition
 import io.mazewall.enforcer.api.execution.ExecutionEnd
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.portal.PreparedPortalOperation
+import io.mazewall.portal.TestPreparedOperations
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking

@@ -15,6 +15,7 @@ import io.mazewall.portal.PortalOperationCall
 import io.mazewall.portal.PortalRuntime
 import io.mazewall.portal.PortalServiceId
 import io.mazewall.portal.PortalStateLostException
+import io.mazewall.portal.PortalServiceHealthState
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -67,6 +68,7 @@ fun main() = runBlocking {
         val wireEnd = wireRejected.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS)
         check(wireEnd is ExecutionEnd.NotStarted && wireEnd.failure === wireFailure.cause)
         expectFailure<ClassNotFoundException> { Class.forName("io.mazewall.demo.koog.worker.AsciiTextTransformer") }
+        expectFailure<ClassNotFoundException> { Class.forName("io.mazewall.portal.TestPreparedOperations") }
         val denied = boundProbe(runtime, "test_read") { service, args -> service.read(args.value) }
         val denial = expectFailure<PortalRemoteCallException> { denied.execute(ProbeArguments(forbidden.toString())) }
         check(denial.remoteType == "java.nio.file.AccessDeniedException") { "unexpected remote failure: $denial" }
@@ -80,10 +82,15 @@ fun main() = runBlocking {
         // An application-size result rejection is completed, not state loss or a replay.
         expectFailure<PortalRemoteCallException> { denied.execute(ProbeArguments(forbidden.toString())) }
         val crash = boundProbe(runtime, "test_crash") { service, _ -> service.crash() }
+        val ownerBefore = runtime.health().single { it.isolationGroup == "test-denied" }
+        check(ownerBefore.state == PortalServiceHealthState.AVAILABLE && ownerBefore.workerPids.size == 1)
+        val childrenBefore = ProcessHandle.current().children().use { it.map(ProcessHandle::pid).toList() }
         val lost = expectFailure<PortalCallException> { crash.execute(ProbeArguments("")) }
         check(lost.evidence == PortalInvocationEvidence.UNKNOWN_COMPLETION)
-        val childrenBefore = ProcessHandle.current().children().use { it.map(ProcessHandle::pid).toList() }
         expectFailure<PortalStateLostException> { denied.execute(ProbeArguments(forbidden.toString())) }
+        val ownerAfter = runtime.health().single { it.isolationGroup == "test-denied" }
+        check(ownerAfter.state == PortalServiceHealthState.STATE_LOST)
+        check(ownerAfter.lastWorkerLifecycle.pid == ownerBefore.workerPids.single())
         val childrenAfter = ProcessHandle.current().children().use { it.map(ProcessHandle::pid).toList() }
         check(childrenAfter.all { it in childrenBefore }) { "terminal session must not reconstruct or replay" }
         check(tool.execute(TextArguments("independent")) == "INDEPENDENT")
