@@ -27,6 +27,18 @@ the sibling is not granted. Native support/permission failures fail the process.
    `ReportService.class`/Boot launcher. It emits candidate JSON and deployment generation
    only. `implementationSha256` is the **whole finished outer JAR**; neither a selected
    class digest, manifest field, nested library digest nor a candidate supplies authority.
+   Both candidate filenames must be absent (including dangling symlinks); existing
+   operator files/aliases are rejected and preserved. Measurement rejects symlink directory
+   topology. In an operator-controlled **stable directory**, it acquires exclusive genuine
+   staging channels in a private directory, fully writes/forces their bytes, then
+   atomically publishes each complete file using a no-replace hardlink. A second-file failure
+   cleans only exact owned inode identities; independent cleanup failures are suppressed
+   onto the original failure. A replacement name is preserved. This is per-file atomic
+   visibility with the genuine staging acquisitions retained through identity-sensitive
+   cleanup (preventing inode-key recycling) and then closed, not a crash-atomic two-file
+   transaction: review begins only after successful
+   measurement completion. Hostile concurrent same-UID directory mutation is outside this
+   stable-deployment contract; output-name collisions still cannot replace existing files.
 4. An **external trusted reviewer** approves the exact candidate, final JAR and genuine
    resource generation. Supply `trusted-review.properties` with `reviewer`,
    `documentSha256`, `jarSha256` and `resourceGeneration`. This file belongs to operator

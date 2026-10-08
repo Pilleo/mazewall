@@ -19,7 +19,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public final class ReportApplication {
     public static void main(String[] args) throws Exception {
         check(args.length == 2, "measure|verify|stale <freshDeploymentDirectory>");
-        Path root = Path.of(args[1]).toRealPath();
+        Path root = Path.of(args[1]).toAbsolutePath().normalize();
+        if (args[0].equals("measure") || args[0].equals("measure-unsupported")) CandidatePublication.rejectDirectoryAliases(root);
+        root = root.toRealPath();
         check(!Thread.currentThread().isVirtual(), "Explicit bootstrap must run on a platform thread");
         if (args[0].equals("measure") || args[0].equals("measure-unsupported")) {
             ReportBootstrap.measure(root, args[0].equals("measure-unsupported")); return;

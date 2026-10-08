@@ -35,5 +35,16 @@ Coordinator owns index row/count, independent review and combined release gate. 
 issue remains open until those gates; Security-presence, HTTP and universal application
 auto-configuration are not advertised by this non-web, Security-absent demo.
 
+**Round1 review correction:** I1 measurement publication now rejects existing files and
+symlink/hardlink aliases, uses genuine exclusive private staging acquisitions and atomic
+no-replace complete-file publication, and cleans only exact owned object identities with
+independent failures retained on the primary. Per-file visibility is not a crash-atomic
+pair or concurrent hostile same-UID topology guarantee. M1 restores independently owned
+sidecar/JAR/template originals on all failures without touching replacements or masking
+the primary. M2 records argv/cwd before launch, actual separate streams and timeout/final
+exit/reap states; termination/reaping targets only the owned child. Actual filesystem
+red/fault tests and all eight preserved java-JAR cases are tracked in the round1 report.
+Rereview/combined coordinator gates remain open; no production approval claim is added.
+
 ---
 <!-- id: issue-20261008-111819-937-prove-clean-executable-boot-singleton-report-with-  file: issue-20261008-111819-937-prove-clean-executable-boot-singleton-report-with-.md -->

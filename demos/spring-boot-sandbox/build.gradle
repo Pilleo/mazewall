@@ -19,3 +19,16 @@ dependencies {
 springBoot { mainClass = 'demo.boot.ReportApplication' }
 tasks.named('bootJar') { archiveFileName = 'report-application.jar' }
 tasks.named('jar') { enabled = false }
+
+sourceSets {
+    ownershipTest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+tasks.register('ownershipTest', JavaExec) {
+    dependsOn tasks.named('ownershipTestClasses')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.ownershipTest.runtimeClasspath
+    mainClass = 'demo.boot.CandidatePublicationTest'
+}

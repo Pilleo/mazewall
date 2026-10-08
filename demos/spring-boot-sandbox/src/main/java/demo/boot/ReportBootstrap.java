@@ -63,8 +63,8 @@ final class ReportBootstrap implements AutoCloseable {
                     .allowFsWrite(root.resolve("reports/quarterly.txt")).build();
             var document = new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration(), unsupported),
                     CanonicalPolicyArtifact.worker(PROFILE, policy), Set.of(), Map.of());
-            Files.writeString(root.resolve(unsupported ? "unsupported-candidate.json" : "candidate.json"), document.toJson());
-            Files.writeString(root.resolve(unsupported ? "unsupported-generation.txt" : "candidate-generation.txt"), resources.getResourceGeneration());
+            CandidatePublication.publish(root, unsupported ? "unsupported-candidate.json" : "candidate.json", document.toJson(),
+                    unsupported ? "unsupported-generation.txt" : "candidate-generation.txt", resources.getResourceGeneration());
             System.out.println("BOOT_CANDIDATE_ONLY wholeOuterJar=" + resources.getImplementationSha256()
                     + " generation=" + resources.getResourceGeneration() + " reviewAuthority=none");
         }

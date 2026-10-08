@@ -67,6 +67,45 @@ hashes and source input inventories. The printed deployment path is retained for
 inspection. Caller completion is not labeled physical end, initialization/warmup is
 not labeled protected body, and SQL rollback is not labeled rollback of external effects.
 
+## Ownership and failure checks
+
+`fixture_io.py` creates private-fixture files with genuine `O_EXCL|O_NOFOLLOW`
+descriptors. It retains those acquisitions for sidecar/JAR/template mutations, checks
+the exact named inode and single-link identity, and restores every independent original
+in a failure boundary. Replaced/symlink/hardlink names are preserved; restoration failures
+are attached to the original failure rather than masking it. A restoration cannot stop
+another independent restore. These are private fixture tools, not general operator-file
+rewrite or production review capabilities.
+
+Every executable invocation records argv/cwd **before launch**, direct separate stdout
+and stderr files, PID, exit code, timed-out and reaped state. On a timeout, partial streams
+and the timeout state are persisted before signalling the exact owned `Popen` child;
+bounded terminate/kill/wait reaps it and records the final outcome. No process group or
+unrelated process is signalled. The combined log and all separate streams are retained.
+
+Focused commands, using the same ROOT/LOCK/VERSION/REPOSITORY above:
+
+```bash
+flock "$LOCK" ./gradlew -p "$ROOT/demos/spring-boot-sandbox" \
+  -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
+  ownershipTest bootJar --no-configuration-cache --no-parallel
+cd "$ROOT/tests/consumers/spring-boot"
+flock "$LOCK" python3 -m unittest -v test_fixture_io
+flock "$LOCK" python3 "$ROOT/tests/consumers/spring-boot/test_measurement.py" \
+  --jar "$ROOT/demos/spring-boot-sandbox/build/libs/report-application.jar" \
+  --java /home/leanid/.sdkman/candidates/java/25.4.4+1-graal/bin/java \
+  --evidence "$ROOT/build/task13-measurement-new"
+```
+
+The Java gate uses real filesystem collisions, symlinks/hardlinks, replacement identities,
+complete-byte publication and actual permission-denied cleanup. Python checks genuine
+restoration failures and a real timeout/kill/reap with partial streams while a separately
+owned unrelated process survives. The finished-JAR negatives exercise both measurement
+entry points and operator-file/directory aliases; the original eight acceptance cases
+remain intact. Required failures are not skipped when filesystem/permission features are
+unavailable. The measurement pair's per-file atomicity/stable topology limits are in the
+demo guide; external finished-JAR approval remains independent trusted fixture authority.
+
 ## Coordinator-only root patch
 
 The executable already builds standalone; no root inclusion is needed for the proof.
