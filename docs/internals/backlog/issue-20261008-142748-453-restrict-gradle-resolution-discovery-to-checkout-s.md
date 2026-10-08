@@ -66,5 +66,36 @@ Keep open until independent review and coordinator rerun of the combined build.
 Task12 shared checkpoint/report owns exact final commands/commit/evidence.
 Backlog index is coordinator-owned; register this task-owned issue separately.
 
+## Rereview 2 — symlink and default-index coverage
+
+Two inventory false negatives were reproduced using the actual entrypoint:
+untracked source links never entered ripgrep's file inventory, and inherited
+GIT_INDEX_FILE could hide ignored tracked eager/unreadable source while Git
+top-level still matched CWD. Round5 RED run-422f8bcba77d:21 filesystem methods,
+10 failures/subtest failures.
+
+Discovery now clears only Git-reported repository-local variables inside readonly
+Git inventory children, leaving parent/non-Git variables unchanged. Actual default
+checkout index is authoritative, including regular linked-worktree .git pointers.
+No optional Git writes or credential-variable handling.
+
+Explicit no-follow policy rejects indexed/visible source-tree links and indexed
+source link ancestors without reading targets. Opaque non-script links can be
+subproject directories and are conservatively rejected too. Untracked conventional
+build-name pruning and local VCS scratch ignore declarations are documented bounds,
+not proof that all omitted paths are generated/owned or that every layout is covered.
+
+Expanded23 filesystem methods pass (run-1ece6800e214), including alternate-index
+source visibility/permissions, index hash preservation, linked-worktree default
+index, tracked/untracked/ignored/dangling/unreadable/private/external/ancestor links.
+The98 parser/action cases pass unchanged (run-2c74ec5aba53).
+
+Actual checkout now truthfully rejects an existing indexed experiment link:
+`experiments/hotspot-agentless/cmd/mw-gadget-build` (run-9635f8a36b47, exit2).
+No actual source links or user caches were changed/removed/ignored. Coordinator
+must resolve actual-checkout coverage/acceptance explicitly; do not label this
+tree as passing or add module-wide exclusions. Full round5 report retains exact
+commands, final verification and fix HEAD.
+
 ---
 <!-- id: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s  file: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s.md -->

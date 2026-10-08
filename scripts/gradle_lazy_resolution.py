@@ -273,10 +273,15 @@ def source_inventory() -> tuple[list[Path], int]:
     index also supplies tracked source that local ignore rules might hide.
     """
     tracked = b""
+    indexed_links = set()
+    git_environment = None
     if Path(".git").exists():
+        git_environment, status = default_git_environment()
+        if status:
+            return [], status
         checkout = subprocess.run(
             ["git", "--no-optional-locks", "rev-parse", "--show-toplevel"],
-            stdout=subprocess.PIPE, check=False,
+            stdout=subprocess.PIPE, env=git_environment, check=False,
         )
         if checkout.returncode:
             return [], checkout.returncode
@@ -284,12 +289,14 @@ def source_inventory() -> tuple[list[Path], int]:
             print("Gradle source inventory failed: Git context is not the caller's checkout", file=sys.stderr)
             return [], 2
         indexed = subprocess.run(
-            ["git", "--no-optional-locks", "ls-files", "--cached", "-z", "--", "*.gradle", "*.gradle.kts"],
-            stdout=subprocess.PIPE, check=False,
+            ["git", "--no-optional-locks", "ls-files", "--cached", "--stage", "-z"],
+            stdout=subprocess.PIPE, env=git_environment, check=False,
         )
         if indexed.returncode:
             return [], indexed.returncode
-        tracked = indexed.stdout
+        records = [record.split(b"\t", 1) for record in indexed.stdout.split(b"\0") if record]
+        tracked = b"".join(filename + b"\0" for _, filename in records)
+        indexed_links = {Path(filename.decode()) for metadata, filename in records if metadata.split()[0] == b"120000"}
     discovered = subprocess.run(
         ["rg", "--no-config", "--files", "-0", "--hidden", "--no-ignore-dot",
          "--no-ignore-global", "--no-ignore-parent", "--glob", "!**/.git/**",
@@ -304,7 +311,81 @@ def source_inventory() -> tuple[list[Path], int]:
     }
     # VCS/cache/worktree state is never source, even if accidentally indexed.
     paths = {path for path in paths if not {".git", ".gradle", ".worktrees"}.intersection(path.parts)}
+    status = reject_source_symlinks(paths | indexed_links, git_environment)
+    if status:
+        return [], status
     return sorted(paths), 0
+
+
+def default_git_environment() -> tuple[dict[str, str] | None, int]:
+    """Only Git inventory children lose Git-reported repository-local context."""
+    import os
+
+    names = subprocess.run(
+        ["git", "--no-optional-locks", "rev-parse", "--local-env-vars"],
+        stdout=subprocess.PIPE, check=False,
+    )
+    if names.returncode:
+        return None, names.returncode
+    environment = os.environ.copy()
+    for name in names.stdout.decode().splitlines():
+        environment.pop(name, None)
+    return environment, 0
+
+
+def reject_source_symlinks(indexed_paths: set[Path], git_environment: dict[str, str] | None) -> int:
+    """No-follow policy: reject opaque links in covered source, never inspect targets.
+
+    All visible nonignored links are potentially subproject directories. Indexed
+    links and ancestors cannot disappear behind untracked-scratch ignore rules.
+    """
+    import os
+    import stat
+
+    private = {".git", ".gradle", ".worktrees"}
+    try:
+        for path in sorted(indexed_paths):
+            if private.intersection(path.parts):
+                continue
+            ancestor = Path(".")
+            for component in path.parts:
+                ancestor /= component
+                if stat.S_ISLNK(os.lstat(ancestor).st_mode):
+                    print(f"Unsupported source symlink: {ancestor} (indexed source: {path})", file=sys.stderr)
+                    return 2
+        pending = [Path(".")]
+        while pending:
+            directories = []
+            links = []
+            for directory in pending:
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        path = Path(entry.path)
+                        if entry.name in private or entry.name == "build":
+                            continue
+                        if entry.is_symlink():
+                            links.append(path)
+                        elif entry.is_dir(follow_symlinks=False):
+                            directories.append(path)
+            ignored = set()
+            candidates = directories + links
+            if git_environment is not None and candidates:
+                selection = subprocess.run(
+                    ["git", "--no-optional-locks", "check-ignore", "--no-index", "-z", "--stdin"],
+                    input=b"".join(os.fsencode(path) + b"\0" for path in candidates),
+                    stdout=subprocess.PIPE, env=git_environment, check=False,
+                )
+                if selection.returncode not in (0, 1):
+                    return selection.returncode
+                ignored = {Path(os.fsdecode(path)) for path in selection.stdout.split(b"\0") if path}
+            for path in sorted(set(links) - ignored):
+                print(f"Unsupported source symlink: {path}", file=sys.stderr)
+                return 2
+            pending = [path for path in directories if path not in ignored]
+    except OSError as error:
+        print(f"Gradle source inventory failed: {error}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def main() -> int:

@@ -38,20 +38,39 @@ ignore rules exclude untracked scratch; ripgrep config, `.ignore`, global and
 parent ignore rules cannot hide normal source. There are no integration, test or
 orchestrator source-folder exclusions.
 
-In a Git checkout root, a verified read-only Git index augments discovery so
+In a Git checkout root, its default read-only Git index augments discovery so
 tracked source is checked even when ignore rules match (including a tracked
-`src/.../build` source package). Git top-level must match the caller's CWD;
-foreign Git context fails rather than selecting another checkout. Git optional
-locks are disabled. VCS/cache/worktree state is never source. Non-Git source
+`src/.../build` source package). Read-only inventory Git children clear only the
+repository-local environment names reported by Git; inherited `GIT_INDEX_FILE`
+and foreign repository context cannot replace the checkout's default index.
+The parent environment and all non-Git-local variables remain unchanged. Git
+top-level must still match CWD, including linked worktrees with a regular `.git`
+pointer file. Git optional locks are disabled. VCS/cache/worktree state is never source. Non-Git source
 snapshots use the same explicit filesystem discovery. Directory enumeration
 errors and source read/permission failures remain nonzero scan failures; no
 cache ownership, permissions or content are repaired by the scanner.
 
 `python3 scripts/tests/gradle_source_discovery_test.py` exercises the production
 entrypoint with real temporary Git/source files, unreadable generated directories,
-unreadable real source, tracked ignored scripts, untracked module scripts and
-foreign Git context. Permission fixtures require an unprivileged UID and refuse
+unreadable real source, tracked ignored scripts under inherited alternate indexes,
+linked-worktree default indexes, untracked modules and source symlinks.
+Permission fixtures require an unprivileged UID and refuse
 false root-user permission proof; they never change user cache directories.
+
+Symlink coverage uses an explicit no-follow rejection policy. Indexed links and
+link ancestors of selected source fail with `Unsupported source symlink`; a
+nonignored visible link also fails even without a Gradle suffix, because its
+opaque target could be a subproject directory. Targets are not read, resolved or
+traversed, including external, dangling, unreadable or generated/private targets.
+Indexed source cannot be hidden behind local scratch ignore rules. This
+conservative policy can reject existing non-Gradle links too; a rejected tree has
+not passed source coverage. No folder-wide exception is added to make it pass.
+
+Inventory bounds are explicit: untracked paths named `build` are conventionally
+pruned, not proven to be generated. An untracked legitimate module/source package
+with that name is outside this walk; tracked source remains indexed. Local VCS
+ignore rules are trusted declarations for untracked scratch, not ownership proof.
+These bounds do not certify every possible untracked module layout.
 
 This is a bounded lexical guard, not a compiler or Gradle type resolver. It does
 not follow helper calls, dynamic DSL dispatch, reassignment, provider aliases

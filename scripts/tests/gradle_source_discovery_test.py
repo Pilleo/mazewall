@@ -2,6 +2,7 @@
 """Real-file discovery contract; permission cases require an unprivileged UID."""
 
 import os
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -130,9 +131,15 @@ class SourceDiscoveryTest(unittest.TestCase):
             subprocess.run(["git", "-C", foreign, "init", "--quiet"], env=self.environment, check=True)
             self.environment["GIT_DIR"] = str(Path(foreign) / ".git")
             self.environment["GIT_WORK_TREE"] = foreign
-            result = self.scan()
-            self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
-            self.assertIn("Git context is not the caller's checkout", result.stderr)
+            name = "tracked-source/build.gradle.kts"
+            # Prepare in the real fixture repository, before injecting caller context.
+            clean = self.environment.copy()
+            clean.pop("GIT_DIR")
+            clean.pop("GIT_WORK_TREE")
+            self.write(name, EAGER)
+            subprocess.run(["git", "-C", str(self.directory), "add", "--", name], env=clean, check=True)
+            self.write(".gitignore", "/tracked-source/\n")
+            self.assert_eager(name)
 
     def test_unreadable_untracked_source_directory_still_fails(self):
         path = self.write("integrations/private-source/build.gradle.kts", ACTION).parent
@@ -160,6 +167,135 @@ class SourceDiscoveryTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("Permission denied", result.stderr)
         self.assertIn(name, result.stderr)
+
+    def alternate_empty_index(self):
+        alternate = self.directory / ".git/alternate-empty.index"
+        environment = self.environment.copy()
+        environment["GIT_INDEX_FILE"] = str(alternate)
+        subprocess.run(["git", "-C", str(self.directory), "read-tree", "--empty"],
+                       env=environment, capture_output=True, check=True)
+        self.environment["GIT_INDEX_FILE"] = str(alternate)
+        return alternate
+
+    def test_alternate_index_cannot_hide_ignored_tracked_eager_source(self):
+        name = "tracked-source/build.gradle.kts"
+        self.write(name, EAGER)
+        self.git("add", "--", name)
+        self.write(".gitignore", "/tracked-source/\n")
+        alternate = self.alternate_empty_index()
+        indexes = (self.directory / ".git/index", alternate)
+        before = [hashlib.sha256(path.read_bytes()).hexdigest() for path in indexes]
+        self.assert_eager(name)
+        self.assertEqual(before, [hashlib.sha256(path.read_bytes()).hexdigest() for path in indexes])
+
+    def test_alternate_index_cannot_hide_unreadable_ignored_tracked_source(self):
+        name = "tracked-source/build.gradle.kts"
+        path = self.write(name, ACTION)
+        self.git("add", "--", name)
+        self.write(".gitignore", "/tracked-source/\n")
+        self.alternate_empty_index()
+        self.deny(path)
+        result = self.scan()
+        self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Permission denied", result.stderr)
+        self.assertIn(name, result.stderr)
+
+    def assert_link_rejected(self, name):
+        result = self.scan()
+        self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Unsupported source symlink:", result.stderr)
+        self.assertIn(name, result.stderr)
+
+    def test_source_file_links_rejected_tracked_and_untracked(self):
+        for tracked in (False, True):
+            with self.subTest(tracked=tracked):
+                target = self.write("regular-target.txt", ACTION)
+                name = "linked-source.gradle.kts"
+                link = self.directory / name
+                link.symlink_to(target)
+                if tracked:
+                    self.git("add", "--", name)
+                try:
+                    self.assert_link_rejected(name)
+                finally:
+                    link.unlink()
+
+    def test_source_directory_link_rejected(self):
+        self.write("adapter-source/build.gradle.kts", ACTION)
+        name = "integrations/local-adapter"
+        link = self.directory / name
+        link.parent.mkdir()
+        link.symlink_to(self.directory / "adapter-source", target_is_directory=True)
+        self.assert_link_rejected(name)
+
+    def test_dangling_source_link_rejected(self):
+        name = "dangling.gradle.kts"
+        (self.directory / name).symlink_to(self.directory / "absent")
+        self.assert_link_rejected(name)
+
+    def test_unreadable_source_link_target_rejected_without_reading_target(self):
+        target = self.write("unreadable-target.txt", ACTION)
+        self.deny(target)
+        name = "unreadable-link.gradle.kts"
+        (self.directory / name).symlink_to(target)
+        self.assert_link_rejected(name)
+
+    def test_source_link_to_private_state_rejected_without_traversal(self):
+        target = self.write(".gradle/private/build.gradle.kts", ACTION).parent
+        self.deny(target)
+        name = "integrations/private-target"
+        link = self.directory / name
+        link.parent.mkdir()
+        link.symlink_to(target, target_is_directory=True)
+        self.assert_link_rejected(name)
+
+    def test_source_link_to_external_target_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="mazewall-external-source-") as external:
+            target = Path(external) / "build.gradle.kts"
+            target.write_text(ACTION)
+            name = "external.gradle.kts"
+            (self.directory / name).symlink_to(target)
+            self.assert_link_rejected(name)
+
+    def test_indexed_source_ancestor_link_rejected_even_if_ignored(self):
+        name = "tracked-source/build.gradle.kts"
+        self.write(name, ACTION)
+        self.git("add", "--", name)
+        self.write(".gitignore", "/tracked-source/\n/real-target/\n")
+        original = self.directory / "tracked-source"
+        target = self.directory / "real-target"
+        original.rename(target)
+        original.symlink_to(target, target_is_directory=True)
+        self.assert_link_rejected("tracked-source")
+
+    def test_indexed_ignored_directory_link_rejected(self):
+        target = self.write("real-target/build.gradle.kts", ACTION).parent
+        name = "linked-adapter"
+        (self.directory / name).symlink_to(target, target_is_directory=True)
+        self.git("add", "--", name)
+        self.write(".gitignore", "/linked-adapter\n/real-target/\n")
+        self.assert_link_rejected(name)
+
+    def test_linked_worktree_uses_its_default_index(self):
+        repository = self.directory
+        linked = repository / "owned-scratch/linked"
+        self.git("worktree", "add", "--orphan", "-b", "fixture-source", str(linked))
+        self.write(".gitignore", "/owned-scratch/\n")
+        self.directory = linked
+        try:
+            self.assertTrue((linked / ".git").is_file())
+            name = "tracked-source/build.gradle.kts"
+            self.write(name, EAGER)
+            self.git("add", "--", name)
+            self.write(".gitignore", "/tracked-source/\n")
+            alternate = repository / ".git/alternate-empty.index"
+            environment = self.environment.copy()
+            environment["GIT_INDEX_FILE"] = str(alternate)
+            subprocess.run(["git", "-C", str(linked), "read-tree", "--empty"], env=environment, check=True)
+            self.environment["GIT_INDEX_FILE"] = str(alternate)
+            self.assert_eager(name)
+        finally:
+            self.directory = repository
 
 
 if __name__ == "__main__":
