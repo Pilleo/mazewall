@@ -1,0 +1,21 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.1'
+}
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+repositories {
+    maven {
+        url = uri(providers.gradleProperty('consumerRepository').get())
+        content { includeGroup 'io.mazewall' }
+    }
+    mavenCentral { content { excludeGroup 'io.mazewall' } }
+}
+dependencies {
+    implementation platform('org.springframework.boot:spring-boot-dependencies:4.1.1')
+    implementation "io.mazewall:mazewall-spring-boot-starter:${providers.gradleProperty('consumerVersion').get()}"
+    implementation 'com.h2database:h2'
+}
+springBoot { mainClass = 'demo.boot.ReportApplication' }
+tasks.named('bootJar') { archiveFileName = 'report-application.jar' }
+tasks.named('jar') { enabled = false }
