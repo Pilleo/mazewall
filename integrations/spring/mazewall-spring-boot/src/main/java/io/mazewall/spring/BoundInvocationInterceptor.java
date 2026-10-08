@@ -28,6 +28,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionManager;
 import org.springframework.transaction.interceptor.MatchAlwaysTransactionAttributeSource;
+import org.springframework.transaction.interceptor.NoRollbackRuleAttribute;
+import org.springframework.transaction.interceptor.RollbackRuleAttribute;
 import org.springframework.transaction.interceptor.RuleBasedTransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionAttribute;
 import org.springframework.transaction.interceptor.TransactionAttributeSource;
@@ -41,8 +43,26 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
     private final Advisor dispatchAdvisor = new DispatchAdvisor(this);
     private volatile Placement proof;
 
+    /** Production construction requires the final adapter backed by an actual owned runtime/domain. */
     public BoundInvocationInterceptor(InvocationDispatcher dispatcher) {
+        this(dispatcher, false);
+    }
+
+    private BoundInvocationInterceptor(InvocationDispatcher dispatcher, boolean trustedHostCharacterization) {
         this.dispatcher = Objects.requireNonNull(dispatcher);
+        if (!trustedHostCharacterization && !(dispatcher instanceof ManagedRuntimeDispatcher)) {
+            throw new IllegalArgumentException("Production Spring dispatch requires ManagedRuntimeDispatcher; "
+                    + "arbitrary dispatch is available only through forTrustedHostCharacterization");
+        }
+    }
+
+    /**
+     * Explicit unprotected host characterization. The supplied dispatcher is trusted;
+     * thread checks cannot prove its ownership or distinguish a shared platform executor.
+     * This factory neither grants an ownership capability nor establishes native protection.
+     */
+    public static BoundInvocationInterceptor forTrustedHostCharacterization(InvocationDispatcher dispatcher) {
+        return new BoundInvocationInterceptor(dispatcher, true);
     }
 
     /**
@@ -111,7 +131,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
                 || attributes.getClass() != MatchAlwaysTransactionAttributeSource.class) {
             throw rejected("S0 requires one explicit synchronous transaction manager and attributes");
         }
-        Map<Method, String> definitions = approved.stream().collect(Collectors.toUnmodifiableMap(
+        Map<Method, TransactionSnapshot> definitions = approved.stream().collect(Collectors.toUnmodifiableMap(
                 method -> method, method -> transactionDefinition(attributes, method, target.getClass())));
         Placement candidate = new Placement(proxy, advised, source, target, advisors, advice,
                 approved, tx, manager, attributes, definitions);
@@ -149,6 +169,10 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         if (active != null) {
             // Keep the canonical runtime's inline transition and observed-failure classification.
             return dispatcher.call(() -> {
+                if (Thread.currentThread() != active.worker || Thread.currentThread().isVirtual()
+                        || ACTIVE.get() != active) {
+                    throw rejected("Nested dispatch must retain the exact active physical worker/context");
+                }
                 current.validate();
                 return proceedOnce.proceed();
             });
@@ -156,7 +180,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
         Thread caller = Thread.currentThread();
         return dispatcher.call(() -> {
             if (Thread.currentThread() == caller || Thread.currentThread().isVirtual() || ACTIVE.get() != null) {
-                throw rejected("Dispatch must enter a dedicated platform execution context");
+                throw rejected("Dispatch must leave the caller and enter a clean platform thread");
             }
             if (TransactionSynchronizationManager.isActualTransactionActive()
                     || TransactionSynchronizationManager.isSynchronizationActive()
@@ -164,7 +188,7 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
                 throw rejected("Worker has unrelated thread-bound transaction/resources");
             }
             current.validate(); // Recheck after queueing, before any transaction/body entry.
-            ACTIVE.set(new ExecutionContext(dispatcher, current.manager));
+            ACTIVE.set(new ExecutionContext(dispatcher, current.manager, Thread.currentThread()));
             try {
                 return proceedOnce.proceed();
             } finally {
@@ -180,26 +204,50 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
                 || type == Character.class || type == byte[].class;
     }
 
-    private record ExecutionContext(InvocationDispatcher dispatcher, TransactionManager manager) {}
+    private record ExecutionContext(InvocationDispatcher dispatcher, TransactionManager manager, Thread worker) {}
 
     private static IllegalStateException rejected(String reason) {
         return new IllegalStateException("Unproved Spring invocation: " + reason);
     }
 
-    private static String transactionDefinition(TransactionAttributeSource source, Method method, Class<?> target) {
+    private static TransactionSnapshot transactionDefinition(TransactionAttributeSource source, Method method, Class<?> target) {
         TransactionAttribute attribute = source.getTransactionAttribute(method, target);
         if (attribute == null || attribute.getClass() != RuleBasedTransactionAttribute.class
                 || attribute.getPropagationBehavior() != TransactionDefinition.PROPAGATION_REQUIRED
                 || attribute.getQualifier() != null) {
             throw rejected("S0 requires explicit unqualified REQUIRED transaction metadata: " + method);
         }
-        return attribute.toString();
+        RuleBasedTransactionAttribute ruleBased = (RuleBasedTransactionAttribute) attribute;
+        return new TransactionSnapshot(attribute.getPropagationBehavior(), attribute.getIsolationLevel(),
+                attribute.getTimeout(), attribute.isReadOnly(), attribute.getName(), attribute.getQualifier(),
+                ruleBased.getDescriptor(), ruleBased.getTimeoutString(), List.copyOf(attribute.getLabels()),
+                ruleBased.getRollbackRules().stream().map(RollbackRuleIdentity::new).toList());
+    }
+
+    private record TransactionSnapshot(int propagation, int isolation, int timeout, boolean readOnly,
+                                       String name, String qualifier, String descriptor, String timeoutString,
+                                       List<String> labels, List<RollbackRuleIdentity> rollbackRules) {}
+
+    // Spring's exact matcher classes have immutable final matching fields. Pin identities,
+    // including list order, because equals/getExceptionName do not distinguish type vs pattern.
+    private static final class RollbackRuleIdentity {
+        private final RollbackRuleAttribute rule;
+        RollbackRuleIdentity(RollbackRuleAttribute rule) {
+            if (rule.getClass() != RollbackRuleAttribute.class && rule.getClass() != NoRollbackRuleAttribute.class) {
+                throw rejected("Unsupported rollback-rule implementation");
+            }
+            this.rule = rule;
+        }
+        @Override public boolean equals(Object other) {
+            return other instanceof RollbackRuleIdentity identity && rule == identity.rule;
+        }
+        @Override public int hashCode() { return System.identityHashCode(rule); }
     }
 
     private record Placement(Object proxy, Advised advised, TargetSource source, Object target,
                              List<Advisor> advisors, List<Object> advice, Set<Method> methods,
                              TransactionInterceptor transaction, TransactionManager manager,
-                             TransactionAttributeSource attributes, Map<Method, String> definitions) {
+                             TransactionAttributeSource attributes, Map<Method, TransactionSnapshot> definitions) {
         void validate() {
             if (!advised.isFrozen() || advised.getTargetSource() != source
                     || advised.isExposeProxy() || advised.isPreFiltered()) {

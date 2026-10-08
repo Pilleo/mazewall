@@ -4,6 +4,7 @@ import io.mazewall.enforcer.api.Mazewall;
 import io.mazewall.enforcer.api.execution.InProcessDomain;
 import io.mazewall.enforcer.api.execution.ManagedRuntime;
 import java.util.Objects;
+import java.util.concurrent.Callable;
 
 /** Uses an already explicitly bootstrapped runtime/domain; never installs a native baseline. */
 public final class ManagedRuntimeDispatcher implements InvocationDispatcher {
@@ -17,13 +18,18 @@ public final class ManagedRuntimeDispatcher implements InvocationDispatcher {
 
     @Override
     public Object call(Body body) {
-        return Mazewall.callContained(runtime, domain, () -> {
+        return Mazewall.callContained(runtime, domain, callable(body));
+    }
+
+    // Shared Callable adaptation is directly host-characterizable without native runtime setup.
+    static Callable<Object> callable(Body body) {
+        return () -> {
             try {
                 return body.proceed();
             } catch (Throwable failure) {
                 return ManagedRuntimeDispatcher.<Object, RuntimeException>raise(failure);
             }
-        });
+        };
     }
 
     // Callable has a narrower throws clause than MethodInvocation; retain original Throwable identity.

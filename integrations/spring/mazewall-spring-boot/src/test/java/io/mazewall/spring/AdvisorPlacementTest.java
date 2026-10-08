@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.junit.jupiter.api.Test;
@@ -39,15 +40,14 @@ class AdvisorPlacementTest {
             if (active.get() != null) return body.proceed();
             events.add(new Event("dispatch", Thread.currentThread().threadId()));
             try {
-                return worker.submit(() -> {
+                return worker.submit(ManagedRuntimeDispatcher.callable(() -> {
                     active.set(true);
                     try {
                         beforeBody.run();
                         return body.proceed();
                     }
-                    catch (Throwable failure) { return AdvisorPlacementTest.<Object, RuntimeException>raise(failure); }
                     finally { active.remove(); }
-                }).get();
+                })).get();
             } catch (ExecutionException failed) { throw failed.getCause(); }
         }
         public void close() { worker.close(); }
@@ -96,7 +96,7 @@ class AdvisorPlacementTest {
                 if (fail) throw business;
                 return "existing-singleton";
             };
-            boundary = new BoundInvocationInterceptor(dispatcher);
+            boundary = BoundInvocationInterceptor.forTrustedHostCharacterization(dispatcher);
             var attributes = new MatchAlwaysTransactionAttributeSource();
             attributes.setTransactionAttribute(new RuleBasedTransactionAttribute());
             transaction = new DefaultPointcutAdvisor(new TransactionInterceptor(manager, attributes));
@@ -203,7 +203,7 @@ class AdvisorPlacementTest {
         }
     }
 
-    @Test void nestedProxyTopologyAndLazyResultShapeHaveNoProof() throws Exception {
+    @Test void nestedProxyTopologyAndUnproxiedMethodHaveNoProof() throws Exception {
         List<Event> events = new ArrayList<>();
         try (var dispatch = new HostDispatch(events)) {
             Fixture fixture = new Fixture(dispatch, events, false, false);
@@ -222,6 +222,32 @@ class AdvisorPlacementTest {
     }
 
     interface LazyOperation { java.util.stream.Stream<String> run(); }
+
+    @Test void actualProxiedLazyReturnIsRejectedBeforeDispatchOrTargetEntry() throws Exception {
+        List<Event> events = new ArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        LazyOperation existingSingleton = () -> {
+            calls.incrementAndGet();
+            return java.util.stream.Stream.of("late-result");
+        };
+        try (var dispatch = new HostDispatch(events)) {
+            Fixture advice = new Fixture(dispatch, events, false, false);
+            ProxyFactory factory = new ProxyFactory(existingSingleton);
+            factory.addAdvisor(advice.boundary.dispatchAdvisor());
+            factory.addAdvisor(advice.transaction);
+            factory.addAdvisor(advice.diagnosis);
+            factory.addAdvisor(advice.authorization);
+            factory.setFrozen(true);
+            LazyOperation proxy = (LazyOperation) factory.getProxy();
+            assertTrue(((org.springframework.aop.framework.Advised) proxy).isInterfaceProxied(LazyOperation.class));
+            IllegalStateException rejected = assertThrows(IllegalStateException.class, () -> advice.boundary.bind(
+                    proxy, advice.transaction, advice.diagnosis, advice.authorization,
+                    List.of(LazyOperation.class.getMethod("run"))));
+            assertTrue(rejected.getMessage().contains("result shape"));
+            assertEquals(0, calls.get());
+            assertTrue(events.isEmpty());
+        }
+    }
 
     @Test void provedNestedBeanCallsUseOneWorkerAndOneDispatch() throws Exception {
         List<Event> events = new ArrayList<>();
@@ -378,6 +404,144 @@ class AdvisorPlacementTest {
             assertThrows(IllegalStateException.class, outer.proxy::run);
             assertEquals(0, inner.calls.get());
             assertEquals("rollback", events.getLast().phase());
+        }
+    }
+
+    @Test void productionConstructionRejectsArbitrarySharedDispatcherBeforeAnyWork() throws Exception {
+        List<Event> events = new ArrayList<>();
+        try (var shared = new HostDispatch(events)) {
+            assertEquals("unrelated-framework-work", shared.worker.submit(() -> "unrelated-framework-work").get());
+            assertThrows(IllegalArgumentException.class, () -> new BoundInvocationInterceptor(shared));
+            assertTrue(events.isEmpty());
+        }
+    }
+
+    @Test void nestedPlatformOffloadRejectsBeforeInnerTransactionAndTarget() throws Exception {
+        assertNestedOffloadRejected(false);
+    }
+
+    @Test void nestedVirtualOffloadRejectsBeforeInnerTransactionAndTarget() throws Exception {
+        assertNestedOffloadRejected(true);
+    }
+
+    private static void assertNestedOffloadRejected(boolean virtual) throws Exception {
+        List<Event> events = java.util.Collections.synchronizedList(new ArrayList<>());
+        try (var first = new HostDispatch(events)) {
+            InvocationDispatcher offloading = body -> first.active.get() == null
+                    ? first.call(body) : onFreshWorker(virtual, body);
+            Transactions manager = new Transactions(events);
+            Fixture inner = new Fixture(offloading, events, false, false, manager, factory -> {});
+            Fixture outer = new Fixture(offloading, events, false, false, manager, factory -> {});
+            inner.bind();
+            outer.bind();
+            outer.nested = inner.proxy::run;
+            assertThrows(IllegalStateException.class, outer.proxy::run);
+            assertEquals(0, inner.calls.get());
+            assertEquals(1, outer.calls.get());
+            assertEquals(1, events.stream().filter(event -> event.phase().equals("begin")).count());
+            assertEquals("rollback", events.getLast().phase());
+            System.out.println("S0 HOST ONLY rejected nested " + (virtual ? "virtual" : "platform") + ": " + events);
+        }
+    }
+
+    @Test void topLevelVirtualWorkerRejectsBeforeTransactionAndTarget() throws Exception {
+        List<Event> events = new ArrayList<>();
+        Fixture fixture = new Fixture(body -> onFreshWorker(true, body), events, false, false);
+        fixture.bind();
+        assertThrows(IllegalStateException.class, fixture.proxy::run);
+        assertEquals(0, fixture.calls.get());
+        assertTrue(events.isEmpty());
+    }
+
+    private static Object onFreshWorker(boolean virtual, InvocationDispatcher.Body body) throws Throwable {
+        FutureTask<Object> result = new FutureTask<>(() -> {
+            try { return body.proceed(); }
+            catch (Throwable failure) { return AdvisorPlacementTest.<Object, RuntimeException>raise(failure); }
+        });
+        Thread worker = virtual ? Thread.ofVirtual().name("invalid-virtual-worker").unstarted(result)
+                : Thread.ofPlatform().name("invalid-nested-worker").inheritInheritableThreadLocals(false).unstarted(result);
+        worker.start();
+        try { return result.get(); }
+        catch (ExecutionException failure) { throw failure.getCause(); }
+        finally { worker.join(); }
+    }
+
+    @Test void changedTransactionNameFailsBeforeDispatch() throws Exception {
+        assertTransactionMetadataDriftRejected(true);
+    }
+
+    @Test void changedTransactionLabelsFailBeforeDispatch() throws Exception {
+        assertTransactionMetadataDriftRejected(false);
+    }
+
+    private static void assertTransactionMetadataDriftRejected(boolean changeName) throws Exception {
+        List<Event> events = new ArrayList<>();
+        try (var dispatch = new HostDispatch(events)) {
+            Fixture fixture = new Fixture(dispatch, events, false, false);
+            var source = (MatchAlwaysTransactionAttributeSource)
+                    ((TransactionInterceptor) fixture.transaction.getAdvice()).getTransactionAttributeSource();
+            var original = new RuleBasedTransactionAttribute();
+            original.setName("approved-name");
+            original.setLabels(new ArrayList<>(List.of(changeName ? "approved-label" : "reviewed, audit")));
+            source.setTransactionAttribute(original);
+            fixture.bind();
+            var changed = new RuleBasedTransactionAttribute();
+            changed.setName(changeName ? "changed-name" : "approved-name");
+            changed.setLabels(changeName ? List.of("approved-label") : List.of("reviewed", "audit"));
+            assertEquals(original.toString(), changed.toString(),
+                    "Name is omitted; structurally different labels can have identical descriptions");
+            source.setTransactionAttribute(changed);
+            assertThrows(IllegalStateException.class, fixture.proxy::run);
+            assertEquals(0, fixture.calls.get());
+            assertTrue(events.isEmpty());
+        }
+    }
+
+    interface CheckedOperation { String run() throws java.io.IOException; }
+
+    @Test void declaredCheckedExceptionKeepsIdentityAndDefaultSpringCommitSemantics() throws Exception {
+        List<Event> events = new ArrayList<>();
+        var failure = new java.io.IOException("checked-business");
+        AtomicInteger calls = new AtomicInteger();
+        CheckedOperation existingBean = () -> {
+            calls.incrementAndGet();
+            events.add(new Event("body", Thread.currentThread().threadId()));
+            throw failure;
+        };
+        try (var dispatch = new HostDispatch(events)) {
+            Fixture advice = new Fixture(dispatch, events, false, false);
+            CheckedOperation proxy = (CheckedOperation) advice.boundary.createProxy(existingBean,
+                    advice.transaction, advice.diagnosis, advice.authorization,
+                    List.of(CheckedOperation.class.getMethod("run")));
+            assertSame(failure, assertThrows(java.io.IOException.class, proxy::run));
+            assertEquals(1, calls.get());
+            assertEquals(List.of("dispatch", "begin", "body", "diagnosis", "commit"),
+                    events.stream().map(Event::phase).toList());
+            assertTrue(events.subList(1, events.size()).stream().allMatch(event -> event.thread() == events.get(1).thread()));
+            System.out.println("S0 HOST ONLY checked identity: " + events);
+        }
+    }
+
+    @Test void specificErrorKeepsIdentityAndRollsBackInsideHostWorker() throws Exception {
+        List<Event> events = new ArrayList<>();
+        Error failure = new LinkageError("specific-fatal-host-error");
+        AtomicInteger calls = new AtomicInteger();
+        Operation existingBean = () -> {
+            calls.incrementAndGet();
+            events.add(new Event("body", Thread.currentThread().threadId()));
+            throw failure;
+        };
+        try (var dispatch = new HostDispatch(events)) {
+            Fixture advice = new Fixture(dispatch, events, false, false);
+            Operation proxy = (Operation) advice.boundary.createProxy(existingBean,
+                    advice.transaction, advice.diagnosis, advice.authorization,
+                    List.of(Operation.class.getMethod("run")));
+            assertSame(failure, assertThrows(LinkageError.class, proxy::run));
+            assertEquals(1, calls.get());
+            assertEquals(List.of("dispatch", "begin", "body", "diagnosis", "rollback"),
+                    events.stream().map(Event::phase).toList());
+            assertTrue(events.subList(1, events.size()).stream().allMatch(event -> event.thread() == events.get(1).thread()));
+            System.out.println("S0 HOST ONLY error identity: " + events);
         }
     }
 

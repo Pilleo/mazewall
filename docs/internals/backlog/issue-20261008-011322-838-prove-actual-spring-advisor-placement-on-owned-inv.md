@@ -37,5 +37,14 @@ worker and instrumented host transaction manager. No JDBC, Security context or
 native protection completion is claimed. Shared task-2 checkpoint/report retain
 commands and acceptance limits. Backlog README is coordinator-owned.
 
+**Round 1 review follow-up:** production construction requires the actual final
+ManagedRuntimeDispatcher; generic injection is explicitly trusted/unprotected
+host characterization. Nested offload must match the exact active physical
+worker/context. Transaction drift uses an explicit immutable snapshot, including
+name and structured labels. Declared checked/fatal bridge identities and virtual
+workers are host-characterized; the lazy-return negative uses the correct
+proxied interface and has a guard-removal sensitivity check. Review remains
+pending; no S1–S3/native/JDBC/Security completion or automatic archive is claimed.
+
 ---
 <!-- id: issue-20261008-011322-838-prove-actual-spring-advisor-placement-on-owned-inv  file: issue-20261008-011322-838-prove-actual-spring-advisor-placement-on-owned-inv.md -->
