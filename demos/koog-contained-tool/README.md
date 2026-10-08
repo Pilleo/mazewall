@@ -31,10 +31,33 @@ Only the generated service call executes in the protected child.
   API and Portal worker dependency. The normal host JAR embeds a format2 verified
   ZIP as opaque data, rather than exposing guest classes on the host classpath.
 
+## Source build
+
+The optional adapter/demo is excluded from the default core build. Opt in using
+the two-stage wrapper from the repository root:
+
+```bash
+bash scripts/koog-build.sh --console=plain -- \
+  :integrations:koog:test :demos:koog-contained-tool:test \
+  :demos:koog-contained-tool:jar :demos:koog-contained-tool:portalCheck
+```
+
+Shared Gradle options go before `--`; selected tasks and second-stage-only options
+go after it. The wrapper first builds `:portals:codegen:exportPluginClasspath`
+with `includeKoogIntegration=true` and `koogBootstrap=true`, excluding demo
+evaluation. Only after success does a second build evaluate the demo using the
+actual plugin JAR and resolved runtime closure. Both builds disable configuration
+caching so receipt checks always run. Each producer run refreshes the receipt;
+the demo rejects another worktree's receipt, missing/changed JARs or any changed,
+added or removed producer input (including root/catalog version changes).
+Direct Gradle opt-in requires a prior producer build and `--no-configuration-cache`.
+For serialized fleet verification, wrap the entire command in the shared lock.
+
 The actual codegen plugin produces all stubs, dispatchers and metadata. Do not
-edit generated output. The temporary source fixture exports the real plugin's
-JAR classpath; coordinator-owned production include/plugin resolution and runtime
-publication are still pending. See the [packaged consumer](../../tests/consumers/koog-portal/README.md).
+edit generated output. Portal runtime has a declared Maven Java-component
+publication with platform/enforcer API dependencies. See the
+[packaged consumer](../../tests/consumers/koog-portal/README.md) for local staging,
+stable Kotlin consumption and fresh native verification.
 
 `koogNativeFixtures=true` adds a separate denied-resource API/guest **for tests
 only**. It is absent from production metadata/ZIPs and is never added to the

@@ -49,6 +49,20 @@ if (providers.gradleProperty("includeSpringIntegration").orNull == "true") {
     include(":integrations:spring:mazewall-spring-boot")
 }
 
+// The demo consumes the plugin built by scripts/koog-build.sh in a preceding build.
+// Bootstrap includes only the adapter, so demo buildscript evaluation cannot race its producer.
+if (providers.gradleProperty("includeKoogIntegration").orNull == "true") {
+    include(":integrations:koog")
+    if (providers.gradleProperty("koogBootstrap").orNull != "true") {
+        include(":demos:koog-contained-tool")
+        include(":demos:koog-contained-tool:service-api")
+        if (providers.gradleProperty("koogNativeFixtures").orNull == "true") {
+            include(":koog-denied-api")
+            project(":koog-denied-api").projectDir = file("tests/consumers/koog-portal/denied-api")
+        }
+    }
+}
+
 // :tools:orchestrator stays out of the default build so in-flight work there
 // cannot fail ./gradlew build. Opt in:
 //   ./gradlew :tools:orchestrator:test -PincludeOrchestrator=true

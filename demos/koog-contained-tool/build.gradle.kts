@@ -2,13 +2,40 @@ import io.mazewall.portal.PortalInstanceMode
 import io.mazewall.portal.codegen.PortalCodegenExtension
 import io.mazewall.portal.codegen.PortalCodegenPlugin
 import io.mazewall.portal.codegen.PortalServiceRegistration
+import java.io.File
 
 buildscript {
-    // Scoped source-verification fixture supplies the actual built plugin classpath.
-    // Production plugin resolution is a coordinator-owned root wiring request.
-    val classpathFile = rootProject.layout.buildDirectory.file("task7-codegen-classpath.txt").get().asFile
-    require(classpathFile.isFile) { "Run :portals:codegen:task7CodegenClasspath using the scoped init fixture first" }
-    dependencies { classpath(files(classpathFile.readText().split(java.io.File.pathSeparator))) }
+    require(!gradle.startParameter.isConfigurationCacheRequested) {
+        "Koog source bootstrap requires uncached receipt validation; use scripts/koog-build.sh"
+    }
+    val receiptFile = rootProject.layout.buildDirectory.file("portal-codegen/plugin-classpath.properties").get().asFile
+    require(receiptFile.isFile) { "Build the actual Portal plugin first with scripts/koog-build.sh" }
+    val receipt = java.util.Properties().apply { receiptFile.inputStream().use { load(it) } }
+    fun digest(file: File): String = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+    require(receipt.getProperty("format") == "1" && receipt.getProperty("root") == rootProject.projectDir.canonicalPath) {
+        "Portal plugin receipt belongs to another format/worktree; rerun scripts/koog-build.sh"
+    }
+    require(receipt.getProperty("version") == rootProject.version.toString()) {
+        "Stale Portal plugin producer version; rerun scripts/koog-build.sh with shared version options"
+    }
+    // Exact inventory detects source edits, additions, removals and root/catalog version changes.
+    val sources = rootProject.fileTree(rootProject.projectDir) {
+        include("*.gradle", "*.gradle.kts", "gradle.properties", "gradlew", "gradle/**")
+        listOf("buildSrc", "platform", "enforcer", "profiler", "portals/runtime", "portals/worker", "portals/codegen").forEach {
+            include("$it/src/**", "$it/*.gradle", "$it/*.gradle.kts")
+        }
+    }.files.associate { "source.${it.relativeTo(rootProject.projectDir).invariantSeparatorsPath}" to digest(it) }
+    val recordedSources = receipt.stringPropertyNames().filter { it.startsWith("source.") }
+        .associateWith { receipt.getProperty(it) }
+    require(sources == recordedSources) { "Stale Portal plugin producer sources; rerun scripts/koog-build.sh" }
+    val jars = receipt.getProperty("classpath")?.split(File.pathSeparator)?.map { File(it) }
+        ?: error("Missing Portal plugin classpath; rerun scripts/koog-build.sh")
+    require(jars.isNotEmpty() && jars.all { it.isFile && receipt.getProperty("artifact.${it.canonicalPath}") == digest(it) }) {
+        "Stale/missing Portal plugin artifact; rerun scripts/koog-build.sh"
+    }
+    logger.lifecycle("Using actual Portal plugin producer version={} revision={}", receipt.getProperty("version"), receipt.getProperty("revision"))
+    dependencies { classpath(files(jars)) }
 }
 
 plugins {
