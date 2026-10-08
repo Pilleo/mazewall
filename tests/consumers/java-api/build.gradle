@@ -14,8 +14,14 @@ application { mainClass = 'consumer.JavaApiConsumer' }
         javaLauncher = javaToolchains.launcherFor(java.toolchain)
         classpath = sourceSets.main.runtimeClasspath
         mainClass = 'consumer.VerifyCompilation'
-        args fixture, sourceSets.main.compileClasspath.asPath,
-            file("src/${fixture}/java/consumer").absolutePath,
-            layout.buildDirectory.dir(fixture).get().asFile.absolutePath
+        def diagnosticCompileClasspath = sourceSets.main.compileClasspath
+        inputs.files(diagnosticCompileClasspath)
+            .withPropertyName('diagnosticCompileClasspath').withNormalizer(ClasspathNormalizer)
+        // Keep javac's exact classpath argument, resolving it only for execution.
+        doFirst {
+            args fixture, diagnosticCompileClasspath.asPath,
+                file("src/${fixture}/java/consumer").absolutePath,
+                layout.buildDirectory.dir(fixture).get().asFile.absolutePath
+        }
     }
 }
