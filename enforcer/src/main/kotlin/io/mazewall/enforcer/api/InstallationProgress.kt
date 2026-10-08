@@ -26,6 +26,7 @@ internal fun installationState(processWide: Boolean): io.mazewall.enforcer.state
 internal class InstallationAttempt(
     private val processWide: Boolean,
     private val environment: InstallationEnvironment,
+    val preparedLandlock: io.mazewall.landlock.PreparedLandlock? = null,
 ) {
     val native get() = environment.native
     val selfVerificationEnabled get() = environment.selfVerificationEnabled

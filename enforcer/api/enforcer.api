@@ -977,11 +977,27 @@ public final class io/mazewall/enforcer/api/execution/ManagedRuntime : java/lang
 	public static final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
 	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun prepare (Lio/mazewall/enforcer/api/ReviewedOperationArtifact;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
+	public final fun prepare (Lio/mazewall/enforcer/api/ReviewedOperationArtifact;Lio/mazewall/enforcer/api/execution/DomainLimits;Lio/mazewall/enforcer/api/execution/PreparedOperationResources;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun submit (Lio/mazewall/enforcer/api/execution/InProcessDomain;Ljava/util/concurrent/Callable;)Lio/mazewall/enforcer/api/execution/InvocationHandle;
 }
 
 public final class io/mazewall/enforcer/api/execution/ManagedRuntime$Companion {
 	public final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedOperationResources : java/lang/AutoCloseable {
+	public static final field Companion Lio/mazewall/enforcer/api/execution/PreparedOperationResources$Companion;
+	public fun close ()V
+	public final fun getImplementationClass ()Ljava/lang/Class;
+	public final fun getImplementationSha256 ()Ljava/lang/String;
+	public final fun getResourceGeneration ()Ljava/lang/String;
+	public final fun getRuntime ()Lio/mazewall/enforcer/api/RuntimeProfile;
+	public static final fun resolve (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/lang/Class;Ljava/util/Set;)Lio/mazewall/enforcer/api/execution/PreparedOperationResources;
+	public final fun validate ()V
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedOperationResources$Companion {
+	public final fun resolve (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/lang/Class;Ljava/util/Set;)Lio/mazewall/enforcer/api/execution/PreparedOperationResources;
 }
 
 public final class io/mazewall/enforcer/diagnostics/ContainmentDiagnostic {

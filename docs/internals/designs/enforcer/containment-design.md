@@ -406,8 +406,12 @@ directories are not implicitly granted. Actual class/resource directory entries
 remain directory grants, and file rules omit directory-only read rights. Explicit
 `allowJvmClasspath()` policy construction retains the same granularity. Required
 runtime path-open or add-rule failures reject installation, retaining the errno in
-failure evidence. Prepared artifact identity/generation binding remains separate
-from this static path-granularity correction.
+failure evidence. Owned `ManagedRuntime` preparation now pins genuine descriptors and
+builds a shared immutable ruleset before worker setup, rejecting missing grants rather
+than silently widening future output to its parent. The additive actual-operation
+resource owner validates selected ordinary-JAR bytes and generation; its packaging,
+alias and physical-content limits are specified in
+[prepared-resources-design.md](prepared-resources-design.md).
 
 `ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
 of policy coverage and Seccomp engine-state rank. The interpreter retains the first
@@ -437,10 +441,12 @@ classpath reads and cause `NoClassDefFoundError` at unpredictable points during 
 ### ABI version negotiation
 
 Landlock `Landlock.kt` negotiates the highest ABI version the running kernel supports
-via `landlock_create_ruleset(size=0, flags=LANDLOCK_CREATE_RULESET_VERSION)`. Using
-a feature flag from a newer ABI than the kernel supports **silently drops those rules**
-without returning an error. Always document the minimum ABI version required when
-adding new Landlock access-right flags.
+via `landlock_create_ruleset(size=0, flags=LANDLOCK_CREATE_RULESET_VERSION)`. Requesting
+unknown access bits can be rejected with `EINVAL`; userspace masking a required right
+out for an older ABI is also insufficient protection. Required recipes explicitly
+reject unavailable support. Strict prepared read-only/read-write recipes require ABI
+3+ for truncation coverage, including `open(O_TRUNC)`. Always document and enforce
+the minimum ABI version when adding required access rights.
 
 ### JVM classpath whitelist (`allowJvmClasspath()`)
 

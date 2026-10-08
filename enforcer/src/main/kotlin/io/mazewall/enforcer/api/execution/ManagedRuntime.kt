@@ -117,7 +117,7 @@ public class ManagedRuntime private constructor(
         }
     }
 
-    /** Prepare an externally reviewed, exactly configured worker operation document. */
+    /** Prepare configured review metadata. Actual implementation identity requires the resource-owner overload. */
     public fun prepare(
         artifact: ReviewedOperationArtifact,
         limits: DomainLimits,
@@ -129,17 +129,32 @@ public class ManagedRuntime private constructor(
         return InProcessDomain(this, domain.resource, artifact.binding)
     }
 
+    /** Prepare the exact externally reviewed implementation and retained resource acquisitions. */
+    public fun prepare(
+        artifact: ReviewedOperationArtifact,
+        limits: DomainLimits,
+        resources: PreparedOperationResources,
+    ): InProcessDomain {
+        val worker = artifact.document.policy as? CanonicalPolicyArtifact.Worker
+            ?: throw IllegalArgumentException("In-process domains require worker policy artifacts")
+        require(worker.runtime == runtime) { "Reviewed operation runtime does not match owner" }
+        val domain = prepareDefinition(worker.policy.definition.frozenCopy(), limits, artifact, resources)
+        return InProcessDomain(this, domain.resource, artifact.binding)
+    }
+
     @Suppress("TooGenericExceptionCaught") // preparation boundary retires its generation and preserves original failure
     public fun prepare(
         policy: Policy<*, Uncompiled>,
         limits: DomainLimits,
-    ): InProcessDomain {
+    ): InProcessDomain = prepareDefinition(policy.definition.frozenCopy(), limits)
+
+    @Suppress("TooGenericExceptionCaught") // preparation boundary retains manager-owned resources until physical retirement
+    private fun prepareDefinition(definition: PolicyDefinition<*>, limits: DomainLimits, artifact: ReviewedOperationArtifact? = null, resources: PreparedOperationResources? = null): InProcessDomain {
         requireUnrestrictedBootstrap()
-        val definition = policy.definition.frozenCopy()
         val resourceRef = AtomicReference<OwnedDomain?>()
         val prepared = synchronized(lock) {
             requireOpen()
-            manager.submit(Callable { prepareOnManager(definition, limits, resourceRef) })
+            manager.submit(Callable { prepareOnManager(definition, limits, resourceRef, artifact, resources) })
         }
         return try {
             await(prepared)
@@ -157,38 +172,80 @@ public class ManagedRuntime private constructor(
         definition: PolicyDefinition<*>,
         limits: DomainLimits,
         resourceRef: AtomicReference<OwnedDomain?>,
+        artifact: ReviewedOperationArtifact?,
+        resources: PreparedOperationResources?,
     ): InProcessDomain {
-        val resource = synchronized(lock) {
+        var claimed = false
+        var preparedLandlock: io.mazewall.landlock.PreparedLandlock? = null
+        val resource = try {
+            synchronized(lock) { domains.values.toList() }.forEach { it.retireIfStopped() }
+            resources?.let {
+                val reviewed = checkNotNull(artifact)
+                it.claim(reviewed.binding, reviewed.document.policy as CanonicalPolicyArtifact.Worker, environment.native, environment.platform.capabilities.matrix.landlockAbiVersion)
+                claimed = true
+            }
+            preparedLandlock = io.mazewall.landlock.PreparedLandlock
+                .prepare(definition, environment, resources?.resources)
+            check(!Thread.currentThread().isInterrupted) { "Domain preparation was cancelled" }
+            synchronized(lock) {
             requireOpen()
             check(domains.values.none { it.failedRetirementPending() || it.cleanupFailure.get() != null }) { "Prior failed generation still has live execution or cleanup" }
             val generation = ++nextGeneration
-            OwnedDomain(generation, limits, definition, environment, "mazewall-domain-$id-$generation-").also {
+            OwnedDomain(generation, limits, definition, environment, preparedLandlock, resources, "mazewall-domain-$id-$generation-").also {
                 domains[generation] = it
                 resourceRef.set(it)
             }
+        }
+        } catch (failure: Throwable) {
+            var primary = failure
+            try {
+                preparedLandlock?.close()
+            } catch (cleanup: Throwable) {
+                primary = io.mazewall.platform.fd.CleanupFailures
+                    .merge(primary, cleanup)
+            }
+            if (claimed) {
+                try {
+                resources?.retire()
+            } catch (cleanup: Throwable) {
+                    primary = io.mazewall.platform.fd.CleanupFailures
+                        .merge(primary, cleanup)
+            }
+            }
+            throw primary
         }
         return try {
             resource.prepare(Deadline(preparationTimeout))
             synchronized(lock) { requireOpen() }
             InProcessDomain(this, resource)
-        } catch (preparationFailure: Exception) {
+        } catch (preparationFailure: Throwable) {
             resource.fail(preparationFailure)
             throw preparationFailure
-        } catch (preparationFatal: Error) {
-            resource.fail(preparationFatal)
-            throw preparationFatal
         }
     }
 
+    @Suppress("TooGenericExceptionCaught") // failed resource revalidation quarantines this generation and rethrows original failure
     public fun <T> submit(
         domain: InProcessDomain,
         action: Callable<T>,
-    ): InvocationHandle<T> =
-        synchronized(lock) {
+    ): InvocationHandle<T> {
+        val validation = synchronized(lock) {
         require(domain.owner === this && domains[domain.generation] === domain.resource) { "Domain belongs to a different runtime" }
         requireOpen()
         if (RuntimeWorkerContext.current != null) throw RejectedExecutionException("Nested dispatch requires an approved execution transition")
-        domain.resource.submit(action)
+        if (!domain.resource.needsResourceValidation()) return domain.resource.submit(action)
+        manager.submit(Callable { domain.resource.validateResources() })
+        }
+        try {
+            await(validation)
+        } catch (failure: Throwable) {
+            domain.resource.fail(failure)
+            throw failure
+        }
+        return synchronized(lock) {
+            requireOpen()
+            domain.resource.submit(action)
+        }
     }
 
     internal fun <T> callContained(

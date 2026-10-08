@@ -1,10 +1,13 @@
 package io.mazewall.enforcer.api
 
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.ManagedRuntime
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -58,5 +61,48 @@ class ExactClasspathGrantNativeTest : BaseIntegrationTest() {
             )
         }
         assertEquals("private-sibling", Files.readString(Path.of(sibling)))
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `prepared owned workers grant an exact artifact and reject replacement`() {
+        val directory = Files.createTempDirectory("prepared-classpath-")
+        try {
+            val artifact = Files.writeString(directory.resolve("parser.jar"), "reviewed-bytes")
+            val sibling = Files.writeString(directory.resolve("private.txt"), "private-sibling")
+            IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyPreparedArtifactGrant", artifact.toString(), sibling.toString())
+        } finally {
+            Files.walk(directory).use { entries -> entries.sorted(Comparator.reverseOrder()).forEach { Files.delete(it) } }
+        }
+    }
+
+    fun verifyPreparedArtifactGrant(
+        artifact: String,
+        sibling: String,
+    ) {
+        val path = Path.of(artifact)
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(path).build()
+        val timeout = Duration.ofSeconds(10)
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(policy, DomainLimits(2, 2))
+            repeat(2) {
+                assertEquals(
+                    "reviewed-bytes",
+                    Mazewall.callContained(
+                        runtime,
+                        domain,
+                        Callable {
+                    assertFailsWith<AccessDeniedException> { Files.readString(Path.of(sibling)) }
+                    Files.readString(path)
+                },
+                    ),
+                )
+            }
+            Files.move(path, path.resolveSibling("old.jar"))
+            Files.writeString(path, "replacement")
+            var entered = false
+            assertFailsWith<IllegalStateException> { runtime.submit(domain, Callable { entered = true }) }
+            assertTrue(!entered)
+        }
     }
 }

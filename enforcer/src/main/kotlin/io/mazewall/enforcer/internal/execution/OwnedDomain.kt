@@ -26,6 +26,8 @@ internal class OwnedDomain(
     val limits: DomainLimits,
     private val policy: PolicyDefinition<*>,
     private val environment: InstallationEnvironment,
+    private val preparedLandlock: io.mazewall.landlock.PreparedLandlock?,
+    private val preparedOperation: io.mazewall.enforcer.api.execution.PreparedOperationResources?,
     name: String,
 ) {
     private val lock = Any()
@@ -52,6 +54,7 @@ internal class OwnedDomain(
     )
 
     fun prepare(deadline: Deadline) {
+        validateResources()
         executor.prestartAllCoreThreads()
         if (!startup.await(deadline.remainingNanos(), TimeUnit.NANOSECONDS)) fail(TimeoutException("Required worker preparation did not finish"))
         val problem = synchronized(lock) {
@@ -63,6 +66,7 @@ internal class OwnedDomain(
             awaitRetirement(deadline)
             throw problem
         }
+        validateResources()
     }
 
     @Suppress("TooGenericExceptionCaught") // startup/retirement boundary preserves fatal identity and owns executor bookkeeping
@@ -72,7 +76,7 @@ internal class OwnedDomain(
         RuntimeWorkerContext.enter(this)
         try {
             try {
-                receipt = ContainedExecutors.installOnCurrentThread(policy, DefaultStacktraceScopingPolicy, environment)
+                receipt = ContainedExecutors.installOnCurrentThread(policy, DefaultStacktraceScopingPolicy, environment, preparedLandlock)
                 receipt.requireInstalled()
             } catch (installationFailure: Throwable) {
                 terminal = installationFailure
@@ -143,7 +147,42 @@ internal class OwnedDomain(
     fun awaitRetirement(deadline: Deadline) {
         executor.awaitTermination(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
         threads.forEach { deadline.join(it) }
-        if (retired()) synchronized(lock) { phase = GenerationLifecycle.evaluate(phase, GenerationEvent.RETIRED) }
+        retireIfStopped()
+    }
+
+    @Suppress("TooGenericExceptionCaught") // physical retirement owns every prepared cleanup attempt
+    fun retireIfStopped() {
+        if (retired()) {
+            synchronized(lock) {
+            if (phase != GenerationPhase.CLOSED) {
+                try {
+                    preparedLandlock?.close()
+                } catch (cleanup: Throwable) {
+                    recordCleanupFailure(cleanup)
+                }
+                try {
+                    preparedOperation?.retire()
+                } catch (cleanup: Throwable) {
+                    recordCleanupFailure(cleanup)
+                }
+                phase = GenerationLifecycle.evaluate(phase, GenerationEvent.RETIRED)
+            }
+        }
+        }
+    }
+
+    fun validateResources() {
+        preparedLandlock?.validate()
+        preparedOperation?.validate()
+    }
+
+    fun needsResourceValidation(): Boolean = preparedLandlock != null
+
+    private fun recordCleanupFailure(problem: Throwable) {
+        cleanupFailure.updateAndGet {
+            io.mazewall.platform.fd.CleanupFailures
+            .merge(it, problem)
+        }
     }
 
     fun retired(): Boolean = executor.isTerminated && threads.none { it.isAlive }

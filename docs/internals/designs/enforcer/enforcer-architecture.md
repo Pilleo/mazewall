@@ -17,3 +17,7 @@ Supervisor USER_NOTIF path (teaching diagram, not a class dump):
 Source: [supervisor_notif_flow.puml](../../../diagrams/supervisor_notif_flow.puml).
 
 For cross-module ownership, start at the [canonical architectural knowledge map](../core/architectural-map.md).
+
+Owned worker preparation and the additive actual implementation/resource binding are
+described in [prepared resources](prepared-resources-design.md), including descriptor
+retirement, explicit recipe rights, ABI requirements and unclosed physical-content gates.

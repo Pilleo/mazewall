@@ -65,6 +65,36 @@ class OwnedRuntimeTest {
     private fun policy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
 
     @Test
+    fun `missing required read resource rejects preparation before any domain can admit`() {
+        val root = java.nio.file.Files
+            .createTempDirectory("missing-prepared-resource-")
+        try {
+            open().use { runtime ->
+                val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(root.resolve("missing")).build()
+                assertFailsWith<java.nio.file.NoSuchFileException> { runtime.prepare(policy, DomainLimits(1, 1)) }
+            }
+        } finally {
+            java.nio.file.Files
+                .delete(root)
+        }
+    }
+
+    @Test
+    fun `missing writable leaf never implicitly grants its parent`() {
+        val root = java.nio.file.Files
+            .createTempDirectory("missing-prepared-output-")
+        try {
+            open().use { runtime ->
+                val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsReadWrite(root.resolve("future-output")).build()
+                assertFailsWith<java.nio.file.NoSuchFileException> { runtime.prepare(policy, DomainLimits(1, 1)) }
+            }
+        } finally {
+            java.nio.file.Files
+                .delete(root)
+        }
+    }
+
+    @Test
     fun `reviewed operation prepares its exact policy and retains configured binding`() {
         open().use { runtime ->
             val binding = OperationBinding("owned-operation", OperationAdapter.CALLABLE, "a".repeat(64), "resources-1", mapOf("entryPoint" to "call()I"))

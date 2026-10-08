@@ -152,8 +152,9 @@ public object ContainedExecutors {
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
         environment: InstallationEnvironment = InstallationEnvironment.capture(),
+        preparedLandlock: io.mazewall.landlock.PreparedLandlock? = null,
     ): io.mazewall.enforcer.api.InstallationReceipt {
-        return installInternal(false, policy, scopingPolicy, environment)
+        return installInternal(false, policy, scopingPolicy, environment, preparedLandlock)
     }
 
     /** Read-only preflight. Does not install filters. */
@@ -313,6 +314,7 @@ public object ContainedExecutors {
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy,
         environment: InstallationEnvironment = InstallationEnvironment.capture(),
+        preparedLandlock: io.mazewall.landlock.PreparedLandlock? = null,
     ): io.mazewall.enforcer.api.InstallationReceipt {
         io.mazewall.enforcer.diagnostics
             .requirePlatformThread()
@@ -320,7 +322,7 @@ public object ContainedExecutors {
         // A failed permanent listener cannot be repaired by policy planning or operator bypass.
         io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
             .requireReusableInstallations()
-        val attempt = InstallationAttempt(processWide, environment)
+        val attempt = InstallationAttempt(processWide, environment, preparedLandlock)
         if (policy.lockIntelCet) attempt.cetOutcome = CetOutcome.UNCONFIRMED
         try {
             check(!processWide || !policy.lockIntelCet) { "Process-wide shadow-stack locking is unsupported; CET controls apply to the installing platform thread" }
@@ -563,10 +565,12 @@ public object ContainedExecutors {
                     ContainmentRegistryEffect.LandlockApplied(processWide, policy),
                 )
                 val capabilities = attempt.platform.capabilities
-                val applied = Landlock.tryApplyRuleset(policy, processWide, fallback = attempt.fallback, native = attempt.native, capabilities = capabilities) {
+                val onApplied = {
                     attempt.landlockApplied = true
                     publish()
                 }
+                val applied = attempt.preparedLandlock?.apply(onApplied)
+                    ?: Landlock.tryApplyRuleset(policy, processWide, fallback = attempt.fallback, native = attempt.native, capabilities = capabilities, onRestrictionApplied = onApplied)
                 when (applied) {
                     is io.mazewall.landlock.LandlockApplyResult.Applied -> {
                         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(

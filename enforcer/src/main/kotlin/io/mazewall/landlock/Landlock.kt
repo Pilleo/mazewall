@@ -114,7 +114,7 @@ internal object Landlock {
      */
     private val logger = Logger.getLogger(Landlock::class.java.name)
 
-    private sealed interface AddRuleResult {
+    internal sealed interface AddRuleResult {
         object Success : AddRuleResult
 
         data class Error(
@@ -739,7 +739,7 @@ internal object Landlock {
             .throwErrno("landlock_create_ruleset")
     }
 
-    context(arena: NativeArena) private fun addRuleToRuleset(
+    context(arena: NativeArena) internal fun addRuleToRuleset(
         ruleset: LandlockRuleset<RulesetState.Building>,
         pathFd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open, FdOwnership.Owned>,
         accessMask: Long,
