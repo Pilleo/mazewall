@@ -343,18 +343,17 @@ def resolve_source_path(path: Path) -> tuple[Path, bool]:
     root = Path.cwd().resolve()
     requested = path
     links = set()
-    pending_directory = False
 
     def anchored_parts(raw: str) -> list[str]:
-        nonlocal pending_directory
-        if raw.endswith("/"):
-            pending_directory = True
         parts = [part for part in raw.split("/") if part]
         if raw.startswith("/"):
             prefix = list(root.parts[1:])
             if parts[:len(prefix)] != prefix:
                 raise ValueError("alias leaves checkout")
             parts = parts[len(prefix):]
+        if raw.endswith("/"):
+            # Require this target's endpoint to be a directory, before its suffix.
+            parts.append(".")
         return parts
 
     try:
@@ -390,7 +389,7 @@ def resolve_source_path(path: Path) -> tuple[Path, bool]:
                 pending.extendleft(reversed(target_parts))
                 continue
             cursor = candidate
-            if (pending or pending_directory) and not stat.S_ISDIR(metadata.st_mode):
+            if pending and not stat.S_ISDIR(metadata.st_mode):
                 raise NotADirectoryError(20, "Not a directory", str(cursor))
             if links:
                 if not (stat.S_ISREG(metadata.st_mode) or stat.S_ISDIR(metadata.st_mode)):

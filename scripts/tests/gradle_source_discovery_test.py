@@ -492,6 +492,35 @@ class SourceDiscoveryTest(unittest.TestCase):
         (self.directory / "directory-slash.gradle.kts").symlink_to("real-target/")
         self.assert_clean()
 
+    def test_indexed_source_suffix_after_directory_alias_target_ending_in_slash(self):
+        name = "adapter/build.gradle.kts"
+        self.write(name, EAGER)
+        self.git("add", "--", name)
+        (self.directory / "adapter").rename(self.directory / "real-target")
+        (self.directory / "adapter").symlink_to("real-target/")
+        self.write(".gitignore", "/real-target/\n")
+        self.assertEqual(EAGER, (self.directory / name).read_text())
+        result = self.scan()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertEqual("".join(
+            f"Eager Gradle configuration resolution: {source}:1: {EAGER.strip()}\n"
+            for source in (name, "real-target/build.gradle.kts")
+        ), result.stderr)
+        self.assertEqual("", result.stdout)
+
+    def test_file_alias_can_expand_through_directory_alias_target_ending_in_slash(self):
+        self.write("real-target/source.gradle.kts", EAGER)
+        (self.directory / "adapter").symlink_to("real-target/")
+        (self.directory / "alias.gradle.kts").symlink_to("adapter/source.gradle.kts")
+        self.git("add", "--", "alias.gradle.kts")
+        self.write(".gitignore", "/real-target/\n/adapter\n")
+        self.assertEqual(EAGER, (self.directory / "alias.gradle.kts").read_text())
+        result = self.scan()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn(f"Eager Gradle configuration resolution: alias.gradle.kts:1: {EAGER.strip()}\n", result.stderr)
+        self.assertNotIn("failed:", result.stderr)
+        self.assertEqual("", result.stdout)
+
     def test_alias_target_directory_unreadable_still_fails(self):
         target = self.write("real-target/build.gradle.kts", ACTION).parent
         self.write(".gitignore", "/real-target/\n")
