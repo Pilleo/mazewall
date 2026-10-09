@@ -5,7 +5,9 @@ import org.junit.jupiter.api.extension.BeforeEachCallback
 import org.junit.jupiter.api.extension.ExtensionContext
 import org.junit.jupiter.api.extension.ExtensionContext.Namespace
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 
 /**
  * Fails any test that closes a file descriptor which already existed before the
@@ -25,9 +27,13 @@ import java.nio.file.Path
  * Disable temporarily with -Dmazewall.fdguard=off (diagnostics only - never to
  * make a failing test pass).
  */
-class ForeignFdGuard :
-    BeforeEachCallback,
+class ForeignFdGuard internal constructor(
+    private val inspectionRoot: Path,
+    private val readLink: (Path) -> Path,
+) : BeforeEachCallback,
     AfterEachCallback {
+    constructor() : this(Path.of("/proc/self/fd"), Files::readSymbolicLink)
+
     override fun beforeEach(context: ExtensionContext) {
         if (isDisabled()) return
         context.getStore(NAMESPACE).put(FD_KEY, currentFds())
@@ -59,16 +65,23 @@ class ForeignFdGuard :
     )
 
     private fun currentFds(): Set<FdInfo> =
-        Files.list(Path.of("/proc/self/fd")).use { stream ->
+        Files.list(inspectionRoot).use { stream ->
             val inspectionDirectory = "/proc/${ProcessHandle.current().pid()}/fd"
             stream
                 .map { p ->
-                val id = p.fileName.toString().toInt()
-                val target = runCatching { Files.readSymbolicLink(p).toString() }
-                    .fold({ it }, { _ -> "unreadable" })
-                FdInfo(id, target)
-            }.filter { it.target != inspectionDirectory }
+                    val id = p.fileName.toString().toInt()
+                    val target = try {
+                        readLink(p).toString()
+                    } catch (_: NoSuchFileException) {
+                        // An enumerated entry is not a verified descriptor identity.
+                        // Do not mistake a missing inspection root for an entry race.
+                        Files.readAttributes(inspectionRoot, BasicFileAttributes::class.java)
+                        return@map null
+                    }
+                    FdInfo(id, target)
+                }.filter { it != null && it.target != inspectionDirectory }
                 .toList()
+                .filterNotNull()
                 .toSet()
         }
 
