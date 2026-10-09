@@ -12,6 +12,154 @@ import kotlin.test.assertTrue
 
 class IsolatedProcessTesterLifecycleTest {
     @Test
+    fun `reflection runner exits zero after real successful invocation`() {
+        val result = runnerProcess(RunnerSuccess::class.java.name, "succeed", "argument-receipt")
+        kotlin.test.assertEquals(0, result.first)
+        assertTrue(result.second.contains("runner-success:argument-receipt"))
+    }
+
+    @Test
+    fun `reflection runner usage exits one without invocation`() {
+        val result = runnerProcess()
+        kotlin.test.assertEquals(1, result.first)
+        assertTrue(result.second.contains("Usage: IsolatedTestRunner"))
+    }
+
+    @Test
+    fun `reflection runner unwraps ordinary invocation failure and exits two`() {
+        val result = runnerProcess(RunnerSuccess::class.java.name, "ordinaryFailure")
+        kotlin.test.assertEquals(2, result.first)
+        assertTrue(result.second.contains("java.lang.IllegalStateException: ordinary invocation receipt"))
+        assertFalse(result.second.contains("java.lang.reflect.InvocationTargetException"), "reflection wrapper must not obscure the invoked cause")
+    }
+
+    @Test
+    fun `reflection invocation fatal is unwrapped and reported rather than mistaken for direct fatal`() {
+        val result = runnerProcess(RunnerSuccess::class.java.name, "fatalFailure")
+        kotlin.test.assertEquals(2, result.first)
+        assertTrue(result.second.contains("java.lang.AssertionError: invoked fatal receipt"))
+        assertFalse(result.second.contains("java.lang.reflect.InvocationTargetException"))
+    }
+
+    @Test
+    fun `direct fatal class initialization escapes runner ordinary failure handling`() {
+        val result = runnerProcess(RunnerFatalInitialization::class.java.name, "succeed")
+        kotlin.test.assertEquals(1, result.first)
+        assertTrue(result.second.contains("Exception in thread \"main\" java.lang.AssertionError: direct initialization fatal receipt"))
+        assertFalse(result.second.contains("IsolatedTestRunner failed to execute"))
+    }
+
+    @Test
+    fun `only missing no argument constructor falls back to actual INSTANCE`() {
+        val result = runnerProcess(RunnerSingleton::class.java.name, "succeed")
+        kotlin.test.assertEquals(0, result.first)
+        assertTrue(result.second.contains("trying INSTANCE: java.lang.NoSuchMethodException:"))
+        assertTrue(result.second.contains("actual INSTANCE invocation receipt"))
+    }
+
+    @Test
+    fun `failed INSTANCE lookup retains original missing constructor evidence`() {
+        val result = runnerProcess(RunnerWithoutSingleton::class.java.name, "succeed")
+        kotlin.test.assertEquals(2, result.first)
+        assertTrue(result.second.contains("java.lang.NoSuchFieldException: INSTANCE"))
+        assertTrue(result.second.contains("Suppressed: java.lang.NoSuchMethodException: ${RunnerWithoutSingleton::class.java.name}.<init>()"))
+    }
+
+    @Test
+    fun `constructor invocation failure never falls back to available INSTANCE`() {
+        val result = runnerProcess(RunnerFailingConstructor::class.java.name, "succeed")
+        kotlin.test.assertEquals(2, result.first)
+        assertTrue(result.second.contains("java.lang.IllegalStateException: constructor invocation receipt"))
+        assertFalse(result.second.contains("trying INSTANCE"))
+        assertFalse(result.second.contains("forbidden constructor fallback receipt"))
+    }
+
+    @Test
+    fun `runner boundary retains null cause wrapper and direct fatal identity in independent process`() {
+        val result = runnerProcess(mainClass = IsolatedTestRunner::class.java.name + "\$FailureClassificationFixture")
+        kotlin.test.assertEquals(0, result.first)
+        assertTrue(result.second.contains("null-wrapper and direct-fatal identities retained"))
+    }
+
+    private fun runnerProcess(
+        vararg arguments: String,
+        mainClass: String = IsolatedTestRunner::class.java.name,
+    ): Pair<Int, String> {
+        val output = Files.createTempFile("isolated-runner-contract-", ".log")
+        val builder = ProcessBuilder(
+            listOf(System.getProperty("java.home") + "/bin/java", "-Xmx128m", "-cp", System.getProperty("java.class.path"), mainClass) + arguments,
+        ).redirectErrorStream(true).redirectOutput(output.toFile())
+        // This root test module has no internal platform access. Only child JVM
+        // option inheritance is removed; the runner itself is executed unchanged.
+        listOf("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS").forEach { builder.environment().remove(it) }
+        val process = builder.start()
+        try {
+            assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS), "actual runner child must exit within bound")
+            return process.exitValue() to Files.readString(output)
+        } finally {
+            process.destroyForcibly()
+            assertTrue(process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS), "actual runner child must be physically reaped")
+            assertFalse(process.isAlive)
+        }
+    }
+
+    internal class RunnerSuccess {
+        fun succeed(argument: String) = println("runner-success:$argument")
+
+        fun ordinaryFailure(): Unit = throw IllegalStateException("ordinary invocation receipt")
+
+        fun fatalFailure(): Unit = throw AssertionError("invoked fatal receipt")
+    }
+
+    internal class RunnerFatalInitialization {
+        fun succeed() = println("must never execute")
+
+        companion object {
+            init {
+                throw AssertionError("direct initialization fatal receipt")
+            }
+        }
+    }
+
+    internal class RunnerSingleton private constructor(
+        val receipt: Boolean,
+    ) {
+        fun succeed() {
+            check(receipt)
+            println("actual INSTANCE invocation receipt")
+        }
+
+        companion object {
+            @JvmField
+            val INSTANCE = RunnerSingleton(true)
+        }
+    }
+
+    internal class RunnerWithoutSingleton(
+        val receipt: Boolean,
+    ) {
+        fun succeed() = check(receipt)
+    }
+
+    internal class RunnerFailingConstructor private constructor(
+        val receipt: Boolean,
+    ) {
+        constructor() : this(false) {
+            throw IllegalStateException("constructor invocation receipt")
+        }
+
+        fun succeed() {
+            check(receipt)
+            println("forbidden constructor fallback receipt")
+        }
+
+        companion object {
+            @JvmField
+            val INSTANCE = RunnerFailingConstructor(true)
+        }
+    }
+
+    @Test
     fun `successful completion still cleans and reaps descendants`() {
         val process = ProcessBuilder("/bin/true").start()
         assertTrue(process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS))
@@ -83,6 +231,26 @@ class IsolatedProcessTesterLifecycleTest {
         }.exceptionOrNull()
         assertTrue(caught === fatal)
         assertTrue(fatal.suppressed.contentEquals(arrayOf(cleanup)))
+    }
+
+    @Test
+    fun `late fatal cleanup outranks ordinary wait failure without abandoning forced reap`() {
+        val process = ProcessBuilder("/bin/true").start()
+        assertTrue(process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS))
+        val ordinary = IllegalStateException("ordinary wait fixture")
+        val fatal = AssertionError("late fatal cleanup fixture")
+        val lifecycle = RecordingLifecycle(
+            waitFailure = ordinary,
+            destroyFailure = fatal,
+            awaitResults = ArrayDeque(listOf(false, true)),
+        )
+        val caught = runCatching {
+            IsolatedProcessTester.verifyLifecycleForTesting(process, Duration.ofSeconds(1), listOf("fixture"), lifecycle)
+        }.exceptionOrNull()
+        assertTrue(caught === fatal, "fatal cleanup must remain the primary failure")
+        assertTrue(fatal.suppressed.contentEquals(arrayOf(ordinary)), "ordinary failure identity must survive promotion")
+        assertTrue(lifecycle.forced, "fatal graceful cleanup must not abandon forced cleanup")
+        assertTrue(lifecycle.awaitResults.isEmpty(), "both physical termination checks must be consumed")
     }
 
     @Test
@@ -223,7 +391,7 @@ class IsolatedProcessTesterLifecycleTest {
         private val waitResult: Boolean = false,
         private val waitFailure: Throwable? = null,
         private val enumerationFailure: RuntimeException? = null,
-        private val destroyFailure: RuntimeException? = null,
+        private val destroyFailure: Throwable? = null,
         private val awaitFailure: InterruptedException? = null,
         val awaitResults: ArrayDeque<Boolean> = ArrayDeque(),
         val descendantResults: ArrayDeque<List<ProcessHandle>> = ArrayDeque(),

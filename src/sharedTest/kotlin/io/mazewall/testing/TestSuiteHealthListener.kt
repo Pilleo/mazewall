@@ -109,6 +109,7 @@ class TestSuiteHealthListener : LauncherSessionListener {
 
             println(
                 String.format(
+                    java.util.Locale.ROOT,
                     "Class: %-50s | Executed: %3d | Skipped: %3d | Aborted: %3d | Failed: %3d | Container aborted: %3d | Container failed: %3d",
                 className,
                     executed,
@@ -129,6 +130,7 @@ class TestSuiteHealthListener : LauncherSessionListener {
         println("--------------------------------")
         println(
             String.format(
+                java.util.Locale.ROOT,
                 "Total: %-50s | Executed: %3d | Skipped: %3d | Aborted: %3d | Failed: %3d | Container aborted: %3d | Container failed: %3d",
             "",
                 totalExecuted,
@@ -188,7 +190,7 @@ class TestSuiteHealthListener : LauncherSessionListener {
             val totalSkipLike = totalSkipped + totalAborted + totalContainerAborted
             if (totalSkipLike > 0) {
                 System.err.println("Strict Test Tier check failed: found $totalSkipLike skipped/aborted tests.")
-                throw RuntimeException("Strict Test Tier check failed: found $totalSkipLike skipped/aborted tests.")
+                error("Strict Test Tier check failed: found $totalSkipLike skipped/aborted tests.")
             }
         }
     }

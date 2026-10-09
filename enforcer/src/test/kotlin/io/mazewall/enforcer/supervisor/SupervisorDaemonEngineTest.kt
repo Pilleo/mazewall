@@ -336,7 +336,7 @@ class SupervisorDaemonEngineTest {
                 LinuxNative.SyscallResult.Success(1L)
             } else {
                 // Throw to break the loop on second iteration
-                throw RuntimeException("Simulated loop interrupt")
+                throw IllegalStateException("Simulated loop interrupt")
             }
         }
 

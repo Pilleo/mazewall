@@ -1,5 +1,6 @@
 package io.mazewall.enforcer.api
 
+import io.mazewall.platform.fd.CleanupFailures
 import java.io.File
 import java.time.Duration
 import java.util.concurrent.TimeUnit
@@ -177,6 +178,7 @@ object IsolatedProcessTester {
         var failure: Throwable? = null
         var interrupted = Thread.interrupted()
         try {
+        val waiting = runCatching {
             if (interrupted) throw InterruptedException("Isolated test waiter was already interrupted")
             if (!lifecycle.waitFor(process, timeout)) {
                 failure = IllegalStateException(
@@ -191,22 +193,22 @@ object IsolatedProcessTester {
                     )
                 }
             }
-        } catch (caught: Throwable) {
-            interrupted = interrupted || caught is InterruptedException
-            failure = if (caught is InterruptedException) {
-                IllegalStateException("Interrupted while waiting for isolated test process", caught)
-            } else {
-                caught
+        }
+        waiting.exceptionOrNull()?.let { caught ->
+            failure = when (caught) {
+                is InterruptedException -> {
+                    interrupted = true
+                    IllegalStateException("Interrupted while waiting for isolated test process", caught)
+                }
+                else -> caught
             }
+        }
         } finally {
-            interrupted = Thread.interrupted() || interrupted
             try {
-                terminateTree(process, lifecycle)
-            } catch (cleanupFailure: Throwable) {
-                if (failure == null) {
-                    failure = cleanupFailure
-                } else if (failure !== cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure)
+                interrupted = Thread.interrupted() || interrupted
+                val cleanup = runCatching { terminateTree(process, lifecycle) }
+                cleanup.exceptionOrNull()?.let { cleanupFailure ->
+                    failure = CleanupFailures.merge(failure, cleanupFailure)
                 }
             } finally {
                 interrupted = Thread.interrupted() || interrupted
@@ -232,18 +234,15 @@ object IsolatedProcessTester {
         var interrupted = Thread.interrupted()
 
         fun attempt(action: () -> Unit) {
-            try {
-                action()
-            } catch (caught: Throwable) {
-                interrupted = interrupted || caught is InterruptedException
-                if (failure == null) {
-                    failure = caught
-                } else if (failure !== caught) {
-                    failure.addSuppressed(caught)
+            val outcome = runCatching(action)
+            outcome.exceptionOrNull()?.let { caught ->
+                when (caught) {
+                    is InterruptedException -> interrupted = true
+                    else -> Unit
                 }
-            } finally {
-                interrupted = Thread.interrupted() || interrupted
+                failure = CleanupFailures.merge(failure, caught)
             }
+            interrupted = Thread.interrupted() || interrupted
         }
         try {
             var descendants = emptyList<ProcessHandle>()
@@ -293,13 +292,18 @@ object IsolatedTestRunner {
         val methodName = args[1]
         val methodArgs = args.drop(2).toTypedArray()
 
-        try {
+        val execution = runCatching {
             val clazz = Class.forName(className)
             val instance = try {
                 clazz.getDeclaredConstructor().apply { isAccessible = true }.newInstance()
             } catch (e: NoSuchMethodException) {
                 // Handle objects/singletons
-                clazz.getField("INSTANCE").get(null)
+                System.err.println("No no-argument constructor for $className; trying INSTANCE: $e")
+                val singleton = runCatching { clazz.getField("INSTANCE").get(null) }
+                singleton.exceptionOrNull()?.let { failure ->
+                    if (failure !== e) failure.addSuppressed(e)
+                }
+                singleton.getOrThrow()
             }
 
             val methods = clazz.declaredMethods.filter { it.name == methodName }
@@ -326,12 +330,39 @@ object IsolatedTestRunner {
 
                 else -> method.invoke(instance, *methodArgs)
             }
+        }
+        val failure = execution.exceptionOrNull()
+        if (failure == null) {
             System.exit(0)
-        } catch (e: Exception) {
-            val cause = if (e is java.lang.reflect.InvocationTargetException) e.cause ?: e else e
-            System.err.println("IsolatedTestRunner failed to execute $className.$methodName: ${cause.message}")
-            cause.printStackTrace(System.err)
-            System.exit(2)
+            return
+        }
+        val cause = invocationFailure(failure)
+        System.err.println("IsolatedTestRunner failed to execute $className.$methodName: ${cause.message}")
+        cause.printStackTrace(System.err)
+        System.exit(2)
+    }
+
+    /** Per-invocation classification boundary; direct non-Exception failures are never reported as exit 2. */
+    internal fun invocationFailure(failure: Throwable): Throwable =
+        when (failure) {
+        is java.lang.reflect.InvocationTargetException -> failure.cause ?: failure
+        is Exception -> failure
+        else -> throw failure
+    }
+
+    /** Subprocess control compiled beside the internal boundary, without cross-module access overrides. */
+    internal object FailureClassificationFixture {
+        @JvmStatic
+        fun main(args: Array<String>) {
+            check(args.isEmpty())
+            val wrapper = java.lang.reflect.InvocationTargetException(null)
+            check(invocationFailure(wrapper) === wrapper)
+            val cause = IllegalStateException("actual wrapper cause receipt")
+            check(invocationFailure(java.lang.reflect.InvocationTargetException(cause)) === cause)
+            val fatal = AssertionError("direct fatal identity receipt")
+            val observed = runCatching { invocationFailure(fatal) }.exceptionOrNull()
+            check(observed === fatal)
+            println("null-wrapper and direct-fatal identities retained")
         }
     }
 }

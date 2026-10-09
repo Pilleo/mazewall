@@ -44,7 +44,7 @@ class PureJavaBpfEngineReproductionTest {
         }
         val mockMemory = object : MockNativeMemory() {
             context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
-                throw RuntimeException("Simulated filter building failure")
+                throw IllegalStateException("Simulated filter building failure")
             }
         }
         val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)

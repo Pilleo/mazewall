@@ -191,6 +191,7 @@ class ContainmentDesignSpec :
                     Arch.current()
                     true
                 } catch (e: java.lang.UnsupportedOperationException) {
+                    System.err.println("Unsupported containment architecture: $e")
                     false
                 }
                 if (isSupported) {

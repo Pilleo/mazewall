@@ -83,7 +83,7 @@ class HighConcurrencyInstallationTest {
 
         repeat(taskCount) {
             wrapped.execute {
-                throw RuntimeException("Simulated task failure")
+                throw IllegalStateException("Simulated task failure")
             }
         }
 
