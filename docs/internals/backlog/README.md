@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 106 | *Total Resolved Issues:* 646
+*Total Active Issues:* 114 | *Total Resolved Issues:* 646
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -30,6 +30,14 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr](issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr.md) | Adopt typed prepared ordinary-JAR resources in Spring and prove native JDBC lifecycle | high | spring-integration |
+| [issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-](issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-.md) | Declare optional Koog production plugin bootstrap and Portal runtime publication | high | integrations |
+| [issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin](issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin.md) | Bind supported exploded and Boot deployment origins to genuine prepared owners | high | enforcer |
+| [issue-20261008-104505-709-root-verification-graph-must-select-grouping-java-](issue-20261008-104505-709-root-verification-graph-must-select-grouping-java-.md) | Root verification graph must select grouping Java and Kotlin quality gates by plugin | high | core |
+| [issue-20261008-111819-937-prove-clean-executable-boot-singleton-report-with-](issue-20261008-111819-937-prove-clean-executable-boot-singleton-report-with-.md) | Prove clean executable Boot singleton report with reviewed typed resources | high | spring-integration |
+| [issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge](issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge.md) | Implement bounded upstream Koog Portal tool and generated packaged consumer | high | integrations |
+| [issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio](issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio.md) | Bind prepared core resources and reviewed operation identities | high | enforcer |
+| [issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati](issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md) | Bind approved synchronous Spring singleton operations and JDBC outcomes | high | spring-integration |
 | [issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s](issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s.md) | Restrict Gradle resolution discovery to checkout source inventory | high | core |
 | [issue-20261009-002130-433-diagnose-eperm-executable-mmap-crashing-iterative-](issue-20261009-002130-433-diagnose-eperm-executable-mmap-crashing-iterative-.md) | Diagnose EPERM executable mmap crashing iterative profiler task JVM | high | profiler |
 | [issue-20261009-000016-699-investigate-intermittent-interrupted-broker-close-](issue-20261009-000016-699-investigate-intermittent-interrupted-broker-close-.md) | Investigate intermittent interrupted broker close cleanup classification | medium | portal-runtime |
