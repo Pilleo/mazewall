@@ -47,6 +47,7 @@ include(":demos:agent-sandbox-demo")
 // Incubating framework adapters are verified explicitly without changing core dependencies.
 if (providers.gradleProperty("includeSpringIntegration").orNull == "true") {
     include(":integrations:spring:mazewall-spring-boot")
+    include(":integrations:spring:mazewall-spring-boot-starter")
 }
 
 // The demo consumes the plugin built by scripts/koog-build.sh in a preceding build.
