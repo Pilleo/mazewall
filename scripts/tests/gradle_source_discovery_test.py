@@ -292,6 +292,35 @@ class SourceDiscoveryTest(unittest.TestCase):
         link.symlink_to(self.directory / "real-target", target_is_directory=True)
         self.assert_eager("real-target/build.gradle.kts")
 
+    def globally_ignored_visible_alias(self, contents):
+        target = self.write("real-target/build.gradle.kts", contents)
+        self.write(".gitignore", "/real-target/\n")
+        (self.directory / "visible-adapter").symlink_to(target.parent, target_is_directory=True)
+        # Owned fixture config is selected only for child processes, never installed.
+        excludes = self.write(".git/fixture-global-excludes", "visible-adapter\n")
+        config = self.write(".git/fixture-global-config", f"[core]\n\texcludesFile = {excludes}\n")
+        self.environment["GIT_CONFIG_GLOBAL"] = str(config)
+        self.assertEqual("visible-adapter\n", self.git("check-ignore", "--no-index", "visible-adapter").stdout)
+        self.assertEqual("", self.git("ls-files").stdout)
+        return target, config, excludes
+
+    def test_global_git_ignore_cannot_hide_visible_alias_eager_target(self):
+        target, config, excludes = self.globally_ignored_visible_alias(EAGER)
+        before = (config.read_bytes(), excludes.read_bytes(), self.environment.copy())
+        self.assert_eager("real-target/build.gradle.kts")
+        self.assertEqual(before, (config.read_bytes(), excludes.read_bytes(), self.environment.copy()))
+        self.assertTrue(target.is_file())
+
+    def test_global_git_ignore_cannot_hide_visible_alias_unreadable_target(self):
+        target, config, excludes = self.globally_ignored_visible_alias(ACTION)
+        before = (config.read_bytes(), excludes.read_bytes(), self.environment.copy())
+        self.deny(target)
+        result = self.scan()
+        self.assertNotEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Permission denied", result.stderr)
+        self.assertIn("real-target/build.gradle.kts", result.stderr)
+        self.assertEqual(before, (config.read_bytes(), excludes.read_bytes(), self.environment.copy()))
+
     def test_alias_expands_symlink_before_parent_component(self):
         self.write(".gitignore", "/hidden/\n/real-target/\n")
         self.write("hidden/module/build.gradle.kts", EAGER)

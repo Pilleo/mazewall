@@ -439,8 +439,10 @@ def alias_source_inventory(indexed_paths: set[Path], git_environment: dict[str, 
                               for entry in entries if entry.name not in private and entry.name != "build"]
             ignored = set()
             if git_environment is not None and candidates and not forced:
+                # Match rg's checkout-local ignores without changing caller config.
                 selection = subprocess.run(
-                    ["git", "--no-optional-locks", "check-ignore", "--no-index", "-z", "--stdin"],
+                    ["git", "--no-optional-locks", "-c", "core.excludesFile=/dev/null",
+                     "check-ignore", "--no-index", "-z", "--stdin"],
                     input=b"".join(os.fsencode(path) + b"\0" for path, _ in candidates),
                     stdout=subprocess.PIPE, env=git_environment, check=False,
                 )

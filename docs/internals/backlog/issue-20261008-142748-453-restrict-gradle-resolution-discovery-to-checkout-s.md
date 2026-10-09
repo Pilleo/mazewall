@@ -155,5 +155,23 @@ containment. No source/cache/link changes, parser broadening or index-policy
 changes. Keep open for independent review/coordinator acceptance; final private
 commit and full unchanged locked-hook evidence are in the task-3 AO artifact report.
 
+## Final broad-review correction — ambient Git excludes
+
+At base `ab9702cf48beea08f0ea69f5f0af7bfd527576bc`, the supplementary alias
+walk inherited global `core.excludesFile`, unlike ripgrep's global-ignore-disabled
+inventory. An untracked visible alias could therefore be skipped while its
+physical target was locally ignored. Actual-entrypoint RED `run-0ed6e80400ab`
+reproduced silent exit0 for both eager and unreadable target scripts (two failures).
+
+The ignore-query child now overrides `core.excludesFile` with `/dev/null` per
+command. Checkout `.gitignore` and repository-local scratch rules remain active;
+parent configuration/environment, default-index isolation, ordered path fixes,
+parser and directory graph are unchanged. Two owned temporary global-config
+fixtures assert eager diagnostics and fail-closed permission/path diagnostics,
+and preserve their config/excludes bytes and caller environment. Final GREEN,
+unchanged locked-hook and private-commit evidence are in `final-fix-report.md`
+in the task-4 AO artifacts. Keep open for coordinator acceptance; native/runtime
+and operational caveats are not repaired by this inventory correction.
+
 ---
 <!-- id: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s  file: issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s.md -->

@@ -77,7 +77,13 @@ relative/dot/absolute variants and explicit boundary/permission failures.
 
 Directory aliases visit physical `(device,inode)` identities. Repeated aliases do
 not suppress real Gradle source: an active alias forces coverage of its target even
-when normal local VCS ignores hide that physical directory. Normal and forced
+when normal local VCS ignores hide that physical directory. Supplementary alias
+discovery also ignores ambient Git `core.excludesFile` rules: the child
+`check-ignore` command overrides that file with `/dev/null`, retaining checkout
+`.gitignore` and repository-local scratch exclusions without mutating parent
+configuration or environment. Actual-entrypoint eager and unreadable-target
+fixtures use owned temporary global Git configuration to protect this contract.
+Normal and forced
 coverage each expand a physical directory at most once; a directory-edge graph
 rejects cycles even across already-visited sibling aliases. Indexed source and
 links remain authoritative under the actual default Git index. Legitimate contained
