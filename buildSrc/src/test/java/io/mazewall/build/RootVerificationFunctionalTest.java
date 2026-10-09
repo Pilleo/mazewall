@@ -34,6 +34,7 @@ final class RootVerificationFunctionalTest {
             String source = Files.readString(rootBuild);
             write(fixture, "build.gradle.kts", """
                 import org.gradle.api.publish.PublishingExtension
+                import java.util.jar.JarFile
                 plugins {
                     java
                     alias(libs.plugins.kotlin) apply false
@@ -56,6 +57,21 @@ final class RootVerificationFunctionalTest {
             write(fixture, "integrations/spring/java-leaf/build.gradle.kts", """
                 plugins { `java-library` }
                 dependencies { testImplementation("junit:junit:4.13.2") }
+                tasks.register("verifyCoverageSelection") {
+                    doLast {
+                        val unitReport = tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport").get()
+                        val combined = tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoCombinedReport").get()
+                        val unitGate = tasks.named<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoTestCoverageVerification").get()
+                        val kernelGate = tasks.named<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoKernelCoverageVerification").get()
+                        check(unitReport.classDirectories.files.isNotEmpty())
+                        check(unitReport.classDirectories.files == combined.classDirectories.files)
+                        check(unitReport.classDirectories.files == unitGate.classDirectories.files)
+                        check(combined.classDirectories.files == kernelGate.classDirectories.files)
+                        check(unitReport.executionData.files == unitGate.executionData.files)
+                        check(combined.executionData.files == kernelGate.executionData.files)
+                        check(unitReport.executionData.files.none { it.name.startsWith("integrationTest") })
+                    }
+                }
                 """);
             write(fixture, "integrations/spring/starter/build.gradle.kts", "plugins { `java-library` }\n");
             write(fixture, "integrations/spring/java-leaf/src/main/java/io/mazewall/Answer.java", """
@@ -84,8 +100,28 @@ final class RootVerificationFunctionalTest {
             write(fixture, "portals/build.gradle.kts", "plugins { base }\n");
 
             BuildResult selected = run(fixture, false,
-                ":integrations:build", ":core:build", ":portals:build", ":unitCheck", ":kernelCheck");
+                ":integrations:build", ":core:build", ":portals:build", ":unitCheck", ":kernelCheck",
+                ":integrations:spring:java-leaf:verifyCoverageSelection");
             assertQuality(selected);
+            Path combined = fixture.resolve("integrations/spring/java-leaf/build/reports/jacoco/jacocoCombinedReport/jacocoCombinedReport.xml");
+            String combinedXml = Files.readString(combined);
+            if (!combinedXml.contains("name=\"io/mazewall/Answer\"")) {
+                throw new AssertionError("Custom combined report lost executable main denominator: " + combinedXml);
+            }
+            Path leafBuild = fixture.resolve("integrations/spring/java-leaf/build.gradle.kts");
+            String passingBuild = Files.readString(leafBuild);
+            Files.writeString(leafBuild, """
+                tasks.named<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoKernelCoverageVerification") {
+                    violationRules { rule { limit { minimum = "0.99".toBigDecimal() } } }
+                }
+                """, java.nio.file.StandardOpenOption.APPEND);
+            BuildResult coverageFailure = run(fixture, true,
+                ":integrations:spring:java-leaf:jacocoKernelCoverageVerification");
+            outcome(coverageFailure, ":integrations:spring:java-leaf:jacocoKernelCoverageVerification", TaskOutcome.FAILED);
+            if (!coverageFailure.getOutput().contains("instructions covered ratio")) {
+                throw new AssertionError("Expected genuine inadequate coverage rejection: " + coverageFailure.getOutput());
+            }
+            Files.writeString(leafBuild, passingBuild);
             // Grouping projects never acquire fake source sets, analyzers or coverage gates.
             for (String group : List.of(":integrations", ":integrations:spring", ":portals")) {
                 for (String task : List.of("compileJava", "test", "spotbugsMain", "detektMain", "jacocoTestReport")) {

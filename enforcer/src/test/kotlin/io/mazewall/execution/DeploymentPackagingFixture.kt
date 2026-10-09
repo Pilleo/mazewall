@@ -168,9 +168,28 @@ internal object DeploymentPackagingFixture {
         vararg arguments: String,
         probeClass: String = "io.mazewall.enforcer.api.execution.DeploymentOriginProbe",
     ): String {
+        val agent = System.getProperty("mazewall.test.childCoverage.agent")
+        val directory = System.getProperty("mazewall.test.childCoverage.directory")
+        check((agent == null) == (directory == null)) { "Owned child coverage requires both agent and output directory" }
+        val executionData = directory?.let {
+            val ownedDirectory = Path.of(it)
+            check(Files.isDirectory(ownedDirectory)) { "Missing owned child coverage directory" }
+            ownedDirectory.resolve("boot-${java.util.UUID.randomUUID()}.exec").also { path ->
+                check(!Files.exists(path)) { "Child coverage must be fresh" }
+            }
+        }
+        val coverageOptions = if (executionData == null) {
+            emptyList()
+        } else {
+            check(Files.isRegularFile(Path.of(checkNotNull(agent)))) { "Missing trusted child coverage agent" }
+            listOf("-javaagent:$agent=destfile=$executionData,append=false,includes=io.mazewall.*")
+        }
         val builder = ProcessBuilder(
             listOf(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+            ) +
+                coverageOptions +
+                listOf(
                 "--enable-native-access=ALL-UNNAMED",
                 "-Dtask8.probe.classpath=${System.getProperty("java.class.path")}",
                 "-Dtask8.probe.class=$probeClass",
@@ -185,6 +204,9 @@ internal object DeploymentPackagingFixture {
             assertTrue(process.waitFor(30, TimeUnit.SECONDS), "Boot fixture must finish")
             val output = process.inputStream.readNBytes(65536).toString(Charsets.UTF_8)
             assertEquals(0, process.exitValue(), output)
+            executionData?.let {
+                assertTrue(Files.isRegularFile(it) && Files.size(it) > 0, "Configured Boot child must produce owned coverage")
+            }
             return output
         } finally {
             if (process.isAlive) process.destroyForcibly()

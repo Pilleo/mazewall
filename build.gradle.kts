@@ -1,6 +1,7 @@
 import org.gradle.api.publish.PublishingExtension
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.jar.JarFile
 
 /** Demos and :tools are operator/control-plane code; ktlint and detekt stay off them. */
 fun Project.skipsKotlinStyleTools(): Boolean = path.startsWith(":demos") || path.startsWith(":tools")
@@ -442,7 +443,32 @@ subprojects {
             )
 
         val unitTest = tasks.named<Test>("test")
-        val unitExecutionData = project.layout.buildDirectory.file("jacoco/test.exec")
+        val childExecutionDirectory = project.layout.buildDirectory.dir("jacoco/unit-children")
+        val unitExecutionData =
+            files(
+                project.layout.buildDirectory.file("jacoco/test.exec"),
+                fileTree(childExecutionDirectory) { include("*.exec") },
+            )
+        if (project.name == "enforcer") {
+            val agent = files(configurations.named("jacocoAgent"))
+            unitTest.configure {
+                inputs.files(agent).withPropertyName("ownedChildJacocoAgent")
+                outputs.dir(childExecutionDirectory).withPropertyName("ownedChildExecutionData")
+                doFirst {
+                    val directory = childExecutionDirectory.get().asFile
+                    check(directory.deleteRecursively()) { "Cannot clear owned child coverage directory: $directory" }
+                    check(directory.mkdirs()) { "Cannot create fresh owned child coverage directory: $directory" }
+                    val agentJar = directory.resolve("jacocoagent.jar")
+                    JarFile(agent.singleFile).use { archive ->
+                        archive.getInputStream(checkNotNull(archive.getJarEntry("jacocoagent.jar"))).use { input ->
+                            agentJar.outputStream().use { output -> input.copyTo(output) }
+                        }
+                    }
+                    systemProperty("mazewall.test.childCoverage.agent", agentJar.absolutePath)
+                    systemProperty("mazewall.test.childCoverage.directory", directory.absolutePath)
+                }
+            }
+        }
         val kernelExecutionData =
             fileTree(project.layout.buildDirectory.dir("jacoco")) {
                 include("integrationTest.exec", "integrationTestFreshJvm.exec")
@@ -453,9 +479,17 @@ subprojects {
                     unitExecutionData,
                     kernelExecutionData,
                     fileTree(rootProject.layout.projectDirectory.dir("enforcer/build/jacoco")).include("*.exec"),
+                    fileTree(rootProject.layout.projectDirectory.dir("enforcer/build/jacoco/unit-children")).include("*.exec"),
                 )
             } else {
                 files(unitExecutionData, kernelExecutionData)
+            }
+
+        val mainSourceSet = extensions.getByType<SourceSetContainer>().named("main")
+        val coveredClasses =
+            mainSourceSet.map { main ->
+                main.output.classesDirs.asFileTree
+                    .matching { exclude(jacocoExcludes) }
             }
 
         fun org.gradle.testing.jacoco.tasks.JacocoReport.configureClasses() {
@@ -465,15 +499,8 @@ subprojects {
             tasks.findByName("processResources")?.let { processResources ->
                 dependsOn(processResources)
             }
-            classDirectories.setFrom(
-                files(
-                    classDirectories.files.map {
-                        fileTree(it) {
-                            exclude(jacocoExcludes)
-                        }
-                    },
-                ),
-            )
+            classDirectories.setFrom(coveredClasses)
+            sourceDirectories.setFrom(mainSourceSet.map { it.allSource.srcDirs })
             reports {
                 xml.required.set(true)
                 html.required.set(true)
@@ -522,15 +549,7 @@ subprojects {
             dependsOn(tasks.named("classes"))
             tasks.findByName("processResources")?.let { processResources -> dependsOn(processResources) }
             executionData.setFrom(unitExecutionData)
-            classDirectories.setFrom(
-                files(
-                    classDirectories.files.map {
-                        fileTree(it) {
-                            exclude(jacocoExcludes)
-                        }
-                    },
-                ),
-            )
+            classDirectories.setFrom(coveredClasses)
             violationRules {
                 if (project.name == "enforcer") {
                     rule {
@@ -581,13 +600,7 @@ subprojects {
             mustRunAfter(tasks.named("jacocoCombinedReport"))
             dependsOn(tasks.named("classes"))
             executionData.setFrom(combinedExecutionData)
-            classDirectories.setFrom(
-                files(
-                    classDirectories.files.map {
-                        fileTree(it) { exclude(jacocoExcludes) }
-                    },
-                ),
-            )
+            classDirectories.setFrom(coveredClasses)
             violationRules {
                 when (project.name) {
                     "enforcer" ->

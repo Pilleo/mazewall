@@ -112,8 +112,10 @@ Unterminated comments/strings/interpolations and unbalanced delimiters fail the
 scan rather than granting an exemption. A passing scan establishes only these
 source-level contracts.
 
-`./gradlew unitCheck` runs the ordinary `test` source set and verifies only
-`build/jacoco/test.exec`. It is the required gate for CI runners that cannot
+`./gradlew unitCheck` runs the ordinary `test` source set and verifies
+`build/jacoco/test.exec` plus owned unit-child files in
+`build/jacoco/unit-children/*.exec`. It never selects kernel execution files.
+It is the required gate for CI runners that cannot
 create a seccomp listener, install Landlock, or use Podman. Unit tests model
 native failures through `NativeEngine` collaborators; they do not weaken a
 failure into a warning merely to make a test run.
@@ -255,6 +257,23 @@ that an aggregate command reran that suite. The latest hardening gate record is
 ## Combined coverage and testability debt
 
 `jacocoCombinedReport` is informational and combines host and kernel evidence.
+Default and custom reports and verifiers select the same actual Java/Kotlin
+`main` class output with the same exclusions; an initially empty custom task's
+class collection is not a production denominator. The executable TestKit
+contract checks that the combined report contains real main classes and that
+the custom verifier rejects inadequate instruction coverage.
+
+Enforcer's existing Boot deployment scenarios collect coverage with an explicit
+agent from the test task's catalogued JaCoCo configuration. The task declares
+the agent input and owned child output directory, clears that directory on
+execution, and passes trusted configuration directly to the test worker.
+Each launch uses a unique, non-appending execution file and requires nonempty
+data on successful exit. The existing bounded wait and physical reaping remain
+mandatory. Only mazewall classes are instrumented: Boot loader and finished
+fixture JAR/resource bytes retain their original identities. Inherited JVM
+options remain stripped; ordinary launches without configured child coverage
+do not add an agent. Unit reports and verifiers include the same owned child
+files, while combined reports additionally select their intended kernel files.
 Native bridges may be excluded from unit coverage only when a kernel contract
 test owns the behavior. If a branch cannot be tested with the existing
 `NativeEngine` seam, inject the required engine or transport collaborator at
