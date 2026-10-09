@@ -37,8 +37,82 @@ class PortalGenerationCaptureTest {
             }
         }
         assertEquals(1, captures.retainedCount)
-        assertSame(fatal, assertThrows(AssertionError::class.java) { captures.retire(Deadline.afterMillis(1000)) })
-        assertEquals(0, captures.retainedCount)
+        assertFalse(source.get().isAlive)
+        Thread.currentThread().interrupt()
+        try {
+            assertSame(fatal, assertThrows(AssertionError::class.java) { captures.retire(Deadline.afterMillis(1000)) })
+            assertTrue(Thread.currentThread().isInterrupted)
+            assertEquals(0, captures.retainedCount)
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test
+    fun `pre interrupted retirement retains physically pending owner`() = interruptedRetirement(true)
+
+    @Test
+    fun `interrupt during retirement retains physically pending owner`() = interruptedRetirement(false)
+
+    private fun interruptedRetirement(beforeWait: Boolean) {
+        val captures = PortalGenerationCaptures()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val source = java.util.concurrent.atomic
+            .AtomicReference<Thread>()
+        val startup = CompletableFuture.supplyAsync {
+            runCatching {
+                captures.measure(Deadline.afterMillis(100), { true }) {
+                    source.set(Thread.currentThread())
+                    entered.countDown()
+                    while (true) {
+                        try {
+                            release.await()
+                            break
+                        } catch (_: InterruptedException) {
+                            // Real physical work remains owned until the gate is released.
+                        }
+                    }
+                }
+            }.exceptionOrNull()
+        }
+        val outcome = CompletableFuture<Pair<Result<Boolean>, Boolean>>()
+        val retiring = Thread.ofPlatform().unstarted {
+            if (beforeWait) Thread.currentThread().interrupt()
+            val result = runCatching { captures.retire(Deadline.afterMillis(2000)) }
+            outcome.complete(result to Thread.currentThread().isInterrupted)
+        }
+        try {
+            assertTrue(entered.await(2, TimeUnit.SECONDS))
+            assertInstanceOf(IllegalStateException::class.java, startup.get(2, TimeUnit.SECONDS))
+            assertEquals(1, captures.retainedCount)
+            assertTrue(source.get().isAlive)
+            retiring.start()
+            if (!beforeWait) {
+                val limit = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
+                while (retiring.stackTrace.none { it.methodName.startsWith("awaitPhysicalEnd") } &&
+                    retiring.isAlive &&
+                    System.nanoTime() < limit
+                ) {
+                        Thread.yield()
+                    }
+                assertTrue(retiring.stackTrace.any { it.methodName.startsWith("awaitPhysicalEnd") }, retiring.stackTrace.contentToString())
+                retiring.interrupt()
+            }
+            val (result, interrupted) = outcome.get(1, TimeUnit.SECONDS)
+            assertEquals(false, result.getOrThrow(), "interrupted wait must report incomplete retirement")
+            assertTrue(interrupted, "retirement must restore interruption")
+            assertEquals(1, captures.retainedCount)
+            assertTrue(source.get().isAlive)
+        } finally {
+            release.countDown()
+            retiring.join(2000)
+            source.get()?.join(2000)
+            assertFalse(retiring.isAlive)
+            assertFalse(source.get()?.isAlive ?: false)
+            assertTrue(captures.retire(Deadline.afterMillis(1000)))
+            assertEquals(0, captures.retainedCount)
+        }
     }
 
     @Test

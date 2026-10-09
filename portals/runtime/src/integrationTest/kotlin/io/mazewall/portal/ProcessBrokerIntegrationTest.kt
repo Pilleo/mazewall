@@ -121,33 +121,51 @@ class ProcessBrokerIntegrationTest {
         }
         val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 5_000))
         val startup = CompletableFuture.runAsync { broker.start() }
-        assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
         val closeReturned = CountDownLatch(1)
         val closeFailure = java.util.concurrent.atomic
             .AtomicReference<Throwable?>()
-        val closer = Thread.ofPlatform().start {
+        val closeInterrupted = java.util.concurrent.atomic
+            .AtomicBoolean()
+        val closer = Thread.ofPlatform().unstarted {
             try {
                 broker.close()
             } catch (failure: Throwable) {
                 closeFailure.set(failure)
             } finally {
+                closeInterrupted.set(Thread.currentThread().isInterrupted)
                 closeReturned.countDown()
             }
         }
-        awaitCondition(java.time.Duration.ofSeconds(2), "close waiting for startup owner") {
-            closer.state in setOf(Thread.State.WAITING, Thread.State.TIMED_WAITING, Thread.State.BLOCKED)
-        }
-        closer.interrupt()
-        assertTrue(closeReturned.await(2, TimeUnit.SECONDS))
-        assertTrue(closeFailure.get() is IncompleteBrokerCleanupException)
+        try {
+            assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
+            closer.start()
+            awaitCondition(java.time.Duration.ofSeconds(2), "close in awaitBrokerStartup for active launcher acquisition") {
+                val stack = closer.stackTrace
+                stack.any { it.className == "io.mazewall.portal.ProcessBrokerKt" && it.methodName.startsWith("awaitBrokerStartup") } &&
+                    stack.any { it.className == "java.util.concurrent.CountDownLatch" && it.methodName == "await" }
+            }
+            closer.interrupt()
+            assertTrue(closeReturned.await(2, TimeUnit.SECONDS), "close did not return: state=${closer.state}, interrupt=${closer.isInterrupted}, failure=${closeFailure.get()}")
+            val failure = closeFailure.get()
+            assertTrue(failure is IncompleteBrokerCleanupException, "actual failure=${failure?.stackTraceToString()}, interrupt=${closeInterrupted.get()}")
+            assertTrue(closeInterrupted.get(), "close must preserve interrupt; actual failure=$failure")
 
-        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
-        assertEquals(1, broker.provisionalWorkers())
-        releaseLaunch.countDown()
-        assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
-        awaitCondition(java.time.Duration.ofSeconds(5), "late interrupted-close child reaped") { lateChild?.isAlive == false }
-        broker.close()
-        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+            assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+            assertEquals(1, broker.provisionalWorkers())
+            releaseLaunch.countDown()
+            assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
+            awaitCondition(java.time.Duration.ofSeconds(5), "late interrupted-close child reaped") { lateChild?.isAlive == false }
+            broker.close()
+            assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+        } finally {
+            releaseLaunch.countDown()
+            closer.join(2000)
+            try {
+                startup.handle { _, _ -> Unit }.get(10, TimeUnit.SECONDS)
+            } finally {
+                broker.close()
+            }
+        }
     }
 
     @Test

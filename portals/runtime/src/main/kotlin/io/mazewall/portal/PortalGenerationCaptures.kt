@@ -99,11 +99,21 @@ internal class PortalGenerationCaptures {
             (resultObserved || result.getNow(null)?.exceptionOrNull() !is Error)
 
         fun awaitPhysicalEnd(deadline: Deadline): Boolean {
-            if (!ended.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS)) return false
-            if (!cancellationEnded.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS)) return false
-            joinWithin(thread, deadline)
-            joinWithin(cancellation, deadline)
-            return physicallyEnded
+            if (physicallyEnded) return true
+            return try {
+                val signalled = ended.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS) &&
+                    cancellationEnded.await(deadline.remainingMillis().coerceAtLeast(0).toLong(), TimeUnit.MILLISECONDS)
+                if (signalled) {
+                    joinWithin(thread, deadline)
+                    joinWithin(cancellation, deadline)
+                    physicallyEnded
+                } else {
+                    false
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                false // Physical owners remain registered for a later retirement attempt.
+            }
         }
 
         private fun joinWithin(

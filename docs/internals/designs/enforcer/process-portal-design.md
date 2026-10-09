@@ -175,7 +175,12 @@ blocking channel-close callback, cancellation has its own registered physical th
 both capture and cancellation threads must terminate/join before ownership retires.
 Result timeout never proves physical I/O end: an operation
 which does not respond to interruption remains owned and prevents Closed until later
-retirement succeeds. Only the startup caller can launch, after a final deadline/active
+retirement succeeds. An interrupted physical retirement wait preserves the caller's
+interrupt status and reports incomplete cleanup without removing its pending owner.
+Already physically ended owners retire without an interruptible wait; their unobserved
+fatal outcomes and cancellation failures remain observable under fatal-first cleanup.
+Result completion and end signals alone never replace the actual thread termination/join
+checks. Only the startup caller can launch, after a final deadline/active
 check; late measurement completion has no launch effect.
 Extra readable paths are deferred.
 
