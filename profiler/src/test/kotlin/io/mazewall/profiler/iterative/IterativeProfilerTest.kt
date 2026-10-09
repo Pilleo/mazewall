@@ -14,6 +14,7 @@ import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.io.File
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 @EnabledIfLinuxAndSupported
@@ -268,19 +269,24 @@ class IterativeProfilerTest {
 
             val basePolicy =
                 WorkerPolicyBuilder
-                    .denyList(RuntimeProfile.NATIVE_IMAGE)
+                    .denyList(RuntimeProfile.HOTSPOT_JIT)
                     .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                     .build()
 
+            assertTrue(basePolicy.allowMmapExec, "This contained read runs on HotSpot and requires executable mappings")
+            var readContent: String? = null
             val compiledPolicy =
                 IterativeProfiler.profile(basePolicy) {
                     // Use a relative path to read the file
                     val relativePath = java.nio.file.Paths
                         .get("build/tmp/iterative-relative-test.txt")
-                    java.nio.file.Files
+                    readContent = java.nio.file.Files
                         .readString(relativePath)
                 }
 
+            assertEquals("content", readContent, "A contained read must succeed, not merely exhaust discovery retries")
+            assertTrue(compiledPolicy.allowedFsWritePaths.isEmpty(), "Read discovery must not grant write access")
+            assertEquals(basePolicy.allowMmapExec, compiledPolicy.allowMmapExec)
             assertTrue(
                 compiledPolicy.allowedFsReadPaths.any { it.value == target.absolutePath },
                 "Should allow read access to absolute path of target: ${target.absolutePath}",

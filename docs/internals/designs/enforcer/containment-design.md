@@ -108,8 +108,11 @@ BPF_RET(DENY)
 > **`JSET` semantics:** `jt=0, jf=1` — if `(ACC & 0x04) != 0` (PROT_EXEC IS set): jt=0, execute `RET_DENY` immediately; else: jf=1, skip over `RET_DENY`.
 
 This blocks only `mmap` / `mprotect` calls where the caller requests executable memory.
-The JVM's own JIT and GC `mmap`/`mprotect` calls do not use `PROT_EXEC` in the way
-that shellcode injection does — they are whitelisted by this check automatically.
+HotSpot executable CodeHeap growth also requests `PROT_EXEC`; this check does not
+distinguish JVM-generated code from shellcode or automatically whitelist it.
+An explicit `HOTSPOT_JIT` profile permits executable mappings; a strict
+`NATIVE_IMAGE` profile does not. JVM coordination-syscall allowances do not make
+the latter profile safe for arbitrary HotSpot work.
 
 ### 3b. `clone` — allow only `CLONE_THREAD`
 
@@ -202,6 +205,16 @@ os::commit_memory(addr, size, 1) failed; error='Operation not permitted' (errno=
 # Native memory allocation (mmap) failed to map N bytes.
 # JVM crashes fatally.
 ```
+
+**Thread-local limitation:** A strict no-executable-mapping profile can also crash
+HotSpot when installed only on a worker. Late JNI native-nmethod generation can
+occur synchronously on that contained thread and require executable CodeHeap
+growth. The retained relative-file read failure involved a late `size0` JNI
+wrapper and a 64 KiB non-profiled executable heap expansion denied with `EPERM`.
+Class loading or one successful warm read does not prove that all late native
+nmethods are ready. Select the runtime profile explicitly for the substrate:
+strict profiles remain fail-closed, without automatic detection or fallback.
+Permitting executable mappings does not itself permit `execve` or `execveat`.
 
 **Correct pattern when blocking network but NOT JIT:**
 ```kotlin
