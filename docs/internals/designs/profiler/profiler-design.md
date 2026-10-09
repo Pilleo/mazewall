@@ -17,6 +17,30 @@ locally requested graceful drain; joining the listener cannot make that profile 
 Rejected handshakes and protocol violations remain terminal during cleanup.
 Diagnostic report dumps use the JSON serializer, including control characters in probe output.
 
+### Self-only diagnostic report scope
+
+`DiagnosticTriageRunner` retains `main(Array<String>)`, `build/triage_report.json`,
+and the string-valued `diagnostics.jvm_thread_dump` field. That field is a
+best-effort `Thread.getAllStackTraces()` snapshot of **the collector's current JVM
+only**, explicitly labelled with its collector PID and scope. It never enumerates
+host processes, infers authority from executable pathnames, attaches to another
+JVM, or sends diagnostic signals. A path containing `java` or `gradle` does not
+establish JVM identity or target ownership.
+
+The failed-test Gradle `runTriage` finalizer starts a **separate JavaExec JVM**.
+Its self snapshot does not diagnose the failed workload JVM, a Gradle daemon, or
+an unrelated process. It includes Java platform-thread stacks only, not virtual
+threads, `Thread.print` monitor/lock details, or virtual-thread pinning evidence.
+Do not infer a workload deadlock or sandbox coordination failure from this
+collector-only evidence.
+
+Rendering limits cap the number of rendered threads, frames per thread, and total
+characters, with visible truncation markers and deterministic thread-ID order.
+They bound **output**, not the acquisition/allocation of `getAllStackTraces()`,
+its safepoint progress, or a hard collection deadline. Ordinary optional snapshot
+exceptions are recorded visibly; fatal JVM errors propagate. The external
+`dmesg` helper's bounded stdout capture is not a timeout for this self snapshot.
+
 ---
 
 ## 1. Architectural Findings & Physics-Level Constraints
