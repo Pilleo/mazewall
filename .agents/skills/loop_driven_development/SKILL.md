@@ -9,7 +9,7 @@ description: >
 
 # Skill: Loop-Driven Development (LDD) for mazewall
 
-This skill instructs autonomous agents on how to execute closed-loop development loops (Maker -> Checker -> Triager) when implementing features or bugfixes in `mazewall`. Jules: the backlog markdown **is** the spec — execute **Needed**, honor **Investigation** / **Side effects**, then this loop.
+Use the backlog/work package as the task contract: execute **Needed** and honor **Investigation** / **Side effects**. Implementation, verification, and diagnosis are phases of this loop; use separate agents only when the runner actually delegates them.
 
 ---
 
@@ -18,7 +18,7 @@ This skill instructs autonomous agents on how to execute closed-loop development
 ```
     +---------------------------------------------------+
     |                   Maker Agent                     |
-    |      (Generates code + test cases from Spec)      |
+    |   (Generates code + tests from work package)     |
     +---------------------------------------------------+
                               |
                               v
@@ -46,16 +46,18 @@ This skill instructs autonomous agents on how to execute closed-loop development
 ### Step 1: Maker (Implementation Phase)
 *   **Action**: Generate code changes and companion test cases.
 *   **Rules**:
-    *   Do not modify files without an accompanying test that reproduces the expected behavior.
+    *   Reproduce bugs and verify non-trivial executable changes with meaningful tests. Documentation-only changes use reference/link checks, `git diff --check`, and backlog validation.
+    *   Follow `.agents/CODE_QUALITY.md`: sealed states/outcomes, enums, exhaustive branches, strict domain types, pure decisions, and minimum visibility.
     *   Verify FFM layouts align with target sizes.
 
 ### Step 2: Checker (Verification Phase)
 *   **Action**: Start with the cheapest verification that covers the work package.
 *   **Commands**:
     *   Inner loop: `./gradlew :<module>:compileKotlin` and `./gradlew :<module>:test --tests <TestClass>`.
-    *   Module gate: `./gradlew :<module>:test` before review.
-    *   Kernel behavior: `./gradlew integrationTest` or `./scripts/run_tests.sh` only when the backlog item declares `needs_kernel: true` or the change installs seccomp, Landlock, or USER_NOTIF behavior.
-    *   Merge gate: `./gradlew build` once after the focused checks pass.
+    *   Module tests: `./gradlew :<module>:test` when broader module evidence is needed.
+    *   Kernel iteration: select the owning module's `integrationTest`/`integrationTestFreshJvm`, or use `./scripts/run_tests.sh` in the configured container environment.
+    *   Completion gate: `./gradlew build` once after focused checks pass. It includes formatting, lint/static analysis, tests, and configured coverage thresholds. Equivalent test commands are alternatives, not cumulative gates.
+    *   Orchestrator changes: `./gradlew build -PincludeOrchestrator=true`.
 *   **Coordination**: Maker, Checker, and Triager are separate agents only when the runner actually spawns them. A single agent follows the same cheap-first sequence itself.
 
 ### Step 3: Triager (Diagnostics Phase)

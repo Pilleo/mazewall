@@ -232,11 +232,18 @@ this is a cooperative test harness, not an arbitrary-process containment boundar
 
 ## Build and evidence gates
 
-`unitCheck` is the fast host-safe development gate. `build` is the full merge gate;
-kernel changes additionally require `integrationTest`, `integrationTestFreshJvm`
-and `./scripts/run_tests.sh` on a suitable host/container environment. The last
-command requires a usable configured Podman or Docker engine. A missing runner or failed kernel test is recorded as a
-failed/unavailable gate, never as passing coverage.
+`unitCheck` is the fast host-safe development gate. `./gradlew build` is the full
+completion gate for included modules: formatting, lint/static analysis, tests,
+and configured coverage thresholds. Its task graph already selects kernel and
+fresh-JVM integration suites. Select owning-module integration tasks for focused
+iteration, or use `./scripts/run_tests.sh` as the containerized test runner;
+equivalent test commands are alternatives, not additional gates after a successful
+full build. The container runner requires a usable configured Podman or Docker
+engine. A missing runner or failed kernel test is recorded as a failed/unavailable
+gate, never as passing coverage. Include `-PincludeOrchestrator=true` when verifying
+orchestrator changes. Documentation-only changes require reference/link checks,
+`git diff --check`, and backlog validation; executable or build-wiring changes
+require their focused tests and final build.
 The runner requests an init/reaper
 so observed orphan descendants are actually reaped. Without it, fresh supervised tests
 can leave zombies under container PID 1 and correctly fail termination assertions.
