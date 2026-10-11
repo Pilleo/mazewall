@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 114 | *Total Resolved Issues:* 647
+*Total Active Issues:* 125 | *Total Resolved Issues:* 653
 
 Agent-development documentation resolved: [canonical build guidance, coding standards, and removal of unused workflow documents](resolved/issue-20261010-223954-987-consolidate-agent-documentation-and-remove-unused-.md).
 
