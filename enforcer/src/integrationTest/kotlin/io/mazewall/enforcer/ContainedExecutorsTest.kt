@@ -287,26 +287,61 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
             .build()
         val features = Platform.featureMatrix
         if (features.landlockTsyncSupported) {
-            try {
+            verifySupportedInstallation {
                 ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
-            } catch (e: Exception) {
-                val strerror13 = io.mazewall.ffi.memory
-                    .getSystemStrerror(13)
-                val matchesLocale = strerror13 != null && e.message?.contains(strerror13, ignoreCase = true) == true
-                if (e.message?.contains("EACCES") == false && e.message?.contains("13") == false && !matchesLocale && e !is io.mazewall.enforcer.api.UnsupportedKernelFeatureException) {
-                    throw e
-                }
             }
         } else {
-            val ex = assertFailsWith<UnsupportedOperationException> {
+            assertFailsWith<io.mazewall.enforcer.api.UnsupportedKernelFeatureException> {
                 ContainedExecutors.installOnProcess(policy as Policy<PolicyScope.ProcessWideSafe, io.mazewall.enforcer.api.Uncompiled>)
             }
-            assertTrue(
-                ex.message!!.contains("Process-wide Landlock") ||
-                ex.message!!.contains("does not support Landlock") ||
-                ex is io.mazewall.enforcer.api.UnsupportedKernelFeatureException,
-            )
         }
+    }
+
+    private fun verifySupportedInstallation(install: () -> Unit) {
+        val installation = runCatching { install() }
+        val failure = installation.exceptionOrNull() ?: return
+        if (failure is Error) throw failure
+        val diagnostic = ContainmentViolationDetector.diagnose(failure) ?: throw failure
+        val message = diagnostic.cause.message ?: throw failure
+        val strerror13 = io.mazewall.ffi.memory
+            .getSystemStrerror(13)
+        val accessDenied = Regex("""\b(?:error|errno)[=:]?\s*13\b|\bEACCES\b""", RegexOption.IGNORE_CASE)
+            .containsMatchIn(message) ||
+            (strerror13 != null && message.contains(strerror13, ignoreCase = true))
+        if (!accessDenied) throw failure
+    }
+
+    @Test
+    fun `quality supported install rejects absent diagnostic`() {
+        val failure = IllegalArgumentException(null as String?)
+        val actual = kotlin.test.assertFails { verifySupportedInstallation { throw failure } }
+        kotlin.test.assertSame(failure, actual)
+    }
+
+    @Test
+    fun `quality supported install rejects unrelated numeric thirteen`() {
+        val failure = java.io.IOException("unrelated operation 13")
+        val actual = kotlin.test.assertFails { verifySupportedInstallation { throw failure } }
+        kotlin.test.assertSame(failure, actual)
+    }
+
+    @Test
+    fun `quality supported install retains fatal identity`() {
+        val failure = AssertionError("fatal installation")
+        val actual = kotlin.test.assertFails { verifySupportedInstallation { throw failure } }
+        kotlin.test.assertSame(failure, actual)
+    }
+
+    @Test
+    fun `quality supported install accepts actual access denial as guard evidence`() {
+        verifySupportedInstallation { throw java.io.IOException("installation failed (error=13)") }
+    }
+
+    @Test
+    fun `quality supported install does not accept operation not permitted`() {
+        val failure = java.io.IOException("installation failed (error=1)")
+        val actual = kotlin.test.assertFails { verifySupportedInstallation { throw failure } }
+        kotlin.test.assertSame(failure, actual)
     }
 
     @Test

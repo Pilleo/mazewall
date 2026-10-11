@@ -13,10 +13,11 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 class StableWorkerCacheGenerationTest {
-    @TempDir lateinit var directory: Path
+    @TempDir var directory: Path? = null
 
     @Test
     fun `stable replacement implementation with identical real service metadata rejects before launch`() {
+        val directory = requireNotNull(directory) { "JUnit must initialize the temporary directory" }
         val manifest = PortalServiceManifest(
             PortalServiceId("owned-echo"),
             OwnedEchoService::class.java.name,

@@ -13,6 +13,8 @@ import io.mazewall.platform.process.*
 import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import io.mazewall.platform.syscall.Syscall
+import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class StackingIntegrationTest : BaseIntegrationTest() {
@@ -57,7 +59,7 @@ class StackingIntegrationTest : BaseIntegrationTest() {
                 Syscall.UMASK,
             )
 
-        try {
+        requireDepthLimit {
             // We try to install 34 filters. Kernel limit is 32.
             for (syscall in safeSyscalls.take(34)) {
                 val policy =
@@ -68,26 +70,49 @@ class StackingIntegrationTest : BaseIntegrationTest() {
                         .build()
                 ContainedExecutors.installOnCurrentThread(policy)
             }
-            // If we reach here, the kernel didn't enforce the limit (or we miscounted)
-            System.err.println("[TEST ERROR] Successfully installed 34 filters, but limit is 32.")
-            System.exit(1)
-        } catch (e: Throwable) {
-            val msg = e.message ?: ""
-            if (msg.contains("32 seccomp filters")) {
-                // Success - we hit the limit as expected.
-                System.out.println("[TEST OK] Hit filter limit as expected: $msg")
-                return
-            }
-            System.err.println("[TEST ERROR] Caught unexpected exception during depth limit test: ${e.javaClass.name}: $msg")
-            e.printStackTrace(System.err)
-            System.exit(2)
         }
+    }
+
+    private fun requireDepthLimit(install: () -> Unit) {
+        val result = runCatching(install)
+        val failure = result.exceptionOrNull()
+        if (failure is IllegalStateException && failure.message.orEmpty().contains("32 seccomp filters")) return
+        result.getOrThrow()
+        throw AssertionError("Successfully installed 34 filters, but limit is 32.")
+    }
+
+    @Test
+    fun `quality depth limit accepts precise diagnostic`() {
+        requireDepthLimit { throw IllegalStateException("Cannot install more than 32 seccomp filters") }
+    }
+
+    @Test
+    fun `quality depth limit rejects successful installation`() {
+        assertThrows(AssertionError::class.java) { requireDepthLimit {} }
+    }
+
+    @Test
+    fun `quality depth limit preserves wrong type diagnostic`() {
+        val failure = IllegalArgumentException("32 seccomp filters")
+        assertSame(failure, assertThrows(IllegalArgumentException::class.java) { requireDepthLimit { throw failure } })
+    }
+
+    @Test
+    fun `quality depth limit preserves unrelated failure`() {
+        val failure = IllegalStateException("unrelated")
+        assertSame(failure, assertThrows(IllegalStateException::class.java) { requireDepthLimit { throw failure } })
+    }
+
+    @Test
+    fun `quality depth limit preserves fatal diagnostic`() {
+        val failure = OutOfMemoryError("32 seccomp filters")
+        assertSame(failure, assertThrows(OutOfMemoryError::class.java) { requireDepthLimit { throw failure } })
     }
 
     @Test
     @EnabledIfLinuxAndSupported
     fun `test filter stacking depth limit`() {
-        // Now the isolated method handles the exception itself and exits with 0 on success.
+        // Only the precise depth-limit failure is accepted by the isolated operation.
         IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testDepthLimit")
     }
 }

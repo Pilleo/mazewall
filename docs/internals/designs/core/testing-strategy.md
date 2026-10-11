@@ -175,6 +175,28 @@ tests, SpotBugs and typed Detekt; injected test and analyzer failures must fail.
 The existing aggregate fixture separately proves configuration-cache reuse,
 and native freshness fixtures remain mandatory in the same executable harness.
 
+Automatic `runTriage` observes failed subproject **Test tasks in the current build**,
+including assertion failures, worker crashes and failures before XML is written.
+Its per-invocation build service receives task-completion events rather than cached
+Boolean providers or old XML. The `testFailureEventsReady` ordering barrier follows
+all selected Tests; the finalizer waits for that barrier's completion event before
+reading the failure flag. Gradle delivers these events asynchronously, serially in
+completion order. The wait is bounded to 60 seconds and interruption/timeout is a
+visible error. Test exceptions and the failed build exit are preserved. Successful,
+up-to-date and no-source Tests do not start the collector, even with stale failure
+XML. An existing report is not automatically removed; its presence alone is not
+evidence that triage ran in this invocation.
+
+`./gradlew -p buildSrc failureTriageTest` runs just the covering executable regression
+without replaying unrelated native fixtures. The mandatory `verificationActionsTest`
+also runs it. It consumes the production root registration, service and collector
+sources in real Gradle/TestKit builds: configuration-cache first/reused failures,
+success/staleness/up-to-date controls, pre-XML and predicate failures, worker crash,
+parallel successful siblings, non-Test failure, and deliberately delayed completion
+delivery. Failed cases must produce actual `DiagnosticTriageRunner` JSON while
+retaining the original failed Test/build. The collector's JVM snapshot remains
+[self-only](../profiler/profiler-design.md#self-only-diagnostic-report-scope).
+
 Use the owning module's named host tests while changing a contract:
 
 ```bash

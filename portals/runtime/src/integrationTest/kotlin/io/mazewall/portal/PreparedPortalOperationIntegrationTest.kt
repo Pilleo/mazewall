@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -36,7 +37,7 @@ class OwnedEchoServicePortalStub(
 }
 
 class PreparedPortalOperationIntegrationTest {
-    @TempDir lateinit var directory: Path
+    @TempDir var directory: Path? = null
 
     @Test
     fun `public prepared operation enforces options and queued cancellation`() {
@@ -151,6 +152,7 @@ class PreparedPortalOperationIntegrationTest {
     }
 
     private fun configuration(limits: PortalRuntimeLimits): PortalRuntimeConfig {
+        val directory = requireNotNull(directory) { "JUnit must initialize the temporary directory" }
         val manifest = PortalServiceManifest(
             PortalServiceId("owned-echo"),
             OwnedEchoService::class.java.name,
@@ -176,7 +178,7 @@ class PreparedPortalOperationIntegrationTest {
             Files.copy(fixture, zip)
             zip.closeEntry()
         }
-        val digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(bundle)).joinToString("") { "%02x".format(it) }
+        val digest = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(bundle)).joinToString("") { "%02x".format(Locale.ROOT, it) }
         return PortalRuntimeConfig(listOf(manifest), mapOf("worker" to PortalWorkerArtifact(bundle, digest)), directory.resolve("cache"), mapOf("restricted" to PortalWorkerProfile()), limits = limits)
     }
 }

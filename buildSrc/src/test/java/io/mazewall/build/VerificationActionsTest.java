@@ -10,6 +10,13 @@ import javax.tools.ToolProvider;
 public final class VerificationActionsTest {
     public static void main(String[] args) {
         Path successMarker = requireSuccessMarker(args);
+        Path rootBuild = successMarker.getParent().getParent().getParent().getParent().resolve("build.gradle.kts");
+        if (args.length == 2) {
+            verifiesFailureTriageWaits();
+            RootVerificationFunctionalTest.verifyFailureTriage(rootBuild);
+            writeSuccessMarker(successMarker);
+            return;
+        }
         String xml = "<file name=\"module/Example.kt\">\n"
             + "<error line=\"12\" column=\"4\" severity=\"warning\" message=\"first\nsecond\" source=\"detekt.Example\" />\n</file>";
         List<String> normalized = DetektWarningRatchetAction.normalize(xml.lines().toList());
@@ -36,15 +43,41 @@ public final class VerificationActionsTest {
             successMarker.getParent().getParent().getParent().getParent().resolve("build.gradle.kts"));
         RootVerificationFunctionalTest.verify(
             successMarker.getParent().getParent().getParent().getParent().resolve("build.gradle.kts"));
+        verifiesFailureTriageWaits();
+        RootVerificationFunctionalTest.verifyFailureTriage(rootBuild);
         writeSuccessMarker(successMarker);
         System.out.println("Verification actions: multiline findings, position invariance, duplicate additions, removals, and severity filtering passed.");
     }
 
     private static Path requireSuccessMarker(String[] args) {
-        if (args.length != 1 || args[0].isBlank()) {
-            throw new AssertionError("verificationActionsTest requires one success-marker path");
+        if ((args.length != 1 && (args.length != 2 || !args[1].equals("--failure-triage"))) || args[0].isBlank()) {
+            throw new AssertionError("verificationActionsTest requires a success-marker path and optional --failure-triage");
         }
         return Path.of(args[0]);
+    }
+
+    private static void verifiesFailureTriageWaits() {
+        var events = new TestFailureTriage.FailureEvents() {
+            @Override public TestFailureTriage.Parameters getParameters() {
+                throw new AssertionError("Await errors must not consult task configuration");
+            }
+        };
+        try {
+            events.awaitFailure(1);
+            throw new AssertionError("Missing completion barrier must fail visibly");
+        } catch (org.gradle.api.GradleException expected) {
+            equal("Timed out awaiting Test failure completion events", expected.getMessage());
+        }
+        Thread.currentThread().interrupt();
+        try {
+            events.awaitFailure(1000);
+            throw new AssertionError("Interrupted completion wait must fail visibly");
+        } catch (org.gradle.api.GradleException expected) {
+            equal(true, expected.getCause() instanceof InterruptedException);
+            equal(true, Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     private static void writeSuccessMarker(Path marker) {

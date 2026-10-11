@@ -16,6 +16,8 @@ import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 @NeedsFreshJvm
@@ -32,8 +34,9 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
                 assertFailsWith<ExecutionException> {
                     future.get()
                 }
-            assertTrue(exception.cause is IllegalStateException)
-            assertTrue(exception.cause!!.message!!.contains("virtual thread"))
+            val cause = assertIs<IllegalStateException>(exception.cause)
+            val message = assertNotNull(cause.message, "Virtual-thread guard failure must explain the rejection")
+            assertTrue(message.contains("virtual thread"))
         } finally {
             executor.shutdown()
         }
@@ -85,8 +88,9 @@ class VirtualThreadGuardrailTest : BaseIntegrationTest() {
                 assertFailsWith<ExecutionException> {
                     future.get()
                 }
-            assertTrue(exception.cause is IllegalStateException)
-            assertTrue(exception.cause!!.message!!.contains("virtual thread"))
+            val cause = assertIs<IllegalStateException>(exception.cause)
+            val message = assertNotNull(cause.message, "Virtual-thread guard failure must explain the rejection")
+            assertTrue(message.contains("virtual thread"))
         } finally {
             executor.shutdown()
         }

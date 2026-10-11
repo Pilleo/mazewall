@@ -360,6 +360,7 @@ class TierERootfulContainerEndpointIntegrationTest {
             )
         } finally {
             runContainerCommand(endpoint.command("rm", "-f", container), Duration.ofSeconds(10))
+            Unit
         }
         assertEquals(0, result.exitCode, result.output)
         assertTrue(result.output.contains("tier-e-ready"), result.output)
@@ -445,7 +446,7 @@ class TierERootfulContainerEndpointIntegrationTest {
             val error = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
                 TierEContainerRun(endpoint, runId, blockedDestination).close()
             }
-            assertTrue(error.message!!.contains("retained for recovery: $name"), error.message)
+            assertTrue(error.message?.contains("retained for recovery: $name") == true, error.message)
             assertEquals("false", runContainerCommand(endpoint.command("inspect", "--format", "{{.State.Running}}", name)).output.trim())
             assertTrue(runContainerCommand(endpoint.command("logs", name)).output.contains("recovery-marker"))
         } finally {
@@ -570,17 +571,17 @@ fi
                 ) { controller ->
                     awaitCondition(Duration.ofSeconds(30), "Docker creation entered under lock") { Files.exists(entered) }
                     releaser = Thread {
-                        try {
+                        runCatching {
                             awaitCondition(Duration.ofSeconds(5), "controller stopped before releasing creation") { !controller.isAlive }
                             Files.writeString(gate, "release\n")
-                        } catch (error: Throwable) {
+                        }.onFailure { error ->
                             releaseFailure.set(error)
                         }
                     }.also { it.start() }
                     error("cancel during owned container creation")
                 }
             }
-            assertTrue(failure.message!!.contains("cancel during owned container creation"))
+            assertTrue(failure.message?.contains("cancel during owned container creation") == true)
             assertTrue(failure.suppressed.isEmpty(), "teardown errors: ${failure.suppressed.contentToString()}")
             releaser?.join(5_000)
             assertTrue(releaser?.isAlive == false)
@@ -630,7 +631,7 @@ fi
                     error("controller interrupted")
                 }
             }
-            assertTrue(failure.message!!.contains("controller interrupted"))
+            assertTrue(failure.message?.contains("controller interrupted") == true)
             assertTrue(failure.suppressed.isEmpty(), "teardown errors: ${failure.suppressed.contentToString()}")
             assertTrue(Thread.currentThread().isInterrupted)
             Thread.interrupted()

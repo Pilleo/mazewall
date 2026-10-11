@@ -13,10 +13,11 @@ import java.util.concurrent.TimeUnit
 import javax.tools.ToolProvider
 
 class WorkerPhysicalReceiptLifetimeTest {
-    @TempDir lateinit var directory: Path
+    @TempDir var directory: Path? = null
 
     @Test
     fun `genuine unsupervised receipt remains rooted while held shutdown and guest execute until parent observes reap`() {
+        val directory = requireNotNull(directory) { "JUnit must initialize the temporary directory" }
         val source = directory.resolve("HeldShutdownWorker.java")
         Files.writeString(
             source,

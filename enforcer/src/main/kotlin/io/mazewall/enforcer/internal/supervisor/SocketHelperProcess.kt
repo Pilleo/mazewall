@@ -27,6 +27,10 @@ internal class SocketHelperProcess private constructor(
     private val channel: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val endpoint: PrivateUnixEndpoint,
 ) : SocketHelper {
+    /** Exact acquired child identity; [close] remains responsible for physical retirement. */
+    internal val processHandle: ProcessHandle
+        get() = process.toHandle()
+
     private val lifetime = SocketHelperLifetime(
         reap = { terminate(process) },
         closeChannel = { RealSocketManager.close(channel) },

@@ -101,9 +101,10 @@ object HotSpotSupportedWorkloadMain {
                 pending = it.pendingOccurrences
             }
             if (failure.pendingOwnership) {
-                try {
+                runCatching {
                     failure.retryCleanup()
-                } catch (cleanup: Exception) {
+                }.onFailure { cleanup ->
+                    if (cleanup !is Exception) throw cleanup
                     failure.addSuppressed(cleanup)
                 }
             }

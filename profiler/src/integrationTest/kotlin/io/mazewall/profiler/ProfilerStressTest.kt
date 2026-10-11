@@ -107,13 +107,14 @@ class ProfilerStressTest : BaseIntegrationTest() {
 
         val results =
             futures.mapIndexed { index, future ->
-                try {
+                runCatching {
                     val valRes = future.get(15, TimeUnit.SECONDS)
                     if (valRes == null) {
                         System.err.println("TASK-$index RETURNED NULL!")
                     }
                     valRes
-                } catch (e: Exception) {
+                }.getOrElse { e ->
+                    if (e !is Exception) throw e
                     throw IllegalStateException("Task $index failed: ${e.message}", e)
                 }
             }

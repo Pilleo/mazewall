@@ -33,11 +33,33 @@ tasks.register('verificationActionsTest', JavaExec) {
     inputs.file(layout.projectDirectory.file('../gradle/libs.versions.toml'))
         .withPropertyName('rootVerificationPluginCatalog')
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(layout.projectDirectory.dir('../profiler/src/main/kotlin/io/mazewall/profiler/triage'))
+        .withPropertyName('productionTriageSources')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file(verificationActionsMarker)
     args(verificationActionsMarker.get().asFile.absolutePath)
     doFirst {
         verificationActionsMarker.get().asFile.delete()
     }
+}
+
+def failureTriageMarker = layout.buildDirectory.file('verification/failure-triage.success')
+tasks.register('failureTriageTest', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'io.mazewall.build.VerificationActionsTest'
+    inputs.files(sourceSets.main.allSource, sourceSets.test.allSource,
+        layout.projectDirectory.file('build.gradle'),
+        layout.projectDirectory.file('../build.gradle.kts'),
+        layout.projectDirectory.file('../gradle/libs.versions.toml'))
+        .withPropertyName('failureTriageVerificationSources')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(layout.projectDirectory.dir('../profiler/src/main/kotlin/io/mazewall/profiler/triage'))
+        .withPropertyName('productionTriageSources')
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(failureTriageMarker)
+    args(failureTriageMarker.get().asFile.absolutePath, '--failure-triage')
+    doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
 tasks.named('check') {

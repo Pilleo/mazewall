@@ -727,28 +727,9 @@ tasks.register<JavaExec>("runTriage") {
     description = "Gathers system telemetry and diagnostics on failure."
     classpath = triageRuntimeClasspath
     mainClass.set("io.mazewall.profiler.triage.DiagnosticTriageRunner")
-
-    val testFailures =
-        objects.listProperty<Boolean>().apply {
-            set(
-                provider {
-                    subprojects.flatMap { it.tasks.withType<Test>() }.map { it.state.failure != null }
-                },
-            )
-        }
-
-    // Only run this diagnostic triage task if the test execution actually failed.
-    onlyIf {
-        testFailures.get().any { it }
-    }
 }
 
-// Wire the triage runner to finalize test execution across all subprojects
-subprojects {
-    tasks.withType<Test>().configureEach {
-        finalizedBy(rootProject.tasks.named("runTriage"))
-    }
-}
+objects.newInstance<io.mazewall.build.TestFailureTriage>().wire(project, tasks.named("runTriage"))
 
 // Resolves the hooks directory for both normal checkouts (.git is a directory) and
 // linked git worktrees (.git is a "gitdir:" pointer file whose target stores the common

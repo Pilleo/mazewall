@@ -13,7 +13,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class RequiredWorkerGenerationTest {
-    @TempDir lateinit var directory: Path
+    @TempDir var directory: Path? = null
 
     @Test
     fun `actual worker rejects changed expected generation after parent ACK`() {
@@ -65,6 +65,7 @@ class RequiredWorkerGenerationTest {
     }
 
     private fun sentinelFixture(): Path {
+        val directory = requireNotNull(directory) { "JUnit must initialize the temporary directory" }
         val source = directory.resolve("AckSentinelWorker.java")
         Files.writeString(
             source,

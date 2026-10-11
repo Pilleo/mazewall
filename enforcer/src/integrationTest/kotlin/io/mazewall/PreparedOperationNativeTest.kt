@@ -38,6 +38,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /** Kernel restrictions run exclusively in a disposable child, never the test worker. */
@@ -253,7 +254,8 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
                     try {
                         assertTrue(closing.await(2, TimeUnit.SECONDS))
                         assertIs<DrainReport.Incomplete>(drain.get(1, TimeUnit.SECONDS))
-                        assertTrue(target.get()!!.isLiveForIo(), "Blocked genuine close must retain its acquisition")
+                        val acquiredDescriptor = assertNotNull(target.get(), "Blocked genuine close must have its acquired descriptor")
+                        assertTrue(acquiredDescriptor.isLiveForIo(), "Blocked genuine close must retain its acquisition")
                         assertTrue(rulesets.all { Files.exists(it) })
                     } finally {
                         release.countDown()
