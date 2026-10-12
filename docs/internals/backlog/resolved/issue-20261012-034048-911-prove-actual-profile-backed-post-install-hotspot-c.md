@@ -1,7 +1,7 @@
 ---
 title: "Prove actual profile-backed post-install HotSpot compilation and coverage custody"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Prove actual profile-backed post-install HotSpot compilation and coverage custody
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled: real USER_NOTIF coverage/drain → selected HOTSPOT_JIT conversion → required Seccomp/Landlock install → completed post-install C1 tier2 target compilation/lazy result → physical end. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-5a/task-5a-review.md` / report (62 selected PASS); exact two-owner bounded observation fix and fresh owning P617 case accepted in `task-6d2/continuation-20261012-a1/task-6d2-checkpoint-review.md`. No all-future-path, CET or Native Image hardware claim. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Prior open prose is historical.
+
 C5 Task5a lacks a real public profiling result to selected-runtime restrictive installation and post-install target compilation proof; synthetic completeness is not native evidence.
 
 **Needed:**

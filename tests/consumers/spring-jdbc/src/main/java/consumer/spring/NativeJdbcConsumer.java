@@ -3,6 +3,7 @@ package consumer.spring;
 import io.mazewall.enforcer.api.*;
 import io.mazewall.enforcer.api.execution.*;
 import io.mazewall.spring.*;
+import io.mazewall.spring.InvocationContextBridge;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -113,16 +114,38 @@ public final class NativeJdbcConsumer {
                 .getConstructor().newInstance() : null;
         Class<?> implementation = security == null ? JdbcOperation.class : security.implementation();
         Path jar = Path.of(implementation.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath();
-        if (args[0].equals("reject-exploded")) {
+        if (args[0].equals("verify-origin-controls")) {
             check(Files.isDirectory(jar), "Actual exploded CodeSource directory required");
+            Path selected = jar.resolve(JdbcOperation.class.getName().replace('.', '/') + ".class");
+            check(Path.of(JdbcOperation.class.getClassLoader().getResource(
+                    JdbcOperation.class.getName().replace('.', '/') + ".class").toURI()).equals(selected),
+                    "Actual selected file resource must agree with CodeSource");
             var explodedPolicy = WorkerPolicyBuilder.denyList(PROFILE).allowFsRead(jar).build();
-            try (var unsupported = PreparedOperationResources.resolve(PROFILE, explodedPolicy, JdbcOperation.class, Set.of())) {
-                throw new AssertionError("Exploded implementation unexpectedly supported: " + unsupported);
-            } catch (IllegalArgumentException unsupported) {
-                check(unsupported.getMessage().contains("Nested/exploded implementation origins"),
-                        "Actual reviewed core origin rejection required: " + unsupported);
+            try (var supported = PreparedOperationResources.resolve(PROFILE, explodedPolicy, JdbcOperation.class, Set.of())) {
+                supported.validate();
+                check(supported.getImplementationClass() == JdbcOperation.class, "Actual selected Class retained");
+                System.out.println("ACTUAL_EXPLICIT_EXPLODED_ORIGIN_SUPPORTED root=" + jar + " resource=" + selected
+                        + " sha256=" + supported.getImplementationSha256() + " generation=" + supported.getResourceGeneration());
             }
-            System.out.println("ACTUAL_EXPLODED_ORIGIN_REJECTED no-fallback");
+            var leafOnly = WorkerPolicyBuilder.denyList(PROFILE).allowFsRead(selected).build();
+            try (var ungranted = PreparedOperationResources.resolve(PROFILE, leafOnly, JdbcOperation.class, Set.of())) {
+                throw new AssertionError("Selected-file grant silently authorized exploded directory: " + ungranted);
+            } catch (IllegalArgumentException ungranted) {
+                check(ungranted.getMessage().contains("Exploded implementation requires an explicitly reviewed existing directory read grant"),
+                        "Actual missing-directory-grant rejection required: " + ungranted);
+            }
+            // A subclass is genuinely outside the exact ordinary-loader contract, even with matching URLs/grants.
+            try (var loader = new java.net.URLClassLoader(new java.net.URL[]{jar.toUri().toURL()}, ClassLoader.getPlatformClassLoader()) {}) {
+                Class<?> unsupportedClass = Class.forName(OtherOperation.class.getName(), false, loader);
+                check(unsupportedClass.getClassLoader() == loader, "Actual unsupported defining loader required");
+                try (var unsupported = PreparedOperationResources.resolve(PROFILE, explodedPolicy, unsupportedClass, Set.of())) {
+                    throw new AssertionError("Unsupported loader accepted: " + unsupported);
+                } catch (IllegalArgumentException unsupported) {
+                    check(unsupported.getMessage().contains("Implementation classloader is unsupported"),
+                            "Actual loader-contract rejection required: " + unsupported);
+                }
+            }
+            System.out.println("ORIGIN_CONTROLS_PASS explicit-directory-positive/ungranted-directory/unsupported-loader; bodyEntries=0");
             return;
         }
         check(Files.isRegularFile(jar) && jar.toString().endsWith(".jar"), "Actual finished ordinary implementation JAR required");
@@ -154,6 +177,9 @@ public final class NativeJdbcConsumer {
                 var stale = new OperationPolicyDocument(binding("0".repeat(64), resources.getResourceGeneration(),
                         implementation, "operation"), candidate.getPolicy(), Set.of(), Map.of());
                 Files.writeString(root.resolve("stale-candidate.json"), stale.toJson());
+                var wrongMember = new OperationPolicyDocument(wrongMemberBinding(resources.getImplementationSha256(),
+                        resources.getResourceGeneration(), implementation), candidate.getPolicy(), Set.of(), Map.of());
+                Files.writeString(root.resolve("wrong-member-candidate.json"), wrongMember.toJson());
                 System.out.println("MEASURED_CANDIDATE_ONLY jar=" + resources.getImplementationSha256()
                         + " generation=" + resources.getResourceGeneration());
             }
@@ -178,14 +204,22 @@ public final class NativeJdbcConsumer {
         var staleArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("stale-candidate.json")),
                 new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("staleDocumentSha256"), Set.of()),
                 binding("0".repeat(64), authority.getProperty("resourceGeneration"), implementation, "operation"));
+        var wrongMemberArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("wrong-member-candidate.json")),
+                new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("wrongMemberDocumentSha256"), Set.of()),
+                wrongMemberBinding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), implementation));
         verify(root, resources, artifact, otherArtifact, foreignArtifact, foreignClass, security);
-        verifyUnusedAndFailedOwnerCleanup(policy, Set.of(jar, root.resolve("template.txt")), artifact, staleArtifact, implementation);
+        verifyUnusedAndFailedOwnerCleanup(policy, Set.of(jar, root.resolve("template.txt")), artifact, staleArtifact, wrongMemberArtifact, implementation);
         }
     }
 
     private static OperationBinding binding(String sha, String generation, Class<?> type, String bean) {
         return new OperationBinding(OPERATION, OperationAdapter.SPRING_METHOD, sha, generation,
                 Map.of("beanName", bean, "className", type.getName(), "methodDescriptor", DESCRIPTOR));
+    }
+
+    private static OperationBinding wrongMemberBinding(String sha, String generation, Class<?> type) {
+        return new OperationBinding(OPERATION, OperationAdapter.SPRING_METHOD, sha, generation,
+                Map.of("beanName", "operation", "className", type.getName(), "methodDescriptor", "absent()V"));
     }
 
     private static void verify(Path root, PreparedOperationResources resources, ReviewedOperationArtifact artifact,
@@ -280,7 +314,8 @@ public final class NativeJdbcConsumer {
     }
 
     private static void verifyUnusedAndFailedOwnerCleanup(Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy,
-            Set<Path> strictPaths, ReviewedOperationArtifact artifact, ReviewedOperationArtifact staleArtifact, Class<?> implementation) {
+            Set<Path> strictPaths, ReviewedOperationArtifact artifact, ReviewedOperationArtifact staleArtifact,
+            ReviewedOperationArtifact wrongMemberArtifact, Class<?> implementation) {
         var unused = PreparedOperationResources.resolve(PROFILE, policy, implementation, strictPaths);
         try (var runtime = ManagedRuntime.open(PROFILE, Policy.NO_EXEC_HOTSPOT, BUDGET, BUDGET)) {
             var lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 1), unused, BUDGET);
@@ -288,16 +323,23 @@ public final class NativeJdbcConsumer {
             assertClosed(unused);
             check(lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Never-started lifecycle drains explicit owner");
         } finally { unused.close(); }
+        for (var rejected : List.of(staleArtifact, wrongMemberArtifact)) {
         var failed = PreparedOperationResources.resolve(PROFILE, policy, implementation, strictPaths);
         try (var runtime = ManagedRuntime.open(PROFILE, Policy.NO_EXEC_HOTSPOT, BUDGET, BUDGET)) {
-            var lifecycle = new DomainLifecycle(runtime, staleArtifact, new DomainLimits(1, 1), failed, BUDGET);
-            try { lifecycle.start(); throw new AssertionError("Stale external implementation expectation accepted"); }
-            catch (IllegalArgumentException mismatch) { /* Core compares genuine finished-JAR identity before readiness. */ }
+            var lifecycle = new DomainLifecycle(runtime, rejected, new DomainLimits(1, 1), failed, BUDGET);
+            try { lifecycle.start(); throw new AssertionError("Invalid reviewed implementation/member accepted"); }
+            catch (IllegalArgumentException mismatch) {
+                String expectedReason = rejected == staleArtifact ? "Reviewed implementation/resource generation does not match actual acquisitions"
+                        : "Reviewed JVM method descriptor does not resolve on actual implementation";
+                check(mismatch.getMessage().contains(expectedReason), "Actual contract rejection required: " + mismatch);
+            }
             check(!lifecycle.isRunning(), "Failed preparation cannot be ready");
             assertClosed(failed);
             lifecycle.stop();
             check(lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Preparation failure retired all actual resources");
         } finally { failed.close(); }
+        }
+        System.out.println("STALE_AND_WRONG_MEMBER_REJECTED bodyEntries=0/pre-readiness/owners-closed");
         System.out.println("UNCLAIMED_STOP_AND_FAILED_PREPARATION_CLOSE_PASS");
     }
 

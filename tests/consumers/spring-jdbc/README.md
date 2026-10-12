@@ -30,7 +30,13 @@ Assertions cover:
   actual captured physical-worker join, complete runtime drain and retired public owner
   demonstrate physical end separately from caller delivery.
 - Stop-before-start and externally reviewed stale implementation digest close actual
-  unclaimed resources; failed preparation never becomes ready.
+  unclaimed resources; a reviewed nonexistent JVM member also rejects before readiness
+  or body entry, with the actual contract reason and genuine owners closed.
+- `verifyOriginControls` resolves the actual ordinary-loader exploded class directory
+  with an explicit directory read grant, validates its selected class resource and
+  records the bounded tree hash/generation. A selected-file-only grant rejects rather
+  than authorizing the directory. An actual subclassed URLClassLoader rejects even
+  with matching directory URLs/grants. These resolution controls enter no body.
 - Published normal starter can run the same fixture without Security; the ordinary
   consumer explicitly asserts Security absence/no linkage at runtime.
 - Explicit `verifySecurityNative` uses a separate ordinary finished security JAR and
@@ -42,8 +48,11 @@ Assertions cover:
   context and does not invent worker/descriptor ownership or emulate kernel success.
 
 No assumptions/skips/fallbacks: required native feature, permission or assertion failure
-fails the command. This is ordinary-JAR proof only. Executable nested Boot and exploded
-origins remain unsupported in this reviewed baseline and reject. No complete ACE, shared
+fails the command. Native JDBC proof uses ordinary JARs; the separate exploded control
+qualifies resolution, not an installed exploded JDBC worker. Immutable 617 supports
+explicitly granted bounded ordinary exploded trees (4096 descendants, depth 64,
+256 MiB, no descendant symlinks) and the pinned Boot 4.1.1 packaging. Other loaders
+and unsupported packaging still reject; this fixture does not replay Boot proof. No complete ACE, shared
 heap, preopened-FD, immutable-content/redefinition or file/network rollback claim.
 
 ## Reproduce locally
@@ -51,17 +60,10 @@ heap, preopened-FD, immutable-content/redefinition or file/network rollback clai
 Run every command under the fleet's shared verification lock. In the assigned worktree:
 
 ```bash
-./gradlew -PincludeSpringIntegration=true \
-  -I tests/consumers/stage.init.gradle \
-  -PconsumerVersion=0.1.0-task9.92da1536 \
-  -PconsumerRepository="$PWD/build/task9-maven" \
-  :platform:publishMavenJavaPublicationToConsumerBaselineRepository \
-  :enforcer:publishMavenJavaPublicationToConsumerBaselineRepository \
-  :integrations:spring:mazewall-spring-boot:publishMavenJavaPublicationToConsumerBaselineRepository
-
 ./gradlew -p tests/consumers/spring-jdbc \
-  -PconsumerVersion=0.1.0-task9.92da1536 \
-  -PconsumerRepository="$PWD/build/task9-maven" verifyNative
+  -PconsumerVersion=0.1.0-candidate.617fc10d \
+  -PconsumerRepository=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/task-6c-final/repository/617fc10d3aa38e50887541da31baa459d6002ef7 \
+  verifyNative
 ```
 
 External authority and candidate files live in this consumer's `build/native-proof`.
@@ -70,23 +72,14 @@ a class-resource digest as a finished-JAR digest. No Docker or full-build gate i
 
 ## Optional normal starter / Security native variant
 
-Include only the task-owned starter using the init script while the root settings
-patch awaits coordinator integration; publish real normal JARs to a fresh local version:
+Reuse the same immutable published repository with the normal starter and optional
+Security fixture; the fresh Security chain measures/reviews its own finished JAR:
 
 ```bash
-./gradlew -PincludeSpringIntegration=true \
-  -I tests/consumers/spring-jdbc/optional-modules.init.gradle \
-  -I tests/consumers/stage.init.gradle \
-  -PconsumerVersion=0.1.0-task9.s3-final \
-  -PconsumerRepository="$PWD/build/task9-s3-final-maven" \
-  :platform:publishMavenJavaPublicationToConsumerBaselineRepository \
-  :enforcer:publishMavenJavaPublicationToConsumerBaselineRepository \
-  :integrations:spring:mazewall-spring-boot:publishMavenJavaPublicationToConsumerBaselineRepository \
-  :integrations:spring:mazewall-spring-boot-starter:publishMavenJavaPublicationToConsumerBaselineRepository
-
 ./gradlew -p tests/consumers/spring-jdbc -PuseStarter=true \
-  -PconsumerVersion=0.1.0-task9.s3-final \
-  -PconsumerRepository="$PWD/build/task9-s3-final-maven" verifyNative verifySecurityNative
+  -PconsumerVersion=0.1.0-candidate.617fc10d \
+  -PconsumerRepository=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/task-6c-final/repository/617fc10d3aa38e50887541da31baa459d6002ef7 \
+  verifyNative verifySecurityNative
 ```
 
 The optional Security source set adds Security7.1.1 explicitly; the ordinary source

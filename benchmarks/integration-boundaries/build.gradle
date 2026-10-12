@@ -24,7 +24,7 @@ tasks.register('verifyPublishedClosure') {
             it.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier && it.id != rootId
         }
         def artifacts = graph.resolvedConfiguration.resolvedArtifacts.findAll { it.moduleVersion.id.group == 'io.mazewall' }
-        assert artifacts.collect { it.moduleVersion.id.name }.toSet() == ['koog-contained-tool', 'service-api', 'koog', 'runtime', 'enforcer', 'platform'].toSet()
+        assert artifacts.collect { it.moduleVersion.id.toString() }.toSet() == ['koog-contained-tool', 'service-api', 'denied-api', 'koog', 'runtime', 'enforcer', 'platform'].collect { "io.mazewall:${it}:${coordinate}".toString() }.toSet()
         artifacts.each {
             def id = it.moduleVersion.id
             assert id.version == coordinate

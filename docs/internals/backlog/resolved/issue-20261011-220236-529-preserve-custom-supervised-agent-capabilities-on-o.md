@@ -1,7 +1,7 @@
 ---
 title: "Preserve custom supervised agent capabilities on owned runtime migration"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Preserve custom supervised agent capabilities on owned runtime migration
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled for supported early VFORK bootstrap: captured handlers, actual custom allowed/denied behavior and physical owner publication/close accepted. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-4a/task-4a-fix-review.md` and fix receipts (24 distinct agent/1 native), accepted P617 source gate. The observed unsupported FORK callback bypass is **not fixed** and remains [separately active](../issue-20261012-192946-226-track-unsupported-jdk-fork-launch-callback-bypass-.md). [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Earlier WIP/open prose is historical.
+
 Task4a captures custom scoping authority before owned readiness and migrates agent lifecycle without changing approved network and process permissions.
 
 **Needed:**

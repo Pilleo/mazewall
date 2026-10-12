@@ -1,7 +1,7 @@
 ---
 title: "Prelink mmap protection fixture lambdas before executable mapping denial"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -15,6 +15,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Prelink mmap protection fixture lambdas before executable mapping denial
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 and second-cold-linkage follow-up fulfilled: prelinked fixture lambdas and explicit StringBuilder denial message preserve actual unchanged Native Image policy/EPERM/raw return/cause/cleanup checks. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-6b/recovery/task-6b-recovery-review.md`, `task-6b/checkpoint/checkpoint-fix-review.md` (all17 Mmap cases PASS; owning193 PASS/2 original CET skips), accepted c049 then P617 complete gates. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Historical crashes stay NO_PASS; prior open prose is historical.
+
 Task6b actual combined gate exited 1 when a HotSpot test worker crashed linking an invokedynamic native wrapper after the NATIVE_IMAGE policy denied executable mmap. hs_err_pid719585.log names the pkey_mprotect test's cold inner mapping lambda, CodeHeap expansion, and failed 65536-byte executable commit. This is fixture placement, not host memory exhaustion or a permission waiver.
 
 **Needed:**

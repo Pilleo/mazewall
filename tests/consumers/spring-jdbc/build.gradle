@@ -71,6 +71,7 @@ tasks.register('approveFixture') {
         authority.setProperty('otherDocumentSha256', digest(new File(root, 'other-candidate.json')))
         authority.setProperty('foreignDocumentSha256', digest(new File(root, 'foreign-candidate.json')))
         authority.setProperty('staleDocumentSha256', digest(new File(root, 'stale-candidate.json')))
+        authority.setProperty('wrongMemberDocumentSha256', digest(new File(root, 'wrong-member-candidate.json')))
         authority.setProperty('resourceGeneration', new File(root, 'candidate-generation.txt').text)
         authority.setProperty('reviewer', 'external-known-fixture-test-reviewer')
         new File(root, 'trusted-review.properties').withOutputStream { authority.store(it, 'Trusted fixture approval, not production authority') }
@@ -78,7 +79,7 @@ tasks.register('approveFixture') {
 }
 
 tasks.register('verifyNative', JavaExec) {
-    dependsOn tasks.named('approveFixture'), tasks.named('rejectExploded')
+    dependsOn tasks.named('approveFixture'), tasks.named('verifyOriginControls')
     javaLauncher = javaToolchains.launcherFor(java.toolchain)
     classpath = packagedClasspath
     mainClass = 'consumer.spring.NativeJdbcConsumer'
@@ -86,14 +87,14 @@ tasks.register('verifyNative', JavaExec) {
     args 'verify', proofRoot.get().asFile.absolutePath
 }
 
-tasks.register('rejectExploded', JavaExec) {
+tasks.register('verifyOriginControls', JavaExec) {
     dependsOn tasks.classes
     javaLauncher = javaToolchains.launcherFor(java.toolchain)
     // This fixture has no main resources; do not declare Gradle's nonexistent NO-SOURCE output as required runtime input.
     classpath = files(sourceSets.main.output.classesDirs, configurations.runtimeClasspath)
     mainClass = 'consumer.spring.NativeJdbcConsumer'
     jvmArgs '--enable-native-access=ALL-UNNAMED'
-    args 'reject-exploded', layout.buildDirectory.get().asFile.absolutePath
+    args 'verify-origin-controls', layout.buildDirectory.get().asFile.absolutePath
 }
 
 def securityRoot = layout.buildDirectory.dir('security-native-proof')
@@ -120,7 +121,8 @@ tasks.register('approveSecurityFixture') {
         def authority = new Properties()
         authority.setProperty('jarSha256', digest(tasks.named('securityJar').get().archiveFile.get().asFile))
         ['documentSha256': 'candidate.json', 'otherDocumentSha256': 'other-candidate.json',
-         'foreignDocumentSha256': 'foreign-candidate.json', 'staleDocumentSha256': 'stale-candidate.json'].each { key, file ->
+          'foreignDocumentSha256': 'foreign-candidate.json', 'staleDocumentSha256': 'stale-candidate.json',
+          'wrongMemberDocumentSha256': 'wrong-member-candidate.json'].each { key, file ->
             authority.setProperty(key, digest(new File(root, file)))
         }
         authority.setProperty('resourceGeneration', new File(root, 'candidate-generation.txt').text)

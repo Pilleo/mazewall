@@ -1,7 +1,7 @@
 ---
 title: "Tier E source transfer rejects unstaged tracked deletions"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Tier E source transfer rejects unstaged tracked deletions
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled and UTF8/raw-name follow-up accepted: binary-safe Git/tar selection/deletion matching, five actual repository regressions and 3,220-entry real archive; native assets/source hashes preserved. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-7b/task-7b-fix-review.md` and fix receipts, followed by accepted P617 source gate. Optional detektTooling87 errors remain in their separate active issue. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Earlier open prose is historical.
+
 Task7b actual rootful gate failed before workloads: git ls-files --cached emits intentionally deleted ContainedExecutor.kt and tar cannot stat it. Preserve tracked modified and untracked scoped source and fail-closed tar handling.
 
 **Needed:**

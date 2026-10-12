@@ -14,11 +14,19 @@ import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.platform.syscall.Syscall
 import io.mazewall.portal.PortalCallException
 import io.mazewall.portal.PortalInvocationEvidence
+import io.mazewall.portal.PortalInstanceMode
+import io.mazewall.portal.PortalInvocationTiming
 import io.mazewall.portal.PortalOperationCall
 import io.mazewall.portal.PortalRuntime
 import io.mazewall.portal.PortalRuntimeConfig
 import io.mazewall.portal.PortalRuntimeLimits
 import io.mazewall.portal.PortalServiceId
+import io.mazewall.portal.PortalServiceManifest
+import io.mazewall.portal.PortalServiceManifestCatalog
+import io.mazewall.portal.PortalServiceHealth
+import io.mazewall.portal.PortalServiceHealthState
+import io.mazewall.portal.PortalWorkerLifecycle
+import io.mazewall.portal.PortalWorkerLifecycleState
 import io.mazewall.portal.PortalWorkerProfile
 import java.lang.management.ManagementFactory
 import java.nio.file.Files
@@ -99,6 +107,64 @@ private fun resources(label: String, pid: Long = ProcessHandle.current().pid()) 
     row("resources", label, pid, field("VmRSS"), field("Threads"), ManagementFactory.getMemoryMXBean().heapMemoryUsage.used, ManagementFactory.getThreadMXBean().threadCount)
 }
 
+private fun preparedManifest(manifests: List<PortalServiceManifest>, id: PortalServiceId): PortalServiceManifest =
+    manifests.filter { it.serviceId == id }.single().also {
+        check(it.contractName == TextTransformerService::class.java.name)
+        check(it.instanceMode == PortalInstanceMode.STATEFUL_SINGLETON)
+    }
+
+private fun preparedHealth(health: List<PortalServiceHealth>, manifest: PortalServiceManifest, pid: Long? = null): PortalServiceHealth =
+    health.filter { it.isolationGroup == manifest.isolationGroup }.single().also {
+        check(it.instanceMode == manifest.instanceMode && it.state == PortalServiceHealthState.AVAILABLE)
+        check(it.policyProfile == manifest.policyProfile)
+        val actualPid = it.workerPids.single()
+        check(actualPid > 0 && (pid == null || actualPid == pid))
+        check(it.lastWorkerLifecycle.state == PortalWorkerLifecycleState.STARTED && it.lastWorkerLifecycle.pid == actualPid)
+    }
+
+private fun preparedTiming(health: PortalServiceHealth, previous: PortalInvocationTiming?, requestId: Int, expectedId: Int): PortalInvocationTiming {
+    check(requestId == expectedId) { "Nonserial Portal timing request ID" }
+    return checkNotNull(health.lastInvocation).also {
+        // The public contract has no wire ID: serial completion must publish a new timing object.
+        check(it !== previous) { "Stale Portal timing for request $requestId" }
+        check(!it.queueWait.isNegative && !it.workerExecution.isNegative)
+    }
+}
+
+private fun selectioncheck() {
+    val manifests = PortalServiceManifestCatalog.load(TextTransformerService::class.java.classLoader)
+    val id = PortalServiceId("bounded-text")
+    val manifest = preparedManifest(manifests, id)
+    val denied = manifests.single { it.serviceId == PortalServiceId("test-denied") }
+    check(manifest.isolationGroup != denied.isolationGroup)
+    val pid = ProcessHandle.current().pid()
+    val timing = PortalInvocationTiming(Duration.ofNanos(1), Duration.ofNanos(2))
+    val selected = PortalServiceHealth(manifest.isolationGroup, manifest.instanceMode, PortalServiceHealthState.AVAILABLE,
+        policyProfile = manifest.policyProfile, lastWorkerLifecycle = PortalWorkerLifecycle(PortalWorkerLifecycleState.STARTED, pid),
+        workerPids = listOf(pid), lastInvocation = timing)
+    val other = selected.copy(isolationGroup = denied.isolationGroup, workerPids = listOf(pid + 1), lastInvocation = timing.copy())
+    fun rejects(name: String, action: () -> Unit) { check(runCatching(action).isFailure) { "Selection control accepted $name" } }
+    check(preparedHealth(listOf(other, selected), manifest, pid) === selected)
+    check(preparedHealth(listOf(selected, other), manifest, pid) === selected)
+    check(preparedTiming(selected, null, 0, 0) === timing)
+    check(preparedTiming(selected.copy(lastInvocation = timing.copy()), timing, 1, 1) !== timing)
+    rejects("missing manifest") { preparedManifest(listOf(denied), id) }
+    rejects("duplicate manifest") { preparedManifest(manifests + manifest, id) }
+    rejects("contract mismatch") { preparedManifest(listOf(manifest.copy(contractName = denied.contractName)), id) }
+    rejects("unsupported mode") { preparedManifest(listOf(manifest.copy(instanceMode = PortalInstanceMode.STATELESS)), id) }
+    rejects("missing group") { preparedHealth(listOf(other), manifest, pid) }
+    rejects("substring group") { preparedHealth(listOf(selected.copy(isolationGroup = manifest.isolationGroup + "-other")), manifest, pid) }
+    rejects("duplicate group") { preparedHealth(listOf(selected, selected, other), manifest, pid) }
+    rejects("duplicate PID") { preparedHealth(listOf(selected.copy(workerPids = listOf(pid, pid))), manifest, pid) }
+    rejects("PID mismatch") { preparedHealth(listOf(selected), manifest, pid + 1) }
+    rejects("lifecycle PID mismatch") { preparedHealth(listOf(selected.copy(lastWorkerLifecycle = selected.lastWorkerLifecycle.copy(pid = pid + 1))), manifest, pid) }
+    rejects("state lost") { preparedHealth(listOf(selected.copy(state = PortalServiceHealthState.STATE_LOST)), manifest, pid) }
+    rejects("missing timing") { preparedTiming(selected.copy(lastInvocation = null), null, 0, 0) }
+    rejects("stale timing") { preparedTiming(selected, timing, 1, 1) }
+    rejects("request mismatch") { preparedTiming(selected, null, 1, 0) }
+    rejects("negative timing") { preparedTiming(selected.copy(lastInvocation = timing.copy(queueWait = Duration.ofNanos(-1))), null, 0, 0) }
+}
+
 private fun selfcheck() {
     check(transform("aBc éß🙂") == "ABC éß🙂")
     check(transform(input(7, 65536)) == expected(input(7, 65536)))
@@ -128,6 +194,7 @@ private fun selfcheck() {
 }
 
 fun main(args: Array<String>) {
+    if (args.contentEquals(arrayOf("--selectioncheck"))) { selectioncheck(); println("selectioncontrols PASS actual-multigroup,order,missing,duplicate,contract,mode,group,PID,lifecycle,state,timing,freshness,request-ID"); return }
     if (args.contentEquals(arrayOf("--selfcheck"))) { selfcheck(); return }
     val options = Options.parse(args)
     val budget = Budget(options.seconds)
@@ -171,15 +238,21 @@ fun main(args: Array<String>) {
                 PortalRuntime.open(config).use { portal ->
                     row("prepare", "PROCESS_PORTAL", System.nanoTime() - portalOpen, "runtime-open")
                     val bindingStart = System.nanoTime()
-                    val operation = portal.prepare(TextTransformerService::class.java, PortalServiceId("bounded-text"), PortalOperationCall<TextTransformerService, Request, String> { service, request -> request.execute(service::uppercaseAscii) })
+                    val serviceId = PortalServiceId("bounded-text")
+                    val manifest = preparedManifest(config.manifests, serviceId)
+                    val operation = portal.prepare(TextTransformerService::class.java, serviceId, PortalOperationCall<TextTransformerService, Request, String> { service, request -> request.execute(service::uppercaseAscii) })
                     row("prepare", "PROCESS_PORTAL", System.nanoTime() - bindingStart, "binding+materialize+process-startup+required-install+readiness")
-                    portal.health().single().workerPids.forEach { pid ->
+                    val ready = preparedHealth(portal.health(), manifest)
+                    check(ready.lastInvocation == null)
+                    ready.workerPids.forEach { pid ->
                         val child = ProcessHandle.of(pid).orElseThrow()
                         check(child.isAlive)
                         children.add(child)
                         resources("worker-ready", pid)
                     }
                     check(children.size == 1)
+                    var previousTiming: PortalInvocationTiming? = null
+                    var nextPortalRequestId = 0
                     for (mode in Mode.entries) {
                         resources("$mode-before")
                         var accepted = 0
@@ -220,7 +293,11 @@ fun main(args: Array<String>) {
                             accepted++; completed++
                             row("sample", mode, phase, request.id, request.text.toByteArray().size, digest(request.text), digest(value), request.submitted, request.started, request.ended, delivered, observedEnd, request.started - request.submitted, request.ended - request.started, if (mode == Mode.PROCESS_PORTAL) "host-mapping+transport+worker" else "local-body")
                             if (mode == Mode.PROCESS_PORTAL && phase != "pressure") {
-                                val timing = checkNotNull(portal.health().single().lastInvocation)
+                                 val health = preparedHealth(portal.health(), manifest, children.single().pid())
+                                 val timing = preparedTiming(health, previousTiming, request.id, nextPortalRequestId)
+                                 check(timing.queueWait.plus(timing.workerExecution).toNanos() <= request.ended - request.started)
+                                 previousTiming = timing
+                                 nextPortalRequestId++
                                 row("portal-timing", phase, request.id, timing.queueWait.toNanos(), timing.workerExecution.toNanos(), "broker-queue,transport+worker")
                             }
                         }

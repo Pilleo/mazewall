@@ -209,3 +209,47 @@ remain feature prerequisites. Original guidance/borrowed/context/profile-backed-
 launch environment-FD and complete raw-overhead residuals, production external
 review/launch approval, remote operator-managed repository and human exercises
 remain explicit. No complete foundation or release-ready claim is made here.
+
+## Exact contract-completion candidate — 2026-10-12 (`617fc10d`)
+
+Append-only new candidate: producer **`617fc10d3aa38e50887541da31baa459d6002ef7`**,
+tree `79dde0aabce5af4c1449bed8bbbb1b940e8ddd69`, parent
+`c049dd3cab4e22eee45da919293884ab3624a9fa`, group **`io.mazewall`**,
+version **`0.1.0-candidate.617fc10d`**. Historical dc6f/c049 and WIP checking
+coordinates, snapshots and locks retain their identities. The later consumer/evidence
+checkpoint is not the artifact producer.
+
+Repository is `/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/task-6c-final/repository/617fc10d3aa38e50887541da31baa459d6002ef7`.
+Actual Gradle9.6.1 / producer Kotlin2.4.20-Beta1 / core-worker serialization1.9.0
+are unchanged. Published core has 2,031 actual class bodies, maximum major66.
+
+| Actual consumer selection | Accepted evidence |
+|---|---|
+| Temurin22.0.2+9 / Oracle Graal25.0.4.1.1+1-LTS-jvmci-25.4-b23 | Independent Java and stable Kotlin2.4.20 positive probes; individual seven retired API/type and two scope negatives per language; 15 live guide snippets / three incomplete-conversion refusals per JDK. No metadata/prerelease skips or source substitution. |
+| Published worker/codegen plugin, stable Kotlin2.4.20, JDK25 | Real published-only marker/plugin class loading, generated stub/dispatcher classes, strict plugin/buildscript locks; worker JAR/POM/module exists. Historical c049 missing-worker attempt stays BLOCKED. |
+| Koog1.3.0 / coroutines1.10.2 | 16 fresh native assertion groups; independent 27-JAR host / 13-JAR opaque worker closure; host serialization1.10.0 distinct from worker1.9.0. Bounded first-party fixture only. |
+| Boot4.1.1 / JDBC7.0.9 / H2 2.4.240, JDK25 | Eight finished executable Boot cases, four nested MazeWall JARs equal supplied bytes; actual Boot-selected serialization1.11.0. Finished Boot is Security-absent. |
+| Ordinary JDBC7.0.9 and optional Security7.1.1, JDK25 | Current post-P consumer Java/build/README accepted; real ordinary/Security native chains, Admin/Bob/rollback/restoration/cancel/end. Explicit Spring bridge import and bounded origin controls. No installed exploded JDBC or production review authority claim. |
+| Four-mode benchmark, stable Kotlin2.4.20 / JDK25 | Post-P benchmark Kotlin/build/README accepted; exact seven candidate modules and prepared bounded-text group selected. Four payloads1/22/1024/65536, raw/validator exits0, independently retained fixture source/JAR origin. |
+
+Eight new strict lock payloads are retained without generation or rewriting in this
+checkpoint: five core/docs/Koog locks under
+`tests/consumers/locks/0.1.0-candidate.617fc10d/kotlin-2.4.20/`, two plugin locks under
+`tests/consumers/locks/0.1.0-candidate.617fc10d/portal-plugin/`, and
+`benchmarks/integration-boundaries/locks/0.1.0-candidate.617fc10d.lockfile`.
+Plugin and benchmark payloads are exact accepted receipt bytes placed in their
+coordinate namespace; reproductions retain the existing recorded lock-location
+copy/init workflow, not an implied change to default fixture wiring.
+All22 inherited locks and five historical c049 consumer locks remain unchanged.
+Per-path lock/artifact/source hashes and actual checkpoint identity are in Task8's
+seal, path inventory and report; all275 publication payloads remain frozen.
+
+Accepted evidence root:
+`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`:
+`task-6c-final/task-6c-final-review.md`, `task-6c3/task-6c3-review.md`,
+`task-6c4/group-fix/task-6c4-review.md` and their source/argv/exit/physical-end receipts.
+The [actual 22-contract acceptance](2026-10-12-integration-contract-completion.md)
+records gate freshness/counts, descriptive raw metrics and limitations. Pre-enabled
+CET, production approval/launch authority, operator remote repository and independent
+unfamiliar-human exercises remain prerequisites; optional tooling87-error debt and
+observed unsupported FORK callback gap remain open.

@@ -1,7 +1,7 @@
 ---
 title: "Migrate remaining installer and execution tests before approved public executor retirement"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Migrate remaining installer and execution tests before approved public executor retirement
 
 **Context:**
+**Resolution — 2026-10-12:** Needed steps1–3 fulfilled: exact callers/tests migrated before approved public cutover, acquired native installer/cause/quarantine/end controls retained, internal coroutine wrapper preserved. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-4c2/task-4c2-review.md` (133 PASS/2 original condition skips), `task-4c3/task-4c3-review.md` (34 focused PASS and emitted signature/type absence), and final P617 `task-6c-final/task-6c-final-review.md` Java/stable Kotlin individual negatives on JDK22/25. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Earlier WIP/open prose is historical.
+
 Task4c preserves accepted Task1–4b WIP and native/lifecycle controls while retiring approved borrowed public APIs after caller migration.
 
 **Needed:**

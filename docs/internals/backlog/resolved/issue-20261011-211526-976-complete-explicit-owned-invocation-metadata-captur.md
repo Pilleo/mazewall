@@ -1,7 +1,7 @@
 ---
 title: "Complete explicit owned invocation metadata capture and restoration"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "enforcer"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Complete explicit owned invocation metadata capture and restoration
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled: capture/snapshot, worker/inline placement, cancellation/restoration/quarantine and original fatal identity accepted. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-3/task-3-fix-review.md` (40 host/2 native fix cases) and `task-6b/recovery/task-6b-recovery-review.md` (74 host/2 native), followed by accepted P617 complete gate. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Security context-reference qualification retained; prior WIP/open prose is historical.
+
 Task 3 C8 requires opt-in caller capture, immutable declared metadata and finally restoration before owned worker reuse.
 
 **Needed:**

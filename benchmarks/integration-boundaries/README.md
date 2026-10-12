@@ -72,8 +72,12 @@ python3 benchmarks/integration-boundaries/check_raw.py --selfcheck \
 
 Keep actual argv/log/exit receipts, source/JAR/embedded worker hashes, strict-lock
 hashes and acquired process-end evidence beside the raw log. `verifyPublishedClosure`
-requires the exact six host module JARs in the explicit repository at the selected
-coordinate and rejects project/source substitution. The worker is embedded opaque
+requires exactly `io.mazewall:{koog-contained-tool,service-api,denied-api,koog,runtime,enforcer,platform}`
+at the supplied version, with every JAR in the supplied repository's exact Maven
+path, and rejects unrelated modules, wrong versions/paths and project/source
+substitution. Candidate `0.1.0-candidate.617fc10d` already publishes this seven-module
+closure. `denied-api` contains only the `DeniedResourceService` interface (the native
+test contract), not its guest implementation or a host fallback. The worker is embedded opaque
 bundle data, not a host dependency. Worker/bootstrap and profiler classes are built
 into that verified bundle; they are not separate host publications in this recipe
 (the selected worker publication task has no publications). Build outputs are disposable;
@@ -82,7 +86,7 @@ evidence belongs in the supplied evidence directory.
 The checking coordinate binds the **producer module/build input inventory**, not
 the benchmark validator's source. Validator/docs revisions have a separate task-source
 inventory and do not rename unchanged published modules or the native benchmark JAR.
-Fixround1 freezes all six versioned POMs and six Gradle `.module` files, with current
+The historical Task6a Fixround1 freezes all six WIP versioned POMs and six Gradle `.module` files, with current
 equality to generated publication outputs. Refreshed strict compile/runtime resolution,
 selected dependency edges/artifact hashes and the carried installed classpath are
 then captured and checked unchanged through a second minimal strict acceptance.
@@ -172,6 +176,15 @@ separate IPC estimate. Binding preparation includes materialization, startup,
 required native installation and readiness; no native-install split is invented.
 Portal last-invocation timing is attributed only after serial ordinary completion;
 it is intentionally unavailable per pressured concurrent outstanding handle.
+The prepared service ID and exact interface name select one public manifest; its
+exact isolation group selects one health record even when `test-denied` is present.
+Missing/duplicate identities, unsupported instance mode, lost state, worker/lifecycle
+PID changes, absent/stale timings and nonserial input IDs fail. Each ordinary timing
+must be a newly published object after the sole outstanding request completes and
+fit that request's mapping interval. Public timing has no wire request-ID field;
+the join is to the harness input ID under concurrency1, not an invented wire ID.
+`--selectioncheck` exercises the actual published multi-group manifest and negative
+identity/freshness controls without installing native policy.
 
 Pressure uses the same bounded inputs but holds the first asynchronous host/body
 entry on an explicit test latch while filling two admission slots. The gate is
@@ -207,4 +220,4 @@ Related contracts: original R1 in the operator-owned read-only ROOT input
 `integrations/2026-10-06-mazewall-integration-foundation-plan.md` (not a worktree source file),
 [Portal isolation/diagnostics](../../docs/internals/designs/portal/local-service-isolation-design.md#diagnostics-and-failure-evidence),
 [consumer publication patterns](../../tests/consumers/README.md),
-[Task6a issue](../../docs/internals/backlog/issue-20261012-062010-859-add-bounded-equivalent-work-integration-boundary-c.md).
+[Task6a issue](../../docs/internals/backlog/resolved/issue-20261012-062010-859-add-bounded-equivalent-work-integration-boundary-c.md).

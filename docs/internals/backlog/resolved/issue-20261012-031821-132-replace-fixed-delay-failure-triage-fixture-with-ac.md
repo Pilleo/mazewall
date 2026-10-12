@@ -1,7 +1,7 @@
 ---
 title: "Replace fixed-delay failure-triage fixture with actual wait-entry handshake"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "buildSrc"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Replace fixed-delay failure-triage fixture with actual wait-entry handshake
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled: actual acquired service thread observed TIMED_WAITING in production latch wait before delivery; marker-only timeout rejects, first/reused/no-cache collector paths and primary failed exit preserved. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-5c/task-5c-review.md` and 14-case executable/check/plugin receipts, accepted P617 complete gate. Production60s bound unchanged. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Earlier WIP/open prose is historical.
+
 Task5c: fixed 1.5-second event delay does not prove production finalizer wait entry; retain real failed Test, production collector and configuration-cache controls.
 
 **Needed:**

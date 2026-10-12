@@ -1,7 +1,7 @@
 ---
 title: "Migrate remaining application callers to owned runtimes and retain incomplete lifecycle owners"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "demos"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Migrate remaining application callers to owned runtimes and retain incomplete lifecycle owners
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled: application bootstrap/invocation/profiler shutdown/drain owners migrated, late wrapped collection retained, actual web resources acquired and cleanup/cause/budget fixes accepted. E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `task-4b/task-4b-fix-review.md` and 48 unfiltered owning tests, quality/ABI/ratchet receipts; accepted P617 gate. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Earlier WIP/open prose is historical.
+
 Task4b migrates CLI and vulnerable web required execution without borrowed wrappers; public cutover remains Task4c.
 
 **Needed:**

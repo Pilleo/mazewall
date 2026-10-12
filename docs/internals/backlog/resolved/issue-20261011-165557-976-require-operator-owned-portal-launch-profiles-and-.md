@@ -1,7 +1,7 @@
 ---
 title: "Require operator-owned Portal launch profiles and independent readiness"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "portal-runtime"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: HIGH]: Require operator-owned Portal launch profiles and independent readiness
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled: immutable declared launch authority, trusted operator preparation, acquired descriptor/synthetic marker controls and independent pre-permit readiness accepted. Evidence under E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`: `newworkspace/task-2-fix-review.md` / `task-2-fix-outcomes.json` (235 selected cases), `task-7a/task-7a-review.md`, and P617 continuation combined/hook fresh cgroup proof. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Production authority and universal FD/environment secrecy are not closed; earlier open statements are historical.
+
 Task 2: required startup does not bind explicit selected environment and descriptor expectations
 
 **Needed:**

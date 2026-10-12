@@ -1,7 +1,7 @@
 ---
 title: "Compile canonical owned-runtime and coverage-preserving profile recipes"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -16,6 +16,8 @@ open_questions: false
 # 🟡 [Severity: MEDIUM]: Compile canonical owned-runtime and coverage-preserving profile recipes
 
 **Context:**
+**Resolution — 2026-10-12:** Needed step1 fulfilled: canonical owned/profile guides and actual snippet/refusal controls accepted in the controller ledger Task1 fix review; final P617 core/doc acceptance rechecks all15 live snippets and three incomplete refusals on actual JDK22/25. Evidence: E=`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/`, `task-6c-final/task-6c-final-report.md`, `task-6c-final-review.md` and `consumer-analysis.json`; P617 source gate/checkpoint accepted. [Acceptance](../../reviews/2026-10-12-integration-contract-completion.md). Earlier checkpoint/open statements below are historical.
+
 Primary recipes advertise borrowed workers, nonexistent public incomplete overrides and overstrong diagnostic/JIT guarantees; Task1 replaces guidance and verifies actual snippets against publications.
 
 **Needed:**
