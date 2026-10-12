@@ -39,17 +39,20 @@ class SupervisorConnectIntegrationTest : BaseIntegrationTest() {
         }
         try {
             Executors.newSingleThreadExecutor().use { raw ->
-                val contained = ContainedExecutors.wrap(raw, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build(), scope)
+                val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build()
                 ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
                     server.soTimeout = 10000
                     Socket().use { socket ->
                         socket.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), 0))
                         socket.tcpNoDelay = true
                         val port = socket.localPort
-                        val connected = contained.submit<Boolean> {
+                        val connected = raw.submit<Boolean> {
+                            ContainedExecutors.installOnCurrentThread(policy, scope).use { receipt ->
+                            receipt.requireInstalled()
                             socket.connect(InetSocketAddress("127.0.0.1", server.localPort), 10000)
                             socket.getOutputStream().write(61)
                             socket.tcpNoDelay
+                            }
                         }
                         server.accept().use { peer ->
                             peer.soTimeout = 10000
@@ -63,10 +66,13 @@ class SupervisorConnectIntegrationTest : BaseIntegrationTest() {
                     receiver.soTimeout = 10000
                     DatagramSocket(0, InetAddress.getLoopbackAddress()).use { sender ->
                         val port = sender.localPort
-                        contained
+                        raw
                             .submit {
+                            ContainedExecutors.installOnCurrentThread(policy, scope).use { receipt ->
+                            receipt.requireInstalled()
                             sender.connect(InetSocketAddress("127.0.0.1", receiver.localPort))
                             sender.send(DatagramPacket(byteArrayOf(62), 1))
+                            }
                         }.get(15, TimeUnit.SECONDS)
                         val packet = DatagramPacket(ByteArray(1), 1)
                         receiver.receive(packet)

@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.tools
 
+import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -33,26 +34,17 @@ public object TierERootfulSourceTransfer {
         archive: Path,
     ) {
         val root = repository.toRealPath()
-        val git = ProcessBuilder(
-            listOf(
-                "git",
-                "-C",
-                root.toString(),
-                "ls-files",
-                "-z",
-                "--cached",
-                "--others",
-            "--exclude-standard",
-                "--",
-            ) +
-            inputs,
-        ).redirectErrorStream(true).start()
-        val names = git.inputStream.readNBytes(32 * 1024 * 1024 + 1)
-        require(names.size <= 32 * 1024 * 1024) { "Rootful source list exceeds 32 MiB" }
-        check(git.waitFor(30, TimeUnit.SECONDS) && git.exitValue() == 0 && names.isNotEmpty()) { "Git source list unavailable" }
+        val names = gitNames(root, "--cached", "--others", "--exclude-standard")
+        check(names.isNotEmpty()) { "Git source list unavailable" }
+        val deleted = gitNames(root, "--deleted").toSet()
         val list = Files.createTempFile("tier-e-rootful-source-", ".list")
         try {
-            Files.write(list, names)
+            Files.newOutputStream(list).use { output ->
+                for (name in names.filterNot { it in deleted }) {
+                    output.write(name.array(), name.position(), name.remaining())
+                    output.write(0)
+                }
+            }
             val tar = ProcessBuilder("tar", "-C", root.toString(), "-cf", archive.toString(), "--null", "-T", list.toString())
                 .redirectErrorStream(true)
                 .start()
@@ -62,6 +54,37 @@ public object TierERootfulSourceTransfer {
             }
         } finally {
             Files.deleteIfExists(list)
+        }
+    }
+
+    private fun gitNames(
+        repository: Path,
+        vararg options: String,
+    ): List<ByteBuffer> {
+        val errors = Files.createTempFile("tier-e-rootful-git-", ".stderr")
+        try {
+            val command = listOf("git", "-C", repository.toString(), "ls-files", "-z") + options + listOf("--") + inputs
+            val git = ProcessBuilder(command).redirectError(errors.toFile()).start()
+            val names = git.inputStream.readNBytes(32 * 1024 * 1024 + 1)
+            require(names.size <= 32 * 1024 * 1024) { "Rootful source list exceeds 32 MiB" }
+            // Git may report EACCES as deleted with exit zero; diagnostics must fail closed.
+            check(git.waitFor(30, TimeUnit.SECONDS) && git.exitValue() == 0 && Files.size(errors) == 0L) {
+                "Git source list unavailable: ${Files.newInputStream(errors).use { it.readNBytes(4096) }.toString(Charsets.UTF_8)}"
+            }
+            val records = mutableListOf<ByteBuffer>()
+            var start = 0
+            for (end in names.indices) {
+                if (names[end] == 0.toByte()) {
+                    require(end > start) { "Git source list contains an empty filename" }
+                    // ByteBuffer equality compares raw remaining bytes, including non-UTF-8 names.
+                    records += ByteBuffer.wrap(names, start, end - start)
+                    start = end + 1
+                }
+            }
+            check(start == names.size) { "Git source list is not NUL-terminated" }
+            return records
+        } finally {
+            Files.deleteIfExists(errors)
         }
     }
 }

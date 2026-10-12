@@ -232,6 +232,7 @@ class PortalGenerationCaptureTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 launches.incrementAndGet()
                 error("inactive capture must not launch")

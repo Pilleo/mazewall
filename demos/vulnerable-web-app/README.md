@@ -158,26 +158,49 @@ The standard `bootJar` remains `vulnerable-app.jar` and cannot load the custom c
 The fixture profile exposes unsafe deserialization routes and a payload generator; it is an
 attack laboratory, not a supported deployment mode or proof of an arbitrary-code boundary.
 
-The demo uses **Scoped Bean Protection**. Instead of locking down the entire Spring Boot process (which would break the embedded Tomcat), we wrap specific `ExecutorService` beans that handle untrusted parsing:
+The demo uses **Scoped Bean Protection**. Enabled startup explicitly installs the permanent,
+process-safe `NO_EXEC_HOTSPOT` baseline before Spring creates workers. The application retains
+one `ManagedRuntime`, and prepares a separate fixed-policy domain for each service:
 
 ```kotlin
-val executor = executorOwner.own(
-    ContainedExecutors.wrap(
-        Executors.newFixedThreadPool(4),
-        servicePolicy,
-    ),
-)
+val operation = executorOwner.prepare(servicePolicy)
+// prepare uses the retained runtime and DomainLimits(workers = 4, maxAdmissions = 64).
 ```
 
-In the controllers, we simply submit the vulnerable task to the protected executor:
+Service delegates submit synchronous `Callable` bodies to their prepared domain:
 
 ```kotlin
-override fun importYaml(body: String) = executor.call {
+override fun importYaml(body: String) = operation.call {
     realService.importYaml(body)
 }
 ```
 
-When a malicious payload (like a SnakeYAML RCE gadget) attempts to call `Runtime.exec()`, the kernel intercepts the `execve` system call and returns `EPERM`. Mazewall catches this, logs the violation, and ensures the JVM thread remains stable.
+The required installation must finish before target entry. Delivery preserves the original
+business/native/fatal cause; permission exceptions alone are inferred evidence, not authenticated
+policy-denial proof. Caller interruption requests cancellation. An invocation's result or timeout
+does not establish `executionEnd()`; the retained runtime owns live work and cleanup through a
+bounded, retryable drain. Closing does not remove kernel restrictions.
+
+Profiling uses separately owned diagnostic executors and starts without the enforcement baseline,
+so its daemon and demonstrated child commands can launch. The owner retains the acquired raw JDK
+pool separately from its actual `Profiler.wrap` wrapper. Admission, cancellation and body retirement
+act on the raw pool first; wrapper/session close starts only after that pool's bodies have ended.
+An incomplete drain retains both resources and refuses enforcement. Cleanup and publication use
+an absolute entry budget, including contention; a pending IO/collector-close thread stays owned
+and is reported as in progress, not already published or physically ended. Retry after body/worker
+exit can close collectors and publish final coverage. Original cleanup causes, fatal identity and
+interruption remain available through typed incomplete reports and throwing close.
+Disabled development services remain explicitly
+unprotected. Independent executors, already-open descriptors and lazy/late work are outside the
+synchronous body contract.
+
+`ServiceResourceBindings` is a trusted application/fixture seam shared by policy grants and file
+service use. Deployment defaults remain `/app/data` and `/app/uploads`; they must exist before
+required preparation. Host tests acquire private temporary data/upload directories and bind them
+before application-context startup, exercising all prepared services without changing host `/app`
+paths or widening policies. Native profiling tests hold an actual wrapped body through incomplete
+publication and verify a distinct late filesystem operation in its final real snapshot. Genuine
+incomplete coverage remains refused; a successful worker drain alone never proves complete profiling.
 
 ## Future Improvements
 

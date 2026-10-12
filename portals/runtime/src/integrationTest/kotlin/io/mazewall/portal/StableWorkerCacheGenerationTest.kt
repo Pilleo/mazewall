@@ -61,6 +61,7 @@ class StableWorkerCacheGenerationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 launches.incrementAndGet()
                 error("stable cache replacement must reject before child acquisition")

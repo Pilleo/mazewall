@@ -9,6 +9,7 @@ import io.mazewall.platform.lifecycle.Deadline
 import io.mazewall.platform.process.JavaAgentSelection
 import io.mazewall.platform.process.JvmChildProcess
 import io.mazewall.platform.process.JvmChildSpec
+import io.mazewall.platform.process.JvmLaunchPreparation
 import io.mazewall.platform.process.ProcessLauncher
 import io.mazewall.platform.process.RealProcessLauncher
 import io.mazewall.platform.process.destroyForciblyWithDescendants
@@ -42,14 +43,15 @@ public class ProcessBroker internal constructor(
     private val sockets: SocketManager = RealSocketManager,
     private val launcher: ProcessLauncher = RealProcessLauncher,
     private val workerClasspath: String = defaultWorkerClasspath(),
-    /** Extra -D args for spawned worker JVMs (e.g. injectable idle deadline in tests). */
-    private val workerExtraJvmArgs: List<String> = emptyList(),
     private val workerProfile: PortalWorkerProfile = PortalWorkerProfile(),
     private val cgroupRoot: java.nio.file.Path? = null,
     private val grantRoots: PortalGrantRoots = PortalGrantRoots.empty(),
     private val instanceMode: PortalInstanceMode = PortalInstanceMode.STATELESS,
     private val workerLaunch: PortalWorkerLaunch? = null,
+    private val launchProfile: PortalLaunchProfile = PortalLaunchProfile(),
 ) : AutoCloseable {
+    private val launchContract = launchProfile.contract()
+
     init {
         require(instanceMode != PortalInstanceMode.STATEFUL_SINGLETON || limits.workers == 1) { "stateful Portal groups require exactly one worker" }
         require(!workerProfile.requiresCgroup || cgroupRoot != null) {
@@ -519,16 +521,19 @@ public class ProcessBroker internal constructor(
             val spec =
             JvmChildSpec(
                 mainClass = "io.mazewall.portal.worker.PortalWorkerMain",
-                mainArgs = listOf(ep.path, "--parent-session", parentSession, "--parent-timeout-ms", limits.startupTimeoutMs.toString()) + generationArgs,
+                mainArgs =
+                    listOf(ep.path, "--parent-session", parentSession, "--parent-timeout-ms", limits.startupTimeoutMs.toString(), "--launch-contract", launchContract.argument()) +
+                        generationArgs +
+                        if (workerProfile.requiresCgroup) listOf("--require-cgroup") else emptyList(),
                 maxHeap = workerProfile.maxHeapBytes?.toString() ?: "64m",
                 javaAgents = JavaAgentSelection.None,
                 classpath = classpath,
-                extraJvmArgs = workerExtraJvmArgs,
+                extraJvmArgs = launchProfile.jvmArgs,
             )
             PortalMeasurementBudget(deadline, active).check()
-            val process = JvmChildProcess.start(launcher, spec)
+            val process = JvmChildProcess.start(launcher, spec, preparation = launchProfile.preparation ?: JvmLaunchPreparation {})
             synchronized(attempt) { attempt.process = process }
-            val cgroup = cgroupRoot?.let { root -> cgroupController.createAndAttach(root, process.pid(), workerProfile) }
+            val cgroup = cgroupController.attachRequired(cgroupRoot, process.pid(), workerProfile)
             synchronized(attempt) { attempt.cgroup = cgroup }
             check(active()) { "portal worker acquisition cancelled" }
             val pump = PortalWorkerOutput(process.inputStream)
@@ -543,9 +548,13 @@ public class ProcessBroker internal constructor(
                 attempt.peer = null
             }
             check(active()) { "portal worker acquisition cancelled before parent authorization" }
-            channel.sendControl(PortalParentAuthorization(parentSession, process.pid()).frame(), deadline)
-            PortalParentAuthorization.acceptAcknowledgement(channel.receiveControl(deadline), parentSession, process.pid())
-            PortalWorkerReady.accept(channel.receiveControl(deadline), PortalWorkerReady(parentSession, process.pid(), generation))
+            launchContract.checkDescriptors(process.pid())
+            launchContract.checkStdio(process.pid())
+            val resources = PortalParentResources.measure(process.pid(), workerProfile.requiresCgroup)
+            PortalMeasurementBudget(deadline, active).check()
+            channel.sendControl(PortalParentAuthorization(parentSession, process.pid(), launchContract.identity, resources).frame(), deadline)
+            PortalParentAuthorization.acceptAcknowledgement(channel.receiveControl(deadline), parentSession, process.pid(), launchContract.identity, resources)
+            PortalWorkerReady.accept(channel.receiveControl(deadline), PortalWorkerReady(parentSession, process.pid(), generation, launchContract.identity, resources))
             check(
                 PortalReadyGate.evaluate(PortalReadyPhase.WAITING, true, active(), deadline.remainingMillis() > 0) == PortalReadyPhase.READY,
             ) { "portal worker ready after startup cancellation or deadline" }

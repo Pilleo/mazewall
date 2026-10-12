@@ -45,7 +45,7 @@ public fun requirePlatformThread(thread: Thread = Thread.currentThread()) {
         throw IllegalStateException(
             "Cannot install seccomp from a virtual thread: the filter would permanently contaminate " +
                 "its carrier and affect unrelated virtual tasks. Use a platform thread, " +
-                "ContainedExecutors.wrap(executor), installOnProcess, or a portal worker.",
+                "ManagedRuntime owned preparation, installOnProcess, or a portal worker.",
         )
     }
 }

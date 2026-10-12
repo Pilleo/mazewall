@@ -67,9 +67,19 @@ class PolicyIntentNativeTest : BaseIntegrationTest() {
         assertEquals("caller-readable", Files.readString(path))
         val pool = Executors.newSingleThreadExecutor()
         try {
-            val worker = ContainedExecutors.wrap(pool, policy)
             val failed = assertFailsWith<ExecutionException> {
-                worker.submit(Callable { Files.readString(path) }).get(10, TimeUnit.SECONDS)
+                pool
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { Files.readString(path) }.getOrElse {
+                            throw io.mazewall.enforcer.internal
+                            .containmentFailureForCaller(it)
+                        }
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
             }
             val cause = failed.cause
             assertTrue(

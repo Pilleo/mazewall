@@ -1,8 +1,11 @@
 package demo.vulnapp
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import demo.vulnapp.config.ExecutorDrain
 import demo.vulnapp.config.MazewallProtectionBootstrap
 import demo.vulnapp.config.ProfileArtifactPublisher
+import demo.vulnapp.config.ServiceExecutorOwner
+import demo.vulnapp.config.ServiceResourceBindings
 import demo.vulnapp.config.collectorCoverage
 import demo.vulnapp.service.DefaultFileService
 import demo.vulnapp.service.FileService
@@ -80,6 +83,7 @@ class VulnerableWebAppFreshJvmTest {
         val root = Files.createTempDirectory("mazewall-web-protected-")
         val marker = root.resolve("marker")
         val target = root.resolve("sbob.json")
+        val bindings = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
         ProfileArtifactPublisher.publish(
             target,
             BillOfBehavior(),
@@ -88,19 +92,38 @@ class VulnerableWebAppFreshJvmTest {
         )
         System.setProperty("mazewall.sbob.path", target.toString())
         try {
-            startApplication(enabled = true).use { application ->
+            lateinit var owner: ServiceExecutorOwner
+            startApplication(enabled = true, bindings = bindings).use { application ->
+                owner = application.getBean(ServiceExecutorOwner::class.java)
                 assertFalse(application.getBean(FileService::class.java) is DefaultFileService)
                 assertEquals("true", application.environment.getProperty(MazewallProtectionBootstrap.RESOLVED_PROPERTY))
                 val benign = getAdmin(application, "1.0")
                 assertEquals(200, benign.statusCode())
                 assertTrue(benign.body().contains("Log processed"))
 
+                val bytes = java.io.ByteArrayOutputStream()
+                java.util.zip.ZipOutputStream(bytes).use { zip ->
+                    zip.putNextEntry(java.util.zip.ZipEntry("benign.txt"))
+                    zip.write("bound upload".toByteArray())
+                    zip.closeEntry()
+                }
+                val upload = org.springframework.mock.web
+                    .MockMultipartFile("file", "benign.zip", "application/zip", bytes.toByteArray())
+                application.getBean(FileService::class.java).extractZip(upload)
+                assertEquals("bound upload", Files.readString(bindings.uploads.resolve("benign.txt")))
+
                 val failure = runCatching {
                     application.getBean(FileService::class.java).runCommand("printf escaped > '$marker'")
                 }.exceptionOrNull()
                 assertTrue(ContainmentViolationDetector.findViolationCause(requireNotNull(failure)) != null)
+                val denied = kotlin.test.assertIs<io.mazewall.enforcer.api.ContainmentViolationException>(failure)
+                val nativeCause = kotlin.test.assertIs<java.io.IOException>(denied.cause)
+                assertTrue(nativeCause.message.orEmpty().contains("Cannot run program \"sh\""), "denial must be the command launch, not an unrelated resource failure")
+                assertTrue(Regex("\\berror[=:]\\s*(1|13)\\b").containsMatchIn(nativeCause.message.orEmpty()), nativeCause.toString())
+                assertEquals(io.mazewall.enforcer.api.ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(denied)?.evidence)
                 assertFalse(Files.exists(marker), "protected service command must not create its marker")
             }
+            assertEquals(ExecutorDrain.Complete, owner.stopAdmissionAndDrain())
         } finally {
             System.clearProperty("mazewall.sbob.path")
             root.toFile().deleteRecursively()
@@ -130,7 +153,14 @@ class VulnerableWebAppFreshJvmTest {
                 "shutdown must publish observed HTTP service evidence",
             )
             assertTrue(Files.readString(generation.stackDictionary).isNotBlank())
-            assertTrue(Files.readString(generation.integrity).contains("\"complete\":true"))
+            val integrity = ObjectMapper().readTree(Files.readString(generation.integrity))
+            if (integrity.path("complete").booleanValue()) {
+                assertEquals(generation.evidence, ProfileArtifactPublisher.resolveEvidencePath(target))
+            } else {
+                kotlin.test.assertFailsWith<demo.vulnapp.config.IncompleteProfileEvidenceException> {
+                    ProfileArtifactPublisher.resolveEvidencePath(target)
+                }
+            }
         } finally {
             System.clearProperty("mazewall.sbob.path")
             root.toFile().deleteRecursively()
@@ -141,10 +171,18 @@ class VulnerableWebAppFreshJvmTest {
         enabled: Boolean,
         profile: Boolean = false,
         sbobPath: java.nio.file.Path? = null,
+        bindings: ServiceResourceBindings? = null,
     ): ConfigurableApplicationContext {
         System.setProperty("org.springframework.boot.logging.LoggingSystem", "none")
         val application = SpringApplication(VulnAppApplication::class.java)
         application.addListeners(MazewallProtectionBootstrap())
+        bindings?.let { acquired ->
+            application.addInitializers(
+                org.springframework.context.ApplicationContextInitializer<ConfigurableApplicationContext> { context ->
+                    context.beanFactory.registerSingleton("serviceResourceBindings", acquired)
+                },
+            )
+        }
         val arguments = mutableListOf(
             "--mazewall.enabled=$enabled",
             "--mazewall.profile=$profile",

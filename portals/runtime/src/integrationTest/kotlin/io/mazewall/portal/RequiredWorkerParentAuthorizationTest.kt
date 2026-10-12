@@ -21,8 +21,9 @@ class RequiredWorkerParentAuthorizationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
-                val launched = RealProcessLauncher.startProcess(args, redirectErrorStream)
+                val launched = RealProcessLauncher.startProcess(args, redirectErrorStream, preparation)
                 child = launched
                 val pending = CompletableFuture.supplyAsync { launched.inputStream.bufferedReader().readLine() }
                 assertEquals("MAZEWALL_PORTAL_PARENT_AUTH_PENDING", pending.get(5, TimeUnit.SECONDS))
@@ -58,6 +59,7 @@ class RequiredWorkerParentAuthorizationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 val altered = args.toMutableList()
                 for (flag in listOf("--parent-session", "--parent-timeout-ms")) {
@@ -66,7 +68,7 @@ class RequiredWorkerParentAuthorizationTest {
                     altered.removeAt(index + 1)
                     altered.removeAt(index)
                 }
-                return RealProcessLauncher.startProcess(altered, redirectErrorStream).also { child = it }
+                return RealProcessLauncher.startProcess(altered, redirectErrorStream, preparation).also { child = it }
             }
         }
         ProcessBroker(launcher = launcher).use { broker ->
@@ -83,13 +85,14 @@ class RequiredWorkerParentAuthorizationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 val altered = args.toMutableList()
                 val sessionIndex = altered.indexOf("--parent-session")
                 check(sessionIndex >= 0)
                 val original = altered[sessionIndex + 1]
                 altered[sessionIndex + 1] = (if (original[0] == '0') "1" else "0") + original.substring(1)
-                return RealProcessLauncher.startProcess(altered, redirectErrorStream).also { child = it }
+                return RealProcessLauncher.startProcess(altered, redirectErrorStream, preparation).also { child = it }
             }
         }
         ProcessBroker(launcher = launcher).use { broker ->

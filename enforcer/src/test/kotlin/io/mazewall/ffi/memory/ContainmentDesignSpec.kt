@@ -197,23 +197,26 @@ class ContainmentDesignSpec :
                 if (isSupported) {
                     val executor = java.util.concurrent.Executors
                         .newSingleThreadExecutor()
-                    val safeExecutor = io.mazewall.enforcer.api.ContainedExecutors.wrap(
-                        executor,
-                        ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(),
-                    )
                     try {
-                        val result = safeExecutor
+                        val result = executor
                             .submit(
                                 java.util.concurrent.Callable {
-                                    val a = 1
-                                    val b = 2
-                                    a + b
+                                    ContainedExecutors
+                                        .installOnCurrentThread(
+                                            ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(),
+                                        ).use { receipt ->
+                                        receipt.requireInstalled()
+                                        val a = 1
+                                        val b = 2
+                                        a + b
+                                    }
                                 },
                             ).get(5, java.util.concurrent.TimeUnit.SECONDS)
 
                         result shouldBe 3
                     } finally {
                         executor.shutdown()
+                        executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
                     }
                 }
             }

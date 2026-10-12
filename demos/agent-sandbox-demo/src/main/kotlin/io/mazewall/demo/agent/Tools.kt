@@ -8,32 +8,40 @@ import io.mazewall.platform.syscall.Syscall
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.DrainReport
+import io.mazewall.enforcer.api.execution.IncompleteDrainException
+import io.mazewall.enforcer.api.execution.InProcessDomain
+import io.mazewall.enforcer.api.execution.InvocationHandle
+import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.api.ScopingHandler
 import java.io.File
 import java.io.IOException
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
+import java.nio.file.AccessDeniedException
+import java.nio.file.Files
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
 class AgentTools(
-    private val useMazewall: Boolean,
+    private val runtime: ManagedRuntime?,
     private val workspaceDir: File
 ) : AutoCloseable {
     // Thread pools representing separate agent compartments (Thread-Level Compartmentalization)
-    private val webRawExecutor = Executors.newSingleThreadExecutor()
-    private val fileRawExecutor = Executors.newSingleThreadExecutor()
-    private val analysisRawExecutor = Executors.newSingleThreadExecutor()
+    private val webRawExecutor = if (runtime == null) Executors.newSingleThreadExecutor() else null
+    private val fileRawExecutor = if (runtime == null) Executors.newSingleThreadExecutor() else null
+    private val analysisRawExecutor = if (runtime == null) Executors.newSingleThreadExecutor() else null
+    private val invocations: MutableSet<InvocationHandle<*>> = ConcurrentHashMap.newKeySet()
+    private val admissionLock = Any()
+    private var closing = false
 
     // 1. Web Agent Compartment: Allows network connections, but blocks private IPs (SSRF) and blocks process spawning
     private val networkPolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
@@ -62,11 +70,7 @@ class AgentTools(
         )
     }
 
-    private val webExecutor: ExecutorService = if (useMazewall) {
-        ContainedExecutors.wrap(webRawExecutor, networkPolicy, webScopingPolicy)
-    } else {
-        webRawExecutor
-    }
+    private val webDomain = runtime?.prepare(networkPolicy, DomainLimits(1, 1), webScopingPolicy)
 
     // 2. File Agent Compartment: RESTRICTED read-only filesystem access via Landlock (Path Traversal) and blocks process spawning
     private val filePolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
@@ -75,12 +79,7 @@ class AgentTools(
         .allowFsRead(workspaceDir.absolutePath)
         .build()
 
-    private val fileExecutor: ExecutorService = if (useMazewall) {
-        // Wrap with default scoping policy as Landlock does not need supervisor stack inspection
-        ContainedExecutors.wrap(fileRawExecutor, filePolicy)
-    } else {
-        fileRawExecutor
-    }
+    private val fileDomain = runtime?.prepare(filePolicy, DomainLimits(1, 1))
 
     // 3. Execution Agent Compartment: Allows execve, but ONLY from the executeDataAnalysis stack (RCE)
     private val execPolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
@@ -116,15 +115,11 @@ class AgentTools(
         return isLegit
     }
 
-    private val analysisExecutor: ExecutorService = if (useMazewall) {
-        ContainedExecutors.wrap(analysisRawExecutor, execPolicy, execScopingPolicy)
-    } else {
-        analysisRawExecutor
-    }
+    private val analysisDomain = runtime?.prepare(execPolicy, DomainLimits(1, 1), execScopingPolicy)
 
     @Tool("Fetch a public webpage for information")
     fun fetchWebpage(url: String): String {
-        return awaitOwned(webExecutor.submit<String> {
+        return execute(webDomain, webRawExecutor) {
             println("[TOOL] Fetching webpage: $url")
 
             withSupervisorDenialEvidence {
@@ -137,19 +132,10 @@ class AgentTools(
                         ),
                     )
                 } else {
-                    val client = HttpClient.newBuilder()
-                        .connectTimeout(Duration.ofSeconds(2))
-                        .build()
-                    val request = HttpRequest.newBuilder()
-                        .uri(URI.create(url))
-                        .timeout(Duration.ofSeconds(2))
-                        .GET()
-                        .build()
-                    val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-                    response.body()
+                    AgentHttp.fetch(url)
                 }
             }
-        })
+        }
     }
 
     @Tool("Analyze a user upload file within workspace")
@@ -159,20 +145,21 @@ class AgentTools(
         // Landlock compartment. A subsequent denial in that compartment is attributable to the
         // installed policy, not to a pre-existing host ACL failure.
         verifyNativeRead(targetFile)
-        return awaitOwned(fileExecutor.submit<String> {
+        return execute(fileDomain, fileRawExecutor) {
             println("[TOOL] Analyzing file: $filename")
             println("[TOOL] Resolved file path: ${targetFile.absolutePath}")
             try {
-                targetFile.readText()
-            } catch (failure: IOException) {
+                Files.readString(targetFile.toPath())
+            } catch (failure: AccessDeniedException) {
+                if (runtime == null) throw failure
                 throw authenticatedDenial(Syscall.OPEN, failure, EACCES)
             }
-        })
+        }
     }
 
     @Tool("Execute data analysis script")
     fun executeDataAnalysis(script: String): String {
-        return awaitOwned(analysisExecutor.submit<String> { executeAuthorizedAnalysis(script) })
+        return execute(analysisDomain, analysisRawExecutor) { executeAuthorizedAnalysis(script) }
     }
 
     // A named non-inline method keeps authority independent of compiler-generated lambda names.
@@ -188,11 +175,22 @@ class AgentTools(
     }
 
     fun shutdown() {
-        val executors = listOf(webRawExecutor, fileRawExecutor, analysisRawExecutor)
-        executors.forEach(ExecutorService::shutdownNow)
         val deadline = System.nanoTime() + SHUTDOWN_TIMEOUT.toNanos()
+        val cancelled = synchronized(admissionLock) {
+            closing = true
+            invocations.toTypedArray()
+        }
+        val executors = listOfNotNull(webRawExecutor, fileRawExecutor, analysisRawExecutor)
+        cancelled.forEach { it.requestCancellation() }
+        executors.forEach(ExecutorService::shutdownNow)
         var interrupted = Thread.interrupted()
         var failure: Throwable? = null
+        runtime?.let {
+            when (val report = it.drain(Duration.ofNanos(maxOf(0L, deadline - System.nanoTime())))) {
+                DrainReport.Complete -> Unit
+                is DrainReport.Incomplete -> failure = IncompleteDrainException(report)
+            }
+        }
         executors.forEach { executor ->
             while (!executor.isTerminated) {
                 val remaining = deadline - System.nanoTime()
@@ -211,6 +209,31 @@ class AgentTools(
         }
         if (interrupted) Thread.currentThread().interrupt()
         failure?.let { throw it }
+    }
+
+    private fun <T> execute(domain: InProcessDomain?, comparison: ExecutorService?, action: () -> T): T {
+        synchronized(admissionLock) {
+            if (closing) throw RejectedExecutionException("Agent tools are closing")
+        }
+        val owner = runtime ?: return awaitOwned(checkNotNull(comparison).submit(Callable(action)))
+        val handle = owner.submit(checkNotNull(domain), Callable(action))
+        invocations.add(handle)
+        handle.executionEnd().whenComplete { _, _ -> invocations.remove(handle) }
+        // Submit may await resource validation: stay outside the lock and cancel publication that crosses close's snapshot.
+        val late = synchronized(admissionLock) { closing }
+        if (late) handle.requestCancellation()
+        return try {
+            handle.result().toCompletableFuture().get(PROCESS_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS)
+        } catch (failure: InterruptedException) {
+            handle.requestCancellation()
+            Thread.currentThread().interrupt()
+            throw failure
+        } catch (failure: TimeoutException) {
+            handle.requestCancellation()
+            throw IOException("agent tool operation timed out after ${PROCESS_TIMEOUT.toMillis()} ms", failure)
+        } catch (failure: ExecutionException) {
+            throw failure.cause ?: failure
+        }
     }
 
     private fun <T> awaitOwned(future: Future<T>): T =

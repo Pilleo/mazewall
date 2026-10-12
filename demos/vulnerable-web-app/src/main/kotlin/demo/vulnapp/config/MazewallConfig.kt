@@ -1,7 +1,6 @@
 package demo.vulnapp.config
 
 import demo.vulnapp.service.*
-import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.RuntimeProfile
@@ -14,17 +13,17 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.web.multipart.MultipartFile
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.concurrent.Executors
 import java.util.logging.Logger
 
 @Configuration
 @ConditionalOnProperty(name = [MazewallProtectionBootstrap.RESOLVED_PROPERTY], havingValue = "true")
 internal class MazewallConfig(
     private val executorOwner: ServiceExecutorOwner,
+    private val resources: ServiceResourceBindings,
 ) {
     private val logger = Logger.getLogger(MazewallConfig::class.java.name)
 
-    private fun wrapExecutor(basePolicy: Policy<*, Uncompiled>): OwnedServiceExecutor {
+    private fun prepareOperation(basePolicy: Policy<*, Uncompiled>): OwnedServiceOperation {
         val sbobPath = System.getProperty("mazewall.sbob.path") ?: "/app/sbob.json"
         val bobFile = Paths.get(sbobPath)
         check(Files.isRegularFile(bobFile)) {
@@ -34,7 +33,7 @@ internal class MazewallConfig(
         logger.info("Engaging SBoB ENFORCEMENT mode. Loading ruleset from: $sbobPath")
         val finalPolicy = SbobParser.parseToPolicy(evidenceFile, basePolicy)
 
-        return executorOwner.own(ContainedExecutors.wrap(Executors.newFixedThreadPool(4), finalPolicy))
+        return executorOwner.prepare(finalPolicy)
     }
 
     @Bean
@@ -45,7 +44,7 @@ internal class MazewallConfig(
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .build()
-        val executor = wrapExecutor(basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : AdminService {
             override fun logMessage(apiVersion: String) = executor.call { realService.logMessage(apiVersion) }
         }
@@ -59,7 +58,7 @@ internal class MazewallConfig(
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
             .build()
-        val executor = wrapExecutor(basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : ProxyService {
             override fun fetchUrl(url: String) = executor.call { realService.fetchUrl(url) }
         }
@@ -72,10 +71,10 @@ internal class MazewallConfig(
             .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/data")
+            .allowFsRead(resources.data.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : XmlImportService {
             override fun importXStream(xmlContent: String) = executor.call { realService.importXStream(xmlContent) }
 
@@ -90,10 +89,10 @@ internal class MazewallConfig(
             .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/data")
+            .allowFsRead(resources.data.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : YamlImportService {
             override fun importYaml(yamlContent: String) = executor.call { realService.importYaml(yamlContent) }
         }
@@ -101,16 +100,16 @@ internal class MazewallConfig(
 
     @Bean
     fun fileService(): FileService {
-        val realService = DefaultFileService()
+        val realService = DefaultFileService(resources.uploads.toFile())
         val basePolicy = WorkerPolicyBuilder
             .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_EXEC as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/uploads")
-            .allowFsWrite("/app/uploads")
+            .allowFsRead(resources.uploads.toString())
+            .allowFsWrite(resources.uploads.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : FileService {
             override fun extractZip(file: MultipartFile) = executor.call { realService.extractZip(file) }
 
@@ -125,10 +124,10 @@ internal class MazewallConfig(
             .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.PURE_COMPUTE as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/data")
+            .allowFsRead(resources.data.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : DeserializationService {
             override fun importJackson(jsonContent: String) = executor.call { realService.importJackson(jsonContent) }
 

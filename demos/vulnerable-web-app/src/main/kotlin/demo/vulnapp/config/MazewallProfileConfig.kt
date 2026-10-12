@@ -17,18 +17,21 @@ import java.util.concurrent.Executors
 @ConditionalOnProperty(name = ["mazewall.profile"], havingValue = "true")
 internal class MazewallProfileConfig(
     private val profileManager: MazewallProfileManager,
+    private val resources: ServiceResourceBindings,
 ) {
-    private fun profiler(): OwnedServiceExecutor =
-        profileManager.register(
+    private fun profiler(): ProfiledServiceExecutor {
+        val raw = Executors.newFixedThreadPool(4)
+        return profileManager.register(raw) {
             Profiler.wrap(
-                Executors.newFixedThreadPool(4),
+                raw,
                 WorkerPolicyBuilder
                     .denyList(RuntimeProfile.HOTSPOT_JIT)
                     .base(Policy.PURE_COMPUTE_UNSAFE)
                     .allowMmapExec()
                     .build(),
-            ),
-        )
+            )
+        }
+    }
 
     @Bean @Primary
     fun adminServiceProfiling(): AdminService =
@@ -70,7 +73,7 @@ internal class MazewallProfileConfig(
 
     @Bean @Primary
     fun fileServiceProfiling(): FileService =
-        DefaultFileService().let { real ->
+        DefaultFileService(resources.uploads.toFile()).let { real ->
         val executor = profiler()
         object : FileService {
             override fun extractZip(file: MultipartFile) = executor.call { real.extractZip(file) }

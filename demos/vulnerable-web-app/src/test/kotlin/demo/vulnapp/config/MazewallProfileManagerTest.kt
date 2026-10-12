@@ -21,6 +21,44 @@ class MazewallProfileManagerTest {
     lateinit var directory: Path
 
     @Test
+    fun `diagnostic publication stays incomplete through held raw work and settles after retry`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val delegate = Executors.newSingleThreadExecutor()
+        val owner = ServiceExecutorOwner(Duration.ofMillis(20))
+        owner.ownProfiling(delegate).execute {
+            entered.countDown()
+            while (release.count > 0) {
+                try {
+                    release.await()
+                } catch (_: InterruptedException) {
+                    // Deliberately retain live work through a cancellation request.
+                }
+            }
+        }
+        var stopped = false
+        val manager = MazewallProfileManager.forTesting(owner, listOf(ProfilingResult(Unit, BillOfBehavior(), emptyMap(), collectorCoverage()))) { stopped = true }
+        val target = directory.resolve("retained.json")
+        try {
+            assertTrue(entered.await(1, java.util.concurrent.TimeUnit.SECONDS))
+            assertIs<ExecutorDrain.Incomplete>(manager.publish(target))
+            assertFalse(stopped, "global cleanup must not run before held raw work retires")
+            awaitPointer(target)
+            assertFailsWith<IncompleteProfileEvidenceException> { ProfileArtifactPublisher.resolveEvidencePath(target) }
+            release.countDown()
+            assertTrue(delegate.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS))
+            settleProfileOwners()
+            assertTrue(stopped)
+            assertEquals(ProfileArtifactPublisher.readCurrent(target).evidence, ProfileArtifactPublisher.resolveEvidencePath(target))
+        } finally {
+            release.countDown()
+            delegate.shutdownNow()
+            delegate.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
+            settleProfileOwners()
+        }
+    }
+
+    @Test
     fun `orderly executor shutdown without collector coverage cannot authorize enforcement`() {
         val owner = ServiceExecutorOwner(Duration.ofSeconds(1))
         val manager = MazewallProfileManager.forTesting(owner) {}
@@ -56,44 +94,63 @@ class MazewallProfileManagerTest {
     }
 
     @Test
-    fun `timeout and profiler cleanup failure are both retained in published integrity`() {
+    fun `timeout publishes incomplete integrity without tearing down live collectors`() {
         val release = CountDownLatch(1)
         val owner = ServiceExecutorOwner(Duration.ofMillis(10))
-        owner.own(Executors.newSingleThreadExecutor()).execute { awaitRelease(release) }
-        val manager = MazewallProfileManager.forTesting(owner) { error("cleanup boom") }
+        owner.ownProfiling(Executors.newSingleThreadExecutor()).execute { awaitRelease(release) }
+        var shutdown = false
+        val manager = MazewallProfileManager.forTesting(owner) { shutdown = true }
 
         try {
             val outcome = manager.publish(directory.resolve("sbob.json"))
 
-            assertIs<ExecutorDrain.Incomplete.Multiple>(outcome)
+            assertIs<ExecutorDrain.Incomplete>(outcome)
+            awaitPointer(directory.resolve("sbob.json"))
             val integrity = Files.readString(ProfileArtifactPublisher.readCurrent(directory.resolve("sbob.json")).integrity)
             assertTrue(integrity.contains("timeout"))
-            assertTrue(integrity.contains("cleanup boom"))
+            assertFalse(shutdown)
         } finally {
             release.countDown()
+            owner.stopAdmissionAndDrain()
+            settleProfileOwners()
         }
     }
 
     @Test
-    fun `interruption and profiler cleanup failure remain visible and interruption is preserved`() {
+    fun `interrupted drain retains collectors and preserves interruption`() {
         val release = CountDownLatch(1)
         val owner = ServiceExecutorOwner(Duration.ofSeconds(1))
-        owner.own(Executors.newSingleThreadExecutor()).execute { awaitRelease(release) }
-        val manager = MazewallProfileManager.forTesting(owner) { error("cleanup interrupted") }
+        owner.ownProfiling(Executors.newSingleThreadExecutor()).execute { awaitRelease(release) }
+        var shutdown = false
+        val manager = MazewallProfileManager.forTesting(owner) { shutdown = true }
         Thread.currentThread().interrupt()
 
         try {
             val outcome = manager.publish(directory.resolve("sbob.json"))
 
-            assertIs<ExecutorDrain.Incomplete.Multiple>(outcome)
+            assertIs<ExecutorDrain.Incomplete.InProgress>(outcome)
             assertTrue(Thread.currentThread().isInterrupted)
-            val integrity = Files.readString(ProfileArtifactPublisher.readCurrent(directory.resolve("sbob.json")).integrity)
-            assertTrue(integrity.contains("interrupted"))
-            assertTrue(integrity.contains("cleanup interrupted"))
+            // Publication cleanup runs on its retained platform owner, not the interrupted caller.
         } finally {
             Thread.interrupted()
             release.countDown()
+            owner.stopAdmissionAndDrain()
+            settleProfileOwners()
         }
+    }
+
+    @Test
+    fun `physical drain followed by collector cleanup failure cannot authorize enforcement`() {
+        val owner = ServiceExecutorOwner(Duration.ofSeconds(1))
+        var attempts = 0
+        val manager = MazewallProfileManager.forTesting(owner, listOf(ProfilingResult(Unit, BillOfBehavior(), emptyMap(), collectorCoverage()))) {
+            if (attempts++ == 0) error("cleanup boom")
+        }
+        val target = directory.resolve("failed-cleanup.json")
+        assertIs<ExecutorDrain.Incomplete.ProfilerCleanup>(manager.publish(target))
+        assertTrue(Files.readString(ProfileArtifactPublisher.readCurrent(target).integrity).contains("cleanup boom"))
+        assertFailsWith<IncompleteProfileEvidenceException> { ProfileArtifactPublisher.resolveEvidencePath(target) }
+        assertIs<ExecutorDrain.Complete>(manager.publish(target))
     }
 
     private fun awaitRelease(release: CountDownLatch) {
@@ -102,5 +159,16 @@ class MazewallProfileManagerTest {
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
+    }
+
+    private fun awaitPointer(path: Path) {
+        val deadline = System.nanoTime() +
+            java.util.concurrent.TimeUnit.SECONDS
+            .toNanos(2)
+        while (!Files.exists(path) && System.nanoTime() < deadline) {
+            java.util.concurrent.locks.LockSupport
+            .parkNanos(1_000_000)
+        }
+        assertTrue(Files.exists(path), "retained IO attempt must eventually publish its diagnostic pointer")
     }
 }

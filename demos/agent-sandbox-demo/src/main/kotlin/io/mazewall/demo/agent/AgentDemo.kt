@@ -10,7 +10,8 @@ import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.Supervision
 import io.mazewall.platform.syscall.Syscall
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+import java.time.Duration
 import java.lang.reflect.Method
 import kotlin.system.exitProcess
 
@@ -72,6 +73,10 @@ private fun runAgentScenarioConfigured(
     expected: ExpectedAgentResult,
 ): AgentScenarioResult {
     if (useMazewall) {
+        val configuredLaunch = System.getProperty("jdk.lang.Process.launchMechanism")
+        require(configuredLaunch == null || configuredLaunch.equals("vfork", ignoreCase = true)) {
+            "This demo requires VFORK configured before ProcessImpl initialization; other JDK launch modes can bypass its VFORK/FORK handlers via CLONE"
+        }
         // The demo supervises the parent-side vfork. Set this before ProcessImpl is initialized;
         // applicationDefaultJvmArgs provides the same value for normal Gradle runs.
         System.setProperty("jdk.lang.Process.launchMechanism", "vfork")
@@ -85,21 +90,21 @@ private fun runAgentScenarioConfigured(
             .allowMmapExec()
             .block(Syscall.PTRACE, Syscall.MOUNT, Syscall.UNSHARE, Syscall.CHROOT)
             .build()
-        ContainedExecutors.installOnProcess(processBaseline).use {
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, processBaseline, Duration.ofSeconds(30), Duration.ofSeconds(5)).use { runtime ->
             println("[MAZEWALL] Tier 1 Process-wide containment applied (blocked PTRACE, MOUNT, UNSHARE, CHROOT).")
-            return runAgentScenario(useMazewall, scenario, expected)
+            return runAgentScenario(runtime, scenario, expected)
         }
     }
-    return runAgentScenario(useMazewall, scenario, expected)
+    return runAgentScenario(null, scenario, expected)
 }
 
 private fun runAgentScenario(
-    useMazewall: Boolean,
+    runtime: ManagedRuntime?,
     scenario: String,
     expected: ExpectedAgentResult,
 ): AgentScenarioResult {
     AgentDemoFixture.create().use { fixture ->
-        AgentTools(useMazewall, fixture.workspace).use { tools ->
+        AgentTools(runtime, fixture.workspace).use { tools ->
             val model: ChatLanguageModel = MockAttackLlm(scenario)
             val outcome = runScenarioBoundary(
                 action = {

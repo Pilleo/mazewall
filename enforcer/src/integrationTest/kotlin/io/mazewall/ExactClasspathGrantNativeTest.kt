@@ -47,15 +47,17 @@ class ExactClasspathGrantNativeTest : BaseIntegrationTest() {
         System.setProperty("java.class.path", System.getProperty("java.class.path") + File.pathSeparator + artifact)
         val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).filesystem(FileSystemPolicy.DenyAll).build()
         Executors.newSingleThreadExecutor().use { worker ->
-            val contained = ContainedExecutors.wrap(worker, policy)
             assertEquals(
                 42,
-                contained
+                worker
                     .submit(
                     Callable {
-                assertTrue(Files.readAllBytes(Path.of(artifact)).isNotEmpty())
-                assertFailsWith<AccessDeniedException> { Files.readString(Path.of(sibling)) }
-                42
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    assertTrue(Files.readAllBytes(Path.of(artifact)).isNotEmpty())
+                    assertFailsWith<AccessDeniedException> { Files.readString(Path.of(sibling)) }
+                    42
+                }
             },
                 ).get(10, TimeUnit.SECONDS),
             )

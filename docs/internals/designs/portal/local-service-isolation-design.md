@@ -67,9 +67,10 @@ manifest generation and JVM runtime identity before launch. The child measures i
 classpath, artifact and defining-loader manifests and rejects a changed requested generation
 before guest construction. It then installs and validates the actual required receipt
 (new process-wide Seccomp and Landlock stages, no fallback, exact static baseline policy),
-constructs the group dispatcher and sends a strict bounded format-1 socket ready record.
+constructs the group dispatcher and sends a strict bounded format-2 socket ready record.
 The host requires the exact session, child PID, protocol and measured generation plus
-required protection evidence under the existing startup deadline. Stdout READY cannot
+required protection, checked operator launch-contract and parent resource evidence under
+the existing startup deadline. Stdout READY cannot
 substitute for this record, even after a matching parent acknowledgement. The receipt
 remains strongly rooted for the entire OS process lifetime, even if guest-created non-daemon
 threads outlive main, initialization fails, or other shutdown hooks complete. The static
@@ -135,9 +136,12 @@ portalCodegen { workerSourceSet.set("portalWorker") }
 The host JAR contains stubs/manifests and opaque bundle bytes, not directly loadable
 guest dispatchers. This separates classpaths; environment authority and required
 generation-bound readiness are distinct launch contracts. Receipt-backed generation
-readiness is implemented; operator-owned launch/environment profiles and C4 real-object
-pinning between hashing, installation and class loading remain separate unclosed gates.
-This readiness slice does not claim complete P3 acceptance or adversarial-file pinning.
+readiness and immutable operator launch profiles are implemented. See the
+[P3 launch contract](../enforcer/process-portal-design.md#required-operator-launch-profiles-p3)
+for inherited-compatible defaults, explicit trusted operator preparation, required named
+selection, closed noncredential marker/resource checks,
+versioned authorization and ownership limits. C4 real-object pinning between hashing,
+installation and class loading and actual production launch/cgroup approval remain separate gates.
 
 The historical worker-classpath system property is accepted only by the
 repository's marked test execution. Production `ProcessBroker` startup requires

@@ -19,6 +19,7 @@ import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
@@ -45,27 +46,42 @@ class PermanentSupervisorRegistrationIntegrationTest : BaseIntegrationTest() {
         val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build()
         try {
             Executors.newSingleThreadExecutor().use { raw ->
-                val wrapped = ContainedExecutors.wrap(raw, policy, scoping)
                 repeat(2) {
-                    assertEquals("registered", wrapped.submit<String> { file.readText() }.get())
+                    assertEquals(
+                        "registered",
+                        raw
+                            .submit<String> {
+                        ContainedExecutors.installOnCurrentThread(policy, scoping).use { receipt ->
+                            receipt.requireInstalled()
+                            file.readText()
+                        }
+                    }.get(10, TimeUnit.SECONDS),
+                    )
                 }
-                val depth = wrapped
+                val depth = raw
                     .submit<Int> {
-                    val nested = ContainedExecutors.installOnCurrentThread(policy, scoping)
-                    val lease = nested
-                    lease.close()
-                    lease.close()
-                    assertEquals("registered", file.readText())
-                    ContainmentStateRegistry.threadState.filterDepth
-                }.get()
+                    ContainedExecutors.installOnCurrentThread(policy, scoping).use { outer ->
+                        outer.requireInstalled()
+                        val lease = ContainedExecutors.installOnCurrentThread(policy, scoping).requireInstalled()
+                        lease.close()
+                        lease.close()
+                        assertEquals("registered", file.readText())
+                        ContainmentStateRegistry.threadState.filterDepth
+                    }
+                }.get(10, TimeUnit.SECONDS)
                 assertEquals(1, depth, "sequential and nested task leases must not stack filters")
                 assertTrue(calls.get() >= 3, "all target accesses must reach the registered scoping handler")
                 val other = object : StacktraceScopingPolicy {
                     override val handlers = scoping.handlers
                 }
-                val otherWrapper = ContainedExecutors.wrap(raw, policy, other)
                 val failure = assertFailsWith<java.util.concurrent.ExecutionException> {
-                    otherWrapper.submit<String> { file.readText() }.get()
+                    raw
+                        .submit<String> {
+                        ContainedExecutors.installOnCurrentThread(policy, other).use { receipt ->
+                            receipt.requireInstalled()
+                            file.readText()
+                        }
+                    }.get(10, TimeUnit.SECONDS)
                 }
                 assertTrue(
                     failure.cause

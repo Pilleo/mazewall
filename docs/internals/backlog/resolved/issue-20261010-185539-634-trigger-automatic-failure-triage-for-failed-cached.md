@@ -6,9 +6,9 @@ priority: high
 dependencies: []
 component: "core"
 target_modules: []
-target_files: 
+target_files:
   - "build.gradle.kts"
-target_symbols: 
+target_symbols:
   - "runTriage"
 open_questions: false
 ---

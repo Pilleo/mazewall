@@ -75,7 +75,7 @@ class OwnedProcessRunnerTest {
         try {
             val started = fixture.resolve("started")
             val lateWrite = fixture.resolve("late-write")
-            val tools = AgentTools(false, fixture.toFile())
+            val tools = AgentTools(null, fixture.toFile())
             val caller = Thread.ofPlatform().start {
                 runCatching {
                     tools.executeDataAnalysis(

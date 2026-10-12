@@ -23,6 +23,17 @@ import kotlin.test.assertTrue
 
 class ProfilerSessionApiTest {
     @Test
+    fun `public incomplete refusal recommends retaining diagnostics without an unavailable override`() {
+        MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.USER_NOTIF)).use { profiler ->
+            val result = profiler.snapshot()
+            val failure = assertFailsWith<IncompleteProfileException> { result.toDedicatedWorkerPolicies() }
+            assertFalse(failure.message.orEmpty().contains("allowIncomplete"))
+            assertTrue(failure.message.orEmpty().contains("toProfileDocumentJson"))
+            assertEquals(result.coverage, failure.coverage)
+        }
+    }
+
+    @Test
     fun `recorded eBPF augmentation retains path failures in the final result and snapshot`(
         @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
     ) {

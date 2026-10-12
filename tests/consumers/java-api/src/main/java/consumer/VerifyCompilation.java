@@ -19,6 +19,11 @@ public final class VerifyCompilation {
         } else if (args[0].equals("scope")) {
             verify(args, "ProcessFilesystem", "compiler.err.cant.resolve.location.args");
             verify(args, "WorkerAsProcess", "compiler.err.prob.found.req");
+        } else if (args[0].equals("retired")) {
+            for (var name : List.of("WrapVararg", "WrapScoping", "WrapTyped", "SingleFactory", "FixedFactory", "CachedFactory")) {
+                verify(args, name, "compiler.err.cant.resolve.location.args");
+            }
+            verify(args, "ExecutorType", "compiler.err.cant.resolve.location");
         } else {
             throw new IllegalArgumentException("Unknown fixture: " + args[0]);
         }
@@ -39,8 +44,21 @@ public final class VerifyCompilation {
             boolean expected = expectedCode == null ? compiled && errors.isEmpty()
                 : !compiled && errors.size() == 1 && errors.getFirst().getCode().equals(expectedCode)
                     && errors.getFirst().getSource().getName().endsWith(name + ".java");
+            if (expected && args[0].equals("retired")) {
+                var symbol = switch (name) {
+                    case "WrapVararg", "WrapScoping" -> "wrap(";
+                    case "WrapTyped" -> "wrapTyped(";
+                    case "SingleFactory" -> "newSingleThreadExecutor(";
+                    case "FixedFactory" -> "newFixedThreadPool(";
+                    case "CachedFactory" -> "newCachedThreadPool(";
+                    case "ExecutorType" -> "ContainedExecutor";
+                    default -> throw new IllegalArgumentException(name);
+                };
+                expected = errors.getFirst().getLineNumber() == (name.equals("ExecutorType") ? 4 : 5)
+                    && errors.getFirst().getMessage(java.util.Locale.ROOT).contains(symbol);
+            }
             if (!expected) throw new AssertionError("Unexpected compilation result for " + name + ": " + diagnostics.getDiagnostics());
-            System.out.println(name + ": expected " + (expectedCode == null ? "success" : "scope rejection") + " passed.");
+            System.out.println(name + ": expected " + (expectedCode == null ? "success" : expectedCode) + " passed.");
         }
     }
 }

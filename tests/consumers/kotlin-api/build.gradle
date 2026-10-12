@@ -10,3 +10,51 @@ dependencies {
 }
 
 application { mainClass = 'consumer.KotlinApiConsumerKt' }
+
+// Invoke the actual stable plugin compiler on each independent diagnostic fixture.
+def probes = [
+    WrapVararg: ['retired', 'UNRESOLVED_REFERENCE', 'wrap'],
+    WrapScoping: ['retired', 'UNRESOLVED_REFERENCE', 'wrap'],
+    WrapTyped: ['retired', 'UNRESOLVED_REFERENCE', 'wrapTyped'],
+    SingleFactory: ['retired', 'UNRESOLVED_REFERENCE', 'newSingleThreadExecutor'],
+    FixedFactory: ['retired', 'UNRESOLVED_REFERENCE', 'newFixedThreadPool'],
+    CachedFactory: ['retired', 'UNRESOLVED_REFERENCE', 'newCachedThreadPool'],
+    ExecutorType: ['retired', 'UNRESOLVED_REFERENCE', 'ContainedExecutor'],
+    ProcessFilesystem: ['scope', 'UNRESOLVED_REFERENCE', 'allowFsRead'],
+    WorkerAsProcess: ['scope', 'ARGUMENT_TYPE_MISMATCH', 'ProcessWideSafe']
+]
+probes.each { name, expected ->
+    tasks.register("verify${name}", JavaExec) {
+        javaLauncher = javaToolchains.launcherFor(java.toolchain)
+        classpath = configurations.kotlinCompilerClasspath
+        mainClass = 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler'
+        def source = file("src/${expected[0]}/kotlin/consumer/${name}.kt")
+        def diagnosticClasspath = configurations.compileClasspath
+        inputs.file(source)
+        inputs.files(diagnosticClasspath).withNormalizer(ClasspathNormalizer)
+        def diagnostics = new ByteArrayOutputStream()
+        standardOutput = diagnostics
+        errorOutput = diagnostics
+        ignoreExitValue = true
+        doFirst {
+            args '-no-stdlib', '-no-reflect', '-Xrender-internal-diagnostic-names',
+                '-jvm-target', providers.gradleProperty('consumerJdk').get(),
+                '-classpath', diagnosticClasspath.asPath,
+                '-d', layout.buildDirectory.dir("diagnostics/${name}").get().asFile.absolutePath,
+                source.absolutePath
+        }
+        doLast {
+            def text = diagnostics.toString('UTF-8')
+            logger.lifecycle(text)
+            def errors = text.readLines().findAll { it.contains('error: ') }
+            if (executionResult.get().exitValue != 1 || errors.size() != 1 ||
+                !errors[0].contains("${name}.kt:") || !errors[0].contains("[${expected[1]}]") ||
+                !errors[0].contains(expected[2])) {
+                throw new GradleException("Unexpected stable Kotlin diagnostic for ${name}: ${text}")
+            }
+            logger.lifecycle("${name}: expected ${expected[1]} passed.")
+        }
+    }
+}
+tasks.register('verifyRetiredApi') { dependsOn probes.findAll { it.value[0] == 'retired' }.keySet().collect { "verify${it}" } }
+tasks.register('verifyScopeBoundaries') { dependsOn 'verifyProcessFilesystem', 'verifyWorkerAsProcess' }

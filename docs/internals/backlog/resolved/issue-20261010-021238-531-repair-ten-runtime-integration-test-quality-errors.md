@@ -7,13 +7,13 @@ dependencies: []
 component: "core"
 target_modules:
   - "portals/runtime"
-target_files: 
+target_files:
   - "portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/PreparedPortalOperationIntegrationTest.kt"
   - "portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/ProcessBrokerIntegrationTest.kt"
   - "portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/RequiredWorkerGenerationTest.kt"
   - "portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/StableWorkerCacheGenerationTest.kt"
   - "portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/WorkerPhysicalReceiptLifetimeTest.kt"
-target_symbols: 
+target_symbols:
   - "ProcessBrokerIntegrationTest"
 open_questions: false
 ---

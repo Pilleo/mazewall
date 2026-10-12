@@ -28,9 +28,12 @@ class ProfileAndEnforceDemoTest {
             val result = io.mazewall.profiler.api.Profiler.profile { workload.readConfiguration() }
             val policy = compileProfileForDemo(result)
             file.writeText("after")
-            java.util.concurrent.Executors.newSingleThreadExecutor().use { executor ->
-                val contained = io.mazewall.enforcer.api.ContainedExecutors.wrap(executor, policy)
-                assertEquals("after", contained.submit(java.util.concurrent.Callable { workload.readConfiguration() }).get())
+            val baseline = io.mazewall.enforcer.api.ProcessPolicyBuilder.denyList(io.mazewall.enforcer.api.RuntimeProfile.HOTSPOT_JIT).allowNonThreadClone().build()
+            OwnedDemoRuntime.run(baseline) { runtime ->
+                val domain = runtime.prepare(policy, io.mazewall.enforcer.api.execution.DomainLimits(1, 1))
+                val invocation = runtime.submit(domain, java.util.concurrent.Callable { workload.readConfiguration() })
+                assertEquals("after", OwnedDemoRuntime.await(invocation))
+                kotlin.test.assertIs<io.mazewall.enforcer.api.execution.ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS))
             }
         }
     }

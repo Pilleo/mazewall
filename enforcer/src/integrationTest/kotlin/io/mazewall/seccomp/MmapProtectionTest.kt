@@ -6,6 +6,7 @@ import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.containmentFailureForCaller
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
 import io.mazewall.platform.native.*
@@ -20,6 +21,7 @@ import java.lang.foreign.Linker
 import java.lang.foreign.ValueLayout
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -94,8 +96,15 @@ class MmapProtectionTest : BaseIntegrationTest() {
             val returned = runCatching { result.getOrThrow(context) }
             attempt?.nativeFailure = returned.exceptionOrNull()
             if (result is LinuxNative.SyscallResult.Error && result.errno == 1) {
+                // Avoid cold invokedynamic concatenation requiring executable code-cache growth on this restricted worker.
                 throw ContainmentViolationException(
-                    "$context denied: errno=${result.errno}, raw return=${result.rawValue}",
+                    StringBuilder()
+                        .append(context)
+                        .append(" denied: errno=")
+                        .append(result.errno)
+                        .append(", raw return=")
+                        .append(result.rawValue)
+                        .toString(),
                     cause = returned.exceptionOrNull(),
                     errno = result.errno,
                     syscallNr = syscallNr,
@@ -255,9 +264,17 @@ class MmapProtectionTest : BaseIntegrationTest() {
         operation: () -> Unit,
     ): ExecutionException {
         val executor = Executors.newSingleThreadExecutor()
-        val contained = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         try {
-            return assertFailsWith<ExecutionException> { contained.submit { attempt.run(operation) }.get() }
+            return assertFailsWith<ExecutionException> {
+                executor
+                    .submit {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { attempt.run(operation) }.getOrElse { throw containmentFailureForCaller(it) }
+                    }
+                }.get(10, TimeUnit.SECONDS)
+            }
         } finally {
             executor.close()
         }
@@ -353,27 +370,34 @@ class MmapProtectionTest : BaseIntegrationTest() {
     fun `mmap with PROT_EXEC is blocked even if mmap syscall is allowed`() {
         val attempt = ProtectionAttempt(Arch.current().mmap)
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.PTRACE).build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.PTRACE).build()
+        val capturedResult = { requireNotNull(attempt.result) }
+        val unexpectedMapping: (Long) -> Unit = { throw IllegalStateException("CRITICAL SECURITY BYPASS: executable mmap succeeded") }
+        // Link fixture lambdas before Native Image's executable-mapping restriction reaches this HotSpot worker.
+        val operation = {
+            val result = anonymousMapping(0x1 or 0x2 or 0x4)
+            attempt.result = result
+            if (result is LinuxNative.SyscallResult.Success) withOwnedMapping(result, unexpectedMapping)
+            strictNativeReturn("mmap(PROT_EXEC)", attempt.syscallNr, attempt, capturedResult)
+            Unit
+        }
 
         try {
             assertFailsWith<ExecutionException> {
-                safeExecutor
+                executor
                     .submit {
-                        attempt.run {
-                        val result = anonymousMapping(0x1 or 0x2 or 0x4)
-                        if (result is LinuxNative.SyscallResult.Success) {
-                            withOwnedMapping(result) {
-                                throw IllegalStateException("CRITICAL SECURITY BYPASS: executable mmap succeeded")
-                            }
+                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching {
+                         attempt.run(operation)
+                        }.getOrElse { throw containmentFailureForCaller(it) }
                         }
-                        strictNativeReturn("mmap(PROT_EXEC)", attempt.syscallNr, attempt) { result }
-                        }
-                    }.get()
+                    }.get(10, TimeUnit.SECONDS)
             }.let { e ->
                 assertObservedProtectionDenial(e, attempt)
             }
         } finally {
-            executor.shutdown()
+            executor.close()
         }
     }
 
@@ -390,29 +414,31 @@ class MmapProtectionTest : BaseIntegrationTest() {
     fun `mprotect with PROT_EXEC is blocked even if mprotect syscall is allowed`() {
         val attempt = ProtectionAttempt(Arch.current().mprotect)
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor =
-            ContainedExecutors.wrap(
-                executor,
-                ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(),
-            ) // Policy that allows mprotect by default but BPF blocks PROT_EXEC
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
+        val capturedResult = { requireNotNull(attempt.result) }
+        val mappingBody: (Long) -> Unit = { address ->
+            attempt.result = protect(address, 0x1 or 0x4)
+            strictNativeReturn("mprotect(PROT_EXEC)", attempt.syscallNr, attempt, capturedResult)
+            throw IllegalStateException("CRITICAL SECURITY BYPASS: executable mprotect succeeded")
+        }
+        val operation = { withOwnedMapping(anonymousMapping(0x1 or 0x2), mappingBody) }
 
         try {
             assertFailsWith<ExecutionException> {
-                safeExecutor
+                executor
                     .submit {
-                        attempt.run {
-                        withOwnedMapping(anonymousMapping(0x1 or 0x2)) { address ->
-                            val result = protect(address, 0x1 or 0x4)
-                            strictNativeReturn("mprotect(PROT_EXEC)", attempt.syscallNr, attempt) { result }
-                            throw IllegalStateException("CRITICAL SECURITY BYPASS: executable mprotect succeeded")
+                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching {
+                         attempt.run(operation)
+                        }.getOrElse { throw containmentFailureForCaller(it) }
                         }
-                        }
-                    }.get()
+                    }.get(10, TimeUnit.SECONDS)
             }.let { e ->
                 assertObservedProtectionDenial(e, attempt)
             }
         } finally {
-            executor.shutdown()
+            executor.close()
         }
     }
 
@@ -425,25 +451,31 @@ class MmapProtectionTest : BaseIntegrationTest() {
         fun `pkey_mprotect with PROT_EXEC is blocked`() {
         val attempt = ProtectionAttempt(Arch.current().pkeyMprotect)
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
+        val capturedResult = { requireNotNull(attempt.result) }
+        val mappingBody: (Long) -> Unit = { address ->
+            attempt.result = protect(address, 0x1 or 0x4, pkey = true)
+            strictNativeReturn("pkey_mprotect(PROT_EXEC)", attempt.syscallNr, attempt, capturedResult)
+            throw IllegalStateException("CRITICAL SECURITY BYPASS: executable pkey_mprotect succeeded")
+        }
+        val operation = { withOwnedMapping(anonymousMapping(0x1 or 0x2), mappingBody) }
 
         try {
             assertFailsWith<ExecutionException> {
-                safeExecutor
+                executor
                     .submit {
-                        attempt.run {
-                        withOwnedMapping(anonymousMapping(0x1 or 0x2)) { address ->
-                            val result = protect(address, 0x1 or 0x4, pkey = true)
-                            strictNativeReturn("pkey_mprotect(PROT_EXEC)", attempt.syscallNr, attempt) { result }
-                            throw IllegalStateException("CRITICAL SECURITY BYPASS: executable pkey_mprotect succeeded")
+                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching {
+                         attempt.run(operation)
+                        }.getOrElse { throw containmentFailureForCaller(it) }
                         }
-                        }
-                    }.get()
+                    }.get(10, TimeUnit.SECONDS)
             }.let { e ->
                 assertObservedProtectionDenial(e, attempt)
             }
         } finally {
-            executor.shutdown()
+            executor.close()
         }
     }
 }

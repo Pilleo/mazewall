@@ -18,8 +18,19 @@ public final class JavaApiConsumer {
         return Mazewall.callContained(runtime, domain, () -> "contained");
     }
 
+    public static String contextAndCustomPreparation(ManagedRuntime runtime) {
+        var policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build();
+        var domain = runtime.prepare(policy, new io.mazewall.enforcer.api.execution.DomainLimits(1, 1), () -> java.util.Map.of());
+        var contexts = (io.mazewall.enforcer.api.execution.InvocationContextBridge) () ->
+            new io.mazewall.enforcer.api.execution.InvocationContextSnapshot(java.util.Map.of("request", "java"), metadata -> () -> {});
+        return Mazewall.callContained(runtime, domain, runtime.captureInvocation(domain, contexts, () -> "declared"));
+    }
+
     public static void main(String[] args) {
         WorkerPolicyBuilder builder = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT);
+        Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> baseline =
+            io.mazewall.enforcer.api.ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build();
+        if (!baseline.getAllowMmapExec()) throw new AssertionError("Process scope lost its runtime floor");
         builder.base(Policy.NO_EXEC_HOTSPOT);
         builder.allowFsRead("/tmp/consumer-resource");
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = builder.build();

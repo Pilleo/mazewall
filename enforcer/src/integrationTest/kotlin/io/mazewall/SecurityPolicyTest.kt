@@ -1,8 +1,8 @@
 package io.mazewall.enforcer.api
 
 import io.mazewall.enforcer.api.*
-import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.execution.*
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
 import io.mazewall.platform.native.*
@@ -13,8 +13,11 @@ import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.file.Files
+import java.time.Duration
+import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 /**
@@ -33,84 +36,113 @@ class SecurityPolicyTest : BaseIntegrationTest() {
     @Test
     fun `PURE_COMPUTE blocks filesystem modifications`() {
         assumeLandlockAbiAtLeast(5)
-        val executor = Executors.newSingleThreadExecutor()
-        val safe = ContainedExecutors.wrap(executor, Policy.PURE_COMPUTE)
+        IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyPureCompute")
+    }
 
+    fun verifyPureCompute() {
+        val timeout = Duration.ofSeconds(10)
         val tempFile = Files.createTempFile("mazewall-test", ".txt").toFile()
         tempFile.writeText("original")
 
         try {
+            ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.PURE_COMPUTE, DomainLimits(1, 1))
             // Test RENAME (Files.move throws IOException on failure)
             val renameFuture =
-                safe.submit {
+                runtime.submit(
+                    domain,
+                    Callable {
                     val newPath = tempFile.toPath().resolveSibling("renamed-${System.currentTimeMillis()}.txt")
                     Files.move(tempFile.toPath(), newPath)
-                }
+                },
+                )
             val ex =
                 org.junit.jupiter.api.assertThrows<ExecutionException> {
-                    renameFuture.get()
+                    renameFuture.result().toCompletableFuture().get(10, TimeUnit.SECONDS)
                 }
             assertTrue(ex.cause is ContainmentViolationException, "Expected violation for rename, got ${ex.cause}")
+            assertIs<ExecutionEnd.Finished>(renameFuture.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
 
             // Test MKDIR (Files.createDirectory throws IOException on failure)
             val mkdirFuture =
-                safe.submit {
+                runtime.submit(
+                    domain,
+                    Callable {
                     val dir = tempFile.toPath().resolveSibling("new-dir-${System.currentTimeMillis()}")
                     Files.createDirectory(dir)
-                }
+                },
+                )
             val ex2 =
                 org.junit.jupiter.api.assertThrows<ExecutionException> {
-                    mkdirFuture.get()
+                    mkdirFuture.result().toCompletableFuture().get(10, TimeUnit.SECONDS)
                 }
             assertTrue(ex2.cause is ContainmentViolationException, "Expected violation for mkdir, got ${ex2.cause}")
+            assertIs<ExecutionEnd.Finished>(mkdirFuture.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
+            }
         } finally {
             tempFile.delete()
-            executor.shutdown()
         }
     }
 
     @Test
     fun `NO_NETWORK blocks outbound connect() at the kernel level`() {
-        val executor = Executors.newSingleThreadExecutor()
-        val safe = ContainedExecutors.wrap(executor, Policy.NO_NETWORK)
+        IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyNoNetwork")
+    }
 
-        try {
+    fun verifyNoNetwork() {
+        val timeout = Duration.ofSeconds(10)
+        // Load the JDK's actual socket native library before the strict no-exec-mapping worker.
+        Socket().use { it.bind(InetSocketAddress("127.0.0.1", 0)) }
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.NO_NETWORK, DomainLimits(1, 1))
             val future =
-                safe.submit {
+                runtime.submit(
+                    domain,
+                    Callable {
                     // Connect to a local port — we don't care if it's listening,
                     // the kernel should block the connect() syscall before TCP handshake.
-                    Socket().connect(InetSocketAddress("127.0.0.1", 65432), 500)
-                }
+                    Socket().use { it.connect(InetSocketAddress("127.0.0.1", 65432), 500) }
+                },
+                )
             val ex = org.junit.jupiter.api
-                .assertThrows<ExecutionException> { future.get() }
+                .assertThrows<ExecutionException> { future.result().toCompletableFuture().get(10, TimeUnit.SECONDS) }
             assertTrue(
                 ex.cause is ContainmentViolationException,
                 "Expected a containment violation for connect(), got: ${ex.cause?.javaClass?.name}: ${ex.cause?.message}",
             )
-        } finally {
-            executor.shutdown()
+            assertIs<ExecutionEnd.Finished>(future.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
         }
     }
 
     @Test
     fun `NO_EXEC blocks process spawning via ProcessBuilder`() {
-        val executor = Executors.newSingleThreadExecutor()
-        val safe = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
+        IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyNoExec")
+    }
 
-        try {
+    fun verifyNoExec() {
+        val timeout = Duration.ofSeconds(10)
+        // The process floor deliberately permits launch; the original worker preset must deny it.
+        val baseline = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowNonThreadClone().build()
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, baseline, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.NO_EXEC, DomainLimits(1, 1))
             val future =
-                safe.submit {
+                runtime.submit(
+                    domain,
+                    Callable {
                     // execve() is blocked by NO_EXEC — ProcessBuilder.start() should fail with EPERM.
                     ProcessBuilder("echo", "should-be-blocked").start()
-                }
+                },
+                )
             val ex = org.junit.jupiter.api
-                .assertThrows<ExecutionException> { future.get() }
+                .assertThrows<ExecutionException> { future.result().toCompletableFuture().get(10, TimeUnit.SECONDS) }
             assertTrue(
                 ex.cause is ContainmentViolationException,
                 "Expected a containment violation for execve(), got: ${ex.cause?.javaClass?.name}: ${ex.cause?.message}",
             )
-        } finally {
-            executor.shutdown()
+            assertIs<ExecutionEnd.Finished>(future.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
         }
     }
 }

@@ -1,6 +1,6 @@
-# Integration foundation — final evidence and traceability draft
+# Integration foundation — final evidence and traceability record
 
-**Draft for controller review/application; 11 October 2026.** The filename retains
+**Controller-applied historical record; 11 October 2026.** The filename retains
 the plan date. Existing scoped source/artifact reviews accept the recorded engineering
 gates below. **Full original-foundation acceptance is BLOCKED by the named remaining
 contracts; release prerequisites are not passes. This is not a release-ready claim.**
@@ -109,7 +109,7 @@ identical. Task 6 retains **30/40** inherited full-repository bytes; Task 7 reta
 `20261011015609` / `20261011015631`; Task 6 both `20261011024231`; Task 7 both
 `20261011032229`. Both old/new archives and checksums validate. The accepted
 Task 5/6 review's Minor M2 corrects the report's overstrong “unmet invariant” prose;
-this draft follows that ruling without rewriting old receipts or restoring metadata.
+this record follows that ruling without rewriting old receipts or restoring metadata.
 
 ### Coverage and required skips
 
@@ -250,15 +250,19 @@ Boot's direct JVM reaping and Java thread joining are distinct receipts.
 | Independent human usability | P guidance/candidate; no human exercise | No participants or results invented | PREREQUISITE |
 | Equivalent-work raw overhead | P; one executed packaging smoke sample only | Cold **598ms**, warm **57,815µs**, payload **22 bytes**, RSS **201,404,416 bytes**; XML hash in D raw smoke receipt. No baseline distributions/preparation/admission/drain measurements. | BLOCKED for full R1; feasible local follow-up |
 
-The controller receives exact candidate compatibility append/target, four new
-coordinate-namespaced locks, and closure notes/diffs for the four brief-owned
-fixture-quality issues. A separate fifth failure-triage closure is evidence-supported
-by accepted real first/reused-cache RED/GREEN/collector controls, with the delayed
-fixture Minor retained; its current root index registration is absent and belongs
-to the controller. No earlier/unrelated operator issues are automatically archived.
+The controller applied the exact candidate compatibility record, four new
+coordinate-namespaced locks, and closures for the four brief-owned fixture-quality
+issues. The separate fifth failure-triage closure and its backlog registration were
+also applied, supported by accepted real first/reused-cache RED/GREEN/collector
+controls; the delayed-fixture Minor remains open. These metadata applications are
+present in base `41ed2b999ad316a0f7e5e6548d49bd9b748d28f7`; they do not change **P**.
+No earlier/unrelated operator issues are automatically archived.
 All historical native/build failures keep their original source labels and outcomes.
 
-Task 9's ignored review package contains actual target paths, preimage/postimage
-hashes, owned issue/index hunk proposals and validation receipts. It makes no root
-README/backlog/index/HEAD/config change, commit or publication. Controller review,
-mixed-index integration and normal identity/hook commit remain separate actions.
+Task 9's ignored review package retains the original target paths, preimage/postimage
+hashes, issue/index proposals and validation receipts. Task 9 itself made no root
+README/backlog/index/HEAD/config change, commit or publication. Later controller
+application is separate from those historical receipts and producer labels. Task 1
+of contract completion corrects primary guidance and adds external snippet checks;
+it does not retroactively satisfy the remaining native/profile/context/launch gates
+in the reconciliation table above.

@@ -6,9 +6,9 @@ priority: high
 dependencies: []
 component: "core"
 target_modules: []
-target_files: 
+target_files:
   - "enforcer/src/integrationTest/kotlin/io/mazewall/seccomp/PrctlBypassReproductionTest.kt"
-target_symbols: 
+target_symbols:
   - "PrctlBypassReproductionTest"
 open_questions: false
 ---

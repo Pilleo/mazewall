@@ -8,6 +8,7 @@ import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.api.IsolatedProcessTester
 import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.containmentFailureForCaller
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FileDescriptor
@@ -25,6 +26,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeText
 import kotlin.test.assertEquals
@@ -47,10 +49,21 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(file)) }).get()
+        try {
+        val res = executor
+            .submit(
+            java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.readString(Path.of(file))
+            }
+        },
+        ).get(10, TimeUnit.SECONDS)
         if (res != "secret") throw IllegalStateException("Wrong content: $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testReadBlocked(dir: String) {
@@ -62,15 +75,23 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of("/etc/passwd")) }).get()
+            executor
+                .submit(
+                java.util.concurrent.Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { Files.readString(Path.of("/etc/passwd")) }.getOrElse { throw containmentFailureForCaller(it) }
+                }
+            },
+            ).get(10, TimeUnit.SECONDS)
             throw IllegalStateException("Should have failed")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -86,10 +107,19 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsWrite(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        safeExecutor.submit { Files.writeString(Path.of(file), "hello") }.get()
+        try {
+        executor
+            .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.writeString(Path.of(file), "hello")
+            }
+        }.get(10, TimeUnit.SECONDS)
         if (Files.readString(Path.of(file)) != "hello") throw IllegalStateException("Write failed")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testWriteBlocked(
@@ -104,15 +134,21 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            safeExecutor.submit { Files.writeString(Path.of(file), "hello") }.get()
+            executor
+                .submit {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { Files.writeString(Path.of(file), "hello") }.getOrElse { throw containmentFailureForCaller(it) }
+                }
+            }.get(10, TimeUnit.SECONDS)
             throw IllegalStateException("Should have failed")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -124,12 +160,20 @@ class LandlockTest : BaseIntegrationTest() {
             .allowJvmClasspath()
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            assertFutureDenied { safeExecutor.submit { Files.readString(Path.of("/etc/passwd")) }.get() }
+            assertFutureDenied {
+                executor
+                    .submit {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { Files.readString(Path.of("/etc/passwd")) }.getOrElse { throw containmentFailureForCaller(it) }
+                    }
+                }.get(10, TimeUnit.SECONDS)
+            }
             Files.readString(Path.of("/etc/passwd")) // Main thread should succeed
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -145,12 +189,23 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
+        try {
         for (i in 1..20) {
-            val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(file)) }).get()
+            val res = executor
+                .submit(
+                java.util.concurrent.Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    Files.readString(Path.of(file))
+                }
+            },
+            ).get(10, TimeUnit.SECONDS)
             if (res != "data") throw IllegalStateException("Task $i failed")
         }
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testExecBlocked(dir: String) {
@@ -160,13 +215,21 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
             assertFutureDenied {
-                safeExecutor.submit(java.util.concurrent.Callable { ProcessBuilder("/bin/echo", "fail").start() }).get()
+                executor
+                    .submit(
+                    java.util.concurrent.Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { ProcessBuilder("/bin/echo", "fail").start() }.getOrElse { throw containmentFailureForCaller(it) }
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
             }
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -181,10 +244,19 @@ class LandlockTest : BaseIntegrationTest() {
                 .of(file, true),
             ).build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        safeExecutor.submit { Files.writeString(Path.of(file), "created!") }.get()
+        try {
+        executor
+            .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.writeString(Path.of(file), "created!")
+            }
+        }.get(10, TimeUnit.SECONDS)
         if (Files.readString(Path.of(file)) != "created!") throw IllegalStateException("Write failed")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testSymlinkRejection(
@@ -199,18 +271,26 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(symlink)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
         // The policy allows 'symlink', but Landlock rejects symlinks in rulesets (O_NOFOLLOW).
         // Therefore, access to the real file should be denied.
         try {
-            safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(realFile)) }).get()
+            executor
+                .submit(
+                java.util.concurrent.Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { Files.readString(Path.of(realFile)) }.getOrElse { throw containmentFailureForCaller(it) }
+                }
+            },
+            ).get(10, TimeUnit.SECONDS)
             throw IllegalStateException("Access should have been denied because the symlink rule was rejected")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -225,10 +305,21 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(file)) }).get()
+        try {
+        val res = executor
+            .submit(
+            java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.readString(Path.of(file))
+            }
+        },
+        ).get(10, TimeUnit.SECONDS)
         if (res != "auto-cp-ok") throw IllegalStateException("Wrong content: $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testNestedSymlinks(realFile: String) {
@@ -240,10 +331,21 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(realFile)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(realFile)) }).get()
+        try {
+        val res = executor
+            .submit(
+            java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.readString(Path.of(realFile))
+            }
+        },
+        ).get(10, TimeUnit.SECONDS)
         if (res != "nested-secret") throw IllegalStateException("Wrong content: $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testDotDotTraversal(allowed: String) {
@@ -255,13 +357,21 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(allowed)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
             assertFutureDenied {
-                safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(allowed).resolve("../forbidden/secret.txt")) }).get()
+                executor
+                    .submit(
+                    java.util.concurrent.Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { Files.readString(Path.of(allowed).resolve("../forbidden/secret.txt")) }.getOrElse { throw containmentFailureForCaller(it) }
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
             }
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -274,10 +384,12 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(linkA)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor
+        try {
+        val res = executor
             .submit(
                 java.util.concurrent.Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
                     try {
                         Files.readString(Path.of(linkA))
                         "success"
@@ -286,10 +398,14 @@ class LandlockTest : BaseIntegrationTest() {
                     ) {
                         "eloop"
                     }
+                    }
                 },
-            ).get()
+            ).get(10, TimeUnit.SECONDS)
         if (res != "eloop") throw IllegalStateException("Expected eloop, got $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     @Test
@@ -579,15 +695,17 @@ class LandlockTest : BaseIntegrationTest() {
             .allowFsRead(allowedDir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
         val allowedPath = Path.of(allowedDir)
         val forbiddenPath = Path.of(forbiddenDir)
         val basePath = Path.of(baseDir)
 
         // 1. Initial reads before rename:
-        safeExecutor
+        try {
+        executor
             .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+            receipt.requireInstalled()
             // Read allowedDir/allowed.txt should succeed
             val allowedTxt = allowedPath.resolve("allowed.txt")
             if (Files.readString(allowedTxt) != "allowed") {
@@ -597,7 +715,8 @@ class LandlockTest : BaseIntegrationTest() {
             // Read forbiddenDir/secret.txt should fail
             val forbiddenTxt = forbiddenPath.resolve("secret.txt")
             assertForbiddenReadDenied { Files.readString(forbiddenTxt) }
-        }.get()
+            }
+        }.get(10, TimeUnit.SECONDS)
 
         // 2. Perform the rename on the main thread (unrestricted):
         val allowedRenamedPath = basePath.resolve("allowed_renamed")
@@ -605,8 +724,10 @@ class LandlockTest : BaseIntegrationTest() {
         Files.move(forbiddenPath, allowedPath)
 
         // 3. Post-rename reads:
-        safeExecutor
+        executor
             .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+            receipt.requireInstalled()
             // Attempt to read the new files at the old path allowedDir/secret.txt (which points to the forbidden directory)
             // This MUST be blocked because the inode of the new allowedDir was never allowed.
             val newSecretInAllowedOldPath = allowedPath.resolve("secret.txt")
@@ -618,9 +739,12 @@ class LandlockTest : BaseIntegrationTest() {
             if (Files.readString(allowedInRenamedPath) != "allowed") {
                 throw IllegalStateException("Failed to read allowed file after rename")
             }
-        }.get()
-
-        executor.shutdown()
+            }
+        }.get(10, TimeUnit.SECONDS)
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     @Test

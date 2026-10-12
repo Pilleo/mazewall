@@ -1,0 +1,35 @@
+plugins { id 'org.jetbrains.kotlin.jvm'; id 'application' }
+kotlin { jvmToolchain(25) }
+def coordinate = providers.gradleProperty('consumerVersion').get()
+def repository = file(providers.gradleProperty('consumerRepository').get())
+repositories {
+    maven { url = uri(repository); content { includeGroup 'io.mazewall' } }
+    mavenCentral { content { excludeGroup 'io.mazewall' } }
+}
+dependencies { implementation "io.mazewall:koog-contained-tool:${coordinate}" }
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode = LockMode.STRICT
+    lockFile = file("locks/${coordinate}.lockfile")
+}
+application {
+    mainClass = 'io.mazewall.benchmark.BoundariesKt'
+    applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED']
+}
+tasks.register('verifyPublishedClosure') {
+    doLast {
+        def graph = configurations.runtimeClasspath
+        def rootId = graph.incoming.resolutionResult.rootComponent.get().id
+        assert !graph.incoming.resolutionResult.allComponents.any {
+            it.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier && it.id != rootId
+        }
+        def artifacts = graph.resolvedConfiguration.resolvedArtifacts.findAll { it.moduleVersion.id.group == 'io.mazewall' }
+        assert artifacts.collect { it.moduleVersion.id.name }.toSet() == ['koog-contained-tool', 'service-api', 'koog', 'runtime', 'enforcer', 'platform'].toSet()
+        artifacts.each {
+            def id = it.moduleVersion.id
+            assert id.version == coordinate
+            assert it.file.canonicalFile == new File(repository, "io/mazewall/${id.name}/${coordinate}/${id.name}-${coordinate}.jar").canonicalFile
+            println "PUBLISHED ${id} ${it.file}"
+        }
+    }
+}

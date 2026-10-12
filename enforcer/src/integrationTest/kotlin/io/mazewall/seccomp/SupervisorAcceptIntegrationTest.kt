@@ -65,11 +65,13 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
             .block(Syscall.ACCEPT, Syscall.ACCEPT4)
             .build()
         val raw = Executors.newSingleThreadExecutor()
-        val contained = ContainedExecutors.wrap(raw, policy, scopingPolicy)
         try {
             listeningSocket().use { listener ->
                 Socket("127.0.0.1", port(listener)).use { client ->
-                    val future = contained.submit<LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>> {
+                    val future = raw.submit<LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>> {
+                        ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use { receipt ->
+                        receipt.requireInstalled()
+
                         class LegitContext {
                             fun run() =
                                 NativeArena.ofConfined().use { arena ->
@@ -79,6 +81,7 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
                             }
                         }
                         LegitContext().run()
+                        }
                     }
                     val result = future.get(20, TimeUnit.SECONDS)
                     val denied = assertInstanceOf(SupervisorDescriptorResult.Denied::class.java, SupervisorDescriptorResult.from(result, LinuxNative))

@@ -103,6 +103,26 @@ class MazewallJavaApiTest {
     }
 
     @Test
+    void testExplicitCustomPreparationKeepsUncastCallableEntry() {
+        try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
+            AtomicInteger captures = new AtomicInteger();
+            Thread caller = Thread.currentThread();
+            StacktraceScopingPolicy scoping = () -> {
+                assertSame(caller, Thread.currentThread());
+                captures.incrementAndGet();
+                return java.util.Map.of();
+            };
+            InProcessDomain domain = runtime.prepare(
+                    WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(),
+                    new DomainLimits(1, 1), scoping);
+            assertEquals("custom-owned", Mazewall.callContained(runtime, domain, () -> "custom-owned"));
+            assertEquals(1, captures.get());
+        } finally {
+            OwnedRuntimeJavaTestSupport.reset();
+        }
+    }
+
+    @Test
     void testContainedExecutors() throws Exception {
         try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
             InProcessDomain domain = runtime.prepare(WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(), new DomainLimits(2, 2));
@@ -110,6 +130,30 @@ class MazewallJavaApiTest {
             assertEquals("owned", invocation.result().toCompletableFuture().get());
             assertInstanceOf(ExecutionEnd.Finished.class, invocation.executionEnd().toCompletableFuture().get());
         } finally {
+            OwnedRuntimeJavaTestSupport.reset();
+        }
+    }
+
+    @Test
+    void applicationDeclaredMetadataUsesExistingUncastCallableEntry() {
+        var context = new ThreadLocal<java.util.Map<String, String>>();
+        try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
+            InProcessDomain domain = runtime.prepare(WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(), new DomainLimits(1, 1));
+            var mutable = new java.util.HashMap<String, String>();
+            mutable.put("request", "captured");
+            context.set(mutable);
+            InvocationContextBridge bridge = () -> new InvocationContextSnapshot(context.get(), metadata -> {
+                var prior = context.get();
+                context.set(metadata);
+                return () -> { if (prior == null) context.remove(); else context.set(prior); };
+            });
+            Callable<String> captured = runtime.captureInvocation(domain, bridge, () -> context.get().get("request"));
+            mutable.put("request", "changed");
+            assertEquals("captured", Mazewall.callContained(runtime, domain, captured));
+            assertEquals("changed", context.get().get("request"));
+            assertNull(Mazewall.callContained(runtime, domain, () -> context.get()));
+        } finally {
+            context.remove();
             OwnedRuntimeJavaTestSupport.reset();
         }
     }

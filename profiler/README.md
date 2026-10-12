@@ -1,8 +1,8 @@
 # mazewall-profiler
 
-**Automatically discover the exact syscall policy your workload needs — no guesswork, no deadlocks.**
+**Observe workloads and generate coverage-qualified policy candidates.**
 
-Figuring out which system calls and filesystem paths your code uses by hand is error-prone and dangerous. Block the wrong coordination syscall (`futex`, `rt_sigreturn`) and the entire JVM deadlocks at the next GC cycle. The profiler eliminates this problem by observing your workload during a test run and generating the exact `Policy` DSL you need.
+Figuring out which system calls and filesystem paths your code uses by hand is error-prone. The profiler observes test workloads and generates candidates; collection completeness is not future-path coverage, trusted review approval or proof of enforcement. The canonical policy compiler preserves the JVM coordination floor.
 
 > **Dev/test only.** Do not include the `:profiler` module as a production runtime dependency.
 
@@ -14,39 +14,77 @@ and its results cannot generate an enforceable policy.
 
 ## Quick Start
 
+<!-- consumer: profiler-collect -->
 ```kotlin
-import io.mazewall.profiler.api.Profiler
+import io.mazewall.profiler.api.MazewallProfiler
 
-// 1. Wrap your workload in a profile block during a test
-val result = Profiler.profile {
-    myXmlParser.parse(untrustedInput)
+fun collectProfile(workload: () -> Unit) = MazewallProfiler.open().use { session ->
+    session.profile { workload() }
 }
-
-// 2. Print the generated policy DSL
-// Note: toDsl() throws if exec/connect destinations were observed but cannot be enforced.
-// Pass allowIncomplete=true if you cannot enforce all destinations.
-println(result.behavior.toDsl(allowIncomplete = true))
 ```
 
-**Output:**
+Profile in a disposable test JVM before an application baseline that forbids the
+profiler's child services. The synchronous `profile()` call finalizes its internal
+collection session before returning the result. Closing the outer `MazewallProfiler`
+facade prevents further use; it is not the collection-drain boundary. Neither
+operation removes installed filters. Inspect `result.coverage` and its scope/warnings first.
+
+Select the runtime on the profiled component **before** restrictive composition.
+For a HotSpot JVM, normalize the template's executable-mapping floor explicitly:
+
+<!-- consumer: profiler-convert -->
 ```kotlin
-WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
-    .base(Policy.NO_NETWORK)
-    .allowFsRead("/app/schemas")
-    .allowFsRead("/app/config.xml")
-    .allowJvmClasspath()
-    .build()
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicies
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.restrictFurtherWith
+import io.mazewall.profiler.api.ProfilingResult
+
+fun convertProfile(result: ProfilingResult<*>) = run {
+    val profileBase = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+        .base(Policy.PURE_COMPUTE_UNSAFE)
+        .forRuntime(RuntimeProfile.HOTSPOT_JIT)
+        .build()
+    println(result.toProfileDocumentJson()) // persist behavior AND measured coverage
+    println(result.toDsl(basePolicyName = "profileBase", base = profileBase))
+    val candidate = result.toPolicy(base = profileBase) // refuses incomplete coverage
+    candidate.restrictFurtherWith(
+        ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT),
+    )
+}
 ```
 
-**3. Paste it into your application:**
+`profileBase` in the emitted DSL refers to the base constructed above. Keep that
+declaration with the generated code. For Native Image, select `NATIVE_IMAGE` for
+both the base and restrictive component. An intersection cannot restore mapping
+permission already denied by another component. Unrestricted JIT helper threads
+do not prove mapping denial safe on every HotSpot worker.
+
+After reviewing and validating the candidate against representative workloads,
+prepare it in an explicitly bootstrapped owned runtime:
+
+<!-- consumer: profiler-prepare -->
 ```kotlin
-val safePool = ContainedExecutors.wrap(
-    Executors.newFixedThreadPool(4),
-    result.behavior.toPolicy()   // or paste the DSL above
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+
+fun prepareCandidate(
+    runtime: ManagedRuntime,
+    reviewedPolicy: Policy<PolicyScope.ThreadLocalOnly, Uncompiled>,
+) = runtime.prepare(
+    reviewedPolicy,
+    DomainLimits(workers = 4, maxAdmissions = 64),
 )
 ```
 
-That's it. The kernel now enforces exactly what the profiler observed — nothing more.
+Use `Mazewall.callContained(runtime, domain, Callable { ... })` for materialized
+synchronous work. The [owned runtime recipe](../enforcer/README.md#owned-synchronous-workers)
+defines bootstrap, admission, cancellation, physical end and bounded drain. Required
+installation precedes body entry; review approval is not conferred by conversion.
 
 ---
 
@@ -78,7 +116,10 @@ The operator API is `MazewallProfiler.open().use { it.profile { workload() } }`.
 
 `IterativeProfiler` is deprecated (not a tracer). `StraceProfiler` is deprecated. Descendant strace is an internal floor probe (`DescendantStrace`), not how you profile application code. `AUTO` never selects STRACE.
 
-`result.toPolicy()` refuses incomplete coverage (for example `io_uring` syscalls with no destinations). Pass `allowIncomplete = true` only if you will not treat the policy as a complete contract.
+`result.toPolicy()` and `result.toDsl()` refuse incomplete coverage (for example
+`io_uring` syscalls with no destinations). There is no public `allowIncomplete`
+override. Keep incomplete results as diagnostics; do not synthesize complete
+coverage or use an internal test seam to authorize enforcement.
 
 ### Tier S — `USER_NOTIF` Daemon (Recommended)
 
@@ -109,32 +150,39 @@ Wraps a subprocess under `strace -f` and parses the syscall log stream asynchron
 
 The profiler's final output is a `BillOfBehavior` — a structured behavioral contract that lists observed syscalls, filesystem paths, and network endpoints. This is the JVM-native contribution to the [SBoB (Software Bill of Behavior)](../docs/presentation/article1-threat-model.md) concept.
 
+<!-- consumer: profiler-exports -->
 ```kotlin
-val behavior: BillOfBehavior = result.behavior
+import io.mazewall.profiler.api.ProfilingResult
 
-behavior.syscalls        // Set<Syscall>  — every syscall observed on the profiled thread
-behavior.opens           // Set<String>   — every filesystem path opened
-behavior.fsWritePaths    // Set<String>   — every path written to
-behavior.connects         // Set<NetworkEndpoint> — observed connect() destinations
-behavior.ioUringOps       // Set<String>  — io_uring opcodes (eBPF collector only)
+fun inspectProfile(result: ProfilingResult<*>) {
+    val behavior = result.behavior
 
-behavior.toPolicy()      // → Policy (ready to pass to ContainedExecutors.wrap)
-behavior.toDsl()         // → String (Kotlin DSL to paste into your codebase)
-behavior.toJson()        // → String (machine-readable SBoB JSON)
-behavior.toStackTracesJson() // → String (JSON mapping stack traces to events)
+    behavior.syscalls        // Set<Syscall> — recorded syscall kinds
+    behavior.opens           // Set<String> — resolved observed open paths
+    behavior.fsWritePaths    // Set<String> — observed write paths
+    behavior.connects        // Set<NetworkEndpoint> — observed connect destinations
+    behavior.ioUringOps      // Set<String> — io_uring opcodes (eBPF collector only)
+
+    behavior.toJson()        // String — SBoB-only JSON
+    behavior.toStackTracesJson() // String — stacks associated with events
+    result.toProfileDocumentJson() // versioned behavior + measured coverage
+}
 ```
 
 `behavior.toJson()` is deliberately an SBoB-only export. It cannot authorize portal
 `--complete-profile`, because it carries no coverage evidence. For that mode, persist the
 versioned measured artifact instead:
 
-```kotlin
-val profileDocumentJson = result.toProfileDocumentJson()
-```
+Persist `result.toProfileDocumentJson()` as shown above.
 
 `ProfileDocument.fromJson(profileDocumentJson)` restores both the SBoB and the complete
 `ProfilingCoverage`. Portal workers reject a missing, legacy, plain-SBoB, or incomplete
 document. The document is structured operator evidence, not a cryptographic signature.
+Do not export `result.behavior.toPolicy()`/`toDsl()` without measured coverage:
+their default absent evidence is incomplete. Result-level conversion retains the
+collector's evidence but cannot prove unexecuted future paths, independent helpers,
+or late asynchronous work. Generic permission errors are inferred diagnostics;
+only correlated observed events identify the intercepted operation.
 
 ---
 

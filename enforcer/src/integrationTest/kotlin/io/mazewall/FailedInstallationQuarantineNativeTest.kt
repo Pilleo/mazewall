@@ -40,7 +40,15 @@ class FailedInstallationQuarantineNativeTest : BaseIntegrationTest() {
         val worker = Executors.newSingleThreadExecutor()
         try {
             val initial = assertFailsWith<ExecutionException> {
-                ContainedExecutors.wrap(worker, policy).submit(Callable { calls.incrementAndGet() }).get(10, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        calls.incrementAndGet()
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
             }
             val failure = assertIs<PartialInstallationException>(initial.cause)
             assertTrue(failure.progress.seccompApplied)
@@ -50,7 +58,15 @@ class FailedInstallationQuarantineNativeTest : BaseIntegrationTest() {
 
             LinuxNative.setEngine(actual)
             val rejected = assertFailsWith<ExecutionException> {
-                ContainedExecutors.wrap(worker, policy).submit(Callable { calls.incrementAndGet() }).get(10, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        calls.incrementAndGet()
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
             }
             assertSame(failure, rejected.cause)
             assertEquals(0, calls.get())

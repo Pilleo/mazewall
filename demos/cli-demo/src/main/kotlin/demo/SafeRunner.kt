@@ -3,10 +3,8 @@ package demo
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.WorkerPolicyBuilder
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.ContainmentViolationException
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
+import io.mazewall.enforcer.api.execution.DomainLimits
+import java.util.concurrent.Callable
 
 object SafeRunner {
     internal val policy =
@@ -18,21 +16,9 @@ object SafeRunner {
     fun run(payload: String) = runContained { VulnerableLogger.log(payload) }
 
     internal fun runContained(action: () -> String) {
-        val executor = Executors.newSingleThreadExecutor()
-        try {
-            // Put wrapper creation inside the owned submission boundary so even a
-            // seccomp-install failure retires the raw executor before returning.
-            OwnedActionRunner.run(executor) {
-                val safeExecutor = ContainedExecutors.wrap(executor, policy)
-                safeExecutor.submit<String> { action() }
-            }
-        } catch (expected: ExecutionException) {
-            // We intentionally unwrap the ExecutionException to expose the underlying
-            // ContainmentViolationException to the caller for clearer demo output.
-            if (expected.cause is ContainmentViolationException) {
-                throw expected.cause as ContainmentViolationException
-            }
-            throw expected
+        OwnedDemoRuntime.run(Policy.NO_EXEC_HOTSPOT) { runtime ->
+            val domain = runtime.prepare(policy, DomainLimits(1, 1))
+            OwnedDemoRuntime.await(runtime.submit(domain, Callable(action)))
         }
     }
 }

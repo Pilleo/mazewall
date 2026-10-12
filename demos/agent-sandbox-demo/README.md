@@ -1,8 +1,8 @@
 # AI Agent Sandboxing & Compartmentalization PoC
 
-This module demonstrates how `mazewall` can secure LLM-based autonomous agents and protect host environments during the "agentic era." 
+This module demonstrates bounded, owned worker compartments for first-party JVM tools handling untrusted agent input.
 
-Unlike traditional out-of-process sandboxes (e.g., Docker or L7 proxies like NVIDIA OpenShell) which suffer from high latency and are unable to isolate Java tools running in the same JVM, `mazewall` enforces **Thread-Level Compartmentalization** and **Stacktrace-Enforced Execution** directly at the Linux kernel level.
+Seccomp/Landlock restrict work on dedicated platform workers. Experimental stacktrace supervision adds selected syscall authorization; this is not heap isolation or a complete arbitrary-code-execution boundary. Independent helper threads and already-open resources remain outside the tool-body contract.
 
 ---
 
@@ -81,6 +81,46 @@ The stacktrace scoping mechanism utilized in this demo is **highly experimental*
 
 ### How It Works:
 1. **The Safepoint Deadlock Challenge:** Spawning OS processes or Java threads triggers the Linux `clone` (or `clone3`) syscall. Supervising `CLONE` directly causes a deadlock: the thread is blocked in `Thread.start()` holding internal classloader/thread monitors, and checking the stacktrace requires triggering a JVM safepoint (which waits for the blocked thread to yield).
-2. **The JVM launchMechanism Workaround:** To bypass this, we configure the JVM to launch processes using `vfork` or `fork` instead of `clone` (`-Djdk.lang.Process.launchMechanism=vfork`). We then allow thread-creation `CLONE` calls un-supervised.
+2. **The JVM launchMechanism Workaround:** Configure VFORK **before ProcessImpl initializes**, using the existing application argument `-Djdk.lang.Process.launchMechanism=vfork`. A JDK25 FORK-mode malicious launch bypassed the exact VFORK/FORK handlers; glibc fork can use the allowed CLONE route, though that fixture is not a syscall trace. The protected bootstrap rejects explicitly incompatible launch settings. Changing a system property after ProcessImpl initialization cannot change its mechanism. The handlers remain exactly CONNECT + VFORK/FORK for web, VFORK/FORK for analysis; CLONE/CLONE3/EXECVE/EXECVEAT remain allowed as before.
 3. **Parent Thread Context Capture:** When `vfork`/`fork` is called, the parent JVM thread is suspended before the child process is fully detached. The supervisor intercepts this call on the parent thread, queries `Thread.getStackTrace()`, and determines if the call originated from the authorized tool (`executeDataAnalysis`).
 4. **Execution Restriction:** Since the child process detaches afterward, the actual `execve` occurs inside the child. Because child PIDs have no JVM stacktrace, we enforce validation on the parent thread's `vfork`/`fork` rather than on `execve` directly.
+
+## Owned bootstrap and shutdown
+
+The protected scenario explicitly starts `Supervision.prepareSupervisor()` before
+`ManagedRuntime.open(HOTSPOT_JIT, processBaseline, ...)`. The baseline still blocks
+PTRACE, MOUNT, UNSHARE and CHROOT, permits executable mappings for JIT, and intentionally
+permits launching approved analysis processes. Each of the three domains has one
+preinstalled platform worker and one admission. Custom handler membership is captured
+once during owned preparation; no default handler substitution occurs.
+
+HTTP connection/read is synchronous on the web worker, with one overall two-second
+connection/response-header deadline and automatic redirects disabled. Normal, redirect
+and error response bodies are returned, honoring supported Content-Type charsets with
+UTF-8 fallback. The response timer ends at headers; subsequent buffered body reads do
+not acquire a new two-second inactivity timeout. A per-request platform observer only
+expires header acquisition by disconnecting; it never connects or reads HTTP on behalf
+of the worker, and is joined before physical body end. A tool result timeout requests cancellation
+but does not prove physical end. Tool shutdown retains outstanding invocation handles,
+requests cancellation, and drains actual workers/receipt cleanup under one five-second
+budget. Incomplete drain is a failure. The existing process runner owns child/tree/output
+cleanup; closing never removes permanent filters from live threads. Unprotected mode
+uses explicitly separate ordinary JDK executors and reports no protection.
+
+A narrow closing/registration monitor rejects new tool admission and establishes the
+cancellation snapshot. Core submission/resource validation, body execution, result
+waiting, cancellation and drain remain outside it. A handle published after the closing
+snapshot cancels itself; handles stay retained through actual `executionEnd`.
+
+Fresh-JVM checks cover allowed public HTTP (`1.1.1.1:80`, requiring reachable host
+egress), denied private/metadata connections, approved analysis, denied web-stack spawn,
+workspace read/traversal, incompatible launch rejection, and actual child/worker death
+after cancellation. A separate acquired-loopback native fixture proves immutable custom
+handler capture and exact-vs-lookalike stack decisions without external network access.
+Acquired local HTTP fixtures additionally verify status/error bodies, charset fallback,
+trickled-header expiry and delayed-body success in comparison and actual custom-supervised
+worker modes. A held-publication barrier proves close cannot miss an admitted analysis
+handle. These controls require no external networking.
+Infrastructure timeouts and generic permission failures are not authenticated denials;
+filesystem proof uses a host read control and the actual restricted-worker
+`AccessDeniedException`, rather than relabeling every IOException.

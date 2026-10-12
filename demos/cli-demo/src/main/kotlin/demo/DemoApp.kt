@@ -17,7 +17,12 @@ fun main(args: Array<String>) {
         }
     }
     val report = runDemo(mode)
+    val incomplete = OwnedDemoRuntime.drainRetained()
     println("\n${report.summary()}")
+    if (incomplete.isNotEmpty()) {
+        System.err.println("Retained runtime owners did not physically drain: $incomplete")
+        exitProcess(2)
+    }
     if (report.exitCode != 0) exitProcess(report.exitCode)
 }
 

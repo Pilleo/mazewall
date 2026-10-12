@@ -11,7 +11,8 @@ import io.mazewall.profiler.api.TraceEvent
  *
  * To compile a policy: result.toPolicy() (refuses incomplete coverage)
  * To get DSL:          result.toDsl() (same coverage gate as toPolicy)
- * To merge runs:       (run1.behavior + run2.behavior).toPolicy(..., coverage, allowIncomplete)
+ * Raw behavior merging does not merge measured coverage or certify a complete result.
+ * Retain each result's [toProfileDocumentJson] diagnostics and review the observed scope.
  *
  * Do not call [BillOfBehavior.toDsl] without [ProfilingCoverage]; the default is [ProfilingCoverage.absent]
  * which is incomplete.
@@ -111,7 +112,8 @@ public class ProfilingResult<T> private constructor(
     /**
      * Compiles this profile into policies for [io.mazewall.enforcer.api.ContainedExecutors.installOnDedicatedProcess].
      * Incomplete coverage fails closed; it never produces a worker allow-list.
-     * Use this **or** the worker's static fail-closed trio — never `allowIncomplete`.
+     * Select the runtime before restrictive composition. Collection completeness applies only to
+     * the measured scope; it does not approve the generated policy or cover future workload paths.
      */
     @JvmOverloads
     public fun toDedicatedWorkerPolicies(

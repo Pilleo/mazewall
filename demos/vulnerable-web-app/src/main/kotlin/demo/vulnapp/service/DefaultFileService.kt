@@ -5,9 +5,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.zip.ZipInputStream
 
-class DefaultFileService : FileService {
+class DefaultFileService(private val destDir: File = File("/app/uploads")) : FileService {
     override fun extractZip(file: MultipartFile): String {
-        val destDir = File("/app/uploads")
         if (!destDir.exists()) {
             destDir.mkdirs()
         }

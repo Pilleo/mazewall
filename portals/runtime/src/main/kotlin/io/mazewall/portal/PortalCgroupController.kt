@@ -26,6 +26,19 @@ internal interface PortalCgroupController {
     fun sample(handle: PortalCgroupHandle): PortalCgroupUsage
 }
 
+/** Required launch setup rejects filesystem imitations before returning a cgroup owner. */
+internal fun PortalCgroupController.attachRequired(
+    root: Path?,
+    pid: Long,
+    profile: PortalWorkerProfile,
+): PortalCgroupHandle? =
+    root?.let {
+    if (profile.requiresCgroup && Files.getFileStore(it).type() != "cgroup2") {
+        throw PortalCgroupUnavailableException("delegated root is not a cgroup v2 filesystem")
+    }
+    createAndAttach(it, pid, profile)
+}
+
 internal object RealPortalCgroupController : PortalCgroupController {
     private val sequence = AtomicLong()
 

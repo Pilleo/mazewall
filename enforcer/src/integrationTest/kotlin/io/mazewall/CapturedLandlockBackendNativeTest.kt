@@ -125,17 +125,24 @@ class CapturedLandlockBackendNativeTest : BaseIntegrationTest() {
         try {
             Executors.newSingleThreadExecutor().use { worker ->
                 val failure = assertFailsWith<ExecutionException> {
-                    val contained = if (supervised) {
-                        val scoping = object : StacktraceScopingPolicy {
+                    val scoping = if (supervised) {
+                        object : StacktraceScopingPolicy {
                             override val handlers = mapOf<io.mazewall.platform.syscall.Syscall, (io.mazewall.platform.lifecycle.Tid, List<Any>, List<StackTraceElement>) -> Boolean>(
                                 io.mazewall.platform.syscall.Syscall.CONNECT to { _, _, _ -> true },
                             )
                         }
-                        ContainedExecutors.wrap(worker, policy, scoping)
                     } else {
-                        ContainedExecutors.wrap(worker, policy)
+                        DefaultStacktraceScopingPolicy
                     }
-                    contained.submit(Callable { Files.readString(Path.of(file)) }).get(20, TimeUnit.SECONDS)
+                    worker
+                        .submit(
+                        Callable {
+                        ContainedExecutors.installOnCurrentThread(policy, scoping).use { receipt ->
+                            receipt.requireInstalled()
+                            Files.readString(Path.of(file))
+                        }
+                    },
+                    ).get(20, TimeUnit.SECONDS)
                 }
                 assertTrue(
                     generateSequence<Throwable>(failure) { it.cause }.any { it is java.nio.file.AccessDeniedException },

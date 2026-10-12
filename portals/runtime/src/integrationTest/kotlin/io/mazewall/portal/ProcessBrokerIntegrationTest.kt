@@ -37,7 +37,8 @@ class ProcessBrokerIntegrationTest {
         override fun startProcess(
             args: List<String>,
             redirectErrorStream: Boolean,
-        ): Process = RealProcessLauncher.startProcess(args, redirectErrorStream).also(children::add)
+            preparation: io.mazewall.platform.process.JvmLaunchPreparation,
+        ): Process = RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also(children::add)
     }
 
     private class SocketReceipts : SocketManager by RealSocketManager {
@@ -91,6 +92,7 @@ class ProcessBrokerIntegrationTest {
                 override fun startProcess(
                     args: List<String>,
                     redirectErrorStream: Boolean,
+                    preparation: io.mazewall.platform.process.JvmLaunchPreparation,
                 ): Process {
                     launches.incrementAndGet()
                     throw primary
@@ -136,7 +138,8 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
-            ): Process = RealProcessLauncher.startProcess(args, redirectErrorStream).also(children::add)
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
+            ): Process = RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also(children::add)
         }
         val cleanup = java.io.IOException("listener cleanup failed")
         val failClose = java.util.concurrent.atomic
@@ -185,10 +188,11 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 launchEntered.countDown()
                 assertTrue(releaseLaunch.await(5, TimeUnit.SECONDS))
-                return RealProcessLauncher.startProcess(args, redirectErrorStream).also { lateChild = it }
+                return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also { lateChild = it }
             }
         }
         val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 100, closeTimeoutMs = 100))
@@ -218,10 +222,11 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 launchEntered.countDown()
                 assertTrue(releaseLaunch.await(5, TimeUnit.SECONDS))
-                return RealProcessLauncher.startProcess(args, redirectErrorStream).also { lateChild = it }
+                return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also { lateChild = it }
             }
         }
         val broker = ProcessBroker(launcher = launcher, sockets = socketReceipts, limits = PortalRuntimeLimits(startupTimeoutMs = 5_000))
@@ -328,12 +333,13 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 if (starts.incrementAndGet() == 2) {
                     secondLaunchEntered.countDown()
                     assertTrue(releaseSecondLaunch.await(5, TimeUnit.SECONDS))
                 }
-                return RealProcessLauncher.startProcess(args, redirectErrorStream).also(children::add)
+                return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also(children::add)
             }
         }
         val broker = ProcessBroker(limits = PortalRuntimeLimits(workers = 2), launcher = launcher)
@@ -361,9 +367,10 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 if (starts.incrementAndGet() == 2) error("second worker launch failed")
-                return RealProcessLauncher.startProcess(args, redirectErrorStream)
+                return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation)
             }
         }
         val closes = AtomicInteger()
@@ -396,9 +403,10 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 if (starts.incrementAndGet() == 2) throw primary
-                return RealProcessLauncher.startProcess(args, redirectErrorStream).also { firstChild = it }
+                return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also { firstChild = it }
             }
         }
         val fatal = AssertionError("fatal provisional listener close")
@@ -444,9 +452,10 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 if (starts.incrementAndGet() == 2) error("second worker launch failed")
-                return RealProcessLauncher.startProcess(args, redirectErrorStream).also { first = it }
+                return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also { first = it }
             }
         }
         val broker = ProcessBroker(limits = PortalRuntimeLimits(workers = 2), launcher = launcher)
@@ -468,6 +477,7 @@ class ProcessBrokerIntegrationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process = ProcessBuilder("sh", "-c", "sleep 60").start().also { child = it }
         }
         val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 150))
@@ -789,7 +799,7 @@ class ProcessBrokerIntegrationTest {
         // fires twice during this sleep. Keep the request away from the exact deadline edge:
         // once a header byte arrives, expiry is correctly a terminal partial-frame timeout.
         val broker = ProcessBroker(
-            workerExtraJvmArgs = listOf("-Dio.mazewall.portal.worker.idleTimeoutMs=500"),
+            launchProfile = PortalLaunchProfile(jvmArgs = listOf("-Dio.mazewall.portal.worker.idleTimeoutMs=500")),
         )
         broker.use { b ->
             b.start()

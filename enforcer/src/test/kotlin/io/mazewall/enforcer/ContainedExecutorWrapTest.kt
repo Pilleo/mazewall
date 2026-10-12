@@ -1,19 +1,50 @@
 package io.mazewall.enforcer.api
 
+import io.mazewall.enforcer.state.ContainmentStateRegistry
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Test
-import java.util.concurrent.Executors
-import kotlin.test.assertIs
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ContainedExecutorWrapTest {
     @Test
-    fun `wrap returns thread-local contained executor not a process sandbox`() {
-        Executors.newSingleThreadExecutor().use { raw ->
-            val wrapped = ContainedExecutors.wrap(raw, Policy.PURE_COMPUTE)
-            assertIs<ContainedExecutor<PolicyScope.ThreadLocalOnly>>(wrapped)
-            assertTrue(wrapped.policy.definition === Policy.PURE_COMPUTE.definition || wrapped.policy.isSyscallAllowed(io.mazewall.platform.syscall.Syscall.READ))
-            val asService: java.util.concurrent.ExecutorService = wrapped
-            assertTrue(asService === wrapped)
+    @EnabledIfLinuxAndSupported
+    fun `experimental coroutine resumes through required internal installation after public retirement`() {
+        val caller = Thread.currentThread()
+        var worker: Thread? = null
+        try {
+            runBlocking {
+                withTimeout(5_000) {
+                    val result = SandboxDispatcher.executeSuspend(Policy.NO_EXEC_HOTSPOT) {
+                        worker = Thread.currentThread()
+                        assertTrue(worker !== caller)
+                        assertFalse(Thread.currentThread().isVirtual)
+                        assertTrue(ContainmentStateRegistry.threadState.filterDepth > 0)
+                        yield()
+                        assertTrue(ContainmentStateRegistry.threadState.filterDepth > 0)
+                        42
+                    }
+                    assertEquals(42, result)
+                }
+            }
+        } finally {
+            SandboxDispatcher.shutdownAll()
+        }
+        assertFalse(checkNotNull(worker).isAlive)
+    }
+
+    @Test
+    fun `borrowed executor entrypoints and view types are absent from emitted API`() {
+        val retired = setOf("wrap", "wrapTyped", "newSingleThreadExecutor", "newFixedThreadPool", "newCachedThreadPool")
+        assertFalse(ContainedExecutors::class.java.methods.any { it.name in retired })
+        for (name in listOf("ContainedExecutor", "ContainedExecutorView")) {
+            assertFailsWith<ClassNotFoundException> {
+                Class.forName("io.mazewall.enforcer.api.$name")
+            }
         }
     }
 }

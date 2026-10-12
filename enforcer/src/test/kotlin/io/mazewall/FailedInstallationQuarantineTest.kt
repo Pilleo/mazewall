@@ -68,15 +68,22 @@ class FailedInstallationQuarantineTest {
 
     @ParameterizedTest
     @EnumSource(Platform.FallbackBehavior::class)
-    fun `failed carrier cannot enter a later task through another wrapper`(fallback: Platform.FallbackBehavior) {
+    fun `failed worker cannot enter a later task through another installation`(fallback: Platform.FallbackBehavior) {
         System.setProperty("io.mazewall.fallback", fallback.name)
         val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build()
         val calls = AtomicInteger()
         val worker = Executors.newSingleThreadExecutor()
         try {
-            val first = ContainedExecutors.wrap(worker, policy)
             val initial = assertFailsWith<ExecutionException> {
-                first.submit(Callable { calls.incrementAndGet() }).get(5, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        calls.incrementAndGet()
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
             }
             val failure = assertIs<PartialInstallationException>(initial.cause)
             assertTrue(failure.progress.seccompApplied)
@@ -86,9 +93,16 @@ class FailedInstallationQuarantineTest {
             reportedMode.set(2L)
             System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
             val beforeRetry = nativeCalls.get()
-            val another = ContainedExecutors.wrap(worker, policy)
             val rejected = assertFailsWith<ExecutionException> {
-                another.submit(Callable { calls.incrementAndGet() }).get(5, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        calls.incrementAndGet()
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
             }
             assertSame(failure, rejected.cause)
             assertEquals(beforeRetry, nativeCalls.get(), "Quarantine must reject before any new native operation")
@@ -105,11 +119,29 @@ class FailedInstallationQuarantineTest {
         reportedMode.set(2L)
         val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build()
         Executors.newSingleThreadExecutor().use { worker ->
-            val contained = ContainedExecutors.wrap(worker, policy)
             assertFailsWith<ExecutionException> {
-                contained.submit(Callable<Int> { throw IllegalArgumentException("business failure") }).get(5, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable<Int> {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        throw IllegalArgumentException("business failure")
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
             }
-            assertEquals(42, contained.submit(Callable { 42 }).get(5, TimeUnit.SECONDS))
+            assertEquals(
+                42,
+                worker
+                    .submit(
+                    Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    42
+                }
+            },
+                ).get(5, TimeUnit.SECONDS),
+            )
         }
     }
 
@@ -118,12 +150,32 @@ class FailedInstallationQuarantineTest {
         System.setProperty("io.mazewall.fallback", "FAIL")
         val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build()
         Executors.newSingleThreadExecutor().use { failedWorker ->
-            val contained = ContainedExecutors.wrap(failedWorker, policy)
-            assertFailsWith<ExecutionException> { contained.submit(Callable { 0 }).get(5, TimeUnit.SECONDS) }
+            assertFailsWith<ExecutionException> {
+                failedWorker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        0
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
+            }
         }
         reportedMode.set(2L)
         Executors.newSingleThreadExecutor().use { freshWorker ->
-            assertEquals(42, ContainedExecutors.wrap(freshWorker, policy).submit(Callable { 42 }).get(5, TimeUnit.SECONDS))
+            assertEquals(
+                42,
+                freshWorker
+                    .submit(
+                    Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    42
+                }
+            },
+                ).get(5, TimeUnit.SECONDS),
+            )
         }
     }
 
@@ -143,9 +195,16 @@ class FailedInstallationQuarantineTest {
         reportedMode.set(2L)
         val beforeRetry = nativeCalls.get()
         Executors.newSingleThreadExecutor().use { worker ->
-            val contained = ContainedExecutors.wrap(worker, policy)
             val rejected = assertFailsWith<ExecutionException> {
-                contained.submit(Callable { 42 }).get(5, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        42
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
             }
             assertSame(failure, rejected.cause)
         }

@@ -18,3 +18,6 @@ plugins {
 
 rootProject.name = 'mazewall-packaged-consumers'
 include 'java-api', 'kotlin-api'
+if (providers.gradleProperty('includeDocSnippets').getOrElse('false').toBoolean()) {
+    include 'doc-snippets'
+}

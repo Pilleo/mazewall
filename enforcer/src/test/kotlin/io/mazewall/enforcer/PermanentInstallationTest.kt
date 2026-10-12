@@ -15,16 +15,19 @@ import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.*
 
 class PermanentInstallationTest {
-    @Test fun `wrapper preserves Landlock when ruleset close throws after restriction`() {
+    @Test fun `installer preserves Landlock when ruleset close throws after restriction`() {
         assertLandlockCleanupFailure(IllegalStateException("ruleset close failed"))
     }
 
-    @Test fun `wrapper preserves Landlock and fatal identity when ruleset close throws`() {
+    @Test fun `installer preserves Landlock and fatal identity when ruleset close throws`() {
         assertLandlockCleanupFailure(AssertionError("fatal ruleset close failed"))
     }
 
@@ -45,9 +48,20 @@ class PermanentInstallationTest {
             }
         }
         LinuxNative.setEngine(native)
+        val entries = AtomicInteger()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
         Executors.newSingleThreadExecutor().use { worker ->
-            val wrapped = ContainedExecutors.wrap(worker, WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build())
-            val failure = assertFailsWith<ExecutionException> { wrapped.submit {}.get() }
+            val failure = assertFailsWith<ExecutionException> {
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        entries.incrementAndGet()
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
+            }
             val partial = if (cleanupFailure is Error) {
                 assertSame(cleanupFailure, failure.cause)
                 assertIs<io.mazewall.enforcer.api.PartialInstallationException>(cleanupFailure.suppressed.single())
@@ -59,7 +73,8 @@ class PermanentInstallationTest {
             assertTrue(restricted)
             assertTrue(partial.progress.landlockApplied)
             assertFalse(partial.progress.seccompApplied)
-            val state = worker.submit<ContainerState> { ContainmentStateRegistry.threadState }.get()
+            assertEquals(0, entries.get())
+            val state = worker.submit<ContainerState> { ContainmentStateRegistry.threadState }.get(5, TimeUnit.SECONDS)
             assertNotNull(state.landlockPolicy)
             assertEquals(0, state.filterDepth)
         }
@@ -156,7 +171,7 @@ class PermanentInstallationTest {
         assertEquals(1, ContainmentStateRegistry.processState.filterDepth)
     }
 
-    @Test fun `wrapper failure preserves Landlock on the actual worker`() {
+    @Test fun `installer failure preserves Landlock on the actual worker`() {
         Platform.setProvider(MockPlatformProvider())
         val engine = MockNativeEngine(
             process = MockNativeProcess().apply {
@@ -177,13 +192,25 @@ class PermanentInstallationTest {
             }
         }
         LinuxNative.setEngine(engine)
+        val entries = AtomicInteger()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
         Executors.newSingleThreadExecutor().use { worker ->
-            val wrapped = ContainedExecutors.wrap(worker, WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build())
-            val failure = assertFailsWith<ExecutionException> { wrapped.submit {}.get() }
+            val failure = assertFailsWith<ExecutionException> {
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        entries.incrementAndGet()
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
+            }
             val partial = assertIs<io.mazewall.enforcer.api.PartialInstallationException>(failure.cause)
             assertTrue(partial.progress.landlockApplied)
             assertFalse(partial.progress.seccompApplied)
-            val state = worker.submit<ContainerState> { ContainmentStateRegistry.threadState }.get()
+            assertEquals(0, entries.get())
+            val state = worker.submit<ContainerState> { ContainmentStateRegistry.threadState }.get(5, TimeUnit.SECONDS)
             assertNotNull(state.landlockPolicy, "irreversible successful Landlock must survive failed Seccomp")
             assertEquals(0, state.filterDepth)
         }

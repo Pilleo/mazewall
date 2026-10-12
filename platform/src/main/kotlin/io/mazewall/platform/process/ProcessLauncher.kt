@@ -14,6 +14,12 @@ internal interface ProcessLauncher {
         redirectErrorStream: Boolean = true,
     ): Process
 
+    fun startProcess(
+        args: List<String>,
+        redirectErrorStream: Boolean,
+        preparation: JvmLaunchPreparation,
+    ): Process = throw UnsupportedOperationException("launcher does not support required operator preparation")
+
     fun addShutdownHook(hook: Thread)
 
     fun removeShutdownHook(hook: Thread)
@@ -38,6 +44,20 @@ internal interface ProcessLauncher {
  * Real implementation of [ProcessLauncher] using standard Java APIs.
  */
 internal object RealProcessLauncher : ProcessLauncher {
+    override fun startProcess(
+        args: List<String>,
+        redirectErrorStream: Boolean,
+        preparation: JvmLaunchPreparation,
+    ): Process {
+        val command = java.util.List.copyOf(args)
+        val pb = ProcessBuilder(command).redirectErrorStream(redirectErrorStream)
+        JvmChildProcess.stripInheritedJvmOptions(pb.environment())
+        preparation.prepare(pb)
+        require(pb.command() == command && pb.redirectErrorStream() == redirectErrorStream) { "operator preparation changed required child command or transport" }
+        require(listOf(pb.redirectInput(), pb.redirectOutput(), pb.redirectError()).all { it.type() == ProcessBuilder.Redirect.Type.PIPE }) { "operator preparation changed owned child pipes" }
+        return pb.start()
+    }
+
     override fun startProcess(
         args: List<String>,
         redirectErrorStream: Boolean,

@@ -2,6 +2,7 @@ package io.mazewall.enforcer.internal.execution
 
 import io.mazewall.enforcer.api.execution.CancellationDisposition
 import io.mazewall.enforcer.api.execution.ExecutionEnd
+import io.mazewall.enforcer.api.execution.InvocationContextSnapshot
 import io.mazewall.enforcer.api.execution.InvocationEvidence
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.enforcer.internal.containmentFailureForCaller
@@ -30,6 +31,47 @@ internal class OwnedInvocation<T>(
 
     fun recordObservedFailure(failure: Throwable) {
         observedFailure.compareAndSet(null, failure)
+    }
+
+    private fun contextFailed(failure: Throwable) {
+        val primary = observedFailure.updateAndGet {
+            io.mazewall.platform.fd.CleanupFailures
+            .merge(it, failure)
+        }
+        owner.fail(checkNotNull(primary))
+    }
+
+    @Suppress("TooGenericExceptionCaught") // owned context boundary retains fatal identity and quarantines unproved restoration
+    fun <R> withContext(
+        snapshot: InvocationContextSnapshot,
+        body: Callable<R>,
+    ): R {
+        val restoration = try {
+            snapshot.apply()
+        } catch (applicationFailure: Throwable) {
+            contextFailed(applicationFailure)
+            throw applicationFailure
+        }
+        var restorationFailure: Throwable? = null
+        val outcome = try {
+            Result.success(body.call())
+        } catch (bodyFailure: Throwable) {
+            Result.failure<R>(bodyFailure)
+        } finally {
+            try {
+                restoration.close()
+            } catch (cleanup: Throwable) {
+                restorationFailure = cleanup
+            }
+        }
+        val primary = outcome.exceptionOrNull()
+        val failure = restorationFailure?.let {
+            io.mazewall.platform.fd.CleanupFailures
+            .merge(primary, it)
+        } ?: primary
+        if (restorationFailure != null || failure is Error) contextFailed(checkNotNull(failure))
+        if (failure != null) throw failure
+        return outcome.getOrThrow()
     }
 
     fun evidence(): InvocationEvidence = InvocationEvidence(owner.generation, observedFailure.get())
@@ -66,6 +108,8 @@ internal class OwnedInvocation<T>(
                     true
                 }
                 Phase.RUNNING -> {
+                    // The originating body retains canonical classification/delivery after its context cleanup.
+                    if (worker === Thread.currentThread()) return
                     checkNotNull(worker).interrupt()
                     false
                 }
@@ -97,12 +141,12 @@ internal class OwnedInvocation<T>(
             val value = RuntimeWorkerContext.withInvocation(this) { action.call() }
             observedFailure.get()?.let { throw it }
             delivered.complete(value)
-        } catch (bodyFatal: Error) {
-            failure = bodyFatal
-            owner.fail(bodyFatal)
-            delivered.completeExceptionally(bodyFatal)
         } catch (bodyFailure: Throwable) {
-            failure = containmentFailureForCaller(bodyFailure)
+            failure = containmentFailureForCaller(
+                io.mazewall.platform.fd.CleanupFailures
+                .merge(observedFailure.get(), bodyFailure),
+            )
+            if (failure is Error) owner.fail(failure)
             delivered.completeExceptionally(failure)
         } finally {
             synchronized(lock) {

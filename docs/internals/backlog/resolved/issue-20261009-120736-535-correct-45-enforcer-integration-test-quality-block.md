@@ -6,9 +6,9 @@ priority: high
 dependencies: []
 component: "core"
 target_modules: []
-target_files: 
+target_files:
   - "enforcer/src/integrationTest/kotlin/io/mazewall/landlock/LandlockTest.kt"
-target_symbols: 
+target_symbols:
   - "LandlockTest"
 open_questions: false
 ---

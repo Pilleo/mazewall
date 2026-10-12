@@ -7,8 +7,8 @@ import java.time.Duration
  * A deliberately vulnerable "log util" that mimics a Log4Shell-style JNDI lookup.
  *
  * In a real exploit, the attacker-controlled input triggers an OS-level execve().
- * When run inside a [io.mazewall.enforcer.api.ContainedExecutors] worker, the kernel intercepts
- * the execve() and returns EPERM — the process is never spawned.
+ * Required [io.mazewall.enforcer.api.execution.ManagedRuntime] workers deny process creation.
+ * A permission exception retains inferred evidence; it does not identify the exact denied syscall.
  */
 object VulnerableLogger {
 

@@ -26,7 +26,18 @@ class FreshSelfVerificationNativeTest : BaseIntegrationTest() {
         try {
             repeat(2) {
                 Executors.newSingleThreadExecutor().use { worker ->
-                    assertEquals(42, ContainedExecutors.wrap(worker, policy).submit(Callable { 42 }).get(10, TimeUnit.SECONDS))
+                    assertEquals(
+                        42,
+                        worker
+                            .submit(
+                            Callable {
+                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                            receipt.requireInstalled()
+                            42
+                        }
+                    },
+                        ).get(10, TimeUnit.SECONDS),
+                    )
                 }
             }
             assertEquals(2, verified.get(), "Every actual installation must obtain its own verification evidence")

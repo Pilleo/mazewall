@@ -63,7 +63,15 @@ class IntelCetIntegrationTest : BaseIntegrationTest() {
         Executors.newSingleThreadExecutor().use { worker ->
             assertEquals(0L, worker.submit(Callable { Platform.queryIntelCetStatus() and 1L }).get(10, TimeUnit.SECONDS))
             assertFailsWith<ExecutionException> {
-                ContainedExecutors.wrap(worker, policy).submit(Callable { calls.incrementAndGet() }).get(10, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        calls.incrementAndGet()
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
             }
             assertEquals(0L, worker.submit(Callable { Platform.queryIntelCetStatus() and 1L }).get(10, TimeUnit.SECONDS), "Library must not late-enable shadow stack")
         }

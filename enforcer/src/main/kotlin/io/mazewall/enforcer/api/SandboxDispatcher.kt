@@ -123,9 +123,7 @@ public object SandboxDispatcher : AutoCloseable {
                 thread
             }
 
-            // Wrap the raw pool to ensure the policy is applied to every thread created by it.
-            // ContainedExecutors.wrap normally takes vararg Policy<*, Uncompiled>.
-            // We use the internal installOnCurrentThread to wrap execution directly.
+            // The internal wrapper requires installation before every experimental dispatcher task.
             val created = io.mazewall.enforcer.internal
                 .ContainedExecutorWrapper(rawPool, definition)
             poolCache[key] = created

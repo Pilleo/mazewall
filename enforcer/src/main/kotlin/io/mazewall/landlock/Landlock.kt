@@ -90,7 +90,7 @@ import java.util.logging.Logger
  * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsRead
  * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsWrite
  * @see io.mazewall.enforcer.api.PolicyBuilder.allowJvmClasspath
- * @see io.mazewall.enforcer.api.ContainedExecutors.wrap
+ * @see io.mazewall.enforcer.api.execution.ManagedRuntime.prepare
  */
 internal object Landlock {
     /** The kernel requires the request size to stop at fields supported by its ABI. */

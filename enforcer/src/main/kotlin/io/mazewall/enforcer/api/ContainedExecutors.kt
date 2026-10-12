@@ -14,7 +14,6 @@ import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.compile
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.internal.ContainedExecutorWrapper
 import io.mazewall.enforcer.state.*
 import io.mazewall.landlock.Landlock
 import io.mazewall.landlock.toFailure
@@ -33,20 +32,9 @@ import java.util.logging.Logger
 // @ref: docs/internals/designs/enforcer/containment-design.md — Filter installation ordering (Landlock before Seccomp), TSYNC semantics
 
 /**
- * Public API for wrapping an existing [java.util.concurrent.ExecutorService] to enforce seccomp containment.
- *
- * ### Graceful Shutdown
- * When using wrapped executors, it is strongly recommended to use a graceful shutdown pattern:
- * ```kotlin
- * executor.shutdown()
- * if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
- *     executor.shutdownNow()
- * }
- * ```
- * Avoid using `shutdownNow()` immediately, as it interrupts threads during the critical seccomp
- * installation and handshake phases. While this implementation is robust against such interruptions
- * to prevent kernel/JVM state desync, an interrupted handshake may still leave the thread in a
- * partially initialized supervisor state.
+ * Explicit permanent process/thread installation, assessment and violation detection.
+ * Synchronous application work uses [io.mazewall.enforcer.api.execution.ManagedRuntime]
+ * preparation and owned Callable invocations. Closing a receipt releases registration, never filters.
  *
  * ARCHITECTURAL INVARIANT: Container state is maintained via immutable [ContainerState] objects,
  * which are updated atomically via [ContainmentStateRegistry]. This ensures
@@ -55,14 +43,14 @@ import java.util.logging.Logger
  *
  * ### Thread Safety & Global Policies
  * Modifying process-wide global security policies (e.g., via [installOnProcess]) while
- * asynchronous wrapped executors ([ContainedExecutorWrapper]) are active, executing tasks,
+ * asynchronous contained workers are active, executing tasks,
  * or undergoing shutdown is unsupported. Doing so can cause late-running tasks in the queue to
  * resolve an inconsistent security state because global state transitions and per-task filter
  * installations may interleave unpredictably. All global policies should be fully installed
- * before wrapping or running asynchronous task executors.
+ * before preparing or running asynchronous contained workers.
  *
  * ### Signal Mask Inheritance Warning
- * When using [wrap] or thread installations with policies that configure `SeccompAction.ACT_TRAP`, the seccomp
+ * When using thread installations with policies that configure `SeccompAction.ACT_TRAP`, the seccomp
  * filter relies on the kernel delivering `SIGSYS` to the violating thread. Standard JVM thread pools
  * (such as [ExecutorService]) do not automatically reset POSIX signal masks (`sigprocmask`) or alternate
  * signal stacks (`sigaltstack`) when reusing threads. If a previous uncontained task executing native code (JNI/FFM)
@@ -72,7 +60,7 @@ import java.util.logging.Logger
  * For guaranteed immediate enforcement in such environments, prefer process- or thread-killing actions like
  * `ACT_KILL_PROCESS` or `ACT_KILL_THREAD`.
  *
- * Furthermore, when a new thread is spawned by a wrapped [ExecutorService], it inherits the signal mask of its parent.
+ * Furthermore, when a new thread is spawned by an [ExecutorService], it inherits the signal mask of its parent.
  * If the seccomp filter restricts `rt_sigprocmask`, the new thread might be permanently trapped with blocked signals.
  * To prevent unkillable threads or missed interruptions (e.g. `Thread.interrupt()` failing to wake up blocked I/O calls),
  * policies should ideally allow `rt_sigprocmask` and `rt_sigaction` for standard JVM thread management.
@@ -199,89 +187,6 @@ public object ContainedExecutors {
         val receipt = installInternal(true, combined, environment = environment).requireInstalled()
         check(!combined.enforceLandlock || receipt.landlockApplied) { "Dedicated process Landlock was not applied" }
         return receipt
-    }
-
-    /**
-     * Wraps an [java.util.concurrent.ExecutorService] so each submitted task installs
-     * [policies] on **that worker thread** before it runs.
-     *
-     * This is thread-scoped containment for trusted code handling untrusted data.
-     * It is not an ACE boundary: sibling threads and `CompletableFuture` hops are
-     * unfiltered. Untrusted Java belongs in [installOnProcess] or a portal worker.
-     *
-     * The caller still owns [delegate]. Filters stay on each worker after a task returns.
-     * Do not reuse the raw delegate for unrestricted work.
-     * Every task requires a completed installation receipt before its body enters;
-     * configured manual-install bypass never authorizes a wrapped task to run uncontained.
-     */
-    public fun wrap(
-        delegate: ExecutorService,
-        vararg policies: Policy<*, Uncompiled>,
-    ): ContainedExecutor<PolicyScope.ThreadLocalOnly> {
-        val combinedPolicy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        return ContainedExecutorView(ContainedExecutorWrapper(delegate, combinedPolicy), combinedPolicy.asThreadLocalPolicy())
-    }
-
-    /**
-     * Returns a typed containment view for components that require an explicit
-     * execution scope. The delegate lifecycle remains owned by the caller.
-     */
-    public fun <S : PolicyScope> wrapTyped(
-        delegate: ExecutorService,
-        policy: Policy<S, Uncompiled>,
-    ): ContainedExecutor<S> = ContainedExecutorView(ContainedExecutorWrapper(delegate, policy.definition), policy)
-
-    private fun PolicyDefinition<*>.asThreadLocalPolicy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = Policy(this as PolicyDefinition<PolicyScope.ThreadLocalOnly>)
-
-    private fun containedThreadFactory(
-        tag: String,
-        policy: Policy<*, Uncompiled>,
-    ): java.util.concurrent.ThreadFactory {
-        val name = "mazewall-contained-$tag-${policy.definition.hashCode().toUInt().toString(16)}"
-        return java.util.concurrent.ThreadFactory { runnable ->
-            Thread(runnable).apply {
-                isDaemon = true
-                setName(name)
-            }
-        }
-    }
-
-    /** Daemon single-thread executor whose threads run under [policy] on wrap. */
-    public fun newSingleThreadExecutor(policy: Policy<*, Uncompiled>): ExecutorService =
-        wrap(
-        java.util.concurrent.Executors
-        .newSingleThreadExecutor(containedThreadFactory("single", policy)),
-            policy,
-    )
-
-    /** Daemon fixed pool whose threads run under [policy] on wrap. */
-    public fun newFixedThreadPool(
-        nThreads: Int,
-        policy: Policy<*, Uncompiled>,
-    ): ExecutorService =
-        wrap(
-        java.util.concurrent.Executors
-        .newFixedThreadPool(nThreads, containedThreadFactory("pool", policy)),
-            policy,
-    )
-
-    /** Daemon cached pool whose threads run under [policy] on wrap. */
-    public fun newCachedThreadPool(policy: Policy<*, Uncompiled>): ExecutorService =
-        wrap(
-        java.util.concurrent.Executors
-        .newCachedThreadPool(containedThreadFactory("cached", policy)),
-            policy,
-    )
-
-    public fun wrap(
-        delegate: ExecutorService,
-        policy: Policy<*, Uncompiled>,
-        scopingPolicy: StacktraceScopingPolicy,
-    ): ContainedExecutor<PolicyScope.ThreadLocalOnly> {
-        return ContainedExecutorView(
-            ContainedExecutorWrapper(delegate, policy.definition, scopingPolicy),
-            policy.definition.asThreadLocalPolicy(),
-        )
     }
 
     /**

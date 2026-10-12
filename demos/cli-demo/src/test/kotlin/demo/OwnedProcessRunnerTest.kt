@@ -83,7 +83,12 @@ class OwnedProcessRunnerTest {
 
     @Test
     fun `safe and unsafe runners do not return before interrupted work stops`() {
-        listOf<(()-> String) -> Unit>(SafeRunner::runContained, UnsafeRunner::runAction).forEach { runner ->
+        io.mazewall.enforcer.api.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "interruptedRunnersBody")
+    }
+
+    @Suppress("unused")
+    fun interruptedRunnersBody() {
+        listOf<(()-> String) -> Unit>(UnsafeRunner::runAction, SafeRunner::runContained).forEach { runner ->
             val started = CountDownLatch(1)
             val stopped = CountDownLatch(1)
             val callerInterrupted = AtomicBoolean()

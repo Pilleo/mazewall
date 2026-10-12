@@ -132,12 +132,15 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
         val denied = AtomicReference<LinuxNative.SyscallResult.Error<*>>()
         val thrown = AtomicReference<IllegalStateException>()
         // Unsafe prctl must remain blocked on the HotSpot-compatible fixture.
-        val safeExecutor = ContainedExecutors.wrap(executor, prctlFixturePolicy())
+        val policy = prctlFixturePolicy()
 
         try {
-            safeExecutor
+            executor
                 .submit(
                     Callable {
+                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching {
                         entered.set(true)
                         assertEquals(1L, LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs).getOrThrow("prctl(PR_GET_NO_NEW_PRIVS)"))
                         val r =
@@ -155,8 +158,13 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                             thrown.set(failure)
                             throw failure
                         }
+                        }.getOrElse {
+                            throw io.mazewall.enforcer.internal
+                            .containmentFailureForCaller(it)
+                        }
+                        }
                     },
-                ).get()
+                ).get(10, java.util.concurrent.TimeUnit.SECONDS)
             throw IllegalStateException("SECURITY BYPASS: prctl(PR_SET_PDEATHSIG, SIGTERM) was allowed")
         } catch (e: ExecutionException) {
             val cause = e.cause
@@ -177,6 +185,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
             throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS))
         }
     }
 
@@ -187,12 +196,15 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
         val entered = AtomicBoolean()
         val denied = AtomicReference<LinuxNative.SyscallResult.Error<*>>()
         val thrown = AtomicReference<IllegalStateException>()
-        val safeExecutor = ContainedExecutors.wrap(executor, prctlFixturePolicy())
+        val policy = prctlFixturePolicy()
 
         try {
-            safeExecutor
+            executor
                 .submit(
                     Callable {
+                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching {
                         entered.set(true)
                         assertEquals(1L, LinuxNative.process.prctl(PrctlCommand.GetNoNewPrivs).getOrThrow("prctl(PR_GET_NO_NEW_PRIVS)"))
                         val r =
@@ -215,8 +227,13 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
                             thrown.set(failure)
                             throw failure
                         }
+                        }.getOrElse {
+                            throw io.mazewall.enforcer.internal
+                            .containmentFailureForCaller(it)
+                        }
+                        }
                     },
-                ).get()
+                ).get(10, java.util.concurrent.TimeUnit.SECONDS)
             throw IllegalStateException("CRITICAL SECURITY BYPASS: prctl(PR_CAP_AMBIENT) succeeded")
         } catch (e: ExecutionException) {
             val cause = e.cause
@@ -237,6 +254,7 @@ class PrctlBypassReproductionTest : BaseIntegrationTest() {
             throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS))
         }
     }
 }

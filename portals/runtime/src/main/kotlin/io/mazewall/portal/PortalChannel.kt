@@ -45,7 +45,7 @@ internal class PortalChannel(
 ) : AutoCloseable {
     internal companion object {
         const val DEFAULT_TIMEOUT_MS = 30_000L
-        const val MAX_CONTROL_BYTES = 512
+        const val MAX_CONTROL_BYTES = 640
     }
 
     private val closed = java.util.concurrent.atomic

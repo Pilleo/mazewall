@@ -61,15 +61,15 @@ tasks.register('resolveIntegrationBaselines') {
     }
 }
 
-ext.verifyPackagedArtifacts = { configuration ->
+ext.verifyPackagedArtifacts = { configuration, expectedModules = ['enforcer', 'platform'] ->
     def dependencies = configuration.incoming.resolutionResult.allDependencies
     if (dependencies.any { it instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult &&
         it.selected.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier }) {
         throw new GradleException("${configuration.name}: project/source substitution is forbidden")
     }
     def mazeArtifacts = configuration.resolvedConfiguration.resolvedArtifacts.findAll { it.moduleVersion.id.group == 'io.mazewall' }
-    if (mazeArtifacts.collect { it.moduleVersion.id.name }.toSet() != ['enforcer', 'platform'].toSet()) {
-        throw new GradleException("${configuration.name}: expected packaged enforcer and platform")
+    if (mazeArtifacts.collect { it.moduleVersion.id.name }.toSet() != expectedModules.toSet()) {
+        throw new GradleException("${configuration.name}: expected packaged ${expectedModules}")
     }
     mazeArtifacts.each { artifact ->
         def id = artifact.moduleVersion.id
@@ -93,7 +93,8 @@ subprojects {
                 configurations.getByName(name).resolvedConfiguration.resolvedArtifacts.sort { it.moduleVersion.id.toString() }.each {
                     logger.lifecycle("${project.name} ${name}: ${it.moduleVersion.id} -> ${it.file}")
                 }
-                rootProject.verifyPackagedArtifacts(configurations.getByName(name))
+                def owners = project.name == 'doc-snippets' ? ['enforcer', 'platform', 'profiler'] : ['enforcer', 'platform']
+                rootProject.verifyPackagedArtifacts(configurations.getByName(name), owners)
             }
             def compilerClasspath = configurations.findByName('kotlinBuildToolsApiClasspath')
             if (compilerClasspath != null) {

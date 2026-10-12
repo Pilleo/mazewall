@@ -47,7 +47,18 @@ class CapturedSeccompBackendNativeTest : BaseIntegrationTest() {
         val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.EXECVE).build()
         try {
             Executors.newSingleThreadExecutor().use { worker ->
-                assertEquals(42, ContainedExecutors.wrap(worker, policy).submit(Callable { 42 }).get(10, TimeUnit.SECONDS))
+                assertEquals(
+                    42,
+                    worker
+                        .submit(
+                        Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        42
+                    }
+                },
+                    ).get(10, TimeUnit.SECONDS),
+                )
                 val mode = worker.submit(Callable { real.process.prctl(PrctlCommand.GetSeccomp) }).get(10, TimeUnit.SECONDS)
                 assertEquals(2L, assertIs<LinuxNative.SyscallResult.Success<Long, *>>(mode).value)
             }

@@ -59,6 +59,11 @@ class DemoAppTest {
     @Test
     @EnabledIfLinuxAndSupported
     fun `unsafe succeeds while safe requires authenticated containment evidence`() {
+        io.mazewall.enforcer.api.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "unsafeAndSafeBody")
+    }
+
+    @Suppress("unused")
+    fun unsafeAndSafeBody() {
         assertTrue(runUnsafe().passed)
         val safe = runSafe()
         when (safe.outcome) {
@@ -71,6 +76,11 @@ class DemoAppTest {
     @Test
     @EnabledIfLinuxAndSupported
     fun `SafeRunner handles malformed payload`() {
+        io.mazewall.enforcer.api.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "malformedBody")
+    }
+
+    @Suppress("unused")
+    fun malformedBody() {
         // This won't trigger the JNDI logic, so it's a simple success path
         SafeRunner.run("not-jndi")
     }
@@ -78,6 +88,11 @@ class DemoAppTest {
     @Test
     @EnabledIfLinuxAndSupported
     fun `SafeRunner blocks execution in JNDI`() {
+        io.mazewall.enforcer.api.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "blockedBody")
+    }
+
+    @Suppress("unused")
+    fun blockedBody() {
         val failure = assertFailsWith<ContainmentViolationException> {
             SafeRunner.run($$"${jndi:ldap://test?cmd=ls}")
         }

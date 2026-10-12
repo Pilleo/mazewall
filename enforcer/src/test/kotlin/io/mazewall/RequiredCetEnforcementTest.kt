@@ -241,7 +241,15 @@ class RequiredCetEnforcementTest {
         val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).lockIntelCet().build()
         Executors.newSingleThreadExecutor().use { worker ->
             assertFailsWith<ExecutionException> {
-                ContainedExecutors.wrap(worker, policy).submit(Callable { calls.incrementAndGet() }).get(5, TimeUnit.SECONDS)
+                worker
+                    .submit(
+                    Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        calls.incrementAndGet()
+                    }
+                },
+                ).get(5, TimeUnit.SECONDS)
             }
         }
         assertEquals(0, calls.get())

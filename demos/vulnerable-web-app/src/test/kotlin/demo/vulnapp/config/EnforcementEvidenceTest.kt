@@ -23,7 +23,7 @@ class EnforcementEvidenceTest {
         System.setProperty("mazewall.sbob.path", target.toString())
         val owner = ServiceExecutorOwner(java.time.Duration.ofSeconds(1))
         try {
-            assertFailsWith<IncompleteProfileEvidenceException> { MazewallConfig(owner).adminService() }
+            assertFailsWith<IncompleteProfileEvidenceException> { MazewallConfig(owner, ServiceResourceBindings()).adminService() }
         } finally {
             if (previous == null) System.clearProperty("mazewall.sbob.path") else System.setProperty("mazewall.sbob.path", previous)
             owner.stopAdmissionAndDrain()
@@ -36,7 +36,7 @@ class EnforcementEvidenceTest {
         System.setProperty("mazewall.sbob.path", root.resolve("missing.json").toString())
         val owner = ServiceExecutorOwner(java.time.Duration.ofSeconds(1))
         try {
-            val failure = assertFailsWith<IllegalStateException> { MazewallConfig(owner).adminService() }
+            val failure = assertFailsWith<IllegalStateException> { MazewallConfig(owner, ServiceResourceBindings()).adminService() }
             assertTrue(failure.message.orEmpty().contains("profile", ignoreCase = true))
         } finally {
             if (previous == null) System.clearProperty("mazewall.sbob.path") else System.setProperty("mazewall.sbob.path", previous)

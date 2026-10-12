@@ -45,8 +45,8 @@ for jdk in 22 25; do
     command=("$root/gradlew" -p "$root/tests/consumers" --console=plain --no-build-cache --no-configuration-cache
         "-PconsumerRepository=$repository" "-PconsumerVersion=$version" "-PconsumerKotlinVersion=$compiler" "-PconsumerJdk=$jdk"
         "${write_locks[@]}" :java-api:clean :kotlin-api:clean
-        :java-api:consumerEnvironment :java-api:run :java-api:verifyCallableEntry :java-api:verifyScopeBoundaries
-        :kotlin-api:consumerEnvironment :kotlin-api:run resolveIntegrationBaselines)
+        :java-api:consumerEnvironment :java-api:run :java-api:verifyCallableEntry :java-api:verifyScopeBoundaries :java-api:verifyRetiredApi
+        :kotlin-api:consumerEnvironment :kotlin-api:run :kotlin-api:verifyRetiredApi :kotlin-api:verifyScopeBoundaries resolveIntegrationBaselines)
     printf '%q ' "${command[@]}" >> "$evidence/commands.log"
     printf '\n' >> "$evidence/commands.log"
     if "${command[@]}" > "$evidence/jdk$jdk.log" 2>&1; then

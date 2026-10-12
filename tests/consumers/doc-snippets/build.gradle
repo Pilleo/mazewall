@@ -1,0 +1,59 @@
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+    id 'application'
+}
+
+kotlin { jvmToolchain(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger()) }
+dependencies {
+    implementation "io.mazewall:enforcer:${providers.gradleProperty('consumerVersion').get()}"
+    implementation "io.mazewall:profiler:${providers.gradleProperty('consumerVersion').get()}"
+}
+application { mainClass = 'consumer.ProfileRefusalKt' }
+
+def guides = ['README.md', 'GETTING_STARTED.md', 'enforcer/README.md', 'profiler/README.md']
+def generated = layout.buildDirectory.dir('generated/snippets')
+tasks.register('extractSnippets') {
+    inputs.files(guides.collect { rootProject.file("../../${it}") })
+    outputs.dir(generated)
+    doLast {
+        delete generated
+        def output = generated.get().asFile
+        output.mkdirs()
+        def inventory = []
+        guides.each { guide ->
+            def text = rootProject.file("../../${guide}").getText('UTF-8')
+            def matches = (text =~ /(?s)<!-- consumer: ([a-z0-9-]+) -->\s*```kotlin\n(.*?)\n```/)
+            if (!matches.find()) throw new GradleException("No consumer snippets in ${guide}")
+            def runtimeBlocks = (text =~ /(?s)```kotlin\n(.*?)\n```/).findAll {
+                !it[1].contains('repositories {')
+            }
+            if (matches.count != runtimeBlocks.size()) {
+                throw new GradleException("Every runtime Kotlin fence in ${guide} needs a consumer marker")
+            }
+            matches.reset()
+            matches.each { match ->
+                def id = match[1]
+                if (inventory.any { it.endsWith("\t${id}") }) throw new GradleException("Duplicate snippet ${id}")
+                new File(output, "${id}.kt").text = "package recipes\n\n${match[2]}\n"
+                inventory.add("${guide}\t${id}")
+            }
+        }
+        new File(output, 'inventory.tsv').text = inventory.join('\n') + '\n'
+        logger.lifecycle("Extracted ${inventory.size()} actual guide snippets: ${inventory}")
+    }
+}
+kotlin.sourceSets.main.kotlin.srcDir(generated)
+tasks.named('compileKotlin') { dependsOn 'extractSnippets' }
+if (providers.gradleProperty('snippetSnapshot').isPresent()) {
+    kotlin.sourceSets.main.kotlin.setSrcDirs([file(providers.gradleProperty('snippetSnapshot').get())])
+    tasks.named('compileKotlin') { setDependsOn([]) }
+}
+
+tasks.register('verifyDocArtifacts') {
+    doLast {
+        ['compileClasspath', 'runtimeClasspath'].each { name ->
+            rootProject.verifyPackagedArtifacts(configurations.getByName(name), ['enforcer', 'platform', 'profiler'])
+        }
+    }
+}
+tasks.named('run') { dependsOn 'verifyDocArtifacts' }

@@ -4,7 +4,7 @@
 
 > **Tier 1** (`ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)`): Blocks `execve`/`execveat`/`memfd_create` process-wide at startup, while still allowing HotSpot to `mmap(PROT_EXEC)` for the JIT. Raw `Policy.NO_EXEC` also denies executable mappings and can fatal a JIT JVM. Nothing in this process should spawn a shell or child process after install, regardless of which thread is compromised. This is the mandatory architectural backstop.
 >
-> **Tier 2** (`ContainedExecutors.wrap(executor, policy)`): Restricts specific syscalls and filesystem paths on a given thread pool. Stops **data-plane attacks** (SSRF, XXE, path traversal, fileless malware) on processing threads where trusted code handles untrusted data.
+> **Tier 2** (`ManagedRuntime.prepare(policy, limits)` followed by owned `submit(domain, Callable)`): Restricts specific syscalls and filesystem paths on dedicated, required-ready platform workers. Stops **data-plane attacks** (SSRF, XXE, path traversal, fileless malware) on processing threads where trusted code handles untrusted data. The application retains the owner until physical execution and cleanup drain; cancellation is not termination.
 >
 > ⚠️ **Tier 2 alone does NOT isolate arbitrary Java code.** An attacker who achieves Java-level code execution (e.g., via deserialization RCE) can escape to unrestricted sibling threads using `CompletableFuture.runAsync(...)` or virtual threads — no ACE required. Always stack Tier 1 first. See [§1](#1-thread-level-vs-process-level-isolation) for the complete ACE pivot analysis.
 
@@ -34,7 +34,7 @@ For years, industry leaders like **Elasticsearch** have successfully used a mini
 **Recommendation:** Use `ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)` as your foundational baseline on HotSpot. Use raw `Policy.NO_EXEC` only when you intend W^X (no further code generation).
 
 ### Thread-Level Mitigation & The "ACE Shared-Memory Pivot" Threat Model
-Thread-level containment (e.g., wrapping an `ExecutorService` with restrictive policies like `PURE_COMPUTE_UNSAFE`) is a powerful tool to minimize the blast radius of un-trusted library execution. However, **thread-scoped seccomp is not an absolute security boundary against an attacker who achieves Arbitrary Code Execution (ACE) on that thread.**
+Thread-level containment (e.g., preparing an owned worker domain with restrictive policies like `PURE_COMPUTE_UNSAFE`) is a powerful tool to minimize the blast radius of un-trusted library execution. However, **thread-scoped seccomp is not an absolute security boundary against an attacker who achieves Arbitrary Code Execution (ACE) on that thread.**
 
 Because the JVM runs within a single Linux process, **all JVM threads share the same physical address space, virtual memory maps, and heap.**
 

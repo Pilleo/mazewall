@@ -64,6 +64,452 @@ class OwnedRuntimeTest {
 
     private fun policy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
 
+    private val declared = ThreadLocal<Map<String, String>>()
+
+    @Test
+    fun `custom scoping captures once on caller before readiness and freezes handler membership`() {
+        open().use { runtime ->
+            val caller = Thread.currentThread()
+            val reads = AtomicInteger()
+            val handlers = mutableMapOf<Syscall, ScopingHandler>()
+            val scoping = object : StacktraceScopingPolicy {
+                override val handlers: Map<Syscall, ScopingHandler>
+                    get() {
+                        assertTrue(Thread.currentThread() === caller)
+                        reads.incrementAndGet()
+                        return handlers
+                    }
+            }
+            engine.process.onPrctl = { command ->
+                if (command is PrctlCommand.SetNoNewPrivs) handlers[Syscall.GETPID] = { _, _, _ -> true }
+                LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+            }
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1), scoping)
+            assertEquals(1, reads.get())
+            assertTrue(handlers.isNotEmpty())
+            val handle = runtime.submit(domain, Callable { Thread.currentThread() })
+            val worker = handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS)
+            assertTrue(worker !== caller)
+            assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+            assertEquals(DrainReport.Complete, runtime.drain(timeout))
+            assertFalse(worker.isAlive)
+        }
+    }
+
+    @Test
+    fun `custom capture failure preserves original ordinary and fatal identity with zero entry`() {
+        open().use { runtime ->
+            val entries = AtomicInteger()
+            for (failure in listOf(IllegalArgumentException("capture failure"), LinkageError("capture fatal"))) {
+                val scoping = object : StacktraceScopingPolicy {
+                    override val handlers: Map<Syscall, ScopingHandler>
+                        get() = throw failure
+                }
+                val observed = assertFailsWith<Throwable> {
+                    val domain = runtime.prepare(policy(), DomainLimits(1, 1), scoping)
+                    runtime.submit(domain, Callable { entries.incrementAndGet() })
+                }
+                assertTrue(observed === failure)
+            }
+            assertEquals(0, entries.get())
+            assertEquals(42, Mazewall.callContained(runtime, runtime.prepare(policy(), DomainLimits(1, 1)), Callable { 42 }))
+        }
+    }
+
+    @Test
+    fun `required custom supervision without bootstrap prevents body entry and retires generation`() {
+        open().use { runtime ->
+            val entries = AtomicInteger()
+            val scoping = object : StacktraceScopingPolicy {
+                override val handlers = mapOf<Syscall, ScopingHandler>(Syscall.CONNECT to { _, _, _ -> true })
+            }
+            val failure = assertFailsWith<IllegalStateException> {
+                val domain = runtime.prepare(policy(), DomainLimits(1, 1), scoping)
+                runtime.submit(domain, Callable { entries.incrementAndGet() })
+            }
+            assertTrue(failure.message.orEmpty().contains("Cannot spawn SupervisorDaemon"))
+            assertEquals(0, entries.get())
+            assertEquals(DrainReport.Complete, runtime.drain(timeout))
+        }
+    }
+
+    private fun bridge(
+        applied: AtomicInteger = AtomicInteger(),
+        restore: () -> Unit = {},
+    ): InvocationContextBridge =
+        InvocationContextBridge {
+        val caller = Thread.currentThread()
+        check(!caller.name.startsWith("mazewall-manager-"))
+        InvocationContextSnapshot(declared.get() ?: emptyMap()) { metadata ->
+            applied.incrementAndGet()
+            val previous = declared.get()
+            declared.set(metadata)
+            AutoCloseable {
+                restore()
+                if (previous == null) declared.remove() else declared.set(previous)
+            }
+        }
+    }
+
+    @Test
+    fun `captured immutable metadata alternates on exact worker and restores nested one permit`() {
+        val unrelated = ThreadLocal<String>()
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val caller = Thread.currentThread()
+            val worker = java.util.concurrent.atomic
+                .AtomicReference<Thread>()
+            unrelated.set("never-transfer")
+            try {
+                for (name in listOf("A", "B", "A")) {
+                    val mutable = mutableMapOf("name" to name)
+                    declared.set(mutable)
+                    val captured = runtime.captureInvocation(
+                        domain,
+                        bridge(),
+                        Callable {
+                        val current = Thread.currentThread()
+                        assertTrue(current !== caller && !current.isVirtual)
+                        assertTrue(worker.compareAndSet(null, current) || worker.get() === current)
+                        assertNull(unrelated.get())
+                        assertEquals(name, declared.get()["name"])
+                        assertFailsWith<UnsupportedOperationException> { (declared.get() as MutableMap)["name"] = "mutation" }
+                        declared.set(mapOf("name" to "inner"))
+                        val inner = runtime.captureInvocation(
+                            domain,
+                            bridge(),
+                            Callable {
+                            assertTrue(Thread.currentThread() === current)
+                            assertEquals("inner", declared.get()["name"])
+                            42
+                        },
+                        )
+                        declared.set(mapOf("name" to name))
+                        assertEquals(42, Mazewall.callContained(runtime, domain, inner))
+                        assertEquals(name, declared.get()["name"])
+                        name
+                    },
+                    )
+                    mutable["name"] = "caller-change"
+                    assertEquals(name, Mazewall.callContained(runtime, domain, captured))
+                    assertEquals("caller-change", declared.get()["name"])
+                    assertNull(Mazewall.callContained(runtime, domain, Callable { declared.get() }))
+                }
+            } finally {
+                unrelated.remove()
+                declared.remove()
+            }
+        }
+    }
+
+    @Test
+    fun `queued capture precedes caller changes and queued cancellation never applies context`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 2))
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val applied = AtomicInteger()
+            val calls = AtomicInteger()
+            try {
+                val held = runtime.submit(
+                    domain,
+                    Callable {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    1
+                },
+                )
+                check(entered.await(5, TimeUnit.SECONDS))
+                declared.set(mapOf("name" to "queued"))
+                val queued = runtime.submit(domain, runtime.captureInvocation(domain, bridge(applied), Callable { calls.incrementAndGet() }))
+                assertEquals(CancellationDisposition.REQUESTED, queued.requestCancellation())
+                assertIs<ExecutionEnd.NotStarted>(queued.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                val next = runtime.submit(domain, runtime.captureInvocation(domain, bridge(applied), Callable { declared.get()["name"] }))
+                declared.set(mapOf("name" to "changed"))
+                assertEquals(0, applied.get())
+                release.countDown()
+                held.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+                assertEquals("queued", next.result().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                next.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+                assertEquals(1, applied.get())
+                assertEquals(0, calls.get())
+                assertNull(Mazewall.callContained(runtime, domain, Callable { declared.get() }))
+            } finally {
+                release.countDown()
+                declared.remove()
+            }
+        }
+    }
+
+    @Test
+    fun `held restoration keeps physical end and admission after cooperative cancellation`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val entered = CountDownLatch(1)
+            val restoring = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            try {
+                declared.set(mapOf("name" to "cancelled"))
+                val captured = runtime.captureInvocation(
+                    domain,
+                    bridge(restore = {
+                    restoring.countDown()
+                    while (release.count > 0) {
+                        try {
+                            check(release.await(5, TimeUnit.SECONDS))
+                        } catch (_: InterruptedException) {
+                            // restoration still owns context
+                        }
+                    }
+                }),
+                    Callable {
+                    assertEquals("cancelled", declared.get()["name"])
+                    entered.countDown()
+                    CountDownLatch(1).await()
+                },
+                )
+                val handle = runtime.submit(domain, captured)
+                check(entered.await(5, TimeUnit.SECONDS))
+                handle.requestCancellation()
+                check(restoring.await(5, TimeUnit.SECONDS))
+                assertTrue(handle.result().toCompletableFuture().isCompletedExceptionally)
+                assertFalse(handle.executionEnd().toCompletableFuture().isDone)
+                assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { 0 }) }
+                release.countDown()
+                assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                assertNull(Mazewall.callContained(runtime, domain, Callable { declared.get() }))
+            } finally {
+                release.countDown()
+                declared.remove()
+            }
+        }
+    }
+
+    @Test
+    fun `restoration failure quarantines generation and preserves fatal primary identity`() {
+        for (fatal in listOf(false, true)) {
+            open().use { runtime ->
+                val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+                val primary: Throwable = if (fatal) LinkageError("body fatal") else IllegalArgumentException("body failure")
+                val cleanup = IllegalStateException("restore unproved")
+                val handle = runtime.submit(domain, runtime.captureInvocation(domain, bridge(restore = { throw cleanup }), Callable<Int> { throw primary }))
+                val delivered = assertFailsWith<java.util.concurrent.ExecutionException> { handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.cause
+                assertTrue(delivered === primary)
+                assertTrue(primary.suppressed.any { it === cleanup })
+                assertTrue(assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure === primary)
+                assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { error("unsafe reuse") }) }
+            }
+        }
+    }
+
+    @Test
+    fun `restoration quarantine preserves canonical containment delivery and original denied cause`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val denied = AccessDeniedException("declared body denial")
+            val cleanup = IllegalStateException("unproved restore")
+            val handle = runtime.submit(domain, runtime.captureInvocation(domain, bridge(restore = { throw cleanup }), Callable<Int> { throw denied }))
+            val delivered = assertIs<ContainmentViolationException>(
+                assertFailsWith<java.util.concurrent.ExecutionException> {
+                handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS)
+            }.cause,
+            )
+            assertTrue(delivered.cause === denied)
+            assertTrue(denied.suppressed.any { it === cleanup })
+            assertTrue(assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure === delivered)
+            assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { 0 }) }
+        }
+    }
+
+    @Test
+    fun `caught nested restoration failure cannot become successful outer evidence`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val cleanup = IllegalStateException("nested restore")
+            val handle = runtime.submit(
+                domain,
+                Callable {
+                val nested = runtime.captureInvocation(domain, bridge(restore = { throw cleanup }), Callable { 1 })
+                assertTrue(assertFailsWith<IllegalStateException> { Mazewall.callContained(runtime, domain, nested) } === cleanup)
+                assertTrue(Mazewall.currentInvocationEvidence()?.observedFailure === cleanup)
+                42
+            },
+            )
+            assertTrue(assertFailsWith<java.util.concurrent.ExecutionException> { handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.cause === cleanup)
+            handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+            assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { 0 }) }
+        }
+    }
+
+    @Test
+    fun `caught nested fatal with clean restoration still retires generation and retains original evidence`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val fatal = LinkageError("nested fatal")
+            val restored = AtomicInteger()
+            val handle = runtime.submit(
+                domain,
+                Callable {
+                val nested = runtime.captureInvocation(domain, bridge(restore = { restored.incrementAndGet() }), Callable<Int> { throw fatal })
+                assertTrue(assertFailsWith<LinkageError> { Mazewall.callContained(runtime, domain, nested) } === fatal)
+                assertTrue(Mazewall.currentInvocationEvidence()?.observedFailure === fatal)
+                42
+            },
+            )
+            assertTrue(assertFailsWith<java.util.concurrent.ExecutionException> { handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.cause === fatal)
+            assertTrue(assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure === fatal)
+            assertEquals(1, restored.get())
+            assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { 0 }) }
+        }
+    }
+
+    @Test
+    fun `recorded nested fatal remains terminal when plain or captured outer throws a later failure`() {
+        for (capturedOuter in listOf(false, true)) {
+            for (outerFailure in listOf(IllegalArgumentException("later business"), LinkageError("later fatal"))) {
+                assertNestedFatalTerminal(capturedOuter, outerFailure)
+            }
+        }
+    }
+
+    @Test
+    fun `recorded nested fatal remains terminal through captured outer business failure and cleanup fatal`() {
+        assertNestedFatalTerminal(true, IllegalArgumentException("later business"), LinkageError("later cleanup fatal"))
+    }
+
+    private fun assertNestedFatalTerminal(
+        capturedOuter: Boolean,
+        outerFailure: Throwable,
+        cleanupFatal: Error? = null,
+    ) {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val fatal = LinkageError("original nested fatal")
+            val innerRestored = AtomicInteger()
+            val outerRestored = AtomicInteger()
+            val caller = Thread.currentThread()
+            val outer = Callable<Int> {
+                val worker = Thread.currentThread()
+                assertTrue(worker !== caller && !worker.isVirtual)
+                if (!capturedOuter) declared.set(mapOf("name" to "outer"))
+                val previous = declared.get()
+                assertEquals("outer", previous["name"])
+                declared.set(mapOf("name" to "inner"))
+                val inner = runtime.captureInvocation(
+                    domain,
+                    bridge(restore = {
+                    assertEquals("inner", declared.get()["name"])
+                    innerRestored.incrementAndGet()
+                }),
+                    Callable<Int> {
+                    assertTrue(Thread.currentThread() === worker)
+                    assertEquals("inner", declared.get()["name"])
+                    throw fatal
+                },
+                )
+                declared.set(previous)
+                assertTrue(assertFailsWith<LinkageError> { Mazewall.callContained(runtime, domain, inner) } === fatal)
+                assertTrue(declared.get() === previous)
+                assertTrue(Mazewall.currentInvocationEvidence()?.observedFailure === fatal)
+                throw outerFailure
+            }
+            val contexts = InvocationContextBridge {
+                InvocationContextSnapshot(mapOf("name" to "outer")) { metadata ->
+                    val previous = declared.get()
+                    declared.set(metadata)
+                    AutoCloseable {
+                        assertEquals("outer", declared.get()["name"])
+                        if (previous == null) declared.remove() else declared.set(previous)
+                        assertTrue(declared.get() === previous)
+                        outerRestored.incrementAndGet()
+                        cleanupFatal?.let { throw it }
+                    }
+                }
+            }
+            val handle = runtime.submit(domain, if (capturedOuter) runtime.captureInvocation(domain, contexts, outer) else outer)
+            val delivered = assertFailsWith<java.util.concurrent.ExecutionException> { handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.cause
+            assertTrue(delivered === fatal)
+            assertTrue(assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure === fatal)
+            assertEquals(1, innerRestored.get())
+            assertEquals(if (capturedOuter) 1 else 0, outerRestored.get())
+            if (cleanupFatal == null) {
+                assertEquals(listOf(outerFailure), fatal.suppressed.toList())
+            } else {
+                assertEquals(listOf(cleanupFatal), fatal.suppressed.toList())
+                assertEquals(listOf(outerFailure), cleanupFatal.suppressed.toList())
+            }
+            assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { 0 }) }
+        }
+    }
+
+    @Test
+    fun `ordinary body failure restores and capture failure consumes no admission`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val caller = Thread.currentThread()
+            val captureFailure = IllegalArgumentException("caller capture")
+            val failing = InvocationContextBridge {
+                assertTrue(Thread.currentThread() === caller)
+                throw captureFailure
+            }
+            assertTrue(assertFailsWith<IllegalArgumentException> { runtime.captureInvocation(domain, failing, Callable { 0 }) } === captureFailure)
+            declared.set(mapOf("name" to "business"))
+            try {
+                val business = IllegalArgumentException("business")
+                val handle = runtime.submit(domain, runtime.captureInvocation(domain, bridge(), Callable<Int> { throw business }))
+                assertTrue(assertFailsWith<java.util.concurrent.ExecutionException> { handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.cause === business)
+                handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+                assertNull(Mazewall.callContained(runtime, domain, Callable { declared.get() }))
+                val captured = runtime.captureInvocation(domain, bridge(), Callable { 1 })
+                assertFailsWith<IllegalStateException> { captured.call() }
+                assertEquals("business", declared.get()["name"])
+            } finally {
+                declared.remove()
+            }
+        }
+    }
+
+    @Test
+    fun `application failure has zero body entry and quarantines unproved worker context`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val calls = AtomicInteger()
+            val applicationFailure = IllegalStateException("partially applied")
+            val context = InvocationContextBridge { InvocationContextSnapshot(emptyMap()) { throw applicationFailure } }
+            val handle = runtime.submit(domain, runtime.captureInvocation(domain, context, Callable { calls.incrementAndGet() }))
+            assertTrue(assertFailsWith<java.util.concurrent.ExecutionException> { handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.cause === applicationFailure)
+            assertTrue(assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure === applicationFailure)
+            assertEquals(0, calls.get())
+            assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { 0 }) }
+        }
+    }
+
+    @Test
+    fun `fatal restoration promotes over business failure and clean restoration preserves body fatal`() {
+        for (restoreFatal in listOf(false, true)) {
+            open().use { runtime ->
+                val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+                val fatal = LinkageError("original fatal")
+                val business = IllegalArgumentException("original business")
+                val restored = CountDownLatch(1)
+                val captured = runtime.captureInvocation(
+                    domain,
+                    bridge(restore = {
+                    restored.countDown()
+                    if (restoreFatal) throw fatal
+                }),
+                    Callable<Int> { if (restoreFatal) throw business else throw fatal },
+                )
+                val handle = runtime.submit(domain, captured)
+                assertTrue(assertFailsWith<java.util.concurrent.ExecutionException> { handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }.cause === fatal)
+                assertTrue(assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure === fatal)
+                assertEquals(0L, restored.count)
+                if (restoreFatal) assertTrue(fatal.suppressed.any { it === business })
+                assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { 0 }) }
+            }
+        }
+    }
+
     @Test
     fun `missing required read resource rejects preparation before any domain can admit`() {
         val root = java.nio.file.Files

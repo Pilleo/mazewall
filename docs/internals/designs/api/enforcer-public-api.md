@@ -14,26 +14,32 @@ keywords: ["public-api", "policy-dsl", "executor-ownership", "installation"]
 
 ## Current Strengths
 
-The current Kotlin happy path is compact, uses the familiar `ExecutorService` abstraction, keeps policies immutable, distinguishes `ProcessWideSafe` from `ThreadLocalOnly`, rejects virtual-thread installation, and fails closed by default.
+The current synchronous path uses application-owned `ManagedRuntime` domains and `Callable`
+bodies, keeps policies immutable, distinguishes `ProcessWideSafe` from `ThreadLocalOnly`,
+rejects virtual-thread installation, and fails closed by default.
 
 ## Confirmed Usability and Safety Gaps
 
 ### Executor Ownership
 
-`ContainedExecutors.wrap(delegate, policy)` accepts an arbitrary executor while the caller retains the raw delegate. Seccomp and Landlock remain on worker threads after a task completes. Reusing the delegate elsewhere can therefore expose unrelated work to permanent restrictions.
+The retired borrowed executor API accepted an arbitrary executor while the caller
+retained the raw delegate. Seccomp and Landlock remain on worker threads after a task
+completes, so reusing that delegate could expose unrelated work to permanent restrictions.
 
-**Deferred — lowest priority.** An owned `ContainedExecutorService` (issue 032520) is intentionally not scheduled. Owning the pool duplicates JVM thread lifecycle, shutdown, and Loom-rejection work on top of irreversible kernel filters. Prefer documenting `wrap` ownership over building a second executor product.
-
-If that direction is ever approved again, the primary API would create dedicated workers and return a marker type:
+Application callers now use the existing owned runtime, not an `ExecutorService` adapter:
 
 ```kotlin
-val parserPool: ContainedExecutorService = mazewall.executors.fixed(
-    threads = 4,
-    policy = parserPolicy,
-)
+val runtime = ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, explicitBaseline, preparationTimeout, closeTimeout)
+val domain = runtime.prepare(parserPolicy, DomainLimits(workers = 4, maxAdmissions = 64))
+val invocation = runtime.submit(domain, Callable { parseMaterializedInput() })
 ```
 
-If adoption of an existing executor remains supported, the operation must be named `adoptDedicatedExecutor`, transfer lifecycle ownership, and prominently reject shared/common pools.
+The owner is retained through cancellation and bounded incomplete drain; result delivery is
+distinct from `executionEnd()`. Required preparation establishes worker readiness before target
+entry. A later drain may confirm physical retirement. Public `wrap` overloads,
+`wrapTyped`, single/fixed/cached factories and `ContainedExecutor` are removed;
+there is no public borrowed replacement. Internal `SandboxDispatcher` dependencies
+remain separately experimental and preserved. Explicit installation/assessment APIs remain supported.
 
 ### Irreversible Installation
 
@@ -76,8 +82,8 @@ publication preserves both its newly applied state and the terminal failure.
 Business-task failure after successful installation does not change this latch.
 Thread-scoped failure does not block preparation on a fresh worker created from an
 unaffected manager context; process-wide failure blocks every subsequent installation
-scope in that process. The caller owns physical executor shutdown; owned generation
-retirement/recreation remains part of the managed-runtime work.
+scope in that process. The application-owned runtime owns physical generation retirement;
+recreation is explicit and requires retirement from trusted bootstrap.
 
 ### Runtime-Compatible Process Baselines
 

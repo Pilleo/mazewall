@@ -10,6 +10,7 @@ import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.compile
+import io.mazewall.enforcer.api.execution.*
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.lifecycle.*
@@ -19,85 +20,88 @@ import io.mazewall.platform.socket.*
 import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assumptions.assumeFalse
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 @NeedsFreshJvm
 class ContainedExecutorsTest : BaseIntegrationTest() {
-    fun testContainmentWrapperBlocksExecve() {
-        val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
-        val future = safeExecutor.submit {
-            ProcessBuilder("echo", "hello").start()
-        }
-        try {
-            future.get()
-            throw IllegalStateException("Should have failed")
-        } catch (e: ExecutionException) {
-            if (e.cause !is ContainmentViolationException) {
-                throw e
-            }
-        } finally {
-            executor.shutdown()
+    fun testOwnedBlocksExecve() {
+        val timeout = Duration.ofSeconds(10)
+        val baseline = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowNonThreadClone().build()
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, baseline, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.NO_EXEC, DomainLimits(1, 1))
+            val future = runtime.submit(domain, java.util.concurrent.Callable { ProcessBuilder("echo", "hello").start() })
+            val failure = assertFailsWith<ExecutionException> { future.result().toCompletableFuture().get(10, TimeUnit.SECONDS) }
+            assertIs<ContainmentViolationException>(failure.cause)
+            assertIs<ExecutionEnd.Finished>(future.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
         }
     }
 
     fun testPerThreadIsolation() {
-        val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
-        val future = safeExecutor.submit(java.util.concurrent.Callable { "installed" })
-        if (future.get() != "installed") throw IllegalStateException("Failed to install")
-
-        // Main thread should still be able to exec
-        val process = ProcessBuilder("echo", "uncontained").start()
-        if (process.waitFor() != 0) throw IllegalStateException("Main thread blocked unexpectedly")
-        executor.shutdown()
+        val timeout = Duration.ofSeconds(10)
+        val baseline = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowNonThreadClone().build()
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, baseline, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.NO_EXEC, DomainLimits(1, 1))
+            val future = runtime.submit(domain, java.util.concurrent.Callable { "installed" })
+            assertEquals("installed", future.result().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            assertIs<ExecutionEnd.Finished>(future.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            // The explicit launch-compatible process floor retains this caller control.
+            val process = ProcessBuilder("echo", "uncontained").start()
+            try {
+                assertTrue(process.waitFor(10, TimeUnit.SECONDS))
+                assertEquals(0, process.exitValue())
+            } finally {
+                if (process.isAlive) {
+                    process.destroyForcibly()
+                    assertTrue(process.waitFor(10, TimeUnit.SECONDS))
+                }
+            }
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
+        }
     }
 
-    fun testInvokeAllAppliesContainment() {
-        val executor = Executors.newFixedThreadPool(2)
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
-        try {
+    fun testOwnedContainsAllTasks() {
+        val timeout = Duration.ofSeconds(10)
+        val baseline = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowNonThreadClone().build()
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, baseline, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.NO_EXEC, DomainLimits(2, 2))
             val tasks = listOf(
                 java.util.concurrent.Callable { ProcessBuilder("echo", "1").start() },
                 java.util.concurrent.Callable { ProcessBuilder("echo", "2").start() },
             )
-            val futures = safeExecutor.invokeAll(tasks)
+            val futures = tasks.map { runtime.submit(domain, it) }
             for (future in futures) {
-                try {
-                    future.get()
-                    throw IllegalStateException("Task should have been contained")
-                } catch (e: ExecutionException) {
-                    if (e.cause !is ContainmentViolationException) throw e
-                }
+                val failure = assertFailsWith<ExecutionException> { future.result().toCompletableFuture().get(10, TimeUnit.SECONDS) }
+                assertIs<ContainmentViolationException>(failure.cause)
+                assertIs<ExecutionEnd.Finished>(future.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
             }
-        } finally {
-            executor.shutdown()
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
         }
     }
 
-    fun testInvokeAnyAppliesContainment() {
-        val executor = Executors.newFixedThreadPool(2)
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
-        try {
-            val tasks = listOf(
+    fun testOwnedContainsSingleResult() {
+        val timeout = Duration.ofSeconds(10)
+        val baseline = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowNonThreadClone().build()
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, baseline, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.NO_EXEC, DomainLimits(2, 2))
+            val future = runtime.submit(
+                domain,
                 java.util.concurrent.Callable {
                     Runtime.getRuntime().exec(arrayOf("echo", "fail"))
                     "should not reach here"
                 },
             )
-            try {
-                safeExecutor.invokeAny(tasks)
-                throw IllegalStateException("Should have failed")
-            } catch (e: ExecutionException) {
-                if (e.cause !is ContainmentViolationException) throw e
-            }
-        } finally {
-            executor.shutdown()
+            val failure = assertFailsWith<ExecutionException> { future.result().toCompletableFuture().get(10, TimeUnit.SECONDS) }
+            assertIs<ContainmentViolationException>(failure.cause)
+            assertIs<ExecutionEnd.Finished>(future.executionEnd().toCompletableFuture().get(10, TimeUnit.SECONDS))
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
         }
     }
 
@@ -205,8 +209,8 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `test containment wrapper blocks execve`() {
-        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testContainmentWrapperBlocksExecve")
+    fun `test owned worker blocks execve`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testOwnedBlocksExecve")
     }
 
     @Test
@@ -215,16 +219,23 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
         assumeFalse(osName.equals("Linux", ignoreCase = true), "Test is for non-Linux platforms only")
 
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
-        val future = safeExecutor.submit(java.util.concurrent.Callable { "success" })
+        val future = executor.submit(
+            java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(Policy.NO_EXEC).use { receipt ->
+                receipt.requireInstalled()
+                "success"
+            }
+        },
+        )
 
         val ex = assertFailsWith<ExecutionException> {
-            future.get()
+            future.get(10, TimeUnit.SECONDS)
         }
         assertTrue(ex.cause is UnsupportedOperationException)
         assertTrue(ex.cause?.message?.contains("does not support") == true)
 
         executor.shutdown()
+        assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
     }
 
     @Test
@@ -233,34 +244,44 @@ class ContainedExecutorsTest : BaseIntegrationTest() {
     }
 
     @Test
-    fun `invokeAll applies containment to all tasks`() {
-        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInvokeAllAppliesContainment")
+    fun `owned submissions apply containment to all tasks`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testOwnedContainsAllTasks")
     }
 
     @Test
-    fun `invokeAny applies containment`() {
-        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testInvokeAnyAppliesContainment")
+    fun `owned single result applies containment`() {
+        IsolatedProcessTester.runIsolatedMethod(this::class.java.name, "testOwnedContainsSingleResult")
     }
 
     @Test
-    fun `test wrap() executor invokeAll and invokeAny with timeouts`() {
+    fun `owned multiple and single results respect finite waits`() {
         assumeLandlockAbiAtLeast(5)
-        val executor = Executors.newFixedThreadPool(2)
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.PURE_COMPUTE)
+        IsolatedProcessTester.runIsolatedMethod(javaClass.name, "testOwnedResultTimeouts")
+    }
 
-        try {
+    fun testOwnedResultTimeouts() {
+        val timeout = Duration.ofSeconds(5)
+        ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout).use { runtime ->
+            val domain = runtime.prepare(Policy.PURE_COMPUTE, DomainLimits(2, 2))
             val tasks = listOf(
                 java.util.concurrent.Callable { "task1" },
                 java.util.concurrent.Callable { "task2" },
             )
-            val results = safeExecutor.invokeAll(tasks, 5, TimeUnit.SECONDS)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            val results = tasks.map { runtime.submit(domain, it) }
             assertEquals(2, results.size)
-            assertEquals<String>("task1", results[0].get())
+            assertEquals<String>("task1", results[0].result().toCompletableFuture().get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS))
+            assertEquals<String>("task2", results[1].result().toCompletableFuture().get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS))
+            results.forEach { assertIs<ExecutionEnd.Finished>(it.executionEnd().toCompletableFuture().get(deadline - System.nanoTime(), TimeUnit.NANOSECONDS)) }
 
-            val any = safeExecutor.invokeAny(tasks, 5, TimeUnit.SECONDS)
+            val nextDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            val next = tasks.map { runtime.submit(domain, it) }
+            val any = java.util.concurrent.CompletableFuture
+                .anyOf(*next.map { it.result().toCompletableFuture() }.toTypedArray())
+                .get(nextDeadline - System.nanoTime(), TimeUnit.NANOSECONDS)
             assertTrue(any == "task1" || any == "task2")
-        } finally {
-            executor.shutdown()
+            next.forEach { assertIs<ExecutionEnd.Finished>(it.executionEnd().toCompletableFuture().get(nextDeadline - System.nanoTime(), TimeUnit.NANOSECONDS)) }
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
         }
     }
 

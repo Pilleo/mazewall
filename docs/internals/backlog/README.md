@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 125 | *Total Resolved Issues:* 653
+*Total Active Issues:* 128 | *Total Resolved Issues:* 652
 
 Agent-development documentation resolved: [canonical build guidance, coding standards, and removal of unused workflow documents](resolved/issue-20261010-223954-987-consolidate-agent-documentation-and-remove-unused-.md).
 
@@ -32,6 +32,20 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261012-110955-698-prelink-mmap-protection-fixture-lambdas-before-exe](issue-20261012-110955-698-prelink-mmap-protection-fixture-lambdas-before-exe.md) | Prelink mmap protection fixture lambdas before executable mapping denial | medium | enforcer |
+| [issue-20261012-105213-824-resolve-pre-existing-optional-profiler-detekttooli](issue-20261012-105213-824-resolve-pre-existing-optional-profiler-detekttooli.md) | Resolve pre-existing optional profiler detektTooling debt | medium | profiler |
+| [issue-20261012-091212-424-tier-e-source-transfer-rejects-unstaged-tracked-de](issue-20261012-091212-424-tier-e-source-transfer-rejects-unstaged-tracked-de.md) | Tier E source transfer rejects unstaged tracked deletions | high | profiler |
+| [issue-20261012-083051-896-prove-portal-startup-and-physical-retirement-in-an](issue-20261012-083051-896-prove-portal-startup-and-physical-retirement-in-an.md) | Prove Portal startup and physical retirement in an owned delegated cgroup | high | core |
+| [issue-20261012-062010-859-add-bounded-equivalent-work-integration-boundary-c](issue-20261012-062010-859-add-bounded-equivalent-work-integration-boundary-c.md) | Add bounded equivalent-work integration boundary checking harness | high | benchmarks |
+| [issue-20261012-051631-902-prove-independent-prestarted-helper-and-late-callb](issue-20261012-051631-902-prove-independent-prestarted-helper-and-late-callb.md) | Prove independent prestarted helper and late callback outside owned worker Landlock | medium | enforcer |
+| [issue-20261012-034048-911-prove-actual-profile-backed-post-install-hotspot-c](issue-20261012-034048-911-prove-actual-profile-backed-post-install-hotspot-c.md) | Prove actual profile-backed post-install HotSpot compilation and coverage custody | high | profiler |
+| [issue-20261012-031821-132-replace-fixed-delay-failure-triage-fixture-with-ac](issue-20261012-031821-132-replace-fixed-delay-failure-triage-fixture-with-ac.md) | Replace fixed-delay failure-triage fixture with actual wait-entry handshake | medium | buildSrc |
+| [issue-20261012-011748-866-migrate-remaining-installer-and-execution-tests-be](issue-20261012-011748-866-migrate-remaining-installer-and-execution-tests-be.md) | Migrate remaining installer and execution tests before approved public executor retirement | high | enforcer |
+| [issue-20261011-230257-867-migrate-remaining-application-callers-to-owned-run](issue-20261011-230257-867-migrate-remaining-application-callers-to-owned-run.md) | Migrate remaining application callers to owned runtimes and retain incomplete lifecycle owners | high | demos |
+| [issue-20261011-220236-529-preserve-custom-supervised-agent-capabilities-on-o](issue-20261011-220236-529-preserve-custom-supervised-agent-capabilities-on-o.md) | Preserve custom supervised agent capabilities on owned runtime migration | high | enforcer |
+| [issue-20261011-211526-976-complete-explicit-owned-invocation-metadata-captur](issue-20261011-211526-976-complete-explicit-owned-invocation-metadata-captur.md) | Complete explicit owned invocation metadata capture and restoration | high | enforcer |
+| [issue-20261011-165557-976-require-operator-owned-portal-launch-profiles-and-](issue-20261011-165557-976-require-operator-owned-portal-launch-profiles-and-.md) | Require operator-owned Portal launch profiles and independent readiness | high | portal-runtime |
+| [issue-20261011-160846-071-compile-canonical-owned-runtime-and-coverage-prese](issue-20261011-160846-071-compile-canonical-owned-runtime-and-coverage-prese.md) | Compile canonical owned-runtime and coverage-preserving profile recipes | high | core |
 | [issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr](issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr.md) | Adopt typed prepared ordinary-JAR resources in Spring and prove native JDBC lifecycle | high | spring-integration |
 | [issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-](issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-.md) | Declare optional Koog production plugin bootstrap and Portal runtime publication | high | integrations |
 | [issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin](issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin.md) | Bind supported exploded and Boot deployment origins to genuine prepared owners | high | enforcer |

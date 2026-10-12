@@ -432,7 +432,47 @@ internal fun assertSafeCoordination(blocked: Set<Syscall>) {
 
 ## 4. Policy DSL Compilation Example
 
-At the end of a profiling run, raw observations are converted into a `BillOfBehavior`. Calling `bill.toDsl("Policy.PURE_COMPUTE_UNSAFE")` compiles the bill and produces a clean, copy-pasteable Kotlin DSL code snippet. Note: `toDsl()` throws if exec/connect destinations were observed but cannot be enforced; pass `allowIncomplete=true` if you cannot enforce all destinations.
+At the end of a profiling run, raw observations are converted into a `BillOfBehavior`.
+Use `result.toDsl()` or `result.toPolicy()` to retain the actual coverage gate, and
+`result.toProfileDocumentJson()` to retain diagnostics. Public conversion refuses
+incomplete collection and unenforceable exec/connect destinations; there is no public
+incomplete override. Merging raw bills does not merge or certify measured coverage.
+
+#### Native selected-runtime conversion proof
+
+`PortalWorkerPolicyNativeTest` executes the public `MazewallProfiler` USER_NOTIF
+facade in a disposable JVM. Its bounded synchronous worker reads `/etc/hostname`
+and computes a reference digest; retained coverage describes that thread's observed
+scope, not existing JIT threads, asynchronous I/O destinations or future branches.
+The test retains the measured result/document, actual observations, ended worker and
+per-session collector thread identities/stacks. No complete field is manufactured.
+
+The result selects `HOTSPOT_JIT` through `toDedicatedWorkerPolicies` **before**
+intersection. The final JVM floor and executable-mapping requirement are checked,
+then those exact retained canonical component bytes are read by a second disposable
+JVM and installed on all threads with required Seccomp and
+Landlock TSYNC receipts (ABI 8+). The profiled hostname is outside the restrictive
+worker-filesystem intersection and is denied; ordinary runtime/classpath grants
+permit a previously unloaded class and resource. Ordered ordinary HotSpot
+`PrintCompilation` output must contain target-method compilation only after the
+required receipt. JDK `LogCompilation` must also contain an actual positive-sized
+target `nmethod` from C1/C2, not merely a queued attempt. Its diagnostic file is
+opened by the JVM before installation; no filesystem grant is widened for logging.
+A compilation-total counter or prewarm is not this proof.
+
+The Native Image conversion remains mapping-strict, and its contradictory use for
+HotSpot is rejected before installation. Legacy/unused and genuinely recorded-log
+results retain incomplete refusals. HOTSPOT_AGENTLESS is independently always
+incomplete and is not substituted for this backend. Session drain joins the actual
+listener/collector; the shared profiler daemon remains infrastructure until the
+profiling JVM ends. That JVM's daemon/helpers, endpoint and pumps retire before
+the enforcement JVM starts; applying the final baseline to live profiling
+infrastructure would prevent its socket cleanup. The test owns both children,
+observed descendants and stdout pumps through actual exit/reap/join. Receipt close
+never removes filters. This is empirical
+conversion/install evidence, not authorization, an ACE boundary or a proof of every
+possible JIT/workload operation. An unavailable required kernel/collector remains
+a real failure or explicit prerequisite, never a fabricated complete result.
 
 ```kotlin
 // Automatically compiled and emitted by BillOfBehavior.toDsl():

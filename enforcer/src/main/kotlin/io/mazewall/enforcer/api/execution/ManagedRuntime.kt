@@ -3,6 +3,7 @@ package io.mazewall.enforcer.api.execution
 import io.mazewall.enforcer.api.CanonicalPolicyArtifact
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy
 import io.mazewall.enforcer.api.InstallationEnvironment
 import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.Policy
@@ -10,6 +11,7 @@ import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.ReviewedOperationArtifact
 import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.frozenCopy
 import io.mazewall.enforcer.diagnostics.requirePlatformThread
@@ -148,13 +150,37 @@ public class ManagedRuntime private constructor(
         limits: DomainLimits,
     ): InProcessDomain = prepareDefinition(policy.definition.frozenCopy(), limits)
 
+    /**
+     * Capture custom supervision handlers once on this trusted caller, before readiness.
+     * Handler membership is immutable; callbacks remain trusted application collaborators.
+     * Prepare the external supervisor explicitly before open installs the process baseline.
+     */
+    public fun prepare(
+        policy: Policy<*, Uncompiled>,
+        limits: DomainLimits,
+        scopingPolicy: StacktraceScopingPolicy,
+    ): InProcessDomain {
+        requireUnrestrictedBootstrap()
+        val handlers = java.util.Map.copyOf(scopingPolicy.handlers)
+        val captured = object : StacktraceScopingPolicy {
+            override val handlers = handlers
+        }
+        return prepareDefinition(policy.definition.frozenCopy(), limits, scopingPolicy = captured)
+    }
+
     @Suppress("TooGenericExceptionCaught") // preparation boundary retains manager-owned resources until physical retirement
-    private fun prepareDefinition(definition: PolicyDefinition<*>, limits: DomainLimits, artifact: ReviewedOperationArtifact? = null, resources: PreparedOperationResources? = null): InProcessDomain {
+    private fun prepareDefinition(
+        definition: PolicyDefinition<*>,
+        limits: DomainLimits,
+        artifact: ReviewedOperationArtifact? = null,
+        resources: PreparedOperationResources? = null,
+        scopingPolicy: StacktraceScopingPolicy = DefaultStacktraceScopingPolicy,
+    ): InProcessDomain {
         requireUnrestrictedBootstrap()
         val resourceRef = AtomicReference<OwnedDomain?>()
         val prepared = synchronized(lock) {
             requireOpen()
-            manager.submit(Callable { prepareOnManager(definition, limits, resourceRef, artifact, resources) })
+            manager.submit(Callable { prepareOnManager(definition, limits, resourceRef, artifact, resources, scopingPolicy) })
         }
         return try {
             await(prepared)
@@ -174,6 +200,7 @@ public class ManagedRuntime private constructor(
         resourceRef: AtomicReference<OwnedDomain?>,
         artifact: ReviewedOperationArtifact?,
         resources: PreparedOperationResources?,
+        scopingPolicy: StacktraceScopingPolicy,
     ): InProcessDomain {
         var claimed = false
         var preparedLandlock: io.mazewall.landlock.PreparedLandlock? = null
@@ -191,7 +218,7 @@ public class ManagedRuntime private constructor(
             requireOpen()
             check(domains.values.none { it.failedRetirementPending() || it.cleanupFailure.get() != null }) { "Prior failed generation still has live execution or cleanup" }
             val generation = ++nextGeneration
-            OwnedDomain(generation, limits, definition, environment, preparedLandlock, resources, "mazewall-domain-$id-$generation-").also {
+            OwnedDomain(generation, limits, definition, environment, preparedLandlock, resources, "mazewall-domain-$id-$generation-", scopingPolicy).also {
                 domains[generation] = it
                 resourceRef.set(it)
             }
@@ -221,6 +248,25 @@ public class ManagedRuntime private constructor(
         } catch (preparationFailure: Throwable) {
             resource.fail(preparationFailure)
             throw preparationFailure
+        }
+    }
+
+    /**
+     * Capture declared metadata now, outside lifecycle locks and before submission/admission.
+     * Feed the returned Callable to submit or Mazewall.callContained; existing calls transfer nothing.
+     * Application bridges are explicit trusted collaborators, not permission authority.
+     */
+    public fun <T> captureInvocation(
+        domain: InProcessDomain,
+        contexts: InvocationContextBridge,
+        action: Callable<T>,
+    ): Callable<T> {
+        require(domain.owner === this) { "Domain belongs to a different runtime" }
+        val snapshot = contexts.capture()
+        return Callable {
+            check(RuntimeWorkerContext.current === domain.resource) { "Captured context requires its exact owned domain" }
+            val invocation = checkNotNull(RuntimeWorkerContext.invocation) { "Context requires an active owned invocation" }
+            invocation.withContext(snapshot, action)
         }
     }
 

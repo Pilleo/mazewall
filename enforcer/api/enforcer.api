@@ -68,10 +68,6 @@ public final class io/mazewall/enforcer/api/CetOutcome : java/lang/Enum {
 	public static fun values ()[Lio/mazewall/enforcer/api/CetOutcome;
 }
 
-public abstract interface class io/mazewall/enforcer/api/ContainedExecutor : java/util/concurrent/ExecutorService {
-	public abstract fun getPolicy ()Lio/mazewall/enforcer/api/Policy;
-}
-
 public final class io/mazewall/enforcer/api/ContainedExecutors {
 	public static final field INSTANCE Lio/mazewall/enforcer/api/ContainedExecutors;
 	public final fun assessOnCurrentThread (Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationAssessment;
@@ -80,12 +76,6 @@ public final class io/mazewall/enforcer/api/ContainedExecutors {
 	public final fun installOnCurrentThread ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
 	public final fun installOnDedicatedProcess ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
 	public final fun installOnProcess ([Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/InstallationReceipt;
-	public final fun newCachedThreadPool (Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public final fun newFixedThreadPool (ILio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public final fun newSingleThreadExecutor (Lio/mazewall/enforcer/api/Policy;)Ljava/util/concurrent/ExecutorService;
-	public final fun wrap (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Lio/mazewall/enforcer/api/ContainedExecutor;
-	public final fun wrap (Ljava/util/concurrent/ExecutorService;[Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
-	public final fun wrapTyped (Ljava/util/concurrent/ExecutorService;Lio/mazewall/enforcer/api/Policy;)Lio/mazewall/enforcer/api/ContainedExecutor;
 }
 
 public final class io/mazewall/enforcer/api/ContainmentViolationEvidence : java/lang/Enum {
@@ -950,6 +940,14 @@ public final class io/mazewall/enforcer/api/execution/IncompleteDrainException :
 	public final fun getReport ()Lio/mazewall/enforcer/api/execution/DrainReport$Incomplete;
 }
 
+public abstract interface class io/mazewall/enforcer/api/execution/InvocationContextBridge {
+	public abstract fun capture ()Lio/mazewall/enforcer/api/execution/InvocationContextSnapshot;
+}
+
+public final class io/mazewall/enforcer/api/execution/InvocationContextSnapshot {
+	public fun <init> (Ljava/util/Map;Ljava/util/function/Function;)V
+}
+
 public final class io/mazewall/enforcer/api/execution/InvocationEvidence {
 	public fun <init> (JLjava/lang/Throwable;)V
 	public final fun component1 ()J
@@ -971,11 +969,13 @@ public abstract interface class io/mazewall/enforcer/api/execution/InvocationHan
 
 public final class io/mazewall/enforcer/api/execution/ManagedRuntime : java/lang/AutoCloseable {
 	public static final field Companion Lio/mazewall/enforcer/api/execution/ManagedRuntime$Companion;
+	public final fun captureInvocation (Lio/mazewall/enforcer/api/execution/InProcessDomain;Lio/mazewall/enforcer/api/execution/InvocationContextBridge;Ljava/util/concurrent/Callable;)Ljava/util/concurrent/Callable;
 	public fun close ()V
 	public final fun drain (Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/DrainReport;
 	public final fun getRuntime ()Lio/mazewall/enforcer/api/RuntimeProfile;
 	public static final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
 	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
+	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun prepare (Lio/mazewall/enforcer/api/ReviewedOperationArtifact;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun prepare (Lio/mazewall/enforcer/api/ReviewedOperationArtifact;Lio/mazewall/enforcer/api/execution/DomainLimits;Lio/mazewall/enforcer/api/execution/PreparedOperationResources;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun submit (Lio/mazewall/enforcer/api/execution/InProcessDomain;Ljava/util/concurrent/Callable;)Lio/mazewall/enforcer/api/execution/InvocationHandle;

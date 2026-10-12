@@ -7,7 +7,9 @@ import org.springframework.context.annotation.Configuration
 
 @Configuration
 @ConditionalOnProperty(name = [MazewallProtectionBootstrap.RESOLVED_PROPERTY], havingValue = "false", matchIfMissing = true)
-class MazewallDisabledConfig {
+internal class MazewallDisabledConfig(
+    private val resources: ServiceResourceBindings,
+) {
     @Bean
     fun adminService(): AdminService = DefaultAdminService()
 
@@ -21,7 +23,7 @@ class MazewallDisabledConfig {
     fun yamlImportService(): YamlImportService = DefaultYamlImportService()
 
     @Bean
-    fun fileService(): FileService = DefaultFileService()
+    fun fileService(): FileService = DefaultFileService(resources.uploads.toFile())
 
     @Bean
     fun deserializationService(): DeserializationService = DefaultDeserializationService()

@@ -75,7 +75,7 @@ actual child PID must match the command-line expectation; the parent sends autho
 only after required cgroup setup and socket ownership succeed. Ordinary application
 startup proceeds only after the worker returns the matching acknowledgement; an old
 sentinel-only worker cannot satisfy that exchange. Ordinary application
-payload limits are independent of the 512-byte startup control bound. Missing, mismatched
+payload limits are independent of the 640-byte startup control bound. Missing, mismatched
 or cancelled authorization closes startup ownership and never reaches the guest.
 The parent ACK authorizes setup; it is not final readiness. Before launching each child,
 the broker captures an immutable generation from the verified artifact digest, ordered
@@ -85,10 +85,11 @@ worker independently measures its actual inputs and defining-loader manifests af
 authorization and compares the requested generation before containment or guest entry.
 Missing real group metadata is a failure, including in typed builtin test fixtures.
 
-Final readiness is a format-1 response on the owned RPC channel with a separate method
-identity, zero request ID/descriptors and a 512-byte maximum enforced from the header
+Final readiness is a format-2 response on the owned RPC channel with a separate method
+identity, zero request ID/descriptors and a 640-byte maximum enforced from the header
 before body allocation. Its canonical ASCII/LF record binds session, actual child PID,
-input/manifest/runtime SHA-256 identities, the versioned static baseline policy identity,
+input/manifest/runtime and launch-contract SHA-256 identities, required parent resource
+identity, the versioned static baseline policy identity,
 and required process-wide Seccomp/filesystem evidence. Unknown versions, extra or
 duplicate fields, noncanonical or mismatched records reject. The worker publishes only
 after validating the actual required installation receipt and constructing its immutable
@@ -96,9 +97,73 @@ dispatcher table. Protection fields derive from that validated receipt, not pare
 The host validates the entire record and consults a pure readiness gate before publication;
 the existing absolute startup deadline and cancellation/ownership checks still apply.
 The standalone worker CLI's sentinel path is separate; it is not a fallback for a broker
-expecting a required record. Operator-owned launch/environment profiles and C4 physical
-object pinning across measurement, kernel installation and class loading remain separate
-unclosed gates: generation comparison is not a claim that every P3 acceptance gate is done.
+expecting a required record. Format-1 authorization/readiness records cannot satisfy a
+format-2 broker. C4 physical object pinning across measurement, kernel installation and
+class loading and production operator approval remain separate gates.
+
+### Required operator launch profiles (P3)
+
+`PortalRuntimeConfig.launchProfiles` selects an immutable `PortalLaunchProfile` by the
+manifest's policy-profile name. `requiredLaunchProfiles` declares names that must have
+explicit authority; missing names and unsupported versions reject during configuration,
+before child acquisition. Version 2 retains inherited deployment behavior when no operator
+preparation is supplied, including through the original public constructor/load entries.
+The existing three JVM option-injector exclusions remain unchanged. Merged JDK pipe stdio,
+owned RPC socket and no launch-time application-FD transfer remain required. Existing
+resource-profile APIs and original public entry/default bridges stay unchanged.
+
+Environment preparation belongs to an explicit trusted operator `JvmLaunchPreparation`
+callback supplied in the profile, before the library acquires the child. The library never
+selects, replaces, enumerates or attests arbitrary environment entries or credential values.
+There is no credential discovery, sanitizer, automatic export or total-environment secrecy
+claim. The callback prepares settings only; it must not launch another process or transfer
+resource ownership. The library checks the captured command and owned pipe transport are
+unchanged after callback return. Preparation failure propagates without child acquisition;
+unsupported required preparation rejects instead of falling back to legacy launch.
+
+The checked metadata surface is closed: `PortalLaunchMarker.APPROVED`, `HOST_ONLY` and
+`DEPLOYMENT_REGION` name the corresponding synthetic/noncredential `MAZEWALL_*` markers.
+Expected marker text is bounded canonical printable ASCII (128 characters), and absent
+marker expectations are explicit. Only those fixed declared names are read in the worker;
+arbitrary names, duplicate/conflicting fields and old schemas reject before guest entry.
+These declarations are immutable metadata, not deep snapshots of callback state. Operators
+own callback state and keep its intended preparation aligned with declared expectations.
+
+For example, a profile can declare `APPROVED` as `approved` and `HOST_ONLY` absent while its
+operator callback sets only `MAZEWALL_APPROVED_MARKER` and removes only the known synthetic
+`MAZEWALL_HOST_ONLY_MARKER`. Unmentioned deployment entries retain inherited behavior.
+`PortalLaunchProfile.jvmArgs` snapshots explicit JVM arguments at the same launch owner;
+command/generation/runtime checks and the required static baseline still apply.
+
+`PortalDescriptorIdentity.measure` reads device/inode from an operator-acquired resource;
+it is an observation, never a closeable FD token. The operator retains that resource through
+startup to prevent identity reuse. The profile's forbidden-resource set is checked against
+actual child descriptors by the parent before permit and independently by the worker before
+containment/guest construction. Both sides also check actual FD 0/1/2 are merged pipes.
+These are declared resource exclusions, not an inventory-wide FD allowlist or revocation
+of descriptors opened later. JDK exec closure alone is not the negative control: the native
+fixture opens a canary in the child, proves that same resource observable from both processes,
+and then reaches real required rejection with no guest entry. A separate disposable host
+probe proves operator preparation of the known synthetic marker while preserving the
+inherited deployment marker. Real-guest public constructor/load controls exercise both the
+legacy inherited case and an explicit operator-chosen deployment region.
+
+The immutable format-2 launch contract is bounded, canonical and versioned. Its declared
+noncredential marker metadata and resource identities travel in the child command line;
+format-2 parent authorization binds the exact
+contract identity before the worker ACK or guest entry. Final readiness retains that checked
+identity alongside the genuine installation receipt. Required cgroup setup additionally
+rejects ordinary filesystems, attaches using the existing controller before permit, and binds
+independently measured `/proc/<pid>/cgroup` membership in authorization and readiness.
+The worker measures membership after receiving the frame, so it cannot race ahead of parent
+attachment. An unbounded resource profile explicitly records `resources=none`; an unavailable
+required cgroup has no weaker fallback. Positive delegated-cgroup attachment/retirement and
+production launch review require actual operator authority; filesystem fixtures are not that proof.
+
+No launch-profile helper owns a process or descriptor. Existing broker provisional acquisition,
+output pump, socket/channel, endpoint and cgroup owners retain custody through failure,
+cancellation, deadline and retryable cleanup. Publication still follows process setup, parent
+authorization, independent measurements, all-thread static containment and dispatcher construction.
 
 Stateless worker replacement is deliberately outside the failed call's result. A failed or timed-out worker
 is destroyed and reaped first; replenishment runs independently, is logged separately, and cannot

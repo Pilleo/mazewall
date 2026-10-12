@@ -1,0 +1,1 @@
+lazy-resource-after-install

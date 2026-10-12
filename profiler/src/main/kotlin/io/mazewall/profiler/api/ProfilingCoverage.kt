@@ -84,8 +84,8 @@ internal class ProfileIntegrity internal constructor(
 }
 
 /**
- * Evidence about what a profile can honestly claim. Incomplete results must not
- * become enforcement policies unless the operator overrides.
+ * Evidence about what a profile can honestly claim within its observed collector scope.
+ * Public conversion refuses incomplete results; completeness is not future-path coverage or approval.
  *
  * This compatibility type is an intentionally flat public record. Grouping its fields would
  * make the immutable evidence less cohesive, so completeness and diagnostics are grouped in
@@ -452,5 +452,5 @@ private class PathDiagnostics(
 public class IncompleteProfileException(
     public val coverage: ProfilingCoverage,
     message: String = "Profile is incomplete (${coverage.warnings.joinToString("; ")}). " +
-        "Pass allowIncomplete=true only if you will not enforce this policy as a complete contract.",
+        "Retain diagnostics with result.toProfileDocumentJson() and resolve the collector's coverage gaps before policy conversion.",
 ) : IllegalStateException(message)

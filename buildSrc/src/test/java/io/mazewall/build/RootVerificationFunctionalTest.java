@@ -293,11 +293,53 @@ final class RootVerificationFunctionalTest {
             write(fixture, "buildSrc/src/main/java/io/mazewall/build/DelayedFailureEvents.java", """
                 package io.mazewall.build;
                 public abstract class DelayedFailureEvents extends TestFailureTriage.FailureEvents {
+                    private final java.util.concurrent.CountDownLatch waiterAcquired = new java.util.concurrent.CountDownLatch(1);
+                    private volatile Thread waiter;
+
+                    @Override public boolean awaitFailure() {
+                        waiter = Thread.currentThread();
+                        waiterAcquired.countDown();
+                        return super.awaitFailure();
+                    }
+
+                    public static void awaitActualWait(Thread target, long timeoutMillis) {
+                        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+                        do {
+                            StackTraceElement[] stack = target.getStackTrace();
+                            boolean productionWait = java.util.Arrays.stream(stack).anyMatch(frame ->
+                                frame.getClassName().equals(TestFailureTriage.FailureEvents.class.getName())
+                                    && frame.getMethodName().equals("awaitFailure"));
+                            boolean latchWait = java.util.Arrays.stream(stack).anyMatch(frame ->
+                                frame.getClassName().equals("java.util.concurrent.CountDownLatch")
+                                    && frame.getMethodName().equals("await"));
+                            if (target.getState() == Thread.State.TIMED_WAITING && productionWait && latchWait) {
+                                System.out.println("TRIAGE_ACTUAL_WAIT_ENTERED thread=" + target.threadId()
+                                    + " state=TIMED_WAITING stack=" + java.util.Arrays.toString(stack));
+                                return;
+                            }
+                            try { Thread.sleep(10); }
+                            catch (InterruptedException failure) {
+                                Thread.currentThread().interrupt();
+                                throw new org.gradle.api.GradleException("Interrupted awaiting fixture actual wait entry", failure);
+                            }
+                        } while (System.nanoTime() < deadline);
+                        throw new org.gradle.api.GradleException("FIXTURE_HANDSHAKE_TIMEOUT: no production latch wait on acquired thread "
+                            + target.threadId() + " state=" + target.getState());
+                    }
+
                     @Override public void onFinish(org.gradle.tooling.events.FinishEvent event) {
                         if (event instanceof org.gradle.tooling.events.task.TaskFinishEvent task
                                 && task.getDescriptor().getTaskPath().equals(":leaf:test")) {
-                            try { Thread.sleep(1500); }
-                            catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new RuntimeException(failure); }
+                            try {
+                                if (!waiterAcquired.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                                    throw new org.gradle.api.GradleException("FIXTURE_HANDSHAKE_TIMEOUT: finalizer thread not acquired");
+                                }
+                            } catch (InterruptedException failure) {
+                                Thread.currentThread().interrupt();
+                                throw new org.gradle.api.GradleException("Interrupted acquiring fixture finalizer thread", failure);
+                            }
+                            // Withhold this event and the serial barrier event until the real production latch blocks.
+                            awaitActualWait(waiter, 10_000);
                             System.out.println("DELAYED_TEST_EVENT_DELIVERED");
                         }
                         super.onFinish(event);
@@ -313,19 +355,37 @@ final class RootVerificationFunctionalTest {
                 evaluationDependsOn""") + """
 
                 tasks.named("testFailureEventsReady") { doLast { println("TRIAGE_BARRIER_EXECUTED") } }
+                tasks.register("rejectHandshakeTimeout") {
+                    doLast {
+                        println("FIXTURE_PRE_AWAIT_MARKER")
+                        io.mazewall.build.DelayedFailureEvents.awaitActualWait(Thread.currentThread(), 100)
+                    }
+                }
                 """);
-            for (String label : List.of("delayed-cc-first", "delayed-cc-reuse")) {
-                BuildResult delayed = triageRun(fixture, label, true, true, false, ":leaf:test");
-                contains(delayed, label.endsWith("first") ? "Configuration cache entry stored." : "Reusing configuration cache.");
+            for (String label : List.of("delayed-cc-first", "delayed-cc-reuse", "delayed-no-cc")) {
+                BuildResult delayed = label.equals("delayed-no-cc")
+                    ? triageRun(fixture, label, true, true, false, ":leaf:test", "--no-configuration-cache")
+                    : triageRun(fixture, label, true, true, false, ":leaf:test");
+                if (!label.equals("delayed-no-cc")) {
+                    contains(delayed, label.endsWith("first") ? "Configuration cache entry stored." : "Reusing configuration cache.");
+                }
+                xmlCounts(fixture, 1, 1);
                 String output = delayed.getOutput();
                 int barrier = output.indexOf("TRIAGE_BARRIER_EXECUTED");
+                int waiting = output.indexOf("TRIAGE_ACTUAL_WAIT_ENTERED");
                 int delivered = output.indexOf("DELAYED_TEST_EVENT_DELIVERED");
                 int collector = output.indexOf("==> Initiating mazewall local diagnostic triage...");
-                if (!(barrier >= 0 && delivered > barrier && collector > delivered)) {
+                if (!(barrier >= 0 && waiting > barrier && delivered > waiting && collector > delivered)) {
                     throw new AssertionError("Did not exercise/drain asynchronous Test completion before triage: " + fixture);
                 }
             }
-            System.out.println("Failure triage: 12 executable cases passed; production JSON, cached failure/success/staleness, pre-XML/crash, siblings and delayed delivery.");
+            BuildResult handshakeTimeout = triageRun(fixture, "handshake-timeout", true, true, false,
+                ":leaf:test", ":rejectHandshakeTimeout", "--continue");
+            outcome(handshakeTimeout, ":rejectHandshakeTimeout", TaskOutcome.FAILED);
+            contains(handshakeTimeout, "FIXTURE_PRE_AWAIT_MARKER");
+            contains(handshakeTimeout, "FIXTURE_HANDSHAKE_TIMEOUT: no production latch wait on acquired thread");
+            xmlCounts(fixture, 1, 1);
+            System.out.println("Failure triage: 14 executable cases passed; production JSON, cached failure/success/staleness, pre-XML/crash, siblings, actual wait-entry delivery and explicit handshake timeout.");
         } catch (Exception failure) {
             throw new AssertionError("Production failure-triage wiring failed", failure);
         }
@@ -335,7 +395,8 @@ final class RootVerificationFunctionalTest {
         Path report = fixture.resolve("build/triage_report.json");
         Files.deleteIfExists(report);
         var arguments = new java.util.ArrayList<>(List.of(tasks));
-        arguments.addAll(List.of("--configuration-cache", "--max-workers=2", "--stacktrace"));
+        if (!arguments.contains("--no-configuration-cache")) arguments.add("--configuration-cache");
+        arguments.addAll(List.of("--max-workers=2", "--stacktrace"));
         if (parallel) arguments.addAll(List.of("--parallel", "--continue"));
         String home = System.getenv("GRADLE_USER_HOME");
         if (home != null) arguments.addAll(List.of("--gradle-user-home", home));

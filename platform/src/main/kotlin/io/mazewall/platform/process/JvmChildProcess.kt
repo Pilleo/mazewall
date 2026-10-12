@@ -81,6 +81,14 @@ internal object JvmChildProcess {
         redirectErrorStream: Boolean = true,
     ): Process = launcher.startProcess(commandLine(spec), redirectErrorStream)
 
+    /** Explicit trusted operator preparation; no environment selection or copying is owned here. */
+    public fun start(
+        launcher: ProcessLauncher,
+        spec: JvmChildSpec,
+        redirectErrorStream: Boolean = true,
+        preparation: JvmLaunchPreparation,
+    ): Process = launcher.startProcess(commandLine(spec), redirectErrorStream, preparation)
+
     public fun startStdoutPump(
         process: Process,
         readySentinel: String?,

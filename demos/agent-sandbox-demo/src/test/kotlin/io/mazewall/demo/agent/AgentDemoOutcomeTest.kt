@@ -147,7 +147,7 @@ class AgentDemoOutcomeTest {
     @Test
     fun `lookalike class and method names do not authorize process execution`() {
         AgentDemoFixture.create().use { fixture ->
-            val tools = AgentTools(false, fixture.workspace)
+            val tools = AgentTools(null, fixture.workspace)
             try {
                 val authorize = AgentTools::class.java.getDeclaredMethod("authorizeExec", List::class.java)
                     .apply { isAccessible = true }

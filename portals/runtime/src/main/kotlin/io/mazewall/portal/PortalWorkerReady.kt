@@ -5,6 +5,8 @@ internal data class PortalWorkerReady(
     val session: String,
     val childPid: Long,
     val generation: PortalWorkerGeneration,
+    val launch: String = PortalLaunchProfile().contract().identity,
+    val resources: String = "none",
 ) {
     init {
         require(session.matches(Regex("[0-9a-f]{32}")) && childPid > 0) { "invalid ready session or child PID" }
@@ -13,12 +15,12 @@ internal data class PortalWorkerReady(
     fun frame(): PortalFrame = PortalFrame(PortalKind.Response, 0, METHOD, record().toByteArray(Charsets.US_ASCII), 0)
 
     private fun record(): String =
-        "format=1\nsession=$session\nchildPid=$childPid\ninputs=${generation.inputs}\nmanifests=${generation.manifests}\nruntime=${generation.runtime}\npolicy=$BASELINE\nprocessWide=1\nseccomp=1\nfilesystem=1\n"
+        "format=2\nsession=$session\nchildPid=$childPid\ninputs=${generation.inputs}\nmanifests=${generation.manifests}\nruntime=${generation.runtime}\nlaunch=$launch\nresources=$resources\npolicy=$BASELINE\nprocessWide=1\nseccomp=1\nfilesystem=1\n"
 
     companion object {
         const val BASELINE = "hotspot-jit-filesystem-no-process-no-network-v1"
         val METHOD = PortalMethod.Generated(Int.MIN_VALUE + 1)
-        private const val FIELD_COUNT = 10
+        private const val FIELD_COUNT = 12
         private const val ASCII_LF = 10
         private const val ASCII_PRINTABLE_MIN = 32
         private const val ASCII_PRINTABLE_MAX = 126
@@ -35,7 +37,11 @@ internal data class PortalWorkerReady(
             val text = bytes.toString(Charsets.US_ASCII)
             val fields = text.removeSuffix("\n").split('\n')
             require(fields.size == FIELD_COUNT && text.endsWith('\n')) { "invalid worker ready record fields" }
-            require(listOf(expected.generation.inputs, expected.generation.manifests, expected.generation.runtime).all { it.matches(HEX_DIGEST) }) { "invalid expected generation" }
+            require(
+                listOf(expected.generation.inputs, expected.generation.manifests, expected.generation.runtime, expected.launch).all {
+                it.matches(HEX_DIGEST)
+            },
+            ) { "invalid expected generation or launch identity" }
             require(text == expected.record()) { "worker ready record does not match required session, PID, protocol, generation or protection" }
             return expected
         }

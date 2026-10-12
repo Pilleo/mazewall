@@ -1,10 +1,10 @@
 package io.mazewall.enforcer.internal.execution
 
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy
 import io.mazewall.enforcer.api.InstallationEnvironment
 import io.mazewall.enforcer.api.InstallationReceipt
 import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.api.execution.DomainLimits
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.platform.fd.ResourceRetirement
@@ -30,6 +30,7 @@ internal class OwnedDomain(
     private val preparedLandlock: io.mazewall.landlock.PreparedLandlock?,
     private val preparedOperation: io.mazewall.enforcer.api.execution.PreparedOperationResources?,
     name: String,
+    private val scopingPolicy: StacktraceScopingPolicy,
 ) {
     private val lock = Any()
     private var phase = GenerationPhase.PREPARING
@@ -88,7 +89,7 @@ internal class OwnedDomain(
         RuntimeWorkerContext.enter(this)
         try {
             try {
-                receipt = ContainedExecutors.installOnCurrentThread(policy, DefaultStacktraceScopingPolicy, environment, preparedLandlock)
+                receipt = ContainedExecutors.installOnCurrentThread(policy, scopingPolicy, environment, preparedLandlock)
                 receipt.requireInstalled()
             } catch (installationFailure: Throwable) {
                 terminal = installationFailure

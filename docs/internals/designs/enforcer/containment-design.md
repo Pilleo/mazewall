@@ -276,7 +276,7 @@ Seccomp filters are monotonic: once a syscall is blocked on a thread, it cannot 
 unblocked. The kernel accumulates filters in a linked list; each new filter is evaluated
 in order, and the most-restrictive result wins. `ContainedExecutors` stacks filters
 incrementally to allow multiple `installOnCurrentThread` calls (e.g. from nested
-executor wrapping or the profiler) without wasting filter slots.
+internal experimental dispatch or the profiler) without wasting filter slots.
 
 ### How deduplication works
 
@@ -344,7 +344,9 @@ syscalls fail before Landlock can activate.
 1. `applyLandlockIfNecessary(processWide, policy)`  ← first
 2. `installSeccompFilter(...)`                      ← second
 
-Wrapper wrap methods only call `installOnCurrentThread`, which reaches `installInternal`.
+Owned preparation and the internal experimental dispatcher wrapper reach
+`installInternal` through `installOnCurrentThread`. Public borrowed wrappers and
+executor factories are retired; explicit required installation remains supported.
 
 Dedicated child processes use the internal `installOnDedicatedProcess` entry. It accepts
 filesystem policies only with Landlock TSYNC support, rejects fallback, and delegates to
@@ -529,6 +531,134 @@ evidence retains library-observed nested containment and transition failure, inc
 when business code catches it. Normal caught business exceptions do not manufacture
 containment evidence. Unobserved/swallowed kernel errors are not detectable through
 this metadata, and uncertain permission provenance remains uncertain.
+
+### Independently owned helpers and late callbacks (R1/A12)
+
+An independent JDK executor is outside the owned worker's Landlock domain only
+when its actual execution thread has that placement. Merely constructing an executor
+does not start its threads: lazy creation from a restricted body can inherit that
+body's irreversible native restrictions. Acquire and prestart intentional independent
+helpers during trusted bootstrap, before entering the protected body. They still retain
+the permanent Tier 1 process baseline; "outside worker Landlock" does not mean
+unconditionally unrestricted, protected by that worker, or a production escape fix.
+
+[OwnedIndependentHelperNativeTest](../../../../enforcer/src/integrationTest/kotlin/io/mazewall/enforcer/api/execution/OwnedIndependentHelperNativeTest.kt)
+uses the public owned runtime and a separately
+acquired, actually prestarted JDK helper. The installed body offloads a successful
+read, then fails its own read of the same file. The genuine NIO `AccessDeniedException`
+is retained as the default classifier's cause, with `INFERRED_PERMISSION_FAILURE`
+and no invented syscall/errno attribution. Required worker installation and actual
+same-file behavior establish placement without authenticating JDK exception provenance.
+
+Only after observing the invocation's physical `ExecutionEnd` does the fixture attach
+`handleAsync` with that explicit helper executor. A latch holds the actual callback
+while owned drain completes and the actual worker thread is dead. The callback then
+reads the same file successfully. Its result and finally are not helper retirement:
+the separate helper owner shuts down, awaits termination and joins its acquired
+physical thread. Invocation delivery/primary failure/end identity remain unchanged.
+No sleep, common pool or future-done flag establishes these lifecycle boundaries.
+In applications, intentional asynchronous work needs its own explicit containment
+and lifetime owner; attaching a callback never extends the synchronous body contract.
+
+### Explicit custom supervised preparation
+
+`runtime.prepare(policy, limits, scopingPolicy)` copies the selected handler map once
+on the trusted invoking caller, outside lifecycle locks and before manager dispatch.
+The exact callback references and immutable syscall membership are retained for all
+workers of that generation, using the existing captured `InstallationEnvironment`
+and installer. Callback state itself is trusted application code, not deeply frozen.
+Existing preparation signatures keep default scoping and transfer no caller metadata.
+Capture failures preserve original ordinary/fatal identity; required worker startup
+failures publish no domain and enter no body. Receipt/session ownership lasts through
+physical worker retirement, with the existing bounded incomplete-drain reporting.
+
+Custom supervision requires explicit `Supervision.prepareSupervisor()` during trusted
+bootstrap **before** `ManagedRuntime.open` installs its permanent process baseline.
+The agent demo preserves its launch-compatible PTRACE/MOUNT/UNSHARE/CHROOT baseline,
+custom public-address CONNECT callback and exact authorized-analysis VFORK/FORK
+callbacks. It deliberately permits CLONE/CLONE3/EXECVE/EXECVEAT in those worker
+policies; an additional no-process baseline would destroy the approved analysis tool.
+Synchronous HTTP connect executes on the owned web worker; unrelated helper executors
+are not covered merely by being created there.
+
+The agent's synchronous HTTP path returns normal/error bodies and respects supported
+response Content-Type charsets with UTF-8 fallback. One monotonic two-second timer
+covers connection and response-header acquisition, then ends before buffered body
+consumption; a per-read inactivity timeout is not an equivalent contract. The deadline
+observer only requests disconnect and is joined before actual body end, with no HTTP
+execution fallback. Tool closing rejects new admission and captures cancellation under
+a short monitor. Submission/resource waits and execution/drain occur outside it;
+publication crossing the snapshot requests cancellation itself, while the existing
+owned invocation retains physical end and admission until body/cleanup completion.
+
+The demo requires VFORK selected before JDK ProcessImpl initialization. Actual JDK25
+FORK-mode testing bypassed those exact spawn callbacks (glibc fork can use the allowed
+CLONE route; the fixture is not a syscall trace); the demo rejects
+an explicitly incompatible launch setting before tool construction. A changed system
+property cannot prove or change an already initialized ProcessImpl mechanism. The
+existing application startup argument and trusted early bootstrap remain required.
+Native fixtures prove the custom callbacks actually allow/deny acquired connections,
+approved shell work and denied web-stack spawn, and retain cause/fatal identity and
+physical retirement. This experimental mechanism is not a complete ACE boundary.
+
+### Explicit declared invocation metadata (C8)
+
+Existing `submit(domain, Callable)` and `Mazewall.callContained(runtime, domain, Callable)`
+transfer no caller metadata. An application can explicitly call
+`runtime.captureInvocation(domain, InvocationContextBridge, Callable)` **on the current
+invoking caller, before admission**, then pass the decorated Callable to either existing
+entry point. Capture runs immediately, outside lifecycle locks, without manager dispatch.
+The returned Callable requires the exact registered domain and an active owned invocation;
+it cannot install context on a caller or unrelated executor. Same-domain synchronous nesting
+uses the existing inline transition and the outer admission, not another permit.
+
+`InvocationContextBridge.capture(): InvocationContextSnapshot` is a trusted application
+seam. The final snapshot takes `Map<String, String>` and a JDK
+`Function<Map<String, String>, AutoCloseable>` installer. It defensively copies declared
+string values with `Map.copyOf`; mutation of the caller's input cannot change admitted
+metadata, and the installer receives an unmodifiable map. Application-specific installers
+read invocation values from that map, use stable configured collaborators, change only
+declared context, and return an exact prior-context restoration. The callback itself is
+trusted code, not a deep-immutable closure or a new authorization capability. No automatic
+ThreadLocal scan, request/connection/transaction transfer or framework dependency is added.
+
+The existing `OwnedInvocation` boundary applies the snapshot on the actual owned worker
+and restores in finally. Nested restoration returns to the exact outer context, rather than clearing it.
+Queued cancellation never applies the snapshot. Running cancellation can deliver to the
+caller before restoration ends; restoration still holds physical `ExecutionEnd` and admission.
+Application failure (including a missing restoration token) or restoration failure records
+observed failure and quarantines the entire generation using its existing retirement owner:
+unproved context is never reused. A caught nested context failure cannot make the outer result
+successful. A captured body fatal likewise retires after restoration even if outer code catches
+it. Cleanup ordering retains the original primary and suppresses cleanup; a later cleanup
+`Error` promotes over a nonfatal primary, but never replaces an existing fatal primary.
+Ordinary body failure with successful restoration retains healthy worker reuse and existing
+containment classification/cause identity.
+Generation failure does not pre-publish the originating worker's raw body failure: that
+invocation still performs canonical caller classification and publishes its matching end
+outcome. Other admitted work retains existing generation-failure/cancellation handling.
+
+For example, a trusted Java application with its own `ThreadLocal<Map<String, String>> labels`
+can supply the bridge without changing the Callable API:
+
+```java
+InvocationContextBridge bridge = () -> new InvocationContextSnapshot(labels.get(), metadata -> {
+    var previous = labels.get();
+    labels.set(metadata);
+    return () -> { if (previous == null) labels.remove(); else labels.set(previous); };
+});
+Callable<String> captured = runtime.captureInvocation(domain, bridge, () -> labels.get().get("request"));
+String result = Mazewall.callContained(runtime, domain, captured);
+```
+
+The public bridge, snapshot constructor and runtime capture method exist for this Java/Kotlin
+application interop; snapshot execution and failure ownership remain internal. Strings are
+declared metadata, not Spring `Authentication`. The existing optional Spring
+`InvocationContextBridge` and supported `DelegatingSecurityContextCallable` keep their separate
+context-reference qualification and published API: Security capture occurs once per invocation,
+not again through this bridge. Trusted callers must not mutate captured Security context or
+Authentication objects. Actual Spring Security/H2 controls verify that caller transaction
+resources are excluded and actual worker transactions remain on their own advisor chain.
 
 This API covers synchronous materialized bodies. Completion observers and arbitrary
 helper/lazy work do not inherit coverage merely from a future. Current nested dispatch

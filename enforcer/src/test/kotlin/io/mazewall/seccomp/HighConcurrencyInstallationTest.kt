@@ -52,22 +52,32 @@ class HighConcurrencyInstallationTest {
     @Test
     fun `high concurrency installation of identical policies`() {
         val executor = Executors.newFixedThreadPool(16)
-        val wrapped = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val taskCount = 2000
         val completedCount = AtomicInteger(0)
 
         // Warm up
-        repeat(100) { wrapped.execute { completedCount.incrementAndGet() } }
-
-        val startTime = System.nanoTime()
-        repeat(taskCount) {
-            wrapped.execute {
-                completedCount.incrementAndGet()
+        repeat(100) {
+            executor.execute {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    completedCount.incrementAndGet()
+                }
             }
         }
 
-        wrapped.shutdown()
-        assertTrue(wrapped.awaitTermination(30, TimeUnit.SECONDS), "Executor did not terminate in time")
+        val startTime = System.nanoTime()
+        repeat(taskCount) {
+            executor.execute {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    completedCount.incrementAndGet()
+                }
+            }
+        }
+
+        executor.shutdown()
+        assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS), "Executor did not terminate in time")
         val duration = System.nanoTime() - startTime
 
         assertEquals(taskCount + 100, completedCount.get(), "Not all tasks completed")
@@ -78,16 +88,28 @@ class HighConcurrencyInstallationTest {
     @Test
     fun `high concurrency installation with exceptions`() {
         val executor = Executors.newFixedThreadPool(16)
-        val wrapped = ContainedExecutors.wrap(executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val taskCount = 1000
+        val enteredCount = AtomicInteger()
+        val endedCount = AtomicInteger()
 
         repeat(taskCount) {
-            wrapped.execute {
+            executor.execute {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                enteredCount.incrementAndGet()
+                try {
                 throw IllegalStateException("Simulated task failure")
+                } finally {
+                    endedCount.incrementAndGet()
+                }
+                }
             }
         }
 
-        wrapped.shutdown()
-        wrapped.awaitTermination(10, TimeUnit.SECONDS)
+        executor.shutdown()
+        assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS), "Executor did not terminate in time")
+        assertEquals(taskCount, enteredCount.get())
+        assertEquals(taskCount, endedCount.get())
     }
 }

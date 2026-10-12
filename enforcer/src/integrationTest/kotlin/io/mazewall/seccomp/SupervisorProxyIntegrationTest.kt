@@ -310,12 +310,15 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             writer.getOutputStream().write(0)
             check(input.read() == 0) // Warm the actual JDK native read before containment.
             val owned = OwnedReadExecutor()
-            val contained = ContainedExecutors.wrap(owned.executor, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build())
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
             val entered = CountDownLatch(1)
-            val future = contained.submit<Result<Boolean>> {
+            val future = owned.executor.submit<Result<Boolean>> {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
                 runCatching {
                     entered.countDown()
                     input.read() < 0 // The acquired peer stays open and sends nothing; no cooperative release.
+                }
                 }
             }
             val readyDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CONTROL_READY_SECONDS)
@@ -468,7 +471,6 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
 
         val ownedExecutor = OwnedReadExecutor()
         val rawExecutor = ownedExecutor.executor
-        val containedExecutor = ContainedExecutors.wrap(rawExecutor, policy, scopingPolicy)
 
         withDiagnosticCleanup(action = {
             // Run legit action first. The file is read successfully (either via the allow path
@@ -476,9 +478,12 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             // The primary effect here is to ensure all Kotlin IO classes are loaded so the
             // subsequent evil-action execution is free from classloading interference.
             val legitResult = awaitOwned(
-                containedExecutor
+                rawExecutor
                 .submit<String> {
-                LegitContext(tempFile).run()
+                ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use { receipt ->
+                    receipt.requireInstalled()
+                    LegitContext(tempFile).run()
+                }
             },
             )
             assertEquals("legit content", legitResult)
@@ -486,8 +491,11 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             // Run evil action second. All IO classes are now loaded; the classloader bypass
             // cannot fire. The scoping policy is invoked and must deny the access.
             val evilResult = awaitRead(
-                containedExecutor.submit<Result<Boolean>> {
-                runCatching { EvilContext(tempFile).run() }
+                rawExecutor.submit<Result<Boolean>> {
+                ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { EvilContext(tempFile).run() }
+                }
             },
             )
             assertTrue(evilResult, "Evil action must be denied by the scoping policy")
@@ -545,14 +553,16 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
 
         val ownedExecutor = OwnedReadExecutor()
         val rawExecutor = ownedExecutor.executor
-        val containedExecutor = ContainedExecutors.wrap(rawExecutor, policy, scopingPolicy)
 
         withDiagnosticCleanup(action = {
             // Read a core JDK file. Despite scopingPolicy returning false for everything,
             // the daemon fast-path should intercept the read and allow it immediately.
             val result = awaitRead(
-                containedExecutor.submit<Result<Boolean>> {
-                runCatching { readFastPath { releaseFile.readText() } }
+                rawExecutor.submit<Result<Boolean>> {
+                ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { readFastPath { releaseFile.readText() } }
+                }
             },
             )
 

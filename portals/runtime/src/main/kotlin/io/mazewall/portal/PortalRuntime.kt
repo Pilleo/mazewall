@@ -107,8 +107,9 @@ public class PortalRuntime private constructor(
     private fun brokerFor(manifest: PortalServiceManifest): ProcessBroker = try {
         brokers.acquire(manifest.isolationGroup, {
                 ProcessBroker(
-                    workerClasspath = config.workerClasspath(manifest),
-                    workerProfile = config.profile(manifest),
+                     workerClasspath = config.workerClasspath(manifest),
+                     workerProfile = config.profile(manifest),
+                     launchProfile = config.launchProfile(manifest),
                     cgroupRoot = config.cgroupRoot,
                     grantRoots = config.grantRoots,
                     instanceMode = manifest.instanceMode,

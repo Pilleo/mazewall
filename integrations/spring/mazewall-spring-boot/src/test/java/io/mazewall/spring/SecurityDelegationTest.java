@@ -77,4 +77,29 @@ class SecurityDelegationTest {
                     .get(5, TimeUnit.SECONDS));
         }
     }
+
+    @Test void supportedSecurityDelegateExcludesActualCallerTransactionResource() throws Exception {
+        var data = new org.h2.jdbcx.JdbcDataSource();
+        data.setURL("jdbc:h2:mem:" + java.util.UUID.randomUUID());
+        var transactions = new org.springframework.jdbc.datasource.DataSourceTransactionManager(data);
+        var callerTransaction = transactions.getTransaction(new org.springframework.transaction.support.DefaultTransactionDefinition());
+        var bridge = new SpringSecurityContextBridge();
+        principal("alice");
+        var resource = org.springframework.transaction.support.TransactionSynchronizationManager.getResource(data);
+        assertNotNull(resource, "Caller owns an actual JDBC transaction resource");
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            var captured = bridge.capture(() -> {
+                assertEquals("alice", SecurityContextHolder.getContext().getAuthentication().getName());
+                assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+                assertNull(org.springframework.transaction.support.TransactionSynchronizationManager.getResource(data));
+                return "no-transaction-transfer";
+            });
+            principal("bob"); // Replace the context reference; do not mutate captured Authentication.
+            assertEquals("no-transaction-transfer", worker.submit(captured).get(5, TimeUnit.SECONDS));
+            assertNull(worker.submit(() -> SecurityContextHolder.getContext().getAuthentication()).get(5, TimeUnit.SECONDS));
+            assertSame(resource, org.springframework.transaction.support.TransactionSynchronizationManager.getResource(data));
+            assertTrue(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+        } finally { transactions.rollback(callerTransaction); }
+        assertNull(org.springframework.transaction.support.TransactionSynchronizationManager.getResource(data));
+    }
 }

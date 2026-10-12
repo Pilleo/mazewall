@@ -79,7 +79,7 @@ class ProfileArtifactPublisherTest {
         ProfileArtifactPublisher.publish(
             target,
             BillOfBehavior(),
-            ExecutorDrain.Incomplete.ProfilerCleanup(reason),
+            ExecutorDrain.Incomplete.ProfilerCleanup(IllegalStateException(reason)),
             listOf(collectorCoverage()),
         )
 

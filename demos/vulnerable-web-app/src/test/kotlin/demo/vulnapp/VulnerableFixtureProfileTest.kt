@@ -1,6 +1,7 @@
 package demo.vulnapp
 
 import demo.vulnapp.config.MazewallDisabledConfig
+import demo.vulnapp.config.ServiceResourceConfig
 import demo.vulnapp.controller.ImportController
 import org.junit.jupiter.api.Test
 import org.springframework.context.annotation.AnnotationConfigApplicationContext
@@ -25,7 +26,7 @@ class VulnerableFixtureProfileTest {
     private fun context(fixtureEnabled: Boolean): AnnotationConfigApplicationContext =
         AnnotationConfigApplicationContext().apply {
             if (fixtureEnabled) environment.setActiveProfiles("isolated-vulnerable-fixture")
-            register(MazewallDisabledConfig::class.java, ImportController::class.java)
+            register(ServiceResourceConfig::class.java, MazewallDisabledConfig::class.java, ImportController::class.java)
             refresh()
         }
 }

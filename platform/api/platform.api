@@ -322,6 +322,10 @@ public final class io/mazewall/platform/process/JvmChildSpec {
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class io/mazewall/platform/process/JvmLaunchPreparation {
+	public abstract fun prepare (Ljava/lang/ProcessBuilder;)V
+}
+
 public final class io/mazewall/platform/process/ProcessTreeKt {
 	public static final fun destroyForciblyWithDescendants (Ljava/lang/Process;)V
 	public static final fun snapshotDescendants (Ljava/lang/ProcessHandle;)Ljava/util/List;

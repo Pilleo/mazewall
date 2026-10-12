@@ -47,15 +47,51 @@ Each JDK22/JDK25 row cleans both consumer outputs, disables build/configuration
 caches, logs the actual compiler and resolved artifact paths, compiles and runs
 Java/Kotlin policy construction, independently compiles an **uncast** Callable
 lambda, and requires actual javac rejection of process filesystem configuration
-and worker-to-process policy assignment. Negative fixtures require exactly one
+and worker-to-process policy assignment. Stable Kotlin independently checks both
+fixed-scope rejections. Each language also checks the two retired `wrap` signatures,
+`wrapTyped`, single/fixed/cached factories and `ContainedExecutor`, one source and
+exact missing-symbol diagnostic per retired surface. Negative fixtures require exactly one
 expected error, so missing symbols/classes cannot masquerade as scope rejection.
-Callable entry examples compile but do not install containment or execute work.
+Callable, declared-context capture and custom-scoping `prepare` examples compile
+but do not install containment or execute work.
 Policies use canonical fixed-scope builders and `PolicyState.Uncompiled`.
 
 The version probes resolve upstream Koog **1.3.0** and Boot **4.1.1**, both alone
 and with the staged candidate. They log selected versions, including serialization
 and compiler-library differences. Graph resolution is not adapter compilation or
 framework runtime evidence.
+
+## Actual documentation snippets
+
+Opt in with `-PincludeDocSnippets=true`. `:doc-snippets:extractSnippets` extracts
+the actual `<!-- consumer: id -->` Kotlin fences from `README.md`,
+`GETTING_STARTED.md`, `enforcer/README.md` and `profiler/README.md`. Every runtime
+Kotlin fence requires a unique marker; repository/dependency Gradle DSL is excluded.
+Extraction adds only a package declaration, with no rewritten API calls or helper
+stubs. The inventory is `doc-snippets/build/generated/snippets/inventory.tsv`.
+
+Publish `:profiler` alongside the core owners using the same local staging mechanism
+above, under a new coordinate when needed. This gate requires all three exact
+JAR paths and rejects project dependencies. Generate the new coordinate's strict
+locks once, then omit `--write-locks` for acceptance:
+
+```bash
+flock "$lock" ./gradlew -p tests/consumers --console=plain \
+  --no-configuration-cache --no-build-cache \
+  -PincludeDocSnippets=true -PconsumerKotlinVersion=2.4.20 \
+  -PconsumerRepository="$repository" -PconsumerVersion="$version" \
+  -PconsumerJdk=22 :doc-snippets:clean :doc-snippets:consumerEnvironment :doc-snippets:run
+# Repeat with -PconsumerJdk=25 using the same reviewed locks.
+```
+
+The runtime self-check supplies genuinely absent collection evidence via the public
+legacy `ProfilingResult` constructor. The actual conversion snippet, direct policy
+conversion and Portal document conversion must all throw `IncompleteProfileException`;
+the document round trip must preserve the incomplete coverage. It never fabricates a
+complete trace. Owned/bootstrap and collection snippets are compiled, not executed;
+native profile→install→post-install-JIT proof remains a separate gate.
+`snippetSnapshot` selects a retained pre-change source directory only for diagnostic
+compilation; acceptance extracts live guide text without that property.
 
 ## Recorded candidate and historical locks
 

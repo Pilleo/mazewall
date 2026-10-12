@@ -22,12 +22,13 @@ class RequiredWorkerGenerationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 val altered = args.toMutableList()
                 val index = altered.indexOf("--worker-generation")
                 val original = altered[index + 1]
                 altered[index + 1] = (if (original[0] == '0') "1" else "0") + original.substring(1)
-                return RealProcessLauncher.startProcess(altered, redirectErrorStream).also { child = it }
+                return RealProcessLauncher.startProcess(altered, redirectErrorStream, preparation).also { child = it }
             }
         }
         ProcessBroker(launcher = launcher).use { broker ->
@@ -46,13 +47,14 @@ class RequiredWorkerGenerationTest {
             override fun startProcess(
                 args: List<String>,
                 redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 val altered = args.toMutableList()
                 val main = altered.indexOf("io.mazewall.portal.worker.PortalWorkerMain")
                 altered[main] = "fixture.AckSentinelWorker"
                 val cp = altered.indexOf("-cp")
                 altered[cp + 1] += java.io.File.pathSeparator + fixture
-                return RealProcessLauncher.startProcess(altered, redirectErrorStream).also { child = it }
+                return RealProcessLauncher.startProcess(altered, redirectErrorStream, preparation).also { child = it }
             }
         }
         ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 2500)).use { broker ->
