@@ -7,16 +7,97 @@ It uses public `PreparedPortalOperation` and `PortalInvocationTiming` through
 `PortalRuntime.health()`. The host reproduces the reviewed ASCII algorithm and
 checks each accepted output against an independent ASCII-input oracle; it never
 loads the guest implementation. An explicit negative class-loading check confirms
-the opaque worker is absent from the host classpath.
+the guest implementation is absent from the host classpath; the published worker
+bootstrap used by codegen does not expose that implementation to the host.
 
 This is a developer checking harness, not a performance acceptance gate or an ACE
-boundary proof. Task6c owns the full raw matrix after the new final candidate.
-The current checking coordinate is WIP, not a committed producer or final release.
+boundary proof. The accepted Task6c raw matrix uses immutable library producer
+`617fc10d3aa38e50887541da31baa459d6002ef7` (P617), candidate
+`0.1.0-candidate.617fc10d`. See the
+[committed local acceptance](../../docs/internals/reviews/2026-10-12-integration-contract-completion.md)
+for source/JAR identities, actual results and remaining release prerequisites.
 
-## Exact build/run recipe
+## Current P617 repository, strict resolution and accepted raw evidence
 
-Use a new local publication repository and a source-hash-bound WIP coordinate for
-checking; a final candidate must instead use its actual new committed producer.
+Use the existing publication, not a new publication or a label derived from the
+later consumer/documentation HEAD. **E** below is the operator-owned evidence root
+`/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion`.
+The current benchmark strict lock is
+[`locks/0.1.0-candidate.617fc10d.lockfile`](locks/0.1.0-candidate.617fc10d.lockfile);
+keep it and historical locks unchanged, with no `--write-locks` during acceptance.
+All Gradle/native commands acquire the shared verification lock; do not wrap an
+internally locking consumer script again.
+
+```bash
+cd /home/leanid/Documents/code/java/jseccomp/.worktrees/integration-contract-completion-20261011
+export JAVA_HOME=/home/leanid/.sdkman/candidates/java/25.4.4+1-graal
+export PATH="$JAVA_HOME/bin:$PATH"
+export GRADLE_USER_HOME=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-09-opencode-v1-zed-continuation/gradle-hook-home
+E=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion
+lock=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-06-mazewall-integration-foundation-plan/verification.lock
+version=0.1.0-candidate.617fc10d
+repository="$E/task-6c-final/repository/617fc10d3aa38e50887541da31baa459d6002ef7"
+accepted="$E/task-6c4/group-fix"
+
+# Strict resolution against the existing publication; no publication or lock generation.
+flock -w 600 "$lock" timeout --kill-after=30s 600s ./gradlew \
+  -p benchmarks/integration-boundaries --console=plain \
+  --no-configuration-cache --no-build-cache \
+  -PconsumerVersion="$version" -PconsumerRepository="$repository" \
+  verifyPublishedClosure installDist
+
+# Read-only validation of the accepted logs, after verifying companion custody.
+for size in 1 22 1024 65536; do
+  python3 benchmarks/integration-boundaries/check_raw.py --selfcheck \
+    --custody "$accepted/publication-freeze.json" "$accepted/payload-$size.log"
+done
+```
+
+`verifyPublishedClosure` requires exactly
+`io.mazewall:{koog-contained-tool,service-api,denied-api,koog,runtime,enforcer,platform}`
+at this version, in the supplied repository's exact Maven JAR paths; it rejects
+unrelated modules, wrong versions/paths and project/source substitution. This is
+the **seven-module benchmark host closure**, not the complete publication inventory.
+`denied-api` contains only the `DeniedResourceService` interface, not its guest
+implementation or a host fallback. P617 also actually publishes `io.mazewall:worker`
+through `mavenJava` to close the published codegen/plugin dependency chain. Worker
+bootstrap publication is distinct from the opaque guest implementation: the
+verified worker bundle contains worker/bootstrap, profiler and guest classes,
+while the host never loads the guest implementation.
+
+Current custody and exact execution receipts are existing files under E:
+
+- `task-6c-final/final-module-custody.json` and
+  `task-6c-final/final-artifact-manifest.json`: P617 publication/source binding.
+- `task-6c4/group-fix/publication-freeze.json`, `resolution-capture.json`,
+  `resolution-acceptance.json` and `source-class-GAV-final-custody.json`: publication
+  hashes, equal strict graphs, actual host/opaque-worker closure and fixture origin.
+  `benchmark-strict-capture.argv.json` and `benchmark-strict-acceptance.argv.json`
+  retain the actual build/capture CLI, including the evidence init script.
+- `task-6c4/group-fix/new-consumer-source-class-JAR.json`, `payload-*.log`,
+  `payload-*-actual-validator.*`, `matrix-results.json`, `descriptive-stats.json`,
+  `physical-end.json` and `end-custody.json`: current exact-group-fix measurement
+  origin, actual raw/validator results and acquired physical ends.
+  `payload-*.argv.json` retain the actual bounded native CLI and fresh-cache paths.
+- `task-6c4/group-fix/report.md` and `task-6c4/group-fix/task-6c4-review.md`:
+  accepted matrix and independent scoped review; `task-8/seal.json` binds the
+  committed locks, unchanged publication and later consumer/evidence checkpoint.
+
+Verify companion publication/strict-resolution custody before accepting raw data.
+The raw checker's `--custody` binds the observed bundle to the expected hash; it
+does not authenticate the manifest or repository. A fresh run needs new output/cache
+paths and its own source/JAR/lock/argv/log/exit/physical-end receipts. Reuse the
+existing P617 publication and strict lock; Task6a's evidence scripts/constants below
+cannot establish current P617 custody. Documentation revisions do not rename the
+accepted measurement source/JAR or the immutable library producer.
+
+## Historical Task6a WIP build/run recipe (six-module checking closure)
+
+The following records the historical Task6a source and six-module WIP closure;
+it is not a recipe for the current seven-module consumer. Its publication and locks
+are retained evidence, not inputs to regenerate or overwrite. At that historical
+source, the selected worker task had no publications; P617 now has a real worker
+Maven publication as described above.
 The existing [two-stage Koog bootstrap](../../scripts/koog-build.sh) and
 [consumer staging init script](../../tests/consumers/stage.init.gradle) publish
 the actual producer modules. Never overwrite historical coordinates or locks.
@@ -70,18 +151,9 @@ python3 benchmarks/integration-boundaries/check_raw.py --selfcheck \
   --custody "$out/fixround1-publication-freeze/manifest.json" "$out/new-run.raw.log"
 ```
 
-Keep actual argv/log/exit receipts, source/JAR/embedded worker hashes, strict-lock
-hashes and acquired process-end evidence beside the raw log. `verifyPublishedClosure`
-requires exactly `io.mazewall:{koog-contained-tool,service-api,denied-api,koog,runtime,enforcer,platform}`
-at the supplied version, with every JAR in the supplied repository's exact Maven
-path, and rejects unrelated modules, wrong versions/paths and project/source
-substitution. Candidate `0.1.0-candidate.617fc10d` already publishes this seven-module
-closure. `denied-api` contains only the `DeniedResourceService` interface (the native
-test contract), not its guest implementation or a host fallback. The worker is embedded opaque
-bundle data, not a host dependency. Worker/bootstrap and profiler classes are built
-into that verified bundle; they are not separate host publications in this recipe
-(the selected worker publication task has no publications). Build outputs are disposable;
-evidence belongs in the supplied evidence directory.
+Historical Task6a retained actual argv/log/exit receipts, source/JAR/embedded worker
+hashes, strict-lock hashes and acquired process-end evidence beside its raw log.
+Build outputs are disposable; evidence belongs in the supplied evidence directory.
 
 The checking coordinate binds the **producer module/build input inventory**, not
 the benchmark validator's source. Validator/docs revisions have a separate task-source
