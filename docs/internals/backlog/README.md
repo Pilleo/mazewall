@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 128 | *Total Resolved Issues:* 652
+*Total Active Issues:* 131 | *Total Resolved Issues:* 652
 
 Agent-development documentation resolved: [canonical build guidance, coding standards, and removal of unused workflow documents](resolved/issue-20261010-223954-987-consolidate-agent-documentation-and-remove-unused-.md).
 
@@ -32,6 +32,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261012-152506-118-await-actual-profiler-collector-stacks-before-nati](issue-20261012-152506-118-await-actual-profiler-collector-stacks-before-nati.md) | Await actual profiler collector stacks before native custody assertion | high | profiler |
+| [issue-20261012-143218-552-publish-portal-bootstrap-worker-in-the-codegen-mav](issue-20261012-143218-552-publish-portal-bootstrap-worker-in-the-codegen-mav.md) | Publish Portal bootstrap worker in the codegen Maven closure | high | core |
+| [issue-20261012-143218-956-enforce-linuxnative-coverage-with-the-actual-platf](issue-20261012-143218-956-enforce-linuxnative-coverage-with-the-actual-platf.md) | Enforce LinuxNative coverage with the actual platform class selector | high | core |
 | [issue-20261012-110955-698-prelink-mmap-protection-fixture-lambdas-before-exe](issue-20261012-110955-698-prelink-mmap-protection-fixture-lambdas-before-exe.md) | Prelink mmap protection fixture lambdas before executable mapping denial | medium | enforcer |
 | [issue-20261012-105213-824-resolve-pre-existing-optional-profiler-detekttooli](issue-20261012-105213-824-resolve-pre-existing-optional-profiler-detekttooli.md) | Resolve pre-existing optional profiler detektTooling debt | medium | profiler |
 | [issue-20261012-091212-424-tier-e-source-transfer-rejects-unstaged-tracked-de](issue-20261012-091212-424-tier-e-source-transfer-rejects-unstaged-tracked-de.md) | Tier E source transfer rejects unstaged tracked deletions | high | profiler |

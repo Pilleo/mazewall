@@ -1,5 +1,12 @@
 plugins {
     kotlin("jvm")
+    `maven-publish`
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") { from(components["java"]) }
+    }
 }
 
 kotlin {

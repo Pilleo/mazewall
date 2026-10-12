@@ -346,11 +346,18 @@ class PortalWorkerPolicyNativeTest : BaseIntegrationTest() {
         private fun workerPolicy(policy: Policy<*, Uncompiled>): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = policy as Policy<PolicyScope.ThreadLocalOnly, Uncompiled>
 
         private fun observeCollectors(prior: Set<Thread>): Map<Thread, Array<StackTraceElement>> {
-            val observed = Thread.getAllStackTraces().filter { (thread, frames) ->
-                thread !in prior &&
-                    (thread.name.startsWith("trace-listener-") || thread.name.startsWith("trace-collector-")) &&
-                    frames.any { it.className.startsWith("io.mazewall.profiler.internal.ProfilerTraceListener") }
-            }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            var observed: Map<Thread, Array<StackTraceElement>>
+            // Thread.start() does not guarantee the collector has entered its listener-owned stack yet.
+            do {
+                observed = Thread.getAllStackTraces().filter { (thread, frames) ->
+                    thread !in prior &&
+                        (thread.name.startsWith("trace-listener-") || thread.name.startsWith("trace-collector-")) &&
+                        frames.any { it.className.startsWith("io.mazewall.profiler.internal.ProfilerTraceListener") }
+                }
+                if (observed.size == 2) break
+                Thread.sleep(1)
+            } while (System.nanoTime() < deadline)
             assertEquals(2, observed.size, "Capture the actual per-session listener/collector identities and source stacks")
             return observed
         }

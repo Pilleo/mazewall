@@ -1,0 +1,99 @@
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+
+buildscript {
+    if (!gradle.startParameter.writeDependencyLocks) {
+        assert file('buildscript-gradle.lockfile').isFile() : 'Generate and retain the plugin classpath lock first'
+    }
+    configurations.classpath.resolutionStrategy.activateDependencyLocking()
+}
+plugins {
+    id 'org.jetbrains.kotlin.jvm'
+    id 'io.mazewall.portal.codegen'
+}
+
+def repository = file(providers.gradleProperty('consumerRepository').get()).canonicalFile
+def version = providers.gradleProperty('consumerVersion').get()
+def evidence = file(providers.gradleProperty('consumerEvidence').get())
+layout.buildDirectory = new File(evidence, 'build')
+kotlin { jvmToolchain(25) }
+repositories {
+    exclusiveContent {
+        forRepository { maven { url = uri(repository) } }
+        filter { includeGroup('io.mazewall') }
+    }
+    mavenCentral()
+}
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode = LockMode.STRICT
+}
+sourceSets { api; portalWorker }
+def apiJar = tasks.register('apiJar', Jar) {
+    from sourceSets.api.output
+    archiveBaseName = 'consumer-api'
+}
+dependencies {
+    implementation files(apiJar)
+    implementation "io.mazewall:runtime:$version"
+    portalWorkerImplementation files(apiJar)
+    portalWorkerImplementation "io.mazewall:runtime:$version"
+}
+portalCodegen {
+    interfaces.set(['fixture.Echo'])
+    workerSourceSet.set('portalWorker')
+}
+tasks.register('verifyPublishedPlugin') {
+    dependsOn 'classes', 'portalWorkerClasses'
+    doLast {
+        def sha = { File f -> MessageDigest.getInstance('SHA-256').digest(f.bytes).encodeHex().toString() }
+        def graphs = [:]
+        [plugin: buildscript.configurations.classpath, host: configurations.runtimeClasspath,
+         worker: configurations.portalWorkerRuntimeClasspath].each { name, config ->
+            config.incoming.resolutionResult.allComponents.each {
+                assert !(it.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier) || it.id.projectPath == ':'
+            }
+            graphs[name] = config.resolvedConfiguration.resolvedArtifacts.collect { artifact ->
+                def id = artifact.moduleVersion.id
+                def f = artifact.file.canonicalFile
+                if (id.group == 'io.mazewall') {
+                    assert id.version == version
+                    assert f == new File(repository, "io/mazewall/${id.name}/$version/${id.name}-${version}.jar").canonicalFile
+                }
+                [coordinate: id.toString(), path: f.path, sha256: sha(f)]
+            }.sort { it.coordinate }
+        }
+        assert graphs.plugin.any { it.coordinate == "io.mazewall:worker:$version" }
+        assert graphs.plugin.any { it.coordinate == "io.mazewall:codegen:$version" }
+        assert graphs.plugin.any { it.coordinate == 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.20' }
+        def loaded = [:]
+        ['io.mazewall.portal.codegen.PortalCodegenPlugin': 'codegen',
+         'io.mazewall.portal.worker.PortalWorkerMain': 'worker'].each { name, module ->
+            def type = Class.forName(name, false, plugins.getPlugin('io.mazewall.portal.codegen').class.classLoader)
+            def f = new File(type.protectionDomain.codeSource.location.toURI()).canonicalFile
+            def original = new File(graphs.plugin.find { it.coordinate == "io.mazewall:$module:$version" }.path)
+            // Gradle may report its original-artifact transform copy as the code source.
+            if (f != original) {
+                assert f.name == original.name
+                assert f.toPath().startsWith(new File(gradle.gradleUserHomeDir, 'caches').canonicalFile.toPath())
+            }
+            assert sha(f) == sha(original)
+            new java.util.zip.ZipFile(f).withCloseable { jar ->
+                assert jar.getEntry(name.replace('.', '/') + '.class') != null
+            }
+            loaded[name] = [path: f.path, sha256: sha(f), publishedPath: original.path,
+                publishedSha256: sha(original), gradleTransformCopy: f != original]
+        }
+        def generated = fileTree(layout.buildDirectory).matching { include '**/EchoPortalStub.kt', '**/EchoPortalDispatcher.kt' }.files
+        assert generated.size() == 2
+        assert fileTree(layout.buildDirectory).matching { include '**/EchoPortalStub.class', '**/EchoPortalDispatcher.class' }.files.size() == 2
+        def args = tasks.compileKotlin.compilerOptions.freeCompilerArgs.get()
+        assert !args.any { it.contains('skip') || it.contains('prerelease') }
+        evidence.mkdirs()
+        new File(evidence, 'graph.json').text = JsonOutput.prettyPrint(JsonOutput.toJson([
+            graphs: graphs, loaded: loaded, kotlin: '2.4.20', compilerArgs: args,
+            generated: generated.collectEntries { [(it.path): sha(it)] }
+        ])) + '\n'
+        println 'PUBLISHED_PORTAL_PLUGIN_OK'
+    }
+}

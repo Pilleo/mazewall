@@ -624,7 +624,7 @@ subprojects {
                     "platform" -> {
                         rule {
                             element = "CLASS"
-                            includes = listOf("io.mazewall.LinuxNative")
+                            includes = listOf("io.mazewall.platform.native.LinuxNative")
                             limit {
                                 counter = "INSTRUCTION"
                                 value = "COVEREDRATIO"

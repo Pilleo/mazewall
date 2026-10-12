@@ -1,0 +1,15 @@
+pluginManagement {
+    repositories {
+        exclusiveContent {
+            forRepository { maven { url = uri(providers.gradleProperty('consumerRepository').get()) } }
+            filter { includeGroupByRegex('io\\.mazewall.*') }
+        }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+    plugins {
+        id 'org.jetbrains.kotlin.jvm' version '2.4.20'
+        id 'io.mazewall.portal.codegen' version providers.gradleProperty('consumerVersion').get()
+    }
+}
+rootProject.name = 'published-portal-plugin-consumer'
