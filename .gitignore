@@ -116,3 +116,8 @@ target/
 /.worktrees/
 /.taskplane-kb/**/*.lock
 /docs/superpowers/
+
+### Local Agent Session Artifacts ###
+/.omo/
+/.superpowers/
+/.skillopt-sleep/
