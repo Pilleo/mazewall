@@ -75,7 +75,7 @@ probe_absent() {
     if grep -Eiq 'no such file|cannot connect|daemon running|connection refused' "${err}"; then
         return 2
     fi
-    if [[ ${rc} -eq 1 || ${rc} -eq 125 ]] && grep -Eiq 'no such (object|image|container|volume|network)|(image|container|volume|network) not known' "${err}"; then
+    if [[ ${rc} -eq 1 || ${rc} -eq 125 ]] && grep -Eiq 'no such (object|image|container|volume|network)|(image|container|volume|network) not known|(image|container|volume|network)( [^[:space:]]+)? not found' "${err}"; then
         return 0
     fi
     return 2
