@@ -149,6 +149,7 @@ cleanup() {
     elif [[ ${status} -ne 0 ]]; then
         main_exit=${status}
     fi
+    phase retirement
     retain_and_retire
     if [[ ${cleanup_failed} -eq 1 && ${main_exit} -eq 0 ]]; then
         main_status=cleanup-error
@@ -169,6 +170,32 @@ cleanup() {
 trap 'on_signal 130' INT
 trap 'on_signal 143' TERM
 trap cleanup EXIT
+
+ready_deadline=${MAZEWALL_READY_DEADLINE:-120}
+stop_grace=${MAZEWALL_PROFILE_STOP_GRACE:-45}
+stop_deadline=${MAZEWALL_PROFILE_STOP_DEADLINE:-75}
+benign_body='Log processed: 1.0'
+
+phase() {
+    printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >> "${output}/phases.tsv"
+}
+
+timeout_rc=0
+timeout 0.2 sleep 1 || timeout_rc=$?
+if [[ ${timeout_rc} -ne 124 ]]; then
+    echo "timeout did not fail closed with 124 (got ${timeout_rc})" >&2
+    main_exit=1
+    exit 1
+fi
+
+fail_profile() {
+    local rc=$1
+    shift
+    printf '%s\n' "$*" | tee -a "${output}/profile-failure" >&2
+    main_status=startup-failure
+    main_exit=${rc}
+    exit "${rc}"
+}
 
 port_open() {
     timeout 0.2 bash -c "exec 3<>/dev/tcp/127.0.0.1/$1" >/dev/null 2>&1
@@ -311,10 +338,211 @@ start_protected() {
     prot_id=${one_id}
     acquired+=("${prot_id}")
     require_image "${prot_id}"
+    python3 - "${output}/inspect-${prot_id}.json" <<'PY' || {
+import json, sys
+doc = json.load(open(sys.argv[1]))
+doc = doc[0] if isinstance(doc, list) else doc
+mounts = doc.get("Mounts") or []
+ok = any(item.get("Destination") == "/app/profiles" and item.get("Mode") == "ro" for item in mounts)
+raise SystemExit(0 if ok else 1)
+PY
+        echo "protected profile mount is not read-only" >&2
+        main_status=identity-failure
+        main_exit=4
+        exit 4
+    }
 }
+
+await_ready() {
+    local service=$1 id=$2 port=$3 rc=0
+    set +e
+    timeout "${ready_deadline}" bash -s -- "${service}" "${id}" "${port}" "${engine_name}" "${image_id}" <<'EOF'
+set -euo pipefail
+service=$1
+id=$2
+port=$3
+engine=$4
+image_id=$5
+benign='Log processed: 1.0'
+while true; do
+    if ! "${engine}" inspect "${id}" | python3 -c 'import json,sys; doc=json.load(sys.stdin); doc=doc[0] if isinstance(doc, list) else doc; state=doc.get("State") or {}; raise SystemExit(0 if state.get("Status")=="running" and doc.get("Image")==sys.argv[1] else 1)' "${image_id}"; then
+        sleep 0.2
+        continue
+    fi
+    set +e
+    out=$(timeout 5 "${engine}" exec "${id}" curl --silent --show-error --connect-timeout 3 --max-time 5 --write-out '\n%{http_code}' "http://127.0.0.1:${port}/admin/log")
+    attempt=$?
+    set -e
+    if [[ ${attempt} -ne 0 ]]; then
+        sleep 0.2
+        continue
+    fi
+    parsed=$(printf '%s' "${out}" | python3 -c 'import sys; lines=sys.stdin.read().strip().splitlines(); print(lines[-1] if lines else ""); print("\n".join(lines[:-1]))')
+    code=${parsed%%$'\n'*}
+    body=${parsed#*$'\n'}
+    if [[ ${code} == 404 ]]; then
+        echo "HTTP 404 from ${service} is not ready" >&2
+        exit 44
+    fi
+    if [[ ${code} == 500 ]]; then
+        echo "HTTP 500 from ${service} is not ready" >&2
+        exit 45
+    fi
+    if [[ ${code} == 200 && ${body} == "${benign}" ]]; then
+        exit 0
+    fi
+    sleep 0.2
+done
+EOF
+    rc=$?
+    set -e
+    if [[ ${rc} -eq 44 ]]; then
+        fail_profile 1 "HTTP 404 from ${service} is not ready"
+    fi
+    if [[ ${rc} -eq 45 ]]; then
+        fail_profile 1 "HTTP 500 from ${service} is not ready"
+    fi
+    if [[ ${rc} -eq 124 ]]; then
+        fail_profile 124 "readiness deadline exceeded for ${service}"
+    fi
+    if [[ ${rc} -ne 0 ]]; then
+        fail_profile 1 "readiness failed for ${service} (exit ${rc})"
+    fi
+    phase "${service}-ready"
+}
+
+exercise_profile() {
+    phase profile-workload
+    python3 -c 'import sys, zipfile; z=zipfile.ZipFile(sys.argv[1], "w"); z.writestr("benign.txt", "bound upload"); z.close()' "${output}/benign.zip"
+    timeout 5 "${engine[@]}" exec "${profile_id}" curl --silent --show-error --connect-timeout 3 --max-time 5 -H 'X-Api-Version: 1.0' "http://127.0.0.1:8083/admin/log" >/dev/null
+    timeout 5 "${engine[@]}" exec -i "${profile_id}" curl --silent --show-error --connect-timeout 3 --max-time 5 -F 'file=@-;filename=benign.zip;type=application/zip' 'http://127.0.0.1:8083/upload' < "${output}/benign.zip" >/dev/null
+    timeout 5 "${engine[@]}" exec "${profile_id}" curl --silent --show-error --connect-timeout 3 --max-time 5 --get --data-urlencode 'url=http://unprotected:8080/admin/log' 'http://127.0.0.1:8083/proxy' >/dev/null
+}
+
+stop_profile() {
+    local rc=0
+    set +e
+    timeout "${stop_deadline}" "${compose[@]}" stop -t "${stop_grace}" profile
+    rc=$?
+    set -e
+    if [[ ${rc} -eq 124 ]]; then
+        fail_profile 124 "profile stop exceeded ${stop_deadline}s"
+    fi
+    if [[ ${rc} -ne 0 ]]; then
+        fail_profile 1 "profile stop failed (${rc})"
+    fi
+    set +e
+    reason=$(run_bounded "${engine[@]}" inspect "${profile_id}" | python3 -c 'import json,sys; doc=json.load(sys.stdin); doc=doc[0] if isinstance(doc, list) else doc; state=doc.get("State") or {}; code=state.get("ExitCode"); oom=state.get("OOMKilled"); status=state.get("Status"); error=state.get("Error") or "";
+print("profile OOM killed the JVM") if oom is True else print("profile exit 137 is not orderly SIGTERM retirement") if code == 137 else print("profile forced shutdown") if "forced" in error.lower() else print("") if status == "exited" and code in (0, 143) else print("profile retirement was not orderly SIGTERM status=%s exit=%s" % (status, code))')
+    rc=$?
+    set -e
+    if [[ ${rc} -eq 124 ]]; then
+        fail_profile 124 "profile inspect after stop timed out"
+    fi
+    if [[ -n ${reason} ]]; then
+        fail_profile 1 "${reason}"
+    fi
+    phase profile-stopped
+}
+
+copy_profile() {
+    local copy_rc=0 extract_rc=0
+    mkdir -p "${output}/profile"
+    set +e
+    timeout 60 "${engine[@]}" run --rm \
+        --mount "type=volume,source=${project}_profile-artifacts,target=/app/profiles,readonly" \
+        --entrypoint tar \
+        "${image}" -c -C /app/profiles . \
+        | tar -x -C "${output}/profile"
+    local statuses=("${PIPESTATUS[@]}")
+    copy_rc=${statuses[0]}
+    extract_rc=${statuses[1]}
+    set -e
+    if [[ ${copy_rc} -eq 124 || ${extract_rc} -eq 124 ]]; then
+        fail_profile 124 "profile copy timed out"
+    fi
+    if [[ ${copy_rc} -ne 0 || ${extract_rc} -ne 0 ]]; then
+        fail_profile 1 "profile copy failed (${copy_rc}/${extract_rc})"
+    fi
+}
+
+validate_generation() {
+    local rc=0
+    set +e
+    validated=$(python3 - "${output}/profile" 2>"${output}/profile-failure" <<'PY'
+import hashlib, json, re, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+pointer_path = root / "sbob.json"
+if not pointer_path.is_file():
+    sys.exit("missing profile pointer")
+pointer = pointer_path.read_text(encoding="utf-8").strip()
+match = re.fullmatch(r'\{"format":"mazewall-profile-generation-v1","generation":"([0-9a-f-]{36})"\}', pointer)
+if not match or ".." in match.group(1):
+    sys.exit("invalid profile pointer")
+generation = match.group(1)
+base = (root / ".sbob.json.generations").resolve()
+directory = (base / generation).resolve()
+if base not in directory.parents:
+    sys.exit("profile generation escapes its directory")
+needed = ("sbob.json", "stacktraces.json", "integrity.json")
+paths = {name: directory / name for name in needed}
+missing = [name for name, path in paths.items() if not path.is_file()]
+if missing:
+    sys.exit("partial generation missing " + ", ".join(missing))
+integrity = json.loads(paths["integrity.json"].read_text(encoding="utf-8"))
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+for field, name in (("evidenceSha256", "sbob.json"), ("stackDictionarySha256", "stacktraces.json")):
+    expected = integrity.get(field)
+    actual = digest(paths[name])
+    if not isinstance(expected, str) or expected != actual:
+        sys.exit("corrupt " + field + " digest")
+if integrity.get("complete") is not True:
+    sys.exit("incomplete profile generation")
+collectors = integrity.get("collectors")
+if not isinstance(collectors, list) or not collectors:
+    sys.exit("incomplete collector coverage is absent")
+for index, collector in enumerate(collectors):
+    if not isinstance(collector, dict) or collector.get("complete") is not True or collector.get("drainComplete") is not True:
+        sys.exit("collector[%s] is incomplete" % index)
+    dropped = collector.get("droppedEvents")
+    if type(dropped) is not int or dropped != 0:
+        sys.exit("collector[%s] dropped events" % index)
+evidence = paths["sbob.json"].read_text(encoding="utf-8").strip()
+if evidence in ("", "{}", "[]"):
+    sys.exit("profile evidence is empty")
+print(generation)
+print("sha256=" + integrity["evidenceSha256"])
+print("sha256=" + integrity["stackDictionarySha256"])
+PY
+    )
+    rc=$?
+    set -e
+    if [[ ${rc} -ne 0 ]]; then
+        cat "${output}/profile-failure" >&2
+        main_status=startup-failure
+        main_exit=1
+        exit 1
+    fi
+    printf '%s\n' "${validated}" > "${output}/profile-generation"
+    phase generation-validated
+}
+
+phase built
+await_ready profile "${profile_id}" 8083
+await_ready unprotected "${unprot_id}" 8080
+exercise_profile
+stop_profile
+copy_profile
+validate_generation
 start_protected
+await_ready protected "${prot_id}" 8081
 
 ssrf_target="http://unprotected:8080/admin/log"
+phase scenarios
 set +e
 python3 exploits/run_all.py "http://127.0.0.1:${port_unprotected}" \
     --engine "${engine_bin}" \

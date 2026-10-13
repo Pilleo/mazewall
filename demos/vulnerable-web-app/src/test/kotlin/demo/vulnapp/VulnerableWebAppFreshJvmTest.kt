@@ -2,11 +2,13 @@ package demo.vulnapp
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import demo.vulnapp.config.ExecutorDrain
+import demo.vulnapp.config.IncompleteProfileEvidenceException
 import demo.vulnapp.config.MazewallProtectionBootstrap
 import demo.vulnapp.config.ProfileArtifactPublisher
 import demo.vulnapp.config.ServiceExecutorOwner
 import demo.vulnapp.config.ServiceResourceBindings
 import demo.vulnapp.config.collectorCoverage
+import demo.vulnapp.service.ProxyService
 import demo.vulnapp.service.DefaultFileService
 import demo.vulnapp.service.FileService
 import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
@@ -23,6 +25,7 @@ import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -43,6 +46,24 @@ class VulnerableWebAppFreshJvmTest {
     @EnabledIfLinuxAndSupported
     fun `profiling records nonempty evidence`() {
         IsolatedProcessTester.runIsolatedMethod(javaClass.name, "profileBody")
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `incomplete profile publication refuses enforcement`() {
+        val root = Files.createTempDirectory("mazewall-web-incomplete-profile-")
+        try {
+            IsolatedProcessTester.runIsolatedMethod(javaClass.name, "profileIncompleteEvidenceBody", root.toString())
+            val reason = ObjectMapper().readTree(Files.readString(ProfileArtifactPublisher.readCurrent(root.resolve("sbob.json")).integrity)).path("reason").asText()
+            assertTrue(reason.contains("collector[1]: event drain did not complete"), reason)
+            assertTrue(reason.contains("collector[1]: collector drain did not complete"), reason)
+            assertTrue(reason.contains("collector[2]: CONNECT was observed without a parsed destination"), reason)
+            assertFailsWith<IncompleteProfileEvidenceException> {
+                ProfileArtifactPublisher.resolveEvidencePath(root.resolve("sbob.json"))
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
     }
 
     @Suppress("unused")
@@ -127,6 +148,34 @@ class VulnerableWebAppFreshJvmTest {
         } finally {
             System.clearProperty("mazewall.sbob.path")
             root.toFile().deleteRecursively()
+        }
+    }
+
+    @Suppress("unused")
+    fun profileIncompleteEvidenceBody(rootText: String) {
+        val root = java.nio.file.Path.of(rootText)
+        val target = root.resolve("sbob.json")
+        val bindings = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
+        System.setProperty("mazewall.sbob.path", target.toString())
+        check(System.getProperty("mazewall.allow-incomplete-profile-enforcement") != "true") {
+            "incomplete enforcement override must stay unset"
+        }
+        try {
+            startApplication(enabled = false, profile = true, sbobPath = target, bindings = bindings).use { application ->
+                assertEquals(200, getAdmin(application, "1.0").statusCode())
+                val bytes = java.io.ByteArrayOutputStream()
+                java.util.zip.ZipOutputStream(bytes).use { zip ->
+                    zip.putNextEntry(java.util.zip.ZipEntry("benign.txt"))
+                    zip.write("bound upload".toByteArray())
+                    zip.closeEntry()
+                }
+                val upload = org.springframework.mock.web.MockMultipartFile("file", "benign.zip", "application/zip", bytes.toByteArray())
+                application.getBean(FileService::class.java).extractZip(upload)
+                application.getBean(ProxyService::class.java).fetchUrl("http://unprotected:8080/admin/log")
+                assertFalse(Files.exists(target), "current-generation pointer must be published only during shutdown")
+            }
+        } finally {
+            System.clearProperty("mazewall.sbob.path")
         }
     }
 
