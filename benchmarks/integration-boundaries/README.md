@@ -87,69 +87,26 @@ Verify companion publication/strict-resolution custody before accepting raw data
 The raw checker's `--custody` binds the observed bundle to the expected hash; it
 does not authenticate the manifest or repository. A fresh run needs new output/cache
 paths and its own source/JAR/lock/argv/log/exit/physical-end receipts. Reuse the
-existing P617 publication and strict lock; Task6a's evidence scripts/constants below
+existing P617 publication and strict lock; Task6a's historical evidence scripts/constants
 cannot establish current P617 custody. Documentation revisions do not rename the
 accepted measurement source/JAR or the immutable library producer.
 
-## Historical Task6a WIP build/run recipe (six-module checking closure)
+## Historical Task6a WIP evidence (six-module checking closure)
 
-The following records the historical Task6a source and six-module WIP closure;
-it is not a recipe for the current seven-module consumer. Its publication and locks
-are retained evidence, not inputs to regenerate or overwrite. At that historical
-source, the selected worker task had no publications; P617 now has a real worker
-Maven publication as described above.
-The existing [two-stage Koog bootstrap](../../scripts/koog-build.sh) and
-[consumer staging init script](../../tests/consumers/stage.init.gradle) publish
-the actual producer modules. Never overwrite historical coordinates or locks.
-All Gradle/native/publication commands acquire the shared lock. These commands
-are externally locked; do not wrap an internally locking consumer script again.
+Task6a used the intermediate coordinate `0.1.0-task6a-wip.4eb86a85fe82dda3`
+and a six-module closure, not the current seven-module consumer. Its obsolete
+lockfile and machine-specific run recipe are archived in Git at `c049dd3c`:
 
 ```bash
-cd /home/leanid/Documents/code/java/jseccomp/.worktrees/integration-contract-completion-20261011
-export JAVA_HOME=/home/leanid/.sdkman/candidates/java/25.4.4+1-graal
-export PATH="$JAVA_HOME/bin:$PATH"
-export GRADLE_USER_HOME=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-09-opencode-v1-zed-continuation/gradle-hook-home
-lock=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-06-mazewall-integration-foundation-plan/verification.lock
-out=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/task-6a
-version=0.1.0-task6a-wip.4eb86a85fe82dda3
-repository="$out/checking-repository"
-
-# Publication was already performed once for this exact checking source inventory.
-# For a NEW source identity, select a NEW version/repository before publication:
-flock -w 600 "$lock" timeout --kill-after=30s 900s ./scripts/koog-build.sh \
-  --console=plain --no-build-cache --init-script tests/consumers/stage.init.gradle \
-  -PconsumerVersion="$version" -PconsumerRepository="$repository" -- \
-  :platform:publishAllPublicationsToConsumerBaselineRepository \
-  :enforcer:publishAllPublicationsToConsumerBaselineRepository \
-  :portals:runtime:publishAllPublicationsToConsumerBaselineRepository \
-  :portals:worker:publishAllPublicationsToConsumerBaselineRepository \
-  :integrations:koog:publishAllPublicationsToConsumerBaselineRepository \
-  :demos:koog-contained-tool:service-api:publishAllPublicationsToConsumerBaselineRepository \
-  :demos:koog-contained-tool:publishAllPublicationsToConsumerBaselineRepository
-
-# Add --write-locks only ONCE when generating a new coordinate's reviewed locks.
-flock -w 600 "$lock" timeout --kill-after=30s 600s ./gradlew \
-  -p benchmarks/integration-boundaries --console=plain \
-  --no-configuration-cache --no-build-cache \
-  -PconsumerVersion="$version" -PconsumerRepository="$repository" \
-  verifyPublishedClosure installDist
-
-cp_path='benchmarks/integration-boundaries/build/install/integration-boundaries/lib/*'
-flock -w 600 "$lock" timeout --kill-after=30s 30s "$JAVA_HOME/bin/java" \
-  --enable-native-access=ALL-UNNAMED -cp "$cp_path" \
-  io.mazewall.benchmark.BoundariesKt --selfcheck
-
-# cache must be a NEW nonexistent directory for each cold preparation run.
-flock -w 600 "$lock" timeout --kill-after=30s 120s "$JAVA_HOME/bin/java" \
-  --enable-native-access=ALL-UNNAMED -Dbenchmark.cache="$out/new-run-worker-cache" \
-  -cp "$cp_path" io.mazewall.benchmark.BoundariesKt \
-  --samples 3 --size 1024 --pressure 4 --seconds 60 --concurrency 1 \
-  >"$out/new-run.raw.log" 2>&1
-# Requires the coordinate's separately verified frozen publication-custody manifest.
-python3 "$out/publication_custody.py" verify-resolution
-python3 benchmarks/integration-boundaries/check_raw.py --selfcheck \
-  --custody "$out/fixround1-publication-freeze/manifest.json" "$out/new-run.raw.log"
+git show c049dd3c:benchmarks/integration-boundaries/README.md
+git show c049dd3c:benchmarks/integration-boundaries/locks/0.1.0-task6a-wip.4eb86a85fe82dda3.lockfile
 ```
+
+Use the current P617 publication and lock for new runs. Recover the historical
+recipe only with its original source/publication evidence; do not regenerate or
+overwrite the old coordinate. At that historical source, the selected worker
+task had no publications; P617 now has a real worker Maven publication as
+described above.
 
 Historical Task6a retained actual argv/log/exit receipts, source/JAR/embedded worker
 hashes, strict-lock hashes and acquired process-end evidence beside its raw log.
