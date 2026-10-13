@@ -64,16 +64,61 @@ json_get() {
     python3 -c 'import json,sys; doc=json.load(sys.stdin); doc=doc[0] if isinstance(doc, list) else doc; print(doc[sys.argv[1]])' "$1"
 }
 
+probe_absent() {
+    local err rc
+    err="${output}/probe-err"
+    run_bounded "$@" >"${err}" 2>&1
+    rc=$?
+    if [[ ${rc} -eq 0 ]]; then
+        return 1
+    fi
+    if [[ ${rc} -eq 1 ]] && grep -Eiq 'no such|not found|not known|does not exist' "${err}"; then
+        return 0
+    fi
+    return 2
+}
+
+note_absent() {
+    local rc
+    probe_absent "$@"
+    rc=$?
+    if [[ ${rc} -ne 0 ]]; then
+        cleanup_failed=1
+    fi
+}
+
+retire_run_tag() {
+    local rc
+    if [[ ${#engine[@]} -eq 0 ]]; then
+        return
+    fi
+    probe_absent "${engine[@]}" image inspect "${image}"
+    rc=$?
+    if [[ ${rc} -eq 0 ]]; then
+        return
+    fi
+    if [[ ${rc} -eq 2 ]]; then
+        cleanup_failed=1
+        return
+    fi
+    if ! run_bounded "${engine[@]}" image rm "${image}" >>"${output}/diagnostics" 2>&1; then
+        cleanup_failed=1
+        return
+    fi
+    note_absent "${engine[@]}" image inspect "${image}"
+}
+
 retain_and_retire() {
-    local id tags owned
+    local id
     if [[ ${#compose[@]} -eq 0 ]]; then
+        retire_run_tag
         return
     fi
     mapfile -t found < <(run_bounded "${compose[@]}" ps --all --quiet 2>/dev/null || true)
     for id in "${found[@]}"; do
         [[ -n "${id}" ]] || continue
         run_bounded "${engine[@]}" inspect "${id}" > "${output}/inspect-${id}.json" 2>>"${output}/diagnostics" || true
-        run_bounded "${compose[@]}" logs --no-color > "${output}/logs-${id}.txt" 2>>"${output}/diagnostics" || true
+        run_bounded "${compose[@]}" logs --no-color "${id}" > "${output}/logs-${id}.txt" 2>>"${output}/diagnostics" || true
     done
     run_bounded "${compose[@]}" stop >/dev/null 2>&1 || true
     if ! run_bounded "${compose[@]}" down -v >>"${output}/diagnostics" 2>&1; then
@@ -81,31 +126,11 @@ retain_and_retire() {
     fi
     for id in "${found[@]}"; do
         [[ -n "${id}" ]] || continue
-        if run_bounded "${engine[@]}" inspect "${id}" >/dev/null 2>&1; then
-            cleanup_failed=1
-        fi
+        note_absent "${engine[@]}" inspect "${id}"
     done
-    if run_bounded "${engine[@]}" volume inspect "${project}_profile-artifacts" >/dev/null 2>&1; then
-        cleanup_failed=1
-    fi
-    if run_bounded "${engine[@]}" network inspect "${project}_default" >/dev/null 2>&1; then
-        cleanup_failed=1
-    fi
-    if [[ -n "${image_id}" ]]; then
-        if tags=$(run_bounded "${engine[@]}" image inspect "${image}" 2>/dev/null); then
-            owned=$(printf '%s' "${tags}" | python3 -c 'import json,sys; doc=json.load(sys.stdin); doc=doc[0] if isinstance(doc, list) else doc; tags=doc.get("RepoTags") or []; print("yes" if doc.get("Id")==sys.argv[1] and sys.argv[2] in tags else "no")' "${image_id}" "${image}")
-            if [[ "${owned}" == yes ]]; then
-                run_bounded "${engine[@]}" image rm "${image_id}" >>"${output}/diagnostics" 2>&1 || cleanup_failed=1
-            else
-                cleanup_failed=1
-            fi
-        else
-            cleanup_failed=1
-        fi
-        if run_bounded "${engine[@]}" image inspect "${image}" >/dev/null 2>&1; then
-            cleanup_failed=1
-        fi
-    fi
+    note_absent "${engine[@]}" volume inspect "${project}_profile-artifacts"
+    note_absent "${engine[@]}" network inspect "${project}_default"
+    retire_run_tag
 }
 
 cleanup() {
