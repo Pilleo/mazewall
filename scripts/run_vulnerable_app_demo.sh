@@ -432,12 +432,22 @@ stop_profile() {
         fail_profile 1 "profile stop failed (${rc})"
     fi
     set +e
-    reason=$(run_bounded "${engine[@]}" inspect "${profile_id}" | python3 -c 'import json,sys; doc=json.load(sys.stdin); doc=doc[0] if isinstance(doc, list) else doc; state=doc.get("State") or {}; code=state.get("ExitCode"); oom=state.get("OOMKilled"); status=state.get("Status"); error=state.get("Error") or "";
-print("profile OOM killed the JVM") if oom is True else print("profile exit 137 is not orderly SIGTERM retirement") if code == 137 else print("profile forced shutdown") if "forced" in error.lower() else print("") if status == "exited" and code in (0, 143) else print("profile retirement was not orderly SIGTERM status=%s exit=%s" % (status, code))')
-    rc=$?
+    inspect_out=$(run_bounded "${engine[@]}" inspect "${profile_id}")
+    inspect_rc=$?
     set -e
-    if [[ ${rc} -eq 124 ]]; then
+    if [[ ${inspect_rc} -eq 124 ]]; then
         fail_profile 124 "profile inspect after stop timed out"
+    fi
+    if [[ ${inspect_rc} -ne 0 ]]; then
+        fail_profile 1 "profile inspect after stop failed (${inspect_rc})"
+    fi
+    set +e
+    reason=$(printf '%s' "${inspect_out}" | python3 -c 'import json,sys; doc=json.load(sys.stdin); doc=doc[0] if isinstance(doc, list) else doc; state=doc.get("State") or {}; code=state.get("ExitCode"); oom=state.get("OOMKilled"); status=state.get("Status"); error=state.get("Error") or "";
+print("profile OOM killed the JVM") if oom is True else print("profile exit 137 is not orderly SIGTERM retirement") if code == 137 else print("profile forced shutdown") if "forced" in error.lower() else print("") if status == "exited" and code in (0, 143) else print("profile retirement was not orderly SIGTERM status=%s exit=%s" % (status, code))')
+    parse_rc=$?
+    set -e
+    if [[ ${parse_rc} -ne 0 ]]; then
+        fail_profile 1 "profile inspect after stop could not be parsed"
     fi
     if [[ -n ${reason} ]]; then
         fail_profile 1 "${reason}"
