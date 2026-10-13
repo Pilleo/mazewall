@@ -34,7 +34,7 @@ The standard matrix is admin control, upload control, zip-slip effect versus den
 
 Evidence for one run is `demos/output/<run-id>/`: phase timestamps, service logs, inspect JSON, copied profile components, both scenario JSON files, `report.md`, and `status`. Keep the script stdout as well; the Gradle build log is not copied into that directory. Verified retirement prints `retired mazewall-web-<run-id>`. `cleanup-error` means disappearance was not confirmed.
 
-Docker 29.9.0 and Compose 5.6.0 are installed here. Podman is absent, and the selected Docker endpoint `/run/user/1000/podman/podman.sock` is missing, so this document does not claim a live container acceptance. The genuine complete profile→enforcement JVM case is also blocked: collector[1] drain did not complete, and collector[2] CONNECT was observed without a parsed destination. Narrower prepared-policy and publication/refusal JUnit proofs remain, and they do not need Compose. Plan: [web demo completion](superpowers/plans/2026-10-13-web-demo-completion.md).
+Docker 29.9.0 and Compose 5.6.0 are installed here. Podman is absent, and the selected Docker endpoint `/run/user/1000/podman/podman.sock` is missing, so this document does not claim a live container acceptance. The genuine complete profile→enforcement JVM case is also blocked: collector[1] drain did not complete, and collector[2] CONNECT was observed without a parsed destination. Narrower prepared-policy and publication/refusal JUnit proofs remain, and they do not need Compose.
 
 ## Interpret the Result
 

@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 116 (115 open, 1 deferred) | *Total Resolved Issues:* 670
+*Total Active Issues:* 118 (117 open, 1 deferred) | *Total Resolved Issues:* 670
 
 Integration-contract completion: eighteen current task/alignment issues archived with
 [actual accepted P617 receipts](../reviews/2026-10-12-integration-contract-completion.md).
@@ -37,6 +37,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out](issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out.md) | Derive web exploit report verdicts from actual outcomes | high | demos |
+| [issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta](issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta.md) | Repair owned profile-first vulnerable web demo startup | high | demos |
 | [issue-20261012-192946-226-track-unsupported-jdk-fork-launch-callback-bypass-](issue-20261012-192946-226-track-unsupported-jdk-fork-launch-callback-bypass-.md) | Track unsupported JDK FORK launch callback bypass in supervised agent demo | medium | core |
 | [issue-20261012-192945-617-align-external-jdbc-bridge-import-and-bounded-depl](resolved/issue-20261012-192945-617-align-external-jdbc-bridge-import-and-bounded-depl.md) | Align external JDBC bridge import and bounded deployment-origin controls | medium | core |
 | [issue-20261012-192945-891-align-benchmark-published-closure-and-exact-prepar](resolved/issue-20261012-192945-891-align-benchmark-published-closure-and-exact-prepar.md) | Align benchmark published closure and exact prepared isolation-group selection | medium | core |

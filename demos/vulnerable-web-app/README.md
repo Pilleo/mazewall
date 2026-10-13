@@ -8,7 +8,7 @@ The supported workflow is:
 
 That command is a gated profile-first run of the standard application. It is not an 11-CVE sweep and it does not certify a kernel guarantee. A green exit is claimed only when every declared row below matched its expectation and owned retirement was verified. No such live container run is claimed here.
 
-The [startup and evidence lifecycle diagram](../../docs/diagrams/vulnerable_web_lifecycle.svg) shows the single protection decision and shutdown ordering. Continuation plan: [web demo completion](../../docs/superpowers/plans/2026-10-13-web-demo-completion.md).
+The [startup and evidence lifecycle diagram](../../docs/diagrams/vulnerable_web_lifecycle.svg) shows the single protection decision and shutdown ordering.
 
 ## Standard matrix
 
