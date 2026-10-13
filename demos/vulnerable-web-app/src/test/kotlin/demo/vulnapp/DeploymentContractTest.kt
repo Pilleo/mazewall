@@ -37,21 +37,68 @@ class DeploymentContractTest {
         val services = compose.getValue("services") as Map<*, *>
 
         mapOf(
-            "unprotected" to ("8082" to "8080"),
-            "protected" to ("8081" to "8081"),
-            "profile" to ("8083" to "8083"),
+            "unprotected" to Triple("MAZEWALL_PORT_UNPROTECTED", "8082", "8080"),
+            "protected" to Triple("MAZEWALL_PORT_PROTECTED", "8081", "8081"),
+            "profile" to Triple("MAZEWALL_PORT_PROFILE", "8083", "8083"),
         ).forEach { (name, ports) ->
-            val (hostPort, containerPort) = ports
+            val (variable, hostPort, containerPort) = ports
             val service = services[name] as Map<*, *>
-            val publishedPorts = service["ports"] as List<*>
+            val published = (service["ports"] as List<*>).single().toString()
             val environment = (service["environment"] as List<*>)
                 .map { it.toString() }
                 .associate { setting: String -> setting.substringBefore('=') to setting.substringAfter('=') }
 
-            assertEquals(listOf("127.0.0.1:$hostPort:$containerPort"), publishedPorts)
+            assertEquals("127.0.0.1:\${$variable:-$hostPort}:$containerPort", published)
+            assertFalse(published.contains("0.0.0.0"))
             assertEquals("0.0.0.0", environment["SERVER_ADDRESS"])
             assertTrue(service.containsKey("healthcheck"), "$name must expose a container health check")
         }
+    }
+
+    @Test
+    fun `services share one run image and a project-local profile volume`() {
+        val compose = Yaml().load<Map<String, Any>>(Files.readString(projectFile("compose.yml")))
+        val services = compose.getValue("services") as Map<*, *>
+        val images = listOf("unprotected", "protected", "profile").map { name ->
+            val service = services[name] as Map<*, *>
+            val build = service["build"] as Map<*, *>
+            assertFalse(build.containsKey("cache_from"), "latest cache must not bypass the run image")
+            service["image"].toString()
+        }
+        assertEquals(setOf("\${MAZEWALL_IMAGE:?}"), images.toSet())
+        val volume = (compose.getValue("volumes") as Map<*, *>)["profile-artifacts"] as Map<*, *>
+        assertEquals("\${COMPOSE_PROJECT_NAME:?}_profile-artifacts", volume["name"])
+        assertFalse(volume["external"] == true)
+    }
+
+    @Test
+    fun `image build validates the copied jar digest`() {
+        val containerfile = Files.readString(projectFile("Containerfile"))
+        val expected = """
+            ARG APP_JAR=build/libs/vulnerable-app.jar
+            ARG APP_JAR_SHA256
+            COPY ${'$'}{APP_JAR} /app/vulnerable-app.jar
+            RUN test -n "${'$'}APP_JAR_SHA256" && printf '%s  %s\n' "${'$'}APP_JAR_SHA256" /app/vulnerable-app.jar | sha256sum -c -
+            LABEL io.mazewall.demo.jar-sha256=${'$'}{APP_JAR_SHA256}
+        """.trimIndent()
+        assertTrue(containerfile.contains(expected), containerfile)
+    }
+
+    @Test
+    fun `outer profile is explicit and docker seccomp is not an annotation claim`() {
+        val compose = Yaml().load<Map<String, Any>>(Files.readString(projectFile("compose.yml")))
+        val services = compose.getValue("services") as Map<*, *>
+        val script = Files.readString(Path.of("../../scripts/run_vulnerable_app_demo.sh"))
+        for (name in listOf("unprotected", "protected", "profile")) {
+            val service = services[name] as Map<*, *>
+            val annotation = (service["annotations"] as Map<*, *>)["io.podman.annotations.seccomp"].toString()
+            assertEquals("\${MAZEWALL_SECCOMP_PROFILE:?}", annotation)
+            assertFalse(annotation.contains("PWD"))
+            assertFalse(service.containsKey("security_opt"))
+        }
+        assertTrue(script.contains("docker-security-opt"))
+        assertTrue(script.contains("not Docker-enforced Seccomp"))
+        assertFalse(script.contains("down --remove-orphans"))
     }
 
     @Test
