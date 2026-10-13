@@ -72,7 +72,10 @@ probe_absent() {
     if [[ ${rc} -eq 0 ]]; then
         return 1
     fi
-    if [[ ${rc} -eq 1 ]] && grep -Eiq 'no such|not found|not known|does not exist' "${err}"; then
+    if grep -Eiq 'no such file|cannot connect|daemon running|connection refused' "${err}"; then
+        return 2
+    fi
+    if [[ ${rc} -eq 1 || ${rc} -eq 125 ]] && grep -Eiq 'no such (object|image|container|volume|network)|(image|container|volume|network) not known' "${err}"; then
         return 0
     fi
     return 2
@@ -118,7 +121,9 @@ retain_and_retire() {
     for id in "${found[@]}"; do
         [[ -n "${id}" ]] || continue
         run_bounded "${engine[@]}" inspect "${id}" > "${output}/inspect-${id}.json" 2>>"${output}/diagnostics" || true
-        run_bounded "${compose[@]}" logs --no-color "${id}" > "${output}/logs-${id}.txt" 2>>"${output}/diagnostics" || true
+    done
+    for service in profile unprotected protected; do
+        run_bounded "${compose[@]}" logs --no-color "${service}" > "${output}/logs-${service}.txt" 2>>"${output}/diagnostics" || true
     done
     run_bounded "${compose[@]}" stop >/dev/null 2>&1 || true
     if ! run_bounded "${compose[@]}" down -v >>"${output}/diagnostics" 2>&1; then
