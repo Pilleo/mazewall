@@ -1,211 +1,88 @@
-# Mazewall Real-World CVE Exploitation Demo
+# Vulnerable web application demo
 
-This subproject demonstrates `mazewall`'s kernel-level security guarantees by running automated attacks against a Spring Boot application that has inherited real-world vulnerabilities from its dependencies.
-
-The canonical [startup and evidence lifecycle diagram](../../docs/diagrams/vulnerable_web_lifecycle.svg)
-shows the single protection decision and shutdown ordering.
-
-The normal application and compose image omit the executable `CustomGadget` and every
-deserialization import/payload HTTP route. These attack fixtures are compiled into a separate
-artifact only by `:demos:vulnerable-web-app:isolatedVulnerableFixtureJar`; its routes additionally
-require the Spring profile `isolated-vulnerable-fixture`. Run that artifact only in an isolated,
-disposable environment. It is deliberately absent from the default compose services.
-The checked-in `results_report.md` records only fixture packaging/profile verification with its
-exact provenance; it is not evidence that the standard application was attacked.
-
-## Vulnerability Matrix
-
-| Attack Vector | Vulnerability | CVE / Link | Impact | Mazewall Protection (Standard JVM) |
-|---------------|---------------|------------|--------|---------------------|
-| **Log4Shell** | Log4j 2.14.1 | [CVE-2021-44228](https://nvd.nist.gov/vuln/detail/CVE-2021-44228) | RCE (Data-plane) | `Policy.NO_NETWORK` (Trapped) |
-| **SnakeYAML** | SnakeYAML 2.3 | [CVE-2022-1471](https://nvd.nist.gov/vuln/detail/CVE-2022-1471) | Deserialization RCE | Tier 1 `NO_EXEC` (Shell blocked, exfiltration possible via Thread-Hopping) |
-| **XStream**   | XStream 1.4.17 | [CVE-2021-39144](https://nvd.nist.gov/vuln/detail/CVE-2021-39144) | Deserialization RCE | Tier 1 `NO_EXEC` (Shell blocked, exfiltration possible via Thread-Hopping) |
-| **XXE**       | DocumentBuilder | [XXE Injection](https://owasp.org/www-community/vulnerabilities/XML_External_Entity_(XXE)_Processing) | File Exfiltration | Landlock Path Restriction (Trapped) |
-| **SSRF**      | RestTemplate | [SSRF](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) | Internal Network Scanning | `Policy.NO_NETWORK` (Trapped) |
-| **SSTI**      | Thymeleaf 3.x | [SSTI RCE](https://www.veracode.com/blog/secure-development/spring-view-manipulation-vulnerability) | Template Manipulation RCE | Tier 1 `NO_EXEC` (Shell blocked, exfiltration possible via Thread-Hopping) |
-| **Zip Slip**  | ZipInputStream | [Zip Slip](https://snyk.io/research/zip-slip-vulnerability) | Arbitrary File Write | Landlock Path Restriction (Trapped) |
-| **SQLi**      | JdbcTemplate | [SQL Injection](https://owasp.org/www-community/attacks/SQL_Injection) | Database Compromise | *Out of Scope (Data-plane)* |
-
-### ⚠️ The "Thread-Hopping" Exfiltration Caveat
-Notice the distinction in the matrix above. For **Untrusted Data** attacks (SSRF, XXE, Log4Shell's initial JNDI lookup), Mazewall can intercept the relevant synchronous system calls when they execute on the scoped worker thread.
-
-However, for attacks that grant **Arbitrary Code Execution (Java logic)** such as SnakeYAML or Thymeleaf SSTI, the attacker can use standard Java concurrency APIs like `CompletableFuture.runAsync(...)` to execute their payload on the global `ForkJoinPool`. 
-
-Because those global threads were spawned at startup, they only inherited the process-wide **Tier 1 (`NO_EXEC`)** policy. 
-1. **The Attacker CANNOT spawn a shell** (Blocked by Tier 1).
-2. **The Attacker CAN exfiltrate data** by reading files or opening network sockets (Bypassing Tier 2).
-
-This demonstrates that on a standard JIT JVM, thread-scoped containment is a highly effective shield for trusted code, but it is not a complete cage for malicious code. For absolute isolation of untrusted logic, **GraalVM Isolates** or **Wasm** are required.
-
-## Prerequisites
-
-- **Linux Kernel 6.2+** (required for Landlock support)
-- **Podman** (preferred) or Docker with `compose` support
-- **JDK 22+** (if building locally)
-
-## Quick Start
-
-The easiest way to execute the entire real-world CVE exploitation demo is to run the integration test via Gradle:
+The supported workflow is:
 
 ```bash
-# Execute the complete automated exploitation and verification
-./gradlew :demos:vulnerable-web-app:test --tests '*VulnerableWebAppFreshJvmTest'
+./scripts/run_vulnerable_app_demo.sh
 ```
 
-The test starts the real Spring application in separate JVMs. It exercises the environment
-bootstrap, conditional service beans, embedded HTTP server, existing benign admin endpoint,
-service-bean execution boundary, orderly context shutdown, and profile publication. It proves
-that an unprotected command succeeds without overwriting a pre-existing fixture, that the same
-operation is denied by the protected bean while benign HTTP work still succeeds, and that the
-profiling instance publishes non-empty evidence. The test also asserts that no `/command` HTTP
-route exists. Tests create private temporary roots and remove only files they own.
+That command is a gated profile-first run of the standard application. It is not an 11-CVE sweep and it does not certify a kernel guarantee. A green exit is claimed only when every declared row below matched its expectation and owned retirement was verified. No such live container run is claimed here.
 
----
+The [startup and evidence lifecycle diagram](../../docs/diagrams/vulnerable_web_lifecycle.svg) shows the single protection decision and shutdown ordering. Continuation plan: [web demo completion](../../docs/superpowers/plans/2026-10-13-web-demo-completion.md).
 
-## Manual Execution (Step-by-Step)
+## Standard matrix
 
-If you prefer to perform each step manually:
+| ID | Operation | Unprotected | Protected |
+|---|---|---|---|
+| `01_admin_control` | `GET /admin/log` with a benign `X-Api-Version` | Completes | Completes |
+| `02_upload_control` | `POST /upload` of a new benign ZIP entry | Completes | Completes |
+| `03_zip_slip` | ZIP entry that escapes into the owned data root | Escape effect | Denial, no escape file, later benign upload still works |
+| `04_ssrf` | `GET /proxy` of the acquired `unprotected` service `/admin/log` on the project network | Exact target response | Controlled fetch denied; direct benign admin stays healthy |
+| `05_sqli_limit` | `GET /search` that discloses both seeded rows | Application-level disclosure | Same disclosure, labeled a known application-level limit |
 
-### 1. Build the Application
-```bash
-./gradlew :demos:vulnerable-web-app:bootJar
-```
+`INFERRED_PERMISSION_FAILURE` is a weaker observation than authenticated policy denial. Zip-slip and SSRF may accept that weaker row only when the source table allows it and the unsafe effect is absent with a later benign control. It is not an authenticated denial. HTTP 404, HTTP 500, timeout, a missing route, or an ineffective payload is not kernel protection. SQL disclosure is inside the application and is not an OS-boundary success.
 
-### 2. Start the Environment
-The compose file defines three instances with host-loopback port publishing:
-- **Unprotected** (`http://localhost:8082`): Standard JVM, no Mazewall filters.
-- **Protected** (`http://localhost:8081`): Scoped Mazewall filters applied to vulnerable threads.
-- **Profile** (`http://localhost:8083`): observation mode; writes the final SBoB on orderly shutdown.
+The checked-in `results_report.md` records only isolated-fixture packaging and profile gating. It is not evidence that the standard application was attacked. Do not rewrite it.
 
-```bash
-podman compose -f demos/vulnerable-web-app/compose.yml up -d profile unprotected
-# Exercise the profiling instance, then stop it to publish the generation.
-podman compose -f demos/vulnerable-web-app/compose.yml stop profile
-podman compose -f demos/vulnerable-web-app/compose.yml up -d protected
-```
+## Profile-first order
 
-### 3. Exercise the existing HTTP boundary
+The script and any manual reproduction use the same order. Protected start is forbidden before both gates pass:
 
-Use a disposable container instance; do not expose this deliberately vulnerable application to an
-untrusted network.
+1. Build the selected JAR and a run-specific image. The image label `io.mazewall.demo.jar-sha256` and every service image id must match that JAR. A stale `:latest` image does not skip the build. Mismatch exits `identity-failure` (4) before a protected verdict.
+2. Start only `profile` and `unprotected` on a fresh project `mazewall-web-<run-id>` with an empty project volume `mazewall-web-<run-id>_profile-artifacts`.
+3. Wait until each acquired container is running that image and its own `curl` of `/admin/log` returns HTTP 200 and exactly `Log processed: 1.0`. Connect timeout is 3s, request max is 5s, and the phase deadline is 120s (`MAZEWALL_READY_DEADLINE`). HTTP 404/500 never counts as ready. A host listener cannot impersonate the container.
+4. Exercise only benign admin, benign upload, and the project-network proxy target `http://unprotected:8080/admin/log`. Do not train attack paths.
+5. Stop `profile` with a 45s grace inside a 75s deadline. Accept only orderly SIGTERM retirement (exit 0 or 143), not OOM, exit 137, or a forced shutdown.
+6. Copy the volume through a read-only mount into the run directory and validate the pointer, all three generation files, both SHA-256 digests, strict `complete`, and nonempty collector drain evidence.
+7. Only then start `protected`, recheck image id and the read-only `/app/profiles` mount, and wait for the same benign response.
+8. Run the matrix, write the report, then retire only that project, volume, network, and run image tag.
 
-```bash
-# Benign control through a protected service executor
-curl -fsS -H 'X-Api-Version: 1.0' http://127.0.0.1:8081/admin/log
-```
+The run directory is `demos/output/<run-id>/`. It holds `phases.tsv`, `logs-profile.txt`, `logs-unprotected.txt`, `logs-protected.txt`, per-container `inspect-*.json`, `seccomp-enforcement`, `profile/`, `profile-generation`, `unprotected_results.json`, `protected_results.json`, `report.md`, and `status`. Gradle build output stays on the script's stdout; keep that log with the directory. The script does not echo the directory path. Verified disappearance prints `retired mazewall-web-<run-id>` to stderr. Anything short of confirmed absence, including a daemon dial, is `cleanup-error` and does not print `retired`. A cleanup failure after an otherwise successful run is nonzero and keeps the earlier failure code when one already exists.
 
-Direct local runs default `server.address` to `127.0.0.1`. Compose overrides the address inside
-each container to `0.0.0.0` so Docker/Podman port forwarding can reach Tomcat, while every
-published host port remains bound to `127.0.0.1`; the deliberately vulnerable services are not
-exposed on every host interface. Each compose service also has a loopback health check.
+Occupied default ports 8082, 8081, and 8083 fail as `port-occupied` without stopping the listener.
 
-### Profiling lifecycle
+## Optional isolated fixture
 
-`MAZEWALL_ENABLED` is resolved once by Spring's prepared environment before the application
-context creates worker pools. The resolved value is then published as
-`mazewall.resolved-enabled`; both the process-wide baseline and protected/unprotected bean
-selection consume that one decision.
-
-Profiling writes `/app/profiles/sbob.json` and its generation directory into the named
-`profile-artifacts` volume. Enforcement mounts the same volume read-only and consumes that exact
-path. Start enforcement only after an orderly profiling shutdown has published evidence;
-missing evidence aborts startup instead of silently selecting a static policy. The named volume
-persists across container recreation; `compose down -v` explicitly removes the recorded evidence.
-
-Profiling is intentionally a separate instance from enforcement. On shutdown it first rejects
-new service work, then drains all accepted service tasks against one bounded deadline, and only
-then snapshots profiler evidence. Each publication writes the SBoB, stack dictionary, and
-digest-backed integrity record into one immutable generation directory. Only after all three
-components exist does one atomic replacement make `sbob.json` point to that generation. Readers
-resolve and validate that pointer, so an interrupted publication cannot combine components from
-different generations. Incomplete generations remain readable for diagnostics but enforcement
-rejects them by default. The integrity record
-contains `complete`, every drain/cleanup failure reason, and SHA-256 digests for both evidence
-components; timeout and interruption are never overwritten by a later cleanup failure. Legacy
-direct SBoB files remain readable by enforcement. Configure the drain deadline with
-`-Dmazewall.executor-drain-seconds=N` (`1..300`, default `10`).
-
-Generation completeness also requires every registered profiler collector to report complete
-coverage. The manager retains each wrapper's immutable behavior/coverage snapshot after profiler
-shutdown; dropped events, unresolved paths, collector-drain failures and collector warnings are
-retained in the integrity record. Clean executor shutdown cannot erase collection loss. Older
-generations containing only a drain-based `complete` marker must be regenerated because they do
-not supply collector evidence.
-
-The unsafe override `-Dmazewall.allow-incomplete-profile-enforcement=true` permits enforcement
-from incomplete evidence only when an operator explicitly accepts the missing-observation risk.
-Profiling and enforcement are mutually exclusive startup modes: setting both
-`mazewall.profile=true` and `mazewall.enabled=true` aborts startup.
-
-The container image runs as the unprivileged `mazewall` user. Only `/app/data` and `/app/uploads`
-are owned by that user; the named-volume mount point `/app/profiles` remains root-owned but is
-group-writable by `mazewall`. The application and exploded classpath remain root-owned and read-only.
-Creating those writable roots before startup keeps Landlock rules anchored to the exact
-directories instead of falling back to the broader `/app` parent.
-
-## How It Works
-
-To build the optional attack artifact explicitly:
+Default mode is `standard` and omits gadget routes. Isolated selection is a separate tested path, not the standard matrix:
 
 ```bash
-./gradlew :demos:vulnerable-web-app:isolatedVulnerableFixtureJar
-# Inside an isolated disposable environment only:
-java -jar demos/vulnerable-web-app/build/libs/isolated-vulnerable-fixture.jar \
-  --spring.profiles.active=isolated-vulnerable-fixture
+MAZEWALL_DEMO_MODE=isolated ./scripts/run_vulnerable_app_demo.sh
 ```
 
-The standard `bootJar` remains `vulnerable-app.jar` and cannot load the custom command gadget.
-The fixture profile exposes unsafe deserialization routes and a payload generator; it is an
-attack laboratory, not a supported deployment mode or proof of an arbitrary-code boundary.
+That builds `demos/vulnerable-web-app/build/libs/isolated-vulnerable-fixture.jar`, sets Spring profile `isolated-vulnerable-fixture`, and passes `--fixture isolated --jar <that jar> --fixture-profile isolated-vulnerable-fixture`. A missing JAR or inactive profile is `UNSUPPORTED_FIXTURE`, not a denial. Host tests cover that gate with a fake engine. It is not a live container proof and not an arbitrary-code boundary.
 
-The demo uses **Scoped Bean Protection**. Enabled startup explicitly installs the permanent,
-process-safe `NO_EXEC_HOTSPOT` baseline before Spring creates workers. The application retains
-one `ManagedRuntime`, and prepares a separate fixed-policy domain for each service:
+## Manual commands
 
-```kotlin
-val operation = executorOwner.prepare(servicePolicy)
-// prepare uses the retained runtime and DomainLimits(workers = 4, maxAdmissions = 64).
+Use the script. These commands only show the same order; they do not repeat its identity, deadline, or retirement checks:
+
+```bash
+docker compose -p "$project" -f demos/vulnerable-web-app/compose.yml build profile unprotected protected
+docker compose -p "$project" -f demos/vulnerable-web-app/compose.yml up -d --no-build profile unprotected
+# benign workload, orderly stop, then validate the generation before the next line
+docker compose -p "$project" -f demos/vulnerable-web-app/compose.yml stop -t 45 profile
+docker compose -p "$project" -f demos/vulnerable-web-app/compose.yml up -d --no-build protected
 ```
 
-Service delegates submit synchronous `Callable` bodies to their prepared domain:
+Podman is preferred when its CLI exists. On this host Podman is absent. Docker 29.9.0 and Compose 5.6.0 are installed, but the selected endpoint `/run/user/1000/podman/podman.sock` is missing, so these commands are not a completed live run. Do not point Docker at a different socket from this guide.
 
-```kotlin
-override fun importYaml(body: String) = operation.call {
-    realService.importYaml(body)
-}
+## Host JUnit, no Compose
+
+The core presentation tour does not start Compose or this script:
+
+```bash
+./gradlew :demos:vulnerable-web-app:presentationTest --console=plain
 ```
 
-The required installation must finish before target entry. Delivery preserves the original
-business/native/fatal cause; permission exceptions alone are inferred evidence, not authenticated
-policy-denial proof. Caller interruption requests cancellation. An invocation's result or timeout
-does not establish `executionEnd()`; the retained runtime owns live work and cleanup through a
-bounded, retryable drain. Closing does not remove kernel restrictions.
+Those tests compare a prepared service policy and a real publication/incomplete-refusal path. They are not a complete profile→enforcement sweep. That genuine JVM case is blocked: collector[1] drain did not complete, and collector[2] CONNECT was observed without a parsed destination. Do not describe it as passing.
 
-Profiling uses separately owned diagnostic executors and starts without the enforcement baseline,
-so its daemon and demonstrated child commands can launch. The owner retains the acquired raw JDK
-pool separately from its actual `Profiler.wrap` wrapper. Admission, cancellation and body retirement
-act on the raw pool first; wrapper/session close starts only after that pool's bodies have ended.
-An incomplete drain retains both resources and refuses enforcement. Cleanup and publication use
-an absolute entry budget, including contention; a pending IO/collector-close thread stays owned
-and is reported as in progress, not already published or physically ended. Retry after body/worker
-exit can close collectors and publish final coverage. Original cleanup causes, fatal identity and
-interruption remain available through typed incomplete reports and throwing close.
-Disabled development services remain explicitly
-unprotected. Independent executors, already-open descriptors and lazy/late work are outside the
-synchronous body contract.
+## Boundary
 
-`ServiceResourceBindings` is a trusted application/fixture seam shared by policy grants and file
-service use. Deployment defaults remain `/app/data` and `/app/uploads`; they must exist before
-required preparation. Host tests acquire private temporary data/upload directories and bind them
-before application-context startup, exercising all prepared services without changing host `/app`
-paths or widening policies. Native profiling tests hold an actual wrapped body through incomplete
-publication and verify a distinct late filesystem operation in its final real snapshot. Genuine
-incomplete coverage remains refused; a successful worker drain alone never proves complete profiling.
+Thread-scoped containment can deny a direct worker syscall. It does not isolate shared JVM memory or arbitrary hostile Java that hops onto an unrestricted pool. Permission exceptions are inferred evidence. Incomplete profile generations are refused unless an operator explicitly sets `-Dmazewall.allow-incomplete-profile-enforcement=true`. This workflow does not set that override.
 
-## Future Improvements
+Profiling and enforcement stay mutually exclusive. The image runs as unprivileged `mazewall`. Only `/app/data` and `/app/uploads` are owned by that user. Published host ports stay on `127.0.0.1`.
 
-As the core `mazewall:enforcer` library matures (specifically addressing the `OPENAT` and `PROT_EXEC` linkage issues logged in the backlog), this demo will be upgraded to demonstrate tighter constraints:
+## How it works
 
-1.  **Stricter Base Policies:** We will transition the executors from `Policy.NO_NETWORK` to `Policy.PURE_COMPUTE` or `Policy.PURE_COMPUTE_UNSAFE`. This will prove that Mazewall can block advanced kernel exploitation primitives (like arbitrary `ioctl`, `mount`, or `prctl` manipulations) beyond just blocking shell execution and network access.
-2.  **Simplified Configuration:** The verbose boilerplate (e.g., manually appending `.allowMmapExec()`) will be removed, proving that the built-in presets handle JVM-native linking operations safely by default.
-3.  **Lazy Classloading Verification:** A dedicated endpoint will be added to force the JVM to load heavy, uninitialized libraries *inside* the strict sandbox, verifying that `allowJvmClasspath()` seamlessly permits legitimate JVM mechanics while blocking malicious path traversals.
+The standard `bootJar` is `vulnerable-app.jar` and cannot load the custom command gadget. Enabled startup installs the process-safe `NO_EXEC_HOTSPOT` baseline before Spring creates workers, then prepares one fixed-policy domain per service. Service delegates submit synchronous `Callable` bodies to that domain. Installation must finish before target entry. Closing does not remove kernel restrictions.
+
+An incomplete collector drain retains its resources and refuses enforcement. A successful worker drain alone never proves complete profiling.
