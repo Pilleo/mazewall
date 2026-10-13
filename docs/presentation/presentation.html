@@ -3,10 +3,7 @@
 
 <head>
   <meta charset="UTF-8">
-  <title>The Labyrinth of Zero-Trust</title>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;700&display=swap"
-    rel="stylesheet">
+  <title>mazewall — executable behavioral contracts</title>
   <style>
     :root {
       --bg-color: #0a0e14;
@@ -1135,92 +1132,92 @@
   <script>
     const slides = [
       {
-        title: "0. SBOM vs BoB — Composition ≠ Behavior",
+        title: "0. Start with behavior — run the JUnit feature tour",
         context: `
       <div class="context-title">Why This Matters:</div>
       <ul>
         <li><strong>SBOM</strong> (Software Bill of Materials) tells you <em>what's inside</em> the container. It's critical for vulnerability scanning — if log4shell drops, you know immediately who's exposed.</li>
         <li>But the moment software is <em>compromised</em>, composition stops being the most important question. The real question becomes: <strong>what is this software doing right now?</strong></li>
         <li><strong>BoB</strong> (Bill of Behavior) is the behavioral companion: a portable, vendor-supplied contract of exactly what runtime actions the software is expected to perform. It's what an SBOM is to composition — but for behavior.</li>
-        <li><strong>Who authors it?</strong> The <em>software vendor</em> — the only party who knows the intended behavior, test coverage, and expected syscall surface. Enforced at runtime via eBPF (e.g., <strong>Kubescape</strong>).</li>
-        <li>💡 <strong>New to in-process sandboxing?</strong> Read the developer-focused introduction: <a href="article0-developer-primer.html" style="color: var(--accent); text-decoration: underline;">Your Threads Are All Equally Trusted — Should They Be?</a></li>
+        <li><strong>Current mazewall:</strong> Seccomp-BPF syscall rules, Landlock paths and application-owned platform workers. Profiling produces a candidate, not authority over unobserved future paths.</li>
+        <li><strong>Open the examples:</strong> <a href="../../demos/README.md">JUnit feature tour</a> and <a href="PRESENTER_GUIDE.md">presenter guide</a>. Read each test, run it, inspect its real assertions and observed result.</li>
       </ul>
     `,
         show: [] // No SVG layers — this slide uses the HTML panel
       },
       {
-        title: "1. The Naked Application — The Unrestricted Maze",
+        title: "1. Compare unrestricted input with an explicit contract",
         context: `
       <div class="context-title">Developer Context:</div>
       <ul>
         <li>Without behavior mapping, a container is an open field. The maze walls represent code module boundaries — structurally present but providing zero runtime enforcement.</li>
         <li>An RCE exploit cuts through the dependency tree, completely bypassing intended logic, reaching the kernel and calling <em>execve()</em> to spawn a shell.</li>
-        <li><strong>Result:</strong> The application has no authority over what syscalls its own process can make. This is the unrestricted default — what the next slides fix.</li>
+        <li><strong>JUnit01:</strong> An acquired synthetic payload creates its marker without a contract. A process baseline rejects the shell effect; a narrower worker network contract rejects a previously reachable destination while calculation succeeds.</li>
       </ul>
     `,
         show: ['startupZone', 'shutdownZone', 'entryPoint', 'mazeWallsExtra', 'blueThread', 'redAttackSlide1', 'syscalls', 'legend']
       },
       {
-        title: "2. The General BoB — Kernel-Level Whitelist",
+        title: "2. Syscalls and paths answer different questions",
         context: `
       <div class="context-title">Developer Context:</div>
       <ul>
-        <li><strong>BoB (Bill of Behavior):</strong> A profile defining exactly what actions (syscalls, file access) a container is allowed to perform, enforced via eBPF in the kernel.</li>
+        <li><strong>Current enforcement:</strong> Seccomp-BPF constrains syscall behavior; Landlock constrains declared filesystem access. Neither is an implemented dynamic eBPF tenant-identity map.</li>
         <li>The General BoB profiles the container's aggregate allowed behaviors. The attack still traverses internal corridors (<em>Merge Fallacy</em> — hundreds of deps merged into one broad profile). But <em>execve()</em> is not whitelisted and is denied.</li>
-        <li><strong>Who authors the BoB?</strong> The <em>software vendor</em> — the only party who knows what the software is intended to do. Customers no longer reverse-engineer runtime policy from logs. Tools like <strong>Kubescape</strong> use eBPF to profile and enforce BoB-style policies in Kubernetes.</li>
-        <li><strong>Key Insight:</strong> BoB isn't just better anomaly detection — it's a vendor-supplied behavioral contract that travels with the software through the supply chain.</li>
+        <li><strong>JUnit01:</strong> Read the approved workspace, attempt a readable sibling on the same restricted worker, and verify actual failure and unchanged bytes. Permission provenance is reported as inferred when that is all the JDK provides.</li>
+        <li><strong>Key insight:</strong> Legitimate work must succeed beside the negative control. A timeout or missing server is not kernel-denial proof.</li>
       </ul>
     `,
         show: ['startupZone', 'shutdownZone', 'entryPoint', 'mazeWallsExtra', 'blueThread', 'lineWhitelist_active', 'badgeExecveWhitelist', 'redAttackSlide2', 'syscalls', 'legend']
       },
       {
-        title: "3. Lifecycle Partitioning — Temporal Denial",
+        title: "3. Discover a candidate and own its execution lifetime",
         context: `
       <div class="context-title">Developer Context:</div>
       <ul>
-        <li>Even with <em>execve()</em> denied, an attacker might try to load a malicious shared library.</li>
-        <li>During Startup, loading native libraries (requiring <em>mprotect</em> or <em>mmap</em> with <code>PROT_EXEC</code>) is legitimately needed. But once the Kubernetes readiness probe passes, the Startup phase is sealed.</li>
-        <li>The eBPF profile <strong>drops sensitive syscalls from the whitelist entirely</strong> for the Runtime phase.</li>
-        <li>The attack reaches the kernel, attempts to make memory executable (<em>mprotect</em>), and gets phase-denied. Startup capabilities (secret reading, class loading) become permanently inaccessible.</li>
+        <li><strong>JUnit02:</strong> Profile a real named file read, inspect measured coverage and the candidate policy, then reread changed content under enforcement. Incomplete evidence refuses conversion.</li>
+        <li><strong>JUnit03:</strong> A virtual caller hands declared metadata to an owned platform worker. No carrier installs permanent filters; worker context is restored.</li>
+        <li>Finite admission rejects excess work with zero body entry. Caller cancellation can finish while actual lexical cleanup is still live and drain is <strong>Incomplete</strong>.</li>
+        <li>Release cleanup, await <code>executionEnd</code>, complete drain and observe the acquired worker terminate. Closing does not uninstall filters; HotSpot executable mappings retain the selected runtime contract.</li>
       </ul>
     `,
         show: ['startupZone', 'shutdownZone', 'entryPoint', 'mazeWallsExtra', 'blueThread', 'lineWhitelist_dim', 'linePhase_active', 'badgeExecveWhitelist_dim', 'badgeMprotectPhase', 'startupBulkhead', 'shutdownGate', 'redAttackSlide3', 'syscalls', 'legend']
       },
       {
-        title: "4. Stacktrace Enforcement — Call-Path Binding",
+        title: "4. Experimental supervision — authorize the exact tool path",
         context: `
       <div class="context-title">Developer Context:</div>
       <ul>
-        <li>The General BoB allows <em>read()</em> because many modules need it. But <em>which</em> code path triggered it?</li>
-        <li>A user-space agent uses DWARF symbols to map allowed call stacks to fixed <strong>Instruction Pointers (IPs)</strong>. The kernel eBPF program unwinds the stack at syscall entry and verifies the IPs against this allowed map.</li>
-        <li>The red attack achieves RCE and hijacks execution via a <strong>ROP chain</strong> through the Logging library, attempting to call <em>read()</em>.</li>
-        <li>The eBPF stack unwinder detects that the actual IP sequence doesn't match the expected call-path, neutralizing code-path hijacking even when the syscall itself is whitelisted.</li>
+        <li><strong>JUnit04:</strong> The same acquired private HTTP target is reachable without the contract and rejected by the unchanged custom CONNECT classifier. No live model or public network endpoint is required.</li>
+        <li>Seccomp USER_NOTIF pauses selected syscalls; an external supervisor checks the JVM stack. The approved named analysis frame permits process creation; the web-tool frame does not.</li>
+        <li>Preserve exact CONNECT + VFORK/FORK handlers and select VFORK before ProcessImpl initializes. Broad CLONE supervision would threaten JVM coordination; unsupported FORK remains separately tracked.</li>
+        <li>This is experimental selected call-path authorization, <strong>not</strong> an implemented DWARF/eBPF ROP verifier or shared-memory isolation boundary.</li>
       </ul>
     `,
         show: ['startupZone', 'shutdownZone', 'entryPoint', 'mazeWallsExtra', 'lineWhitelist_dim', 'linePhase_dim', 'lineStack_active', 'badgeExecveWhitelist_dim', 'badgeMprotectPhase_dim', 'badgeReadStack', 'startupBulkhead', 'shutdownGate', 'stacktraceEnforcement', 'syscalls', 'legend']
       },
       {
-        title: "5. Thread-Scoped Context — Defeating the Confused Deputy",
+        title: "5. Cross an explicit process boundary with a generated tool",
         context: `
       <div class="context-title">Developer Context:</div>
       <ul>
-        <li>The stacktrace matches perfectly: <em>DownloadController → File.read()</em>. The code isn't hijacked; it's tricked by malicious input (e.g., <em>../../etc/passwd</em>). This is the <strong>Confused Deputy</strong> problem.</li>
-        <li><strong>Solution:</strong> The app runtime pushes dynamic thread context (user role, tenant ID) into an eBPF-readable kernel map.</li>
-        <li>At the <strong>eBPF LSM (Linux Security Module)</strong> layer, the kernel securely resolves the path and checks not just <em>what</em> code called it, but <em>on whose behalf</em> and with what data boundaries.</li>
-        <li><strong>Examples:</strong> Restricting a JSON parser to its specific input buffer, or preventing cross-tenant file access at the syscall layer.</li>
+        <li><strong>JUnit05:</strong> Actual Koog registry → prepared generated service → distinct protected child. <code>aBc éß🙂</code> becomes <code>ABC éß🙂</code>; non-ASCII text is preserved.</li>
+        <li>The guest implementation is opaque worker data, not loadable host code. Typed text cannot choose a path, operation policy or arbitrary guest implementation.</li>
+        <li>Observe real readiness, distinct worker PID, strict input/wire bounds and acquired child retirement. Host parsing/codecs remain outside the protected service call.</li>
+        <li>The diagram is conceptual. The implemented proof is a bounded first-party process service, not universal arbitrary-JAR trust, exhaustive environment secrecy or same-process tenant-memory isolation.</li>
       </ul>
     `,
         show: ['startupZone', 'shutdownZone', 'entryPoint', 'mazeWallsExtra', 'lineWhitelist_dim', 'linePhase_dim', 'lineStack_dim', 'lineScope_active', 'badgeExecveWhitelist_dim', 'badgeMprotectPhase_dim', 'badgeReadStack_dim', 'badgeReadScope', 'startupBulkhead', 'shutdownGate', 'threadScope', 'syscalls', 'legend']
       },
       {
-        title: "6. Defense in Depth — Complete Profiling",
+        title: "6. Framework adoption and the exact limits of a green test",
         context: `
       <div class="context-title">Developer Context:</div>
       <ul>
-        <li><strong>Holistic Security:</strong> A truly restricted workload relies on multiple overlapping BoB layers. Each gate enforces one dimension: <em>what</em> syscall, <em>when</em> in lifecycle, <em>which</em> code path, <em>on whose behalf</em>.</li>
-        <li><strong>Whitelist</strong> stops unauthorized binaries. <strong>Phase Lock</strong> drops capabilities post-initialization. <strong>Stack Gate</strong> catches memory exploits. <strong>Scope Gate</strong> bounds data access by identity.</li>
-        <li><strong>Why not AI?</strong> Learned models are opaque, non-portable, and impossible to audit or compare across environments. A vendor-signed BoB is explicit, reviewable, and attributable — a verifiable contract beats an opaque model every time.</li>
-        <li><strong>Ecosystem:</strong> <strong>Kubescape</strong> (eBPF behavioral profiling), <strong>Tetragon</strong>, <strong>Falco</strong>, <strong>KubeArmor</strong> all implement adjacent parts of this stack. BoB is the missing portable artifact that ties them together.</li>
+        <li><strong>JUnit06:</strong> Finished Boot singleton, external known-fixture review, exact report/template access and real H2 commit/rollback. SQL rollback does not undo file or heap effects.</li>
+        <li><strong>JUnit07:</strong> Separately packaged optional Security demonstrates Admin/Bob post-authorization, real SQL rollback and clean context after error/denial/cancellation. The Boot example itself is Security-free.</li>
+        <li>A green assertion proves the exercised contract. Thread scope does not isolate shared JVM memory, helpers or already-open resources. Profiling does not cover every future path; cancellation is not physical end.</li>
+        <li>Production authority, remote retrieval, unfamiliar-human rehearsal and compatible already-enabled CET remain explicit gates. <a href="PRESENTER_GUIDE.md">Run the independently owned examples and inspect their evidence.</a></li>
       </ul>
     `,
         show: ['startupZone', 'shutdownZone', 'entryPoint', 'mazeWallsExtra', 'blueThread', 'lineWhitelist_active', 'linePhase_active', 'lineStack_active', 'lineScope_active', 'badgeExecveWhitelist', 'badgeMprotectPhase', 'badgeReadStack', 'badgeReadScope', 'genericAttacksSlide6', 'startupBulkhead', 'shutdownGate', 'syscalls', 'legend']

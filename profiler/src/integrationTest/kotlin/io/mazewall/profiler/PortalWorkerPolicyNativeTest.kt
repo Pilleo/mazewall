@@ -356,7 +356,8 @@ class PortalWorkerPolicyNativeTest : BaseIntegrationTest() {
                         frames.any { it.className.startsWith("io.mazewall.profiler.internal.ProfilerTraceListener") }
                 }
                 if (observed.size == 2) break
-                Thread.sleep(1)
+                java.util.concurrent.locks.LockSupport
+                    .parkNanos(TimeUnit.MILLISECONDS.toNanos(1))
             } while (System.nanoTime() < deadline)
             assertEquals(2, observed.size, "Capture the actual per-session listener/collector identities and source stacks")
             return observed

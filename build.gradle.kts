@@ -103,7 +103,7 @@ allprojects {
         val failedTestsOutputs = ConcurrentHashMap<String, StringBuilder>()
         val maxCapturedOutputChars = 64 * 1024
 
-        if (isVerbose) {
+        if (isVerbose || name == "presentationTest") {
             testLogging {
                 events("passed", "skipped", "failed", "standardOut", "standardError")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
@@ -312,6 +312,29 @@ detekt {
 }
 
 subprojects {
+    plugins.withId("java") {
+        if (path in setOf(":demos:cli-demo", ":demos:agent-sandbox-demo", ":demos:vulnerable-web-app", ":demos:koog-contained-tool")) {
+            val demoTests = extensions.getByType<SourceSetContainer>()["test"]
+            tasks.named<Test>("test") { useJUnitPlatform { excludeTags("presentation") } }
+            tasks.register<Test>("presentationTest") {
+                group = "verification"
+                description = "Run independently owned JUnit feature examples in teaching order."
+                testClassesDirs = demoTests.output.classesDirs
+                classpath = demoTests.runtimeClasspath
+                useJUnitPlatform { includeTags("presentation") }
+                maxParallelForks = 1
+                systemProperty("junit.jupiter.execution.parallel.enabled", "false")
+                systemProperty("junit.jupiter.testclass.order.default", "org.junit.jupiter.api.ClassOrderer\$DisplayName")
+                outputs.upToDateWhen { false }
+                outputs.cacheIf { false }
+                jvmArgs("--enable-native-access=ALL-UNNAMED")
+                testLogging {
+                    events("passed", "failed", "skipped", "standardOut", "standardError")
+                    showStandardStreams = true
+                }
+            }
+        }
+    }
     if (project.path.startsWith(":demos")) {
         return@subprojects
     }
@@ -979,6 +1002,24 @@ tasks.register<Exec>("refactorFirstReport") {
         "--output",
         refactorFirstOutput.get().asFile.absolutePath,
     )
+}
+
+val presentationStages =
+    listOf(":demos:cli-demo", ":demos:agent-sandbox-demo") +
+        listOfNotNull(findProject(":demos:koog-contained-tool")?.path)
+
+tasks.register("presentationTest") {
+    group = "verification"
+    description = "Teach contracts, owned execution, supervised tools, then optional process Portals."
+    dependsOn(presentationStages.map { "$it:presentationTest" })
+    doFirst {
+        logger.lifecycle("Presentation stages: {}. Finished Boot/Security and web examples have separate owning tasks.", presentationStages)
+    }
+}
+gradle.projectsEvaluated {
+    presentationStages.zipWithNext().forEach { (before, after) ->
+        project(after).tasks.named("presentationTest") { mustRunAfter("$before:presentationTest") }
+    }
 }
 
 // Wipes every module's JUnit XML/binary result directories (all test variants).

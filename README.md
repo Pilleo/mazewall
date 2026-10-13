@@ -235,6 +235,10 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 
 ## Where to Go Next
 
+For a logical, executable feature tour, open the [JUnit showcase tests](demos/README.md)
+and follow the [presenter guide](docs/presentation/PRESENTER_GUIDE.md). Each example
+has real assertions, a short outcome trace and its own native/resource lifetime.
+
 | I want to… | Go to |
 |---|---|
 | Install and write my first policy | [GETTING_STARTED.md](GETTING_STARTED.md) |
@@ -254,6 +258,9 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 | `:enforcer` | Core runtime — zero dependencies beyond Kotlin stdlib | Experimental; evaluate only with an explicit threat-model and supported-platform review |
 | `:profiler` | Developer tool — profiles a workload and generates a minimal policy | Experimental policy discovery; generated policies require validation |
 | `:demos:cli-demo` | Interactive CLI exploits showcase | 🚫 Demo only |
+| `:demos:agent-sandbox-demo` | Custom supervised tool compartments and offline JUnit controls | Experimental demo |
+| `:demos:koog-contained-tool` | Generated bounded process-Portal tool | Optional Koog demo |
+| `demos/spring-boot-sandbox` | Finished-JAR singleton, JDBC and owned execution | Standalone published consumer |
 | `:demos:vulnerable-web-app` | Spring Boot CVE demo (Log4Shell, SSRF, XXE…) | 🚫 Demo only |
 
 ---

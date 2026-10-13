@@ -61,6 +61,7 @@ dependencies {
         add(guest.implementationConfigurationName, project(":koog-denied-api"))
     }
     testImplementation(kotlin("test"))
+    testImplementation(rootProject.sourceSets["sharedTest"].output)
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter.api)
     testRuntimeOnly(libs.junit.jupiter.engine)
@@ -82,7 +83,10 @@ configure<PortalCodegenExtension> {
         PortalInstanceMode.STATEFUL_SINGLETON, "static-baseline", "bounded-text-worker",
     ))
 }
-tasks.test { useJUnitPlatform() }
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    dependsOn(tasks.named("jar"))
+}
 publishing {
     publications { create<MavenPublication>("containedTool") { from(components["java"]) } }
     repositories { maven { name = "consumerStage"; url = uri(layout.buildDirectory.dir("consumer-stage")) } }

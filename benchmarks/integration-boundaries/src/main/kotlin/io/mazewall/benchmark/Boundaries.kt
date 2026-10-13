@@ -159,6 +159,14 @@ private fun selectioncheck() {
     rejects("PID mismatch") { preparedHealth(listOf(selected), manifest, pid + 1) }
     rejects("lifecycle PID mismatch") { preparedHealth(listOf(selected.copy(lastWorkerLifecycle = selected.lastWorkerLifecycle.copy(pid = pid + 1))), manifest, pid) }
     rejects("state lost") { preparedHealth(listOf(selected.copy(state = PortalServiceHealthState.STATE_LOST)), manifest, pid) }
+    rejects("health mode mismatch") { preparedHealth(listOf(selected.copy(instanceMode = PortalInstanceMode.STATELESS)), manifest, pid) }
+    rejects("health policy mismatch") { preparedHealth(listOf(selected.copy(policyProfile = manifest.policyProfile + "-other")), manifest, pid) }
+    rejects("nonpositive PID") {
+        preparedHealth(listOf(selected.copy(workerPids = listOf(0L), lastWorkerLifecycle = selected.lastWorkerLifecycle.copy(pid = 0L))), manifest)
+    }
+    rejects("worker not started") {
+        preparedHealth(listOf(selected.copy(lastWorkerLifecycle = selected.lastWorkerLifecycle.copy(state = PortalWorkerLifecycleState.entries.first { it != PortalWorkerLifecycleState.STARTED }))), manifest, pid)
+    }
     rejects("missing timing") { preparedTiming(selected.copy(lastInvocation = null), null, 0, 0) }
     rejects("stale timing") { preparedTiming(selected, timing, 1, 1) }
     rejects("request mismatch") { preparedTiming(selected, null, 1, 0) }

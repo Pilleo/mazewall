@@ -15,6 +15,9 @@ dependencies {
     implementation "io.mazewall:${artifact}:${providers.gradleProperty('consumerVersion').get()}"
     implementation platform('org.springframework.boot:spring-boot-dependencies:4.1.1')
     implementation 'com.h2database:h2'
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 sourceSets {
@@ -100,6 +103,21 @@ tasks.register('verifyOriginControls', JavaExec) {
 def securityRoot = layout.buildDirectory.dir('security-native-proof')
 def securityClasspath = files(tasks.named('securityJar').flatMap { it.archiveFile },
         tasks.named('otherJar').flatMap { it.archiveFile }, configurations.securityRuntimeClasspath)
+tasks.register('presentationTest', Test) {
+    dependsOn tasks.named('securityJar'), tasks.named('otherJar')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'presentation' }
+    maxParallelForks = 1
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    doFirst {
+        systemProperty 'presentation.securityJar', tasks.named('securityJar').get().archiveFile.get().asFile.absolutePath
+        systemProperty 'presentation.classpath', securityClasspath.asPath
+    }
+    testLogging { events 'passed', 'failed', 'standardOut', 'standardError'; showStandardStreams = true }
+}
 tasks.register('measureSecurityCandidate', JavaExec) {
     dependsOn tasks.named('securityJar'), tasks.named('otherJar')
     javaLauncher = javaToolchains.launcherFor(java.toolchain)
