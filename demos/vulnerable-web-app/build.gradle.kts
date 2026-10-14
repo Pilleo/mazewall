@@ -1,37 +1,44 @@
 plugins {
-    kotlin("jvm")
-    kotlin("plugin.spring") version "2.4.0"
-    id("org.springframework.boot") version "3.4.0"
-    alias(libs.plugins.detekt)
-    alias(libs.plugins.ktlint)
-    alias(libs.plugins.spotbugs)
+    id("mazewall.quality-conventions")
+    alias(libs.plugins.kotlinPluginSpring)
+    alias(libs.plugins.springBoot)
     id("jacoco")
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(25))
-    }
-}
-
-kotlin {
-    jvmToolchain(25)
 }
 
 configurations.all {
     exclude(group = "org.springframework.boot", module = "spring-boot-starter-logging")
     resolutionStrategy {
-        force("org.apache.logging.log4j:log4j-api:2.14.1")
-        force("org.apache.logging.log4j:log4j-core:2.14.1")
-        force("org.apache.logging.log4j:log4j-jul:2.14.1")
-        force("org.apache.logging.log4j:log4j-slf4j-impl:2.14.1")
-        force("com.thoughtworks.xstream:xstream:1.4.17")
+        force(
+            libs.vulnerable.log4j.api
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.log4j.core
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.log4j.jul
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.log4j.slf4j
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.xstream
+                .get()
+                .toString(),
+        )
     }
 }
 
 dependencies {
     // Import Spring Boot BOM to resolve Starter versions
-    implementation(platform("org.springframework.boot:spring-boot-dependencies:3.4.0"))
+    implementation(platform(libs.spring.boot.bom))
 
     implementation(project(":enforcer"))
     implementation(project(":profiler"))
@@ -42,23 +49,23 @@ dependencies {
 
     // Database & SQL Injection
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
-    implementation("com.h2database:h2:2.2.224")
+    implementation(libs.h2)
 
     // Log4Shell (vulnerable Log4j 2.14.1)
-    implementation("org.apache.logging.log4j:log4j-api:2.14.1")
-    implementation("org.apache.logging.log4j:log4j-core:2.14.1")
-    implementation("org.apache.logging.log4j:log4j-slf4j-impl:2.14.1")
+    implementation(libs.vulnerable.log4j.api)
+    implementation(libs.vulnerable.log4j.core)
+    implementation(libs.vulnerable.log4j.slf4j)
 
     // SnakeYAML for CVE-2022-1471 (Explicitly added for YamlImportService)
     implementation("org.yaml:snakeyaml")
 
     // XStream 1.4.17 for CVE-2021-39144
-    implementation("com.thoughtworks.xstream:xstream:1.4.17")
+    implementation(libs.vulnerable.xstream)
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation(kotlin("test"))
     testImplementation(rootProject.sourceSets["sharedTest"].output)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testRuntimeOnly(libs.junit.platform.launcher)
 }
 
 tasks.withType<Test> {
@@ -140,19 +147,16 @@ tasks.register<org.springframework.boot.gradle.tasks.bundling.BootJar>("isolated
     classpath(vulnerableFixture.runtimeClasspath)
 }
 
-val extractJacocoAgent by tasks.registering(Copy::class) {
-    // org.jacoco.agent is a wrapper jar containing jacocoagent.jar inside.
-    // Extract it once so bootRun can reference it as a -javaagent.
-    val agentWrapperJar =
-        configurations["jacocoAgent"]
-            .resolvedConfiguration.resolvedArtifacts
-            .first { it.name == "org.jacoco.agent" }
-            .file
-    from(zipTree(agentWrapperJar)) {
-        include("jacocoagent.jar")
+val extractJacocoAgent =
+    tasks.register<Copy>("extractJacocoAgent") {
+        // org.jacoco.agent is a wrapper jar containing jacocoagent.jar inside.
+        // Extract it once so bootRun can reference it as a -javaagent.
+        val jacocoAgent = configurations.named("jacocoAgent")
+        from(providers.provider { zipTree(jacocoAgent.get().singleFile) }) {
+            include("jacocoagent.jar")
+        }
+        into(layout.buildDirectory.dir("jacoco"))
     }
-    into(layout.buildDirectory.dir("jacoco"))
-}
 
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     mainClass.set("demo.vulnapp.VulnAppApplicationKt")

@@ -1,8 +1,7 @@
 import java.math.BigDecimal
 
 plugins {
-    `java-library`
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
@@ -41,12 +40,19 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
 }
 
-val integrationTestImplementation by configurations.getting {
+configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.testImplementation.get())
 }
 
-val integrationTestRuntimeOnly by configurations.getting {
+configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
+}
+
+configurations.named("integrationTestCompileClasspath") {
+    attributes.attribute(
+        org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+        objects.named(org.gradle.api.attributes.LibraryElements.JAR),
+    )
 }
 
 val compileVulnerableRop =
@@ -179,14 +185,10 @@ val integrationTestFreshJvm =
         doFirst(io.mazewall.build.FreshJvmClassFilterAction())
     }
 
-tasks.check {
-    dependsOn(integrationTest, integrationTestFreshJvm)
-}
-
 tasks.test {
 }
 
-val plantumlConfig by configurations.creating
+val plantumlConfig = configurations.create("plantumlConfig")
 
 dependencies {
     plantumlConfig(libs.plantuml.core)
@@ -336,6 +338,5 @@ tasks.named("generateClassDiagrams") {
         cleanup(svgFile)
     }
 }
-
 // Diagram generation writes checked-in documentation. Keep it explicit (`generateClassDiagrams`)
 // so ordinary builds remain read-only with respect to the source tree.

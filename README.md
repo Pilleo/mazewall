@@ -239,6 +239,10 @@ For a logical, executable feature tour, open the [JUnit showcase tests](demos/RE
 and follow the [presenter guide](docs/presentation/PRESENTER_GUIDE.md). Each example
 has real assertions, a short outcome trace and its own native/resource lifetime.
 
+### Build verification
+
+Use `./gradlew unitCheck` for host-safe tests and coverage, `./gradlew kernelCheck` for privileged kernel integration tests, and `./gradlew build` for the full merge gate. Normal verification is read-only; run `./gradlew format`, `./gradlew updateDiagrams`, or `./gradlew installGitHooks` only when those explicit maintenance actions are intended. Dependency changes require a reviewed `./gradlew dependencies --write-locks --write-verification-metadata sha256` update.
+
 | I want to… | Go to |
 |---|---|
 | Install and write my first policy | [GETTING_STARTED.md](GETTING_STARTED.md) |

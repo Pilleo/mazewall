@@ -8,9 +8,9 @@ import demo.vulnapp.config.ProfileArtifactPublisher
 import demo.vulnapp.config.ServiceExecutorOwner
 import demo.vulnapp.config.ServiceResourceBindings
 import demo.vulnapp.config.collectorCoverage
-import demo.vulnapp.service.ProxyService
 import demo.vulnapp.service.DefaultFileService
 import demo.vulnapp.service.FileService
+import demo.vulnapp.service.ProxyService
 import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.api.IsolatedProcessTester
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
@@ -153,7 +153,8 @@ class VulnerableWebAppFreshJvmTest {
 
     @Suppress("unused")
     fun profileIncompleteEvidenceBody(rootText: String) {
-        val root = java.nio.file.Path.of(rootText)
+        val root = java.nio.file.Path
+            .of(rootText)
         val target = root.resolve("sbob.json")
         val bindings = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
         System.setProperty("mazewall.sbob.path", target.toString())
@@ -169,7 +170,8 @@ class VulnerableWebAppFreshJvmTest {
                     zip.write("bound upload".toByteArray())
                     zip.closeEntry()
                 }
-                val upload = org.springframework.mock.web.MockMultipartFile("file", "benign.zip", "application/zip", bytes.toByteArray())
+                val upload = org.springframework.mock.web
+                    .MockMultipartFile("file", "benign.zip", "application/zip", bytes.toByteArray())
                 application.getBean(FileService::class.java).extractZip(upload)
                 application.getBean(ProxyService::class.java).fetchUrl("http://unprotected:8080/admin/log")
                 assertFalse(Files.exists(target), "current-generation pointer must be published only during shutdown")

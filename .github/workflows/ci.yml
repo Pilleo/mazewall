@@ -56,31 +56,65 @@ jobs:
                           - '**/*.kt'
                           - '**/*.java'
                           - '**/*.kts'
+                          - '**/*.gradle'
+                          - 'gradle/libs.versions.toml'
+                          - '**/gradle.lockfile'
+                          - 'gradle/verification-metadata.xml'
                           - '**/gradle.properties'
                           - '**/Containerfile'
                           - 'scripts/**'
 
-            - name: Restore Gradle Build Cache
+            - name: Restore Container Gradle Cache
               uses: actions/cache/restore@v4
               with:
                   path: |
-                      ~/.gradle/build-cache
                       ~/.cache/mazewall/container-gradle
-                  key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
+                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
                   restore-keys: |
-                      gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-
-                      gradle-build-cache-${{ runner.os }}-
-
+                      container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-
+                      container-gradle-${{ runner.os }}-
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+                  # GitHub scopes PR caches to the PR merge ref. Allowing writes
+                  # lets reruns restore the first attempt without exposing the
+                  # entry to the default branch.
+                  cache-read-only: false
+                  gradle-home-cache-includes: |
+                      caches
+                      notifications
+                      dependency-check-data
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
             - name: Run Host-Safe Unit Quality Gate
+              id: host_unit
               # This gate intentionally precedes Podman setup: ordinary CI
               # runners must be able to prove unit behavior and coverage.
               run: ./gradlew unitCheck --no-daemon
+            - name: Verify reproducible dependency state
+              run: ./gradlew verifyGradleReproducibility --no-daemon
+            - name: Prove configuration-cache reuse
+              run: |
+                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
+                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
+            - name: Verify CI cache policy
+              run: ./scripts/check_ci_cache_policy.sh
+            - name: Verify host/kernel Gradle lifecycle split
+              run: ./scripts/check_gradle_lifecycle.sh
+            - name: Triage failed host verification
+              if: steps.host_unit.outcome == 'failure'
+              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon
+            - name: Upload Gradle diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: gradle-diagnostics
+                  path: |
+                      build/reports/problems/
+                      build/reports/triage/
+                      build/reports/gradle-baseline/
+                  if-no-files-found: ignore
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -105,13 +139,14 @@ jobs:
                   if [ -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar ]; then
                       podman load -i ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar
                   fi
-            - name: Run Containerized Build, Lint, Tests & Coverage Verification
+            - name: Run Privileged Kernel Gate and Assemble
               run: |
                   set -o pipefail
-                  ./scripts/run_containerized_tests.sh build 2>&1 | tee build.log
+                  # unitCheck already ran on the host for this exact checkout.
+                  ./scripts/run_containerized_tests.sh kernelCheck assemble 2>&1 | tee build.log
             - name: Run PITest (Host Unit Tests Only)
               if: steps.filter.outputs.code == 'true'
-              run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Dpitest.threads=2
+              run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Pmazewall.pitest.threads=2
             - name: Run Vulnerability Exploitation Demo
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh
@@ -134,21 +169,9 @@ jobs:
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
-            - name: Get Current Date for NVD Cache Key
-              id: nvd-date
-              run: echo "date=$(date -u +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-            - name: Restore NVD Database Cache
-              uses: actions/cache/restore@v4
-              with:
-                  path: |
-                      ~/.gradle/dependency-check-data
-                      ~/.cache/mazewall/nvd-db
-                  key: nvd-database-${{ runner.os }}-${{ steps.nvd-date.outputs.date }}
-                  restore-keys: |
-                      nvd-database-${{ runner.os }}-
             - name: Run Security Check
               if: steps.filter.outputs.code == 'true'
-              run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze --info
+              run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
             - name: Verify Workspace and Cache Ownership
@@ -163,22 +186,13 @@ jobs:
                           fi
                       fi
                   done
-            - name: Save NVD Database Cache (Always)
-              uses: actions/cache/save@v4
-              if: always()
-              with:
-                  path: |
-                      ~/.gradle/dependency-check-data
-                      ~/.cache/mazewall/nvd-db
-                  key: nvd-database-${{ runner.os }}-${{ steps.nvd-date.outputs.date }}
-            - name: Save Gradle Build Cache (Master Only)
+            - name: Save Container Gradle Cache (Master Only)
               uses: actions/cache/save@v4
               if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               with:
                   path: |
-                      ~/.gradle/build-cache
                       ~/.cache/mazewall/container-gradle
-                  key: gradle-build-cache-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties') }}-${{ github.sha }}
+                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository

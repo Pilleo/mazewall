@@ -11,8 +11,9 @@ import java.time.Duration
 internal object DiagnosticTriageRunner {
     @JvmStatic
     fun main(args: Array<String>) {
+        val options = parseOptions(args)
         println("==> Initiating mazewall local diagnostic triage...")
-        val targetFile = File("build/triage_report.json")
+        val targetFile = options.output
 
         // 1. Capture local kernel audit logs for blocked syscalls (SECCOMP/Landlock)
         val dmesgLogs = captureDmesg()
@@ -39,18 +40,41 @@ internal object DiagnosticTriageRunner {
                 "hs_err_logs" to hsErrLogs,
                 "kernel_security_config" to kernelConfig,
             ),
+            options.failedTask,
         )
 
-        println("==> Local diagnostic triage complete. Report written to: build/triage_report.json")
+        println("==> Local diagnostic triage complete. Report written to: ${targetFile.path}")
+    }
+
+    private data class Options(
+        val failedTask: String?,
+        val output: File,
+    )
+
+    private fun parseOptions(args: Array<String>): Options {
+        var failedTask: String? = null
+        var output = File("build/triage_report.json")
+        var index = 0
+        while (index < args.size) {
+            require(index + 1 < args.size) { "Missing value for ${args[index]}" }
+            when (val option = args[index]) {
+                "--failed-task" -> failedTask = args[index + 1]
+                "--output" -> output = File(args[index + 1])
+                else -> error("Unknown triage option: $option")
+            }
+            index += 2
+        }
+        return Options(failedTask, output)
     }
 
     internal fun writeReport(
         targetFile: File,
         timestamp: Long,
         diagnostics: Map<String, String>,
+        failedTask: String? = null,
     ) {
         targetFile.parentFile?.mkdirs()
-        targetFile.writeText(diagnosticReportJson(timestamp, diagnostics))
+        targetFile.writeText(diagnosticReportJson(timestamp, diagnostics, failedTask))
     }
 
     /** Timeout for reading an owned external helper's stdout, not for self-snapshot acquisition. */

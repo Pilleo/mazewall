@@ -5,7 +5,7 @@ import java.security.MessageDigest
 import java.util.Properties
 
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
     `java-gradle-plugin`
 }
 

@@ -73,6 +73,36 @@ class ForeignFdGuardTest {
     }
 
     @Test
+    fun descriptorClosedAfterFirstReadlinkIsNotAStableForeignSnapshot() =
+        withOwnedFile { owner, entry, _ ->
+            var observed = false
+            val guard = ForeignFdGuard(ROOT) { path ->
+                val target = Files.readSymbolicLink(path)
+                if (path == entry && owner.isOpen) {
+                    observed = true
+                    owner.close()
+                }
+                target
+            }
+            val context = context()
+            guard.beforeEach(context)
+            guard.afterEach(context)
+            assertTrue(observed, "The owned descriptor must close after its first successful readlink")
+        }
+
+    @Test
+    fun inspectionErrorAtVerificationReadlinkPropagates() =
+        withOwnedFile { _, entry, _ ->
+            var reads = 0
+            val failure = AccessDeniedException(entry.toString(), null, "EACCES on stable reread")
+            val guard = ForeignFdGuard(ROOT) { path ->
+                if (path == entry && ++reads == 2) throw failure
+                Files.readSymbolicLink(path)
+            }
+            assertSame(failure, assertThrows(AccessDeniedException::class.java) { guard.beforeEach(context()) })
+        }
+
+    @Test
     fun inspectionErrorsPropagateUnchanged() =
         withOwnedFile { _, entry, _ ->
         val failures = listOf(

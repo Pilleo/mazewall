@@ -24,6 +24,7 @@ public abstract class TestFailureTriage {
     protected abstract BuildEventsListenerRegistry getEvents();
 
     public void wire(Project root, TaskProvider<? extends Task> triage) {
+        var explicitFailure = root.getProviders().gradleProperty("triage.failedTask");
         var barrier = root.getTasks().register("testFailureEventsReady");
         var failures = root.getGradle().getSharedServices().registerIfAbsent(
             "mazewallTestFailures", FailureEvents.class, spec -> {
@@ -40,7 +41,8 @@ public abstract class TestFailureTriage {
         triage.configure(task -> {
             task.dependsOn(barrier);
             task.usesService(failures);
-            task.onlyIf("a Test task failed in this build", ignored -> failures.get().awaitFailure());
+            task.onlyIf("a failed task was supplied or a Test failed in this build",
+                ignored -> explicitFailure.isPresent() || failures.get().awaitFailure());
         });
     }
 

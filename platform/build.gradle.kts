@@ -1,7 +1,7 @@
 import java.math.BigDecimal
 
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
 }
@@ -35,11 +35,11 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
 }
 
-val integrationTestImplementation by configurations.getting {
+configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.testImplementation.get())
 }
 
-val integrationTestRuntimeOnly by configurations.getting {
+configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
@@ -80,10 +80,6 @@ tasks.register<Exec>("verifyCAbi") {
     commandLine(cAbiOracle.get().asFile.absolutePath)
 }
 
-tasks.check {
-    dependsOn(integrationTest)
-}
-
 tasks.test {
     dependsOn(compileCAbiOracle)
 }
@@ -120,8 +116,15 @@ pitest {
             "io.mazewall.ffi.nix.*",
             "io.mazewall.ffi.linux.*",
             "io.mazewall.MockNativeEngine*",
+            // ACT_KILL_THREAD's native code is the kernel's zero value, so PIT's
+            // "replace return with zero" mutant is observationally equivalent.
+            "io.mazewall.core.SeccompAction${'$'}ACT_KILL_THREAD",
         ),
     )
+    // Kotlin inserts this non-null check for AtomicReference.get(); stateRef's
+    // generic contract makes a null result impossible, so removing it is also
+    // observationally equivalent.
+    excludedMethods.set(setOf("apply\\${'$'}io_mazewall_platform"))
     targetTests.set(
         setOf(
             "io.mazewall.platform.syscall.SeccompActionTest",

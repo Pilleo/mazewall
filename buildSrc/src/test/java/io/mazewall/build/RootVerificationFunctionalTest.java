@@ -196,11 +196,14 @@ final class RootVerificationFunctionalTest {
             write(fixture, "buildSrc/build.gradle", "plugins { id 'java-gradle-plugin' }\n");
             write(fixture, "buildSrc/src/main/java/io/mazewall/build/TestFailureTriage.java",
                 Files.readString(repository.resolve("buildSrc/src/main/java/io/mazewall/build/TestFailureTriage.java")));
+            write(fixture, "buildSrc/src/main/java/io/mazewall/build/TriageArguments.java",
+                Files.readString(repository.resolve("buildSrc/src/main/java/io/mazewall/build/TriageArguments.java")));
             String source = Files.readString(rootBuild);
-            int start = source.indexOf("\nevaluationDependsOn(\":profiler\")");
+            int start = source.indexOf("\nval triageRuntimeClasspath =");
             int end = source.indexOf("\n// Resolves the hooks directory", start);
             if (start < 0 || end < 0) throw new AssertionError("Missing production triage wiring");
             String build = """
+                import io.mazewall.build.TriageArguments
                 plugins { java; alias(libs.plugins.kotlin) apply false }
                 allprojects { repositories { mavenCentral() } }
                 tasks.register("nonTestFailure") { doLast { throw GradleException("CONTROLLED_NON_TEST_FAILURE") } }
@@ -346,13 +349,13 @@ final class RootVerificationFunctionalTest {
                     }
                 }
                 """);
-            write(fixture, "build.gradle.kts", build.replace("\nevaluationDependsOn", """
+            write(fixture, "build.gradle.kts", build.replace("\nval triageRuntimeClasspath =", """
 
                 gradle.sharedServices.registerIfAbsent("mazewallTestFailures", io.mazewall.build.DelayedFailureEvents::class.java) {
                     parameters.testTaskPaths.set(listOf(":leaf:test", ":peer:test", ":unused:test", ":profiler:test"))
                     parameters.barrierTaskPath.set(":testFailureEventsReady")
                 }
-                evaluationDependsOn""") + """
+                val triageRuntimeClasspath =""") + """
 
                 tasks.named("testFailureEventsReady") { doLast { println("TRIAGE_BARRIER_EXECUTED") } }
                 tasks.register("rejectHandshakeTimeout") {

@@ -1,5 +1,5 @@
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
     `maven-publish`
 }
 
@@ -35,7 +35,6 @@ kotlinCompilations.named("integrationTest") {
 }
 
 evaluationDependsOn(":portals:worker")
-
 /**
  * Full runtime classpath for spawned portal workers (issue: worker JVM must load
  * PortalWorkerMain + :portals:runtime/:platform/:enforcer). Referencing the FileCollection directly
@@ -43,11 +42,11 @@ evaluationDependsOn(":portals:worker")
  * inside a systemProperty MUST stay lazy (providers.provider) — eager resolution at
  * configuration time is forbidden by Gradle 9 and produced empty paths (CNFE in workers).
  */
-val portalWorkerClasspath by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-    isVisible = false
-}
+val portalWorkerClasspath =
+    configurations.create("portalWorkerClasspath") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+    }
 
 // Plain FileCollection view so task doFirst blocks don't capture the script object
 // (configuration-cache requirement).
@@ -68,12 +67,19 @@ abstract class PortalWorkerClasspathArgProvider
 val portalWorkerCpArgProvider =
     objects.newInstance(PortalWorkerClasspathArgProvider::class.java, portalWorkerCpFiles)
 
-val integrationTestImplementation by configurations.getting {
+configurations.named("integrationTestImplementation") {
     extendsFrom(configurations.testImplementation.get())
 }
 
-val integrationTestRuntimeOnly by configurations.getting {
+configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
+}
+
+configurations.named("integrationTestCompileClasspath") {
+    attributes.attribute(
+        org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+        objects.named(org.gradle.api.attributes.LibraryElements.JAR),
+    )
 }
 
 val integrationTest =
@@ -98,10 +104,6 @@ val integrationTest =
         jvmArgumentProviders.add(portalWorkerCpArgProvider)
     }
 
-tasks.check {
-    dependsOn(integrationTest)
-}
-
 tasks.test {
     useJUnitPlatform()
     jvmArgs("--enable-native-access=ALL-UNNAMED", "-Xmx256m")
@@ -121,7 +123,7 @@ dependencies {
     testImplementation(libs.kotest.assertions)
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.slf4j.nop)
-    integrationTestImplementation(kotlin("test"))
-    integrationTestImplementation(libs.junit.jupiter.api)
-    integrationTestRuntimeOnly(libs.junit.jupiter.engine)
+    add("integrationTestImplementation", kotlin("test"))
+    add("integrationTestImplementation", libs.junit.jupiter.api)
+    add("integrationTestRuntimeOnly", libs.junit.jupiter.engine)
 }

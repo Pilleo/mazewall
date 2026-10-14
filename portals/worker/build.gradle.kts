@@ -1,5 +1,5 @@
 plugins {
-    kotlin("jvm")
+    id("mazewall.quality-conventions")
     `maven-publish`
 }
 

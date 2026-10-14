@@ -1,19 +1,17 @@
-import org.gradle.api.publish.PublishingExtension
+import io.mazewall.build.TriageArguments
+import io.mazewall.build.VerifyDependencyState
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
 
-/** Demos and :tools are operator/control-plane code; ktlint and detekt stay off them. */
+/** Demos and tools keep their existing explicit analyzer selection. */
 fun Project.skipsKotlinStyleTools(): Boolean = path.startsWith(":demos") || path.startsWith(":tools")
 
 plugins {
-    alias(libs.plugins.kotlin)
-    alias(libs.plugins.detekt)
-    alias(libs.plugins.ktlint)
-    alias(libs.plugins.spotbugs)
+    id("mazewall.quality-conventions")
+    id("mazewall.publishing-conventions")
     alias(libs.plugins.dependencyCheck)
     alias(libs.plugins.pitest) apply false
-    id("jacoco")
     id("base")
     id("io.mazewall.test-health")
 }
@@ -21,10 +19,6 @@ plugins {
 allprojects {
     group = "io.mazewall"
     version = "0.1.0-SNAPSHOT"
-
-    repositories {
-        mavenCentral()
-    }
 
     if (skipsKotlinStyleTools()) {
         tasks.configureEach {
@@ -81,9 +75,6 @@ allprojects {
     val isVerbose = gradle.startParameter.logLevel in listOf(LogLevel.INFO, LogLevel.DEBUG)
 
     tasks.withType<Test>().configureEach {
-        // Apply hang-prevention timeouts to every project's Test tasks, not just :test.
-        systemProperty("junit.jupiter.execution.timeout.default", "2 m")
-        systemProperty("junit.jupiter.execution.timeout.thread.mode.default", "SEPARATE_THREAD")
         if (project.path in setOf(":enforcer", ":platform", ":profiler")) {
             useJUnitPlatform()
             jvmArgs(
@@ -165,12 +156,7 @@ allprojects {
             )
         }
     }
-
-    // Ensure code is formatted before compilation or check to prevent build failures
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        if (!skipsKotlinStyleTools()) {
-            dependsOn("ktlintFormat")
-        }
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_22)
             freeCompilerArgs.add("-Xcontext-parameters")
@@ -181,40 +167,34 @@ allprojects {
     tasks.withType<JavaCompile>().configureEach {
         options.release.set(22)
     }
+}
 
-    tasks.matching { it.name == "ktlintCheck" || it.name == "ktlintTestSourceSetCheck" || it.name == "ktlintMainSourceSetCheck" }.configureEach {
-        if (!skipsKotlinStyleTools()) {
-            dependsOn("ktlintFormat")
-        }
+val checkGradleLazyResolution =
+    tasks.register<Exec>("checkGradleLazyResolution") {
+        group = "verification"
+        description = "Reject eager Gradle configuration resolution in Kotlin build scripts"
+        commandLine("bash", "$rootDir/scripts/check_gradle_lazy_resolution.sh")
     }
-
-    // Also format Kotlin scripts (like build.gradle.kts)
-    tasks.matching { it.name == "kotlinSourcesJar" }.configureEach {
-        if (!skipsKotlinStyleTools()) {
-            dependsOn("ktlintFormat")
-        }
-    }
-}
-
-tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotbugsIntegrationTest") || it.name.startsWith("spotbugsSharedTest") }.configureEach {
-    enabled = false
-}
-
-val checkGradleLazyResolution by tasks.registering(Exec::class) {
-    group = "verification"
-    description = "Reject eager Gradle configuration resolution in Kotlin build scripts"
-    commandLine("bash", "$rootDir/scripts/check_gradle_lazy_resolution.sh")
-}
 
 tasks.named("check") {
     dependsOn(checkGradleLazyResolution)
+}
+
+tasks.register("format") {
+    group = "formatting"
+    description = "Formats Kotlin sources in projects that opt into KtLint."
+    dependsOn("ktlintFormat")
+    dependsOn(
+        listOf(":platform", ":enforcer", ":profiler", ":portals:runtime", ":portals:codegen", ":portals:worker")
+            .map { "$it:ktlintFormat" },
+    )
 }
 dependencies {
     testImplementation(kotlin("test"))
 }
 
 sourceSets {
-    val sharedTest by creating {
+    create("sharedTest") {
         kotlin.srcDir("src/sharedTest/kotlin")
         resources.srcDir("src/sharedTest/resources")
     }
@@ -259,7 +239,7 @@ dependencies {
     "sharedTestImplementation"(project(":platform"))
     "sharedTestImplementation"(libs.archunit.junit5)
     "sharedTestImplementation"(libs.junit.jupiter.api)
-    "sharedTestImplementation"("org.junit.platform:junit-platform-launcher:1.10.2")
+    "sharedTestImplementation"(libs.junit.platform.launcher)
     testImplementation(sourceSets["sharedTest"].output)
     testImplementation(libs.archunit.junit5)
     testImplementation(platform(libs.junit.bom))
@@ -376,16 +356,8 @@ subprojects {
             }
         }
 
-        tasks.configureEach {
-            if (name.startsWith("detekt")) {
-                try {
-                    val method = this.javaClass.getMethod("getJdkHome")
-                    val property = method.invoke(this) as org.gradle.api.file.DirectoryProperty
-                    property.set(layout.projectDirectory.dir(providers.systemProperty("java.home")))
-                } catch (_: NoSuchMethodException) {
-                    // Ignore tasks that do not have getJdkHome
-                }
-            }
+        tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
+            jdkHome.set(layout.dir(providers.systemProperty("java.home").map(::File)))
         }
 
         extensions.configure<PublishingExtension> {
@@ -519,9 +491,7 @@ subprojects {
             // Explicit dependencies to satisfy Gradle 9 validation
             // The JacocoReport task uses classDirectories which includes outputs from classes and processResources
             dependsOn(tasks.named("classes"))
-            tasks.findByName("processResources")?.let { processResources ->
-                dependsOn(processResources)
-            }
+            dependsOn(tasks.named("processResources"))
             classDirectories.setFrom(coveredClasses)
             sourceDirectories.setFrom(mainSourceSet.map { it.allSource.srcDirs })
             reports {
@@ -570,7 +540,7 @@ subprojects {
             dependsOn(tasks.named("jacocoTestReport"))
             mustRunAfter(tasks.named("jacocoTestReport"))
             dependsOn(tasks.named("classes"))
-            tasks.findByName("processResources")?.let { processResources -> dependsOn(processResources) }
+            dependsOn(tasks.named("processResources"))
             executionData.setFrom(unitExecutionData)
             classDirectories.setFrom(coveredClasses)
             violationRules {
@@ -734,12 +704,43 @@ tasks.register("kernelCheck") {
     )
 }
 
-evaluationDependsOn(":profiler")
-
-val triageRuntimeClasspath by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
+tasks.register("mergeCheck") {
+    group = "verification"
+    description = "Runs the complete host and privileged-kernel merge gate."
+    dependsOn(tasks.named("check"), tasks.named("unitCheck"), tasks.named("kernelCheck"), "verifyGradleReproducibility")
 }
+
+tasks.register<VerifyDependencyState>("verifyGradleReproducibility") {
+    group = "verification"
+    description = "Verifies that dependency locks and checksum metadata are checked in."
+    verificationMetadata.set(layout.projectDirectory.file("gradle/verification-metadata.xml"))
+    val expectedLockfiles =
+        listOf(
+            "gradle.lockfile",
+            "settings-gradle.lockfile",
+            "buildSrc/gradle.lockfile",
+            "platform/gradle.lockfile",
+            "enforcer/gradle.lockfile",
+            "profiler/gradle.lockfile",
+            "portals/runtime/gradle.lockfile",
+            "portals/codegen/gradle.lockfile",
+            "portals/worker/gradle.lockfile",
+            "demos/cli-demo/gradle.lockfile",
+            "demos/agent-sandbox-demo/gradle.lockfile",
+            "demos/vulnerable-web-app/gradle.lockfile",
+        ).map(layout.projectDirectory::file)
+    lockfiles.from(expectedLockfiles)
+}
+
+tasks.named("build") {
+    dependsOn(tasks.named("mergeCheck"))
+}
+
+val triageRuntimeClasspath =
+    configurations.create("triageRuntimeClasspath") {
+        isCanBeConsumed = false
+        isCanBeResolved = true
+    }
 
 dependencies {
     add(triageRuntimeClasspath.name, project(":profiler"))
@@ -747,9 +748,21 @@ dependencies {
 
 tasks.register<JavaExec>("runTriage") {
     group = "verification"
-    description = "Gathers system telemetry and diagnostics on failure."
+    description = "Gathers telemetry for an explicitly named failed Gradle task."
     classpath = triageRuntimeClasspath
     mainClass.set("io.mazewall.profiler.triage.DiagnosticTriageRunner")
+    val failedTask = providers.gradleProperty("triage.failedTask").orElse("unknown")
+    val reportFile =
+        layout.buildDirectory.file(
+            failedTask.map { taskPath ->
+                val safePath = taskPath.trim(':').replace(Regex("[^A-Za-z0-9._-]+"), "-").ifEmpty { "unknown" }
+                if (taskPath == "unknown") "triage_report.json" else "reports/triage/$safePath/report.json"
+            },
+        )
+    val triageArguments = objects.newInstance<TriageArguments>()
+    triageArguments.failedTaskPath.set(failedTask)
+    triageArguments.reportFile.set(reportFile)
+    argumentProviders.add(triageArguments)
 }
 
 objects.newInstance<io.mazewall.build.TestFailureTriage>().wire(project, tasks.named("runTriage"))
@@ -781,7 +794,7 @@ val gitHooksDir: File by lazy {
     }
 }
 
-val installGitHooks by tasks.registering(Copy::class) {
+tasks.register<Copy>("installGitHooks") {
     group = "git"
     description = "Installs the pre-commit audit and verification hook"
     from("$rootDir/scripts/git-audit-hook.sh") {
@@ -795,10 +808,15 @@ val installGitHooks by tasks.registering(Copy::class) {
 }
 
 tasks.named("check") {
-    dependsOn(installGitHooks)
     findProject(":tools:orchestrator")?.let { orchestrator ->
         dependsOn(orchestrator.tasks.named("checkBacklog"))
     }
+}
+
+tasks.register("updateDiagrams") {
+    group = "documentation"
+    description = "Regenerates the checked-in class diagrams."
+    dependsOn(":enforcer:generateClassDiagrams", ":profiler:generateClassDiagrams")
 }
 
 /**
@@ -851,49 +869,50 @@ tasks.named("check") {
  * libraries. Keep implementation packages out of that contract even when a
  * declaration is accidentally made public during a future refactor.
  */
-val verifySupportedApiSurface by tasks.registering {
-    group = "verification"
-    description = "Rejects implementation packages and types from published Kotlin ABI snapshots"
-    dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":profiler:checkKotlinAbi")
-    val snapshots =
-        mapOf(
-            file("enforcer/api/enforcer.api") to
-                listOf(
-                    "io/mazewall/enforcer/supervisor/",
-                    "io/mazewall/ffi/",
-                    "io/mazewall/landlock/",
-                    "io/mazewall/seccomp/",
-                    "io/mazewall/enforcer/engine/",
-                ),
-            file("profiler/api/profiler.api") to
-                listOf(
-                    "io/mazewall/profiler/engine/",
-                    "io/mazewall/profiler/collector/",
-                    "io/mazewall/profiler/compiler/",
-                    "io/mazewall/profiler/iterative/",
-                    "io/mazewall/profiler/strace/",
-                    "io/mazewall/profiler/triage/",
-                    "io/mazewall/profiler/tierE/",
-                    "io/mazewall/profiler/ffi/",
-                    "io/mazewall/ffi/",
-                    "io/mazewall/seccomp/",
-                ),
-        )
-    // Kotlin must emit a public JVM class for the internal Tier-E daemon main
-    // method. It is an executable entry point, not a callable Kotlin API.
-    val internalLauncher = "io/mazewall/profiler/tierE/daemon/TierEKotlinDaemonMain"
-    inputs.files(snapshots.keys)
-    doLast {
-        val violations =
-            snapshots.flatMap { (snapshot, forbiddenSymbols) ->
-                val content = snapshot.readText().replace(internalLauncher, "")
-                forbiddenSymbols.filter(content::contains).map { "$snapshot exposes $it" }
+val verifySupportedApiSurface =
+    tasks.register("verifySupportedApiSurface") {
+        group = "verification"
+        description = "Rejects implementation packages and types from published Kotlin ABI snapshots"
+        dependsOn(":platform:checkKotlinAbi", ":enforcer:checkKotlinAbi", ":profiler:checkKotlinAbi")
+        val snapshots =
+            mapOf(
+                file("enforcer/api/enforcer.api") to
+                    listOf(
+                        "io/mazewall/enforcer/supervisor/",
+                        "io/mazewall/ffi/",
+                        "io/mazewall/landlock/",
+                        "io/mazewall/seccomp/",
+                        "io/mazewall/enforcer/engine/",
+                    ),
+                file("profiler/api/profiler.api") to
+                    listOf(
+                        "io/mazewall/profiler/engine/",
+                        "io/mazewall/profiler/collector/",
+                        "io/mazewall/profiler/compiler/",
+                        "io/mazewall/profiler/iterative/",
+                        "io/mazewall/profiler/strace/",
+                        "io/mazewall/profiler/triage/",
+                        "io/mazewall/profiler/tierE/",
+                        "io/mazewall/profiler/ffi/",
+                        "io/mazewall/ffi/",
+                        "io/mazewall/seccomp/",
+                    ),
+            )
+        // Kotlin must emit a public JVM class for the internal Tier-E daemon main
+        // method. It is an executable entry point, not a callable Kotlin API.
+        val internalLauncher = "io/mazewall/profiler/tierE/daemon/TierEKotlinDaemonMain"
+        inputs.files(snapshots.keys)
+        doLast {
+            val violations =
+                snapshots.flatMap { (snapshot, forbiddenSymbols) ->
+                    val content = snapshot.readText().replace(internalLauncher, "")
+                    forbiddenSymbols.filter(content::contains).map { "$snapshot exposes $it" }
+                }
+            check(violations.isEmpty()) {
+                "Published API contains implementation declarations:\n${violations.joinToString("\n")}"
             }
-        check(violations.isEmpty()) {
-            "Published API contains implementation declarations:\n${violations.joinToString("\n")}"
         }
     }
-}
 
 tasks.named("check") {
     dependsOn(verifySupportedApiSurface)
@@ -905,46 +924,47 @@ tasks.named("check") {
  * does not require source directories to mirror packages, so check the parsed
  * package declaration rather than relying on a directory layout convention.
  */
-val verifyPackageTopology by tasks.registering {
-    group = "verification"
-    description = "Rejects retired flat production package namespaces"
-    val sourceRoots =
-        listOf(
-            "platform/src/main/kotlin",
-            "enforcer/src/main/kotlin",
-            "profiler/src/main/kotlin",
-            "portals/runtime/src/main/kotlin",
-            "portals/codegen/src/main/kotlin",
-            "portals/worker/src/main/kotlin",
-        ).map(::file)
-    val repositoryRoot = layout.projectDirectory.asFile
-    val retiredPackages =
-        setOf(
-            "io.mazewall",
-            "io.mazewall.core",
-            "io.mazewall.enforcer.supervisor",
-            "io.mazewall.profiler",
-            "io.mazewall.profiler.engine",
-            "io.mazewall.profiler.attribution",
-        )
-    inputs.files(sourceRoots)
-    doLast {
-        val packagePattern = Regex("(?m)^package\\s+([A-Za-z0-9_.]+)\\s*$")
-        val violations =
-            sourceRoots.flatMap { root ->
-                root
-                    .walkTopDown()
-                    .filter { it.isFile && it.extension == "kt" }
-                    .mapNotNull { source ->
-                        val packageName = packagePattern.find(source.readText())?.groupValues?.get(1)
-                        packageName?.takeIf(retiredPackages::contains)?.let { "${source.relativeTo(repositoryRoot)} declares retired package $it" }
-                    }.toList()
+val verifyPackageTopology =
+    tasks.register("verifyPackageTopology") {
+        group = "verification"
+        description = "Rejects retired flat production package namespaces"
+        val sourceRoots =
+            listOf(
+                "platform/src/main/kotlin",
+                "enforcer/src/main/kotlin",
+                "profiler/src/main/kotlin",
+                "portals/runtime/src/main/kotlin",
+                "portals/codegen/src/main/kotlin",
+                "portals/worker/src/main/kotlin",
+            ).map(::file)
+        val repositoryRoot = layout.projectDirectory.asFile
+        val retiredPackages =
+            setOf(
+                "io.mazewall",
+                "io.mazewall.core",
+                "io.mazewall.enforcer.supervisor",
+                "io.mazewall.profiler",
+                "io.mazewall.profiler.engine",
+                "io.mazewall.profiler.attribution",
+            )
+        inputs.files(sourceRoots)
+        doLast {
+            val packagePattern = Regex("(?m)^package\\s+([A-Za-z0-9_.]+)\\s*$")
+            val violations =
+                sourceRoots.flatMap { root ->
+                    root
+                        .walkTopDown()
+                        .filter { it.isFile && it.extension == "kt" }
+                        .mapNotNull { source ->
+                            val packageName = packagePattern.find(source.readText())?.groupValues?.get(1)
+                            packageName?.takeIf(retiredPackages::contains)?.let { "${source.relativeTo(repositoryRoot)} declares retired package $it" }
+                        }.toList()
+                }
+            check(violations.isEmpty()) {
+                "Domain-first package topology violations:\n${violations.joinToString("\n")}"
             }
-        check(violations.isEmpty()) {
-            "Domain-first package topology violations:\n${violations.joinToString("\n")}"
         }
     }
-}
 
 tasks.named("check") {
     dependsOn(verifyPackageTopology)

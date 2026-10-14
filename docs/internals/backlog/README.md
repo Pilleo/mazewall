@@ -1,12 +1,12 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 129 | *Total Resolved Issues:* 670
+*Total Active Issues:* 131 | *Total Resolved Issues:* 670
 
-Active status detail: 128 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 130 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
-[prioritized feature-tour plan](../../superpowers/plans/2026-10-13-presentation-readiness.md).
+[maintained presenter guide](../../presentation/PRESENTER_GUIDE.md).
 The showcase uses readable tagged JUnit tests and existing fresh-JVM fixtures,
 with standard Gradle/IDE execution rather than another presentation script.
 The plan reuses existing FORK, positive-CET and optional-tooling issues. Production
@@ -48,6 +48,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-](issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-.md) | Keep executable buildSrc TestKit storage checkout-owned | high | testing |
+| [issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing](issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md) | Investigate Dependency-Check NVD record processing failure | high | ci |
 | [issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe](issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe.md) | Preserve canonical backlog totals and active membership after evidence closure | medium | core |
 | [issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt](issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt.md) | Add negative controls for benchmark prepared health guards | low | benchmarks |
 | [issue-20261013-005316-083-record-independent-production-operation-and-launch](issue-20261013-005316-083-record-independent-production-operation-and-launch.md) | Record independent production operation and launch authority | medium | integrations |

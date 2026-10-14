@@ -114,7 +114,7 @@ target/
 
 ### Local Work Coordination ###
 /.worktrees/
-/.taskplane-kb/**/*.lock
+/.taskplane-kb/
 /docs/superpowers/
 
 ### Local Agent Session Artifacts ###

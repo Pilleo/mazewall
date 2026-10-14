@@ -41,6 +41,29 @@ class DiagnosticTriageRunnerTest {
     }
 
     @Test
+    fun `triage records the failed task in the requested output file`() {
+        val report = File(temporaryDirectory, "reports/unit-check/report.json")
+        DiagnosticTriageRunner.main(arrayOf("--failed-task", ":unitCheck", "--output", report.absolutePath))
+        assertTrue(report.isFile)
+        val parsed = Json.parseToJsonElement(report.readText()).jsonObject
+        assertEquals(":unitCheck", parsed.getValue("failed_task").jsonPrimitive.content)
+        assertTrue(
+            parsed
+            .getValue("diagnostics")
+            .jsonObject
+            .getValue("jvm_thread_dump")
+            .jsonPrimitive.content
+            .contains("current JVM only"),
+        )
+    }
+
+    @Test
+    fun `triage rejects unknown and missing options before collecting diagnostics`() {
+        assertThrows(IllegalStateException::class.java) { DiagnosticTriageRunner.main(arrayOf("--unknown", "value")) }
+        assertThrows(IllegalArgumentException::class.java) { DiagnosticTriageRunner.main(arrayOf("--output")) }
+    }
+
+    @Test
     fun `test triage runner creates report file`() {
         val probes = mapOf(
             "dmesg_seccomp_logs" to "explicit audit result",

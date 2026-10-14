@@ -65,24 +65,27 @@ class ForeignFdGuard internal constructor(
     )
 
     private fun currentFds(): Set<FdInfo> =
-        Files.list(inspectionRoot).use { stream ->
+        Files
+            .list(inspectionRoot)
+            .use { stream ->
             val inspectionDirectory = "/proc/${ProcessHandle.current().pid()}/fd"
             stream
                 .map { p ->
                     val id = p.fileName.toString().toInt()
-                    val target = try {
-                        readLink(p).toString()
-                    } catch (_: NoSuchFileException) {
-                        // An enumerated entry is not a verified descriptor identity.
-                        // Do not mistake a missing inspection root for an entry race.
-                        Files.readAttributes(inspectionRoot, BasicFileAttributes::class.java)
-                        return@map null
-                    }
-                    FdInfo(id, target)
+                    descriptorTarget(p)?.let { target -> FdInfo(id, target) }
                 }.filter { it != null && it.target != inspectionDirectory }
                 .toList()
                 .filterNotNull()
-                .toSet()
+        }.filter { fd -> descriptorTarget(inspectionRoot.resolve(fd.id.toString())) == fd.target }
+            .toSet()
+
+    private fun descriptorTarget(path: Path): String? =
+        try {
+            readLink(path).toString()
+        } catch (_: NoSuchFileException) {
+            // An entry race is acceptable only while the inspection root is still present.
+            Files.readAttributes(inspectionRoot, BasicFileAttributes::class.java)
+            null
         }
 
     private fun isDisabled(): Boolean = System.getProperty("mazewall.fdguard")?.lowercase() == "off"
