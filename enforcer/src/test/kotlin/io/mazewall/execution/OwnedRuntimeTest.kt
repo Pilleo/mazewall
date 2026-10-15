@@ -582,7 +582,8 @@ class OwnedRuntimeTest {
     @Test
     fun `caught nested containment failure remains unsuccessful and evidence is not reused`() {
         open().use { runtime ->
-            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            // Result delivery precedes admission release; queue the follow-up on the same worker.
+            val domain = runtime.prepare(policy(), DomainLimits(1, 2))
             assertFailsWith<ContainmentViolationException> {
                 Mazewall.callContained(
                     runtime,

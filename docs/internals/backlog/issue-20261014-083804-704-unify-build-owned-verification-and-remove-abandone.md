@@ -17,6 +17,7 @@ target_files:
   - "src/consumerVerification"
   - "src/sharedTest/kotlin/io/mazewall/IsolatedProcessTester.kt"
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/ContainedExecutorWrapTest.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/execution/OwnedRuntimeTest.kt"
   - "tests/consumers"
   - "benchmarks/integration-boundaries"
   - "profiler/hotspot-agentless"
@@ -132,6 +133,17 @@ boundary gaps: eager optional-native task realization in the host aggregate and
 missing integration/consumer scripts in the rootful source archive. Both have
 meaningful RED/GREEN controls and a successful follow-up full build
 (`run-bd93ef1797a4`); the default-branch merge awaits the published CI result.
+
+Follow-up `80b67b5e` passes the earlier configuration/source boundaries in CI.
+CI then exposes an independent evidence-test admission timing assumption, fixed
+with a second bounded queued admission while retaining one physical worker and
+all denial/evidence assertions. All33 owned-runtime cases pass. The rootful job
+now reaches and honestly refuses its unchanged hardware-specific performance
+limits; see [the pending operator decision](issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md).
+The merge remains blocked by that benchmark gate; its limits are unchanged.
+The admission-test candidate passes the full included-module build on Ubuntu
+OpenJDK25.0.4.1 (`run-b7e52d1e97d0`). Local GraalVM mapping-denial worker exits
+remain independently recorded; the test-only change does not mask that issue.
 
 **Needed:**
 1. Make Gradle authoritative for host/full lint, test, coverage, and build guards.
