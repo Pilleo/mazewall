@@ -127,6 +127,11 @@ class ProfilerArchitectureTest {
     @ArchTest
     fun observationAndEbpfOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.profiler.api.ConnectResolution" to setOf(
+                "io.mazewall.profiler.api.ConnectResolution\$NotApplicable",
+                "io.mazewall.profiler.api.ConnectResolution\$Resolved",
+                "io.mazewall.profiler.api.ConnectResolution\$Failed",
+            ),
             "io.mazewall.profiler.internal.engine.ProfilerAckOutcome" to setOf(
                 "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$Acknowledged",
                 "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$PassThrough",

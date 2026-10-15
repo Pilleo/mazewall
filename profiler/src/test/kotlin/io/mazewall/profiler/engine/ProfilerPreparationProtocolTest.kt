@@ -16,6 +16,42 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 
 class ProfilerPreparationProtocolTest {
+    @Test
+    fun `prepared CONNECT endpoints and read failures survive both private frame boundaries`() {
+        val request = ProfilerPreparationProtocol.Request(SeccompNotification(123, 456, 0xC000003E.toInt(), 42, longArrayOf(3, 4096, 16, 0, 0, 0)), "CONNECT")
+        val resolutions = listOf(
+            ConnectResolution.Resolved(NetworkEndpoint("127.0.0.1", 8080)),
+            ConnectResolution.Resolved(NetworkEndpoint("unix:/tmp/sock")),
+            ConnectResolution.Failed(ConnectResolution.Reason.MEMORY_READ_FAILED, "native inspection errno=13"),
+        )
+        for (resolution in resolutions) {
+            val event = SyscallEvent.fromEvidence<SyscallEventState.Resolved>(Tid(456), "CONNECT", request.notification.args.toList(), PathResolution.NotApplicable, resolution)
+            val bytes = ByteArrayOutputStream()
+            ProfilerPreparationProtocol.writeResponse(DataOutputStream(bytes), request, event)
+            val prepared = ProfilerPreparationProtocol.readResponse(DataInputStream(ByteArrayInputStream(bytes.toByteArray())), request)
+            assertEquals(resolution, prepared.connectResolution)
+            val frame = DataInputStream(
+                ByteArrayInputStream(
+                    io.mazewall.profiler.internal.TraceEventEncoder
+                .encode(prepared),
+                ),
+            )
+            assertEquals(456, frame.readInt())
+            val decoded = kotlin.test
+                .assertIs<io.mazewall.profiler.internal.TraceEventDecodeResult.Event>(
+                io.mazewall.profiler.internal.TraceEventDecoder
+                .decodeBody(frame, 456),
+            ).event
+            assertEquals(resolution, decoded.connectResolution)
+            val observation = ProfileObservation.fromTraceEvent(decoded)
+            when (resolution) {
+                is ConnectResolution.Resolved -> assertEquals(resolution.endpoint, kotlin.test.assertIs<ProfileObservation.Connect>(observation).endpoint)
+                is ConnectResolution.Failed -> kotlin.test.assertIs<ProfileObservation.Syscall>(observation)
+                ConnectResolution.NotApplicable -> error("not a CONNECT fixture")
+            }
+        }
+    }
+
     private val request = ProfilerPreparationProtocol.Request(SeccompNotification(123, 456, 0xC00000B7.toInt(), 2, LongArray(6)), "OPEN")
 
     @Test

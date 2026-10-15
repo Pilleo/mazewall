@@ -11,6 +11,11 @@ target_files:
   - "AGENTS.md"
   - "build.gradle.kts"
   - "platform/build.gradle.kts"
+  - "platform/src/main/kotlin/io/mazewall/platform/process/ChildStartupTransaction.kt"
+  - "platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompNotifHandler.kt"
+  - "platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompSessionHandler.kt"
+  - "platform/src/test/kotlin/io/mazewall/core/ChildStartupTransactionTest.kt"
+  - "platform/src/test/kotlin/io/mazewall/platform/seccomp/daemon/SeccompSessionHandlerTest.kt"
   - "gradle/verification-metadata.xml"
   - "buildSrc"
   - ".github/workflows/ci.yml"
@@ -20,6 +25,13 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/ContainedExecutorWrapTest.kt"
   - "enforcer/src/test/kotlin/io/mazewall/execution/OwnedRuntimeTest.kt"
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/internal/execution/OwnedDomain.kt"
+  - "enforcer/src/main/kotlin/io/mazewall/enforcer/api/SbobParser.kt"
+  - "enforcer/src/test/kotlin/io/mazewall/SbobParserTest.kt"
+  - "demos/vulnerable-web-app/README.md"
+  - "demos/vulnerable-web-app/src/main/kotlin/demo/vulnapp/config"
+  - "demos/vulnerable-web-app/src/test/kotlin/demo/vulnapp"
+  - "exploits/run_all.py"
+  - "exploits/test_web_demo.py"
   - "portals/codegen/src/test/kotlin/io/mazewall/portal/codegen/PortalCodegenFunctionalTest.kt"
   - "portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerMain.kt"
   - "portals/worker/src/test/kotlin/io/mazewall/portal/worker/PortalWorkerStartupTest.kt"
@@ -32,6 +44,12 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/hotspot/HotSpotProtocolTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/hotspot/HotSpotChildFixture.kt"
   - "profiler/build.gradle.kts"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/api"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/internal"
+  - "profiler/src/main/kotlin/io/mazewall/profiler/ffi/ProfilerNativeCommandWriter.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler"
+  - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/ProfilerIntegrationTest.kt"
+  - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/ProcessWideProfilerIntegrationTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools"
   - "profiler/src/test/resources/tier-e"
   - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/TierERootfulContainerEndpointIntegrationTest.kt"
@@ -39,6 +57,9 @@ target_files:
   - "experiments/hotspot-agentless"
   - "docs/internals/evidence"
   - "docs/internals/designs/core/testing-strategy.md"
+  - "docs/internals/designs/core/notification-liveness-contract.md"
+  - "docs/internals/designs/profiler/profiler-design.md"
+  - "docs/internals/designs/api/profiler-public-api.md"
   - "docs/internals/backlog/README.md"
   - ".agents/hooks.json"
   - ".grok/hooks/mazewall_guards.json"
@@ -172,6 +193,34 @@ behavior. No generic-failure acceptance or cleanup weakening was introduced.
 The admission-test candidate passes the full included-module build on Ubuntu
 OpenJDK25.0.4.1 (`run-b7e52d1e97d0`). Local GraalVM mapping-denial worker exits
 remain independently recorded; the test-only change does not mask that issue.
+
+## Operator-approved deep profiler and consumer follow-up
+
+After host/kernel/mutation CI reached the web comparison, the operator explicitly
+authorized the safest core profiler repair and investigation of the gaps behind
+exhaustive/pure models. The scoped owners are the resolved
+[profiler completion/ownership repair](resolved/issue-20261015-172121-857-preserve-truthful-profiler-completion-across-termi.md),
+[base-grant path pruning](resolved/issue-20261015-182018-091-prune-learned-filesystem-paths-covered-by-explicit.md),
+[owned web handoff](resolved/issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta.md), and
+[truthful report producer](resolved/issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out.md).
+
+Explicit stream-terminal proof, successful consumption and physical cleanup are
+separate outcomes; daemon leases order concurrent shutdown; native CONNECT
+inspection stays bounded and preserves failures. The parser reducer is exhaustive
+on both axes. Cold process-wide tests require real I/O in owned child JVMs, with
+critical classes/queue initialized before irreversible filtering. Learned app
+permissions are restricted again by explicit service ceilings. Existing shared
+descriptors, pointer TOCTOU and thread-scope limitations remain documented.
+
+Complete packaged five-row acceptance passes (`run-c5e6ca7b42bf`), all62 retained
+Python report/ownership controls pass (`run-05f4716ff572`), the full included-module
+build passes (`run-bbf486925536`,452290ms), and all unchanged mutation gates pass
+(`run-c0f65b467853`, enforcer matching-input reuse). One connected review found no
+remaining verified scoped defect after the ownership/isolation corrections.
+No new dependency, public API break, native layout/BPF change, threshold reduction,
+permission fallback or data publication. The independent executable-mapping EPERM
+issue remains open. Exact-head remote CI still gates integration; this primary
+cleanup item stays open until that checkpoint is accepted.
 
 **Needed:**
 1. Make Gradle authoritative for host/full lint, test, coverage, and build guards.

@@ -259,9 +259,16 @@ public sealed interface ProfileObservation {
                 is TraceEvent.Mmap ->
                     Syscall(corr, source, "MMAP", emptyList())
                 is TraceEvent.Generic ->
-                    Syscall(corr, source, name, event.args, event.paths, openFlagsFrom(name, event.args))
+                    when (val connection = event.connectResolution) {
+                        is ConnectResolution.Resolved -> Connect(corr, source, connection.endpoint)
+                        ConnectResolution.NotApplicable, is ConnectResolution.Failed -> Syscall(corr, source, name, event.args, event.paths, openFlagsFrom(name, event.args))
+                    }
             }
-            return observation.withPathResolution(event.pathResolution)
+            return when (observation) {
+                is Syscall -> observation.withPathResolution(event.pathResolution)
+                is Connect -> observation.withPathResolution(event.pathResolution)
+                is IoUring -> observation.withPathResolution(event.pathResolution)
+            }
         }
 
         private fun openFlagsFrom(

@@ -4,6 +4,7 @@ import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.profiler.api.SyscallEvent
 import io.mazewall.profiler.api.SyscallEventState
 import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.api.legacyConnectResolution
 import java.io.DataInputStream
 import java.io.IOException
 import java.nio.charset.StandardCharsets
@@ -21,7 +22,7 @@ internal object TraceEventDecoder {
     ): TraceEventDecodeResult =
         try {
             val version = input.readInt()
-            require(version == PathResolutionWire.VERSION) { "unsupported profiler event version: $version" }
+            require(version == PathResolutionWire.VERSION || version == ConnectResolutionWire.VERSION) { "unsupported profiler event version: $version" }
             val syscallNameLength = input.readInt()
             val syscallName = readUtf8(input, syscallNameLength, MAX_SYSCALL_NAME_BYTES, "syscall name")
             val argumentCount = input.readInt()
@@ -34,8 +35,9 @@ internal object TraceEventDecoder {
                 readUtf8(input, length, MAX_PATH_BYTES, "path")
             }
             val resolution = PathResolutionWire.read(input, paths)
+            val connection = if (version == ConnectResolutionWire.VERSION) ConnectResolutionWire.read(input, syscallName) else legacyConnectResolution(syscallName)
             TraceEventDecodeResult.Event(
-                event = TraceEvent.fromSyscallEvent(SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(tidValue), syscallName, arguments.toList(), resolution)),
+                event = TraceEvent.fromSyscallEvent(SyscallEvent.fromEvidence<SyscallEventState.Resolved>(Tid(tidValue), syscallName, arguments.toList(), resolution, connection)),
                 rawArguments = arguments.toList(),
                 syscallNameLength = syscallNameLength,
                 argumentCount = argumentCount,

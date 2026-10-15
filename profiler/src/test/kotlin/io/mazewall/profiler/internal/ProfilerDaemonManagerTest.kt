@@ -29,6 +29,45 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerDaemonManagerTest {
     @Test
+    @io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+    @org.junit.jupiter.api.Timeout(15)
+    fun `actual shutdown hook retains the live daemon until its session lease retires`() {
+        val manager = ProfilerDaemonManager()
+        val context = manager.getOrSpawnSharedDaemon()
+        val lease = context.lifetime.acquire()
+        val finished = java.util.concurrent.CompletableFuture<Unit>()
+        val shutdown = Thread {
+            try {
+                context.shutdownHook.run()
+                finished.complete(Unit)
+            } catch (failure: Throwable) {
+                finished.completeExceptionally(failure)
+            }
+        }
+        shutdown.start()
+        try {
+            io.mazewall.testing.awaitCondition(description = "real child hook closes session admission") {
+                try {
+                    context.lifetime.acquire().close()
+                    false
+                } catch (_: IllegalStateException) {
+                    true
+                }
+            }
+            assertFalse(finished.isDone, "Child retirement must wait for the acquired session")
+            assertTrue(context.daemonProcess.isAlive)
+            lease.close()
+            finished.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertFalse(context.daemonProcess.isAlive)
+        } finally {
+            lease.close()
+            shutdown.join(5_000)
+            manager.stop()
+            assertFalse(shutdown.isAlive)
+        }
+    }
+
+    @Test
     fun `test daemon spawn and stop with mocks`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()

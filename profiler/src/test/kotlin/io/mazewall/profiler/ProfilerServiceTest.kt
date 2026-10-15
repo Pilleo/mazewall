@@ -49,6 +49,33 @@ import kotlin.test.assertTrue
 @io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 class ProfilerServiceTest {
     @Test
+    fun `native network inspection failures retain permission diagnostics and refuse policy conversion`() {
+        StreamInstaller().use { stream ->
+            val session = ProfilerService(runtime(stream)).openSession()
+            try {
+                for (errno in listOf(1, 13)) {
+                    val event = SyscallEvent.fromEvidence<SyscallEventState.Resolved>(
+                        Tid(73),
+                        "CONNECT",
+                        listOf(3, 4096, 16),
+                        PathResolution.NotApplicable,
+                        ConnectResolution.Failed(ConnectResolution.Reason.MEMORY_READ_FAILED, "native memory errno=$errno"),
+                    )
+                    session.logs += TraceEvent.fromSyscallEvent(event)
+                }
+                session.close()
+                val result = session.result(Unit)
+                kotlin.test.assertFalse(result.coverage.complete)
+                assertTrue(result.coverage.warnings.any { it.contains("errno=1") })
+                assertTrue(result.coverage.warnings.any { it.contains("errno=13") })
+                assertFailsWith<IncompleteProfileException> { result.toPolicy() }
+            } finally {
+                session.close()
+            }
+        }
+    }
+
+    @Test
     fun `execution limits retain the production defaults and reject nonpositive values`() {
         assertEquals(60_000L, ProfilerExecutionLimits.DEFAULT.workerTimeoutMillis)
         assertEquals(5_000L, ProfilerExecutionLimits.DEFAULT.workerGraceMillis)
@@ -368,6 +395,11 @@ class ProfilerServiceTest {
                     val command = byte.get(0).toInt() and 0xff
                     commands.put(command)
                     if (command == 0x54) {
+                        output.write(
+                            io.mazewall.profiler.internal.TraceStreamEndWire
+                            .encode(io.mazewall.platform.seccomp.daemon.SeccompStreamEnd.PASS_THROUGH),
+                        )
+                        output.flush()
                         peer.close()
                         break
                     }

@@ -15,11 +15,16 @@ internal enum class NotifResult {
     PASS_THROUGH,
 }
 
+/** A normal producer boundary, distinct from transport, reply and reactor failure. */
+internal enum class SeccompStreamEnd { PRODUCER_EXIT, PASS_THROUGH }
+
 /**
  * Strategy interface for processing seccomp user notifications inside [SeccompSessionHandler].
  */
 @io.mazewall.platform.lifecycle.MazewallInternal
 internal interface SeccompNotifHandler {
+    public fun endStream(reason: SeccompStreamEnd) = Unit
+
     context(arena: NativeArena) public fun beginNotification(
         notif: ManagedSegment,
         resp: ManagedSegment,

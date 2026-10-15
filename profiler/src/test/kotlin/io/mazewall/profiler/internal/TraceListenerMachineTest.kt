@@ -1,5 +1,6 @@
 package io.mazewall.profiler.internal
 import io.mazewall.platform.native.*
+import io.mazewall.platform.seccomp.daemon.SeccompStreamEnd
 import io.mazewall.platform.syscall.*
 import io.mazewall.profiler.api.*
 import io.mazewall.profiler.api.ObservationConstructorContract
@@ -22,6 +23,7 @@ class TraceListenerMachineTest {
             TraceListenerState.ProcessingEvent(trace),
             TraceListenerState.HandshakeRejected,
             TraceListenerState.ProtocolViolation("invalid"),
+            TraceListenerState.Drained(SeccompStreamEnd.PRODUCER_EXIT),
         )
         val events = listOf(
             TraceListenerEvent.HandshakeReceived,
@@ -32,26 +34,41 @@ class TraceListenerMachineTest {
             TraceListenerEvent.ArgumentsRead(42, "OPENAT", 0),
             TraceListenerEvent.EventRead(trace),
             TraceListenerEvent.SocketClosed,
+            TraceListenerEvent.DrainConfirmed(SeccompStreamEnd.PRODUCER_EXIT, false),
+            TraceListenerEvent.ProtocolRejected("invalid terminal"),
         )
+        assertEquals(TraceListenerState::class.sealedSubclasses.toSet(), states.map { it::class }.toSet())
+        assertEquals(TraceListenerEvent::class.sealedSubclasses.toSet(), events.map { it::class }.toSet())
         val violation = TraceListenerState.ProtocolViolation::class
         val awaiting = TraceListenerState.AwaitingEvent::class
         val closed = TraceListenerState.Disconnected::class
         val rejected = TraceListenerState.HandshakeRejected::class
+        val drained = TraceListenerState.Drained::class
         val expected = listOf(
-            listOf(awaiting, rejected, violation, violation, violation, violation, violation, closed),
-            listOf(violation, violation, awaiting, TraceListenerState.ReadingHeader::class, violation, violation, violation, closed),
-            listOf(violation, violation, violation, violation, TraceListenerState.ReadingSyscall::class, violation, violation, closed),
-            listOf(violation, violation, violation, violation, violation, TraceListenerState.ReadingArguments::class, violation, closed),
-            listOf(violation, violation, violation, violation, violation, violation, TraceListenerState.ProcessingEvent::class, closed),
-            listOf(violation, violation, awaiting, violation, violation, violation, violation, closed),
+            listOf(awaiting, rejected, violation, violation, violation, violation, violation, closed, violation, violation),
+            listOf(violation, violation, awaiting, TraceListenerState.ReadingHeader::class, violation, violation, violation, closed, drained, violation),
+            listOf(violation, violation, violation, violation, TraceListenerState.ReadingSyscall::class, violation, violation, closed, violation, violation),
+            listOf(violation, violation, violation, violation, violation, TraceListenerState.ReadingArguments::class, violation, closed, violation, violation),
+            listOf(violation, violation, violation, violation, violation, violation, TraceListenerState.ProcessingEvent::class, closed, violation, violation),
+            listOf(violation, violation, awaiting, violation, violation, violation, violation, closed, violation, violation),
             List(events.size) { rejected },
             List(events.size) { violation },
+            listOf(violation, violation, violation, violation, violation, violation, violation, drained, violation, violation),
         )
         states.forEachIndexed { row, state ->
             events.forEachIndexed { column, event ->
                 assertEquals(expected[row][column], TraceListenerMachine.evaluate(state, event)::class, "$state / $event")
             }
         }
+    }
+
+    @Test
+    fun `pass-through completion requires the local shutdown request`() {
+        val state = TraceListenerState.AwaitingEvent
+        assertInstanceOf(TraceListenerState.ProtocolViolation::class.java, TraceListenerMachine.evaluate(state, TraceListenerEvent.DrainConfirmed(SeccompStreamEnd.PASS_THROUGH, false)))
+        val drained = TraceListenerState.Drained(SeccompStreamEnd.PASS_THROUGH)
+        assertEquals(drained, TraceListenerMachine.evaluate(state, TraceListenerEvent.DrainConfirmed(SeccompStreamEnd.PASS_THROUGH, true)))
+        assertEquals(drained, TraceListenerMachine.evaluate(drained, TraceListenerEvent.SocketClosed))
     }
 
     @Test

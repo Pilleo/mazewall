@@ -1,5 +1,6 @@
 package io.mazewall.profiler.internal
 
+import io.mazewall.profiler.api.ConnectResolution
 import io.mazewall.profiler.api.SyscallEvent
 import io.mazewall.profiler.api.SyscallEventState
 import java.io.ByteArrayOutputStream
@@ -16,7 +17,8 @@ internal object TraceEventEncoder {
         val bytes = ByteArrayOutputStream()
         DataOutputStream(bytes).use { output ->
             output.writeInt(event.tid.value)
-            output.writeInt(PathResolutionWire.VERSION)
+            val network = event.connectResolution != ConnectResolution.NotApplicable
+            output.writeInt(if (network) ConnectResolutionWire.VERSION else PathResolutionWire.VERSION)
             writeString(output, event.syscallName, MAX_SYSCALL_NAME_BYTES)
             require(event.args.size <= MAX_ARGUMENTS) { "too many syscall arguments" }
             output.writeInt(event.args.size)
@@ -25,6 +27,7 @@ internal object TraceEventEncoder {
             output.writeInt(event.paths.size)
             event.paths.forEach { writeString(output, it, MAX_PATH_BYTES) }
             PathResolutionWire.write(output, event.pathResolution)
+            if (network) ConnectResolutionWire.write(output, event.syscallName, event.connectResolution)
         }
         return bytes.toByteArray()
     }

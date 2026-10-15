@@ -35,6 +35,171 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerTraceListenerTest {
     @Test
+    @Timeout(10)
+    fun `interrupted cleanup retains live reader ownership and retries joins without closing twice`() {
+        val blocked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val closes = AtomicInteger()
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                private var handshake = false
+
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    if (!handshake) {
+                        handshake = true
+                        buf.writeByte(0, 0xAC.toByte())
+                        return LinuxNative.SyscallResult.Success(1L)
+                    }
+                    blocked.countDown()
+                    while (release.count > 0) {
+                        try {
+                            release.await()
+                        } catch (_: InterruptedException) {
+                            // Native blocking reads need not honor Java interruption.
+                        }
+                    }
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+            },
+            fileSystem = object : MockNativeFileSystem() {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    closes.incrementAndGet()
+                    return LinuxNative.SyscallResult.Success(0L)
+                }
+            },
+        )
+        val listener = ProfilerTraceListener(TestFileDescriptors.replace(313), mutableListOf(), null, mutableMapOf(), { null }, native)
+        val result = java.util.concurrent.CompletableFuture<Pair<io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome, Boolean>>()
+        val closer = Thread {
+            Thread.currentThread().interrupt()
+            result.complete(listener.closeWithResult() to Thread.currentThread().isInterrupted)
+        }
+        try {
+            listener.start(CountDownLatch(1))
+            assertTrue(blocked.await(2, TimeUnit.SECONDS))
+            closer.start()
+            val (outcome, interrupted) = result.get(2, TimeUnit.SECONDS)
+            kotlin.test.assertIs<io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome.Incomplete>(outcome)
+            assertTrue(interrupted)
+            assertTrue(listener.workerTerminatedLatch.count > 0)
+            assertEquals(1, closes.get())
+            release.countDown()
+            assertTrue(listener.workerTerminatedLatch.await(2, TimeUnit.SECONDS))
+            assertTrue(listener.collectorTerminatedLatch.await(2, TimeUnit.SECONDS))
+            assertEquals(io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome.Complete, listener.closeWithResult())
+            assertEquals(1, closes.get())
+            assertFalse(listener.drainComplete, "Retrying resource cleanup cannot invent a normal stream terminal record")
+        } finally {
+            release.countDown()
+            closer.join(2_000)
+            listener.closeWithResult()
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    fun `a drained reader cannot certify a failed event collector`() {
+        val event = io.mazewall.profiler.api.SyscallEvent.fromResolution<io.mazewall.profiler.api.SyscallEventState.Resolved>(
+            io.mazewall.platform.lifecycle
+                .Tid(7),
+            "GETPID",
+            emptyList(),
+            io.mazewall.profiler.api.PathResolution.NotApplicable,
+        )
+        val end = java.nio.ByteBuffer
+            .allocate(9)
+            .putInt(Int.MIN_VALUE)
+            .putInt(1)
+            .put(1)
+            .array()
+        val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte()) + TraceEventEncoder.encode(event) + end)
+        val logs = object : ArrayList<TraceEvent>() {
+            override fun add(element: TraceEvent): Boolean = error("collector storage failed")
+        }
+        val native = MockNativeEngine(
+            memory = object : MockNativeMemory() {
+                override fun read(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val bytes = input.readNBytes(count.toInt())
+                    bytes.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                    return LinuxNative.SyscallResult.Success(bytes.size.toLong())
+                }
+
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(count)
+            },
+        )
+        ProfilerTraceListener(TestFileDescriptors.replace(312), logs, null, mutableMapOf(), { null }, native).use { listener ->
+            listener.start(CountDownLatch(1))
+            assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
+            assertTrue(listener.collectorTerminatedLatch.await(3, TimeUnit.SECONDS))
+            listener.close()
+            assertTrue(logs.isEmpty(), "The accepted event was not retained")
+            assertFalse(listener.drainComplete, "Collector failure must refuse complete evidence even after a normal terminal record")
+        }
+    }
+
+    @Test
+    @Timeout(20)
+    fun `only a complete producer terminal record proves an unsolicited stream drain`() {
+        val end = java.nio.ByteBuffer
+            .allocate(9)
+            .putInt(Int.MIN_VALUE)
+            .putInt(1)
+            .put(1)
+            .array()
+        val streams = listOf(
+            end to true,
+            byteArrayOf() to false,
+            end.copyOf(3) to false,
+            end.copyOf(8) to false,
+            end.copyOf().also { it[7] = 2 } to false,
+            end.copyOf().also { it[8] = 0 } to false,
+            end.copyOf().also { it[8] = 2 } to false,
+        )
+        for ((bytes, complete) in streams) {
+            val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte()) + bytes)
+            val native = MockNativeEngine(
+                memory = object : MockNativeMemory() {
+                    override fun read(
+                        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                        buf: ManagedSegment,
+                        count: Long,
+                    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                        // Closing peers may reset the transport after the complete terminal record.
+                        if (input.available() == 0) return LinuxNative.SyscallResult.Error(104, -1L)
+                        val read = input.readNBytes(count.toInt())
+                        read.forEachIndexed { index, byte -> buf.writeByte(index.toLong(), byte) }
+                        return LinuxNative.SyscallResult.Success(read.size.toLong())
+                    }
+                },
+            )
+            ProfilerTraceListener(TestFileDescriptors.replace(311), mutableListOf(), null, mutableMapOf(), { null }, native).use { listener ->
+                listener.start(CountDownLatch(1))
+                assertTrue(listener.workerTerminatedLatch.await(3, TimeUnit.SECONDS))
+                listener.close()
+                assertEquals(complete, listener.drainComplete, "terminal bytes=${bytes.toList()}")
+            }
+        }
+    }
+
+    @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `invalid wire tid closes without publishing or acknowledging an event`() {
         val input = java.io.ByteArrayInputStream(byteArrayOf(0xAC.toByte(), 0, 0, 0, 0))

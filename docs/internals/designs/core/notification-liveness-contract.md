@@ -136,6 +136,19 @@ before another frame; processing failure remains primary and ACK/cleanup failure
 remain suppressed. Invalid TID is a protocol violation without publication/ACK.
 Rejected event bodies after a valid TID still discharge their one ACK obligation.
 Any rejection during graceful drain remains incomplete evidence.
+Normal producer exit and requested pass-through publish a distinct bounded
+terminal record. Only a lone listener HUP can certify producer exit; generic
+EOF, reset, error flags and partial records cannot. The listener requires a
+complete normal record and successful physical reader/collector retirement.
+Collector exceptions never become successful consumption. Session leases keep
+the daemon alive during bounded concurrent application shutdown; deadline or
+callback failure still retires the child without certifying incomplete work.
+
+Native CONNECT evidence is decoded from a bounded exact read of the requested
+Linux socket address in the owned helper and retained through both private frame
+boundaries. Failed/unknown inspections remain generic unparsed observations and
+refuse completeness; resolved addresses become the existing typed Connect value.
+This is diagnostic requested-argument evidence, not kernel authorization.
 
 Final snapshots freeze behavior and collector coverage. Successful executor drain
 alone does not prove complete evidence: loss, unresolved paths, failed collection

@@ -19,6 +19,30 @@ import java.util.stream.Stream
 import kotlin.test.assertIs
 
 class SyscallPathResolverTest {
+    @Test
+    fun `native CONNECT resolution becomes a typed destination observation`() {
+        val address = byteArrayOf(2, 0, 0x1f, 0x90.toByte(), 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0)
+        val reader = object : ProfilerMemoryReader {
+            context(arena: NativeArena) override fun readBytes(
+                tid: Tid,
+                remoteAddr: Long,
+                len: Int,
+            ): ByteArray {
+                assertEquals(Tid(123), tid)
+                assertEquals(4096L, remoteAddr)
+                assertEquals(16, len)
+                return address.copyOf()
+            }
+        }
+        NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val event = makeResolver(reader).resolve(makeRawEvent("CONNECT", listOf(3, 4096, 16)))
+                val observation = assertIs<ProfileObservation.Connect>(ProfileObservation.fromSyscallEvent(event))
+                assertEquals(NetworkEndpoint("127.0.0.1", 8080), observation.endpoint)
+            }
+        }
+    }
+
     private val AT_FDCWD_VAL = -100L
 
     private class RecordingMockReader : ProfilerMemoryReader {

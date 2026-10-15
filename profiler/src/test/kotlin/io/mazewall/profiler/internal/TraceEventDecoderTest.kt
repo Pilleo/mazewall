@@ -19,6 +19,95 @@ import kotlin.test.assertIs
 
 class TraceEventDecoderTest {
     @Test
+    fun `endpoint snapshots remain distinct and copies cannot bind them to changed registers`() {
+        fun event(port: Int) =
+            SyscallEvent.fromEvidence<SyscallEventState.Resolved>(
+            Tid(7),
+                "CONNECT",
+                listOf(3, 4096, 16),
+                PathResolution.NotApplicable,
+            ConnectResolution.Resolved(NetworkEndpoint("127.0.0.1", port)),
+        )
+        val first = event(80)
+        val second = event(443)
+        kotlin.test.assertNotEquals(first, second)
+        val trace = assertIs<TraceEvent.Generic>(TraceEvent.fromSyscallEvent(first))
+        kotlin.test.assertNotEquals(trace, TraceEvent.fromSyscallEvent(second))
+        assertEquals(trace, trace.copy())
+        assertIs<ProfileObservation.Connect>(ProfileObservation.fromTraceEvent(trace.copy()))
+        assertIs<ProfileObservation.Syscall>(ProfileObservation.fromTraceEvent(trace.copy(args = listOf(4, 8192, 16))))
+        val rebound = SyscallEvent<SyscallEventState.Resolved>(Tid(7), "CONNECT", listOf(4, 8192, 16), first.paths)
+        assertIs<ProfileObservation.Syscall>(ProfileObservation.fromSyscallEvent(rebound))
+        val retained = SyscallEvent<SyscallEventState.Resolved>(Tid(7), "CONNECT", first.args, first.paths)
+        assertEquals(first, retained)
+    }
+
+    @Test
+    fun `malformed network evidence never turns into a typed CONNECT`() {
+        fun frame(
+            name: String = "CONNECT",
+            write: (java.io.DataOutputStream) -> Unit,
+        ): ByteArray {
+            val bytes = java.io.ByteArrayOutputStream()
+            java.io.DataOutputStream(bytes).use {
+                it.writeInt(2)
+                it.writeInt(name.length)
+                it.writeBytes(name)
+                it.writeInt(0)
+                it.writeInt(0)
+                it.writeByte(0)
+                it.writeInt(0)
+                write(it)
+            }
+            return bytes.toByteArray()
+        }
+        val malformed = listOf(
+            frame { it.writeByte(0) },
+            frame { it.writeByte(99) },
+            frame {
+                it.writeByte(1)
+                it.writeInt(Int.MAX_VALUE)
+            },
+            frame {
+                it.writeByte(1)
+                it.writeInt(1)
+                it.writeByte(0x80)
+                it.writeInt(80)
+            },
+            frame {
+                it.writeByte(1)
+                it.writeInt(0)
+                it.writeInt(80)
+            },
+            frame {
+                it.writeByte(1)
+                it.writeInt(1)
+                it.writeByte('x'.code)
+                it.writeInt(65536)
+            },
+            frame {
+                it.writeByte(2)
+                it.writeByte(99)
+            },
+            frame {
+                it.writeByte(2)
+                it.writeByte(4)
+                it.writeInt(10)
+                it.writeByte(1)
+            },
+            frame("OPEN") {
+                it.writeByte(1)
+                it.writeInt(1)
+                it.writeByte('x'.code)
+                it.writeInt(80)
+            },
+        )
+        for (bytes in malformed) {
+            assertIs<TraceEventDecodeResult.ProtocolViolation>(TraceEventDecoder.decodeBody(DataInputStream(ByteArrayInputStream(bytes)), 7))
+        }
+    }
+
+    @Test
     fun `malformed UTF8 diagnostic fails the frame instead of altering evidence`() {
         val bytes = java.io.ByteArrayOutputStream()
         java.io.DataOutputStream(bytes).use { output ->

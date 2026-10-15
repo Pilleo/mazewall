@@ -17,6 +17,31 @@ import java.util.concurrent.TimeUnit
 
 class ChildStartupTransactionTest {
     @Test
+    fun `failed pre-retirement callback still reaps the child and preserves fatal identity`() {
+        val fatal = LinkageError("application retirement failed")
+        val cleanupFailure = java.io.IOException("endpoint retirement failed")
+        var deletes = 0
+        val process = MockProcess(123, "READY\n")
+        val launcher = object : MockProcessLauncher(process) {
+            override fun deleteIfExists(path: Path): Boolean {
+                if (++deletes == 1) throw cleanupFailure
+                return true
+            }
+        }
+        val startup = ChildStartupTransaction(launcher, "test-", "child.sock")
+        startup.start(JvmChildSpec("test.Main"))
+        startup.startOutputPump("READY", {}, "test-retirement-pump")
+        startup.registerShutdownHook { throw fatal }
+        startup.awaitReady(1)
+        val owner = startup.commit()
+        assertSame(fatal, assertThrows(LinkageError::class.java) { owner.shutdownHook.run() })
+        assertFalse(process.isAlive)
+        assertTrue(fatal.suppressed.contains(cleanupFailure))
+        owner.close()
+        assertTrue(launcher.shutdownHooks.isEmpty())
+    }
+
+    @Test
     fun `startup boundary rejects uncommitted success and retires its endpoint`() {
         val deleted = mutableListOf<Path>()
         val launcher = object : MockProcessLauncher() {

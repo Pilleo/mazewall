@@ -76,6 +76,8 @@ public object SbobParser {
 
     /**
      * Parses an SBoB JSON string and generates a [Policy].
+     * This is policy learning: observed calls may unblock the starting [base].
+     * An approval ceiling must be reapplied with [Policy.restrictFurtherWith].
      */
     public fun parseJsonToPolicy(
         json: String,
@@ -86,8 +88,8 @@ public object SbobParser {
         val dto = BobDeserializer.deserialize(json)
 
         // 2. NORMALIZE & PRUNE: Handle filesystem paths
-        val prunedReads = PathNormalizer.normalizeAndPrune(dto.opens, baseCwd)
-        val prunedWrites = PathNormalizer.normalizeAndPrune(dto.fsWritePaths, baseCwd)
+        val prunedReads = PathNormalizer.normalizeAndPrune(dto.opens + base.allowedFsReadPaths.map { it.value }, baseCwd)
+        val prunedWrites = PathNormalizer.normalizeAndPrune(dto.fsWritePaths + base.allowedFsWritePaths.map { it.value }, baseCwd)
 
         // 3. TRANSFORM: Convert DTO data into a PolicyDefinition
         val def = PolicyTransformer.transform(dto, prunedReads, prunedWrites, base.definition)

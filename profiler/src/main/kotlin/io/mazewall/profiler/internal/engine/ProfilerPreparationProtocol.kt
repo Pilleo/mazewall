@@ -77,7 +77,8 @@ internal object ProfilerPreparationProtocol {
         return when (val decoded = TraceEventDecoder.decodeBody(frame, tid)) {
             is TraceEventDecodeResult.Event -> {
                 require(decoded.event.syscallName == request.syscallName && frame.available() == 0) { "Preparation response operation mismatch" }
-                SyscallEvent.fromResolution(Tid(tid), request.syscallName, request.notification.args.toList(), decoded.event.pathResolution)
+                require(decoded.rawArguments == request.notification.args.toList()) { "Preparation response arguments mismatch" }
+                SyscallEvent.fromEvidence(Tid(tid), request.syscallName, request.notification.args.toList(), decoded.event.pathResolution, decoded.event.connectResolution)
             }
             is TraceEventDecodeResult.ProtocolViolation -> throw IOException("Malformed preparation response")
         }

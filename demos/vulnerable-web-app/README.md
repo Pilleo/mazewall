@@ -6,7 +6,7 @@ The supported workflow is:
 ./scripts/run_vulnerable_app_demo.sh
 ```
 
-That command is a gated profile-first run of the standard application. It is not an 11-CVE sweep and it does not certify a kernel guarantee. A green exit is claimed only when every declared row below matched its expectation and owned retirement was verified. No such live container run is claimed here.
+That command is a gated profile-first run of the standard application. It is not an 11-CVE sweep and it does not certify a kernel guarantee. A green exit is claimed only when every declared row below matched its expectation and owned retirement was verified. The standard five-row matrix passed locally on 2026-10-15 (`full-safety-profile-02`, `run-c5e6ca7b42bf`) with an explicitly selected rootful Docker endpoint. Zip-slip and controlled-fetch refusals were inferred permission observations, not authenticated kernel-denial proofs.
 
 The [startup and evidence lifecycle diagram](../../docs/diagrams/vulnerable_web_lifecycle.svg) shows the single protection decision and shutdown ordering.
 
@@ -37,6 +37,18 @@ The script and any manual reproduction use the same order. Protected start is fo
 7. Only then start `protected`, recheck image id and the read-only `/app/profiles` mount, and wait for the same benign response.
 8. Run the matrix, write the report, then retire only that project, volume, network, and run image tag.
 
+Multipart inputs are staged in the private `.multipart` directory beneath the
+declared uploads resource, preserving Spring's configured size and disk-buffering
+limits. Symlink staging and an outside configured location fail startup. Temporary
+names from another container are never granted by widening access to `/tmp`.
+Policy learning remains a proposal: each service restricts the learned policy
+further with its explicit ceiling, including network/exec denials and filesystem
+roots. A learned child already covered by an approved base root is redundant;
+strict prepared-resource validation still rejects invalid explicit resources.
+HTTP denial responses retain observed/inferred/unknown evidence strength. Standard
+MVC JSON uses the installed Jackson provider, independently of the profiler's
+transitive Kotlin serializer.
+
 The run directory is `demos/output/<run-id>/`. It holds `phases.tsv`, `logs-profile.txt`, `logs-unprotected.txt`, `logs-protected.txt`, per-container `inspect-*.json`, `seccomp-enforcement`, `profile/`, `profile-generation`, `unprotected_results.json`, `protected_results.json`, `report.md`, and `status`. Gradle build output stays on the script's stdout; keep that log with the directory. The script does not echo the directory path. Verified disappearance prints `retired mazewall-web-<run-id>` to stderr. Anything short of confirmed absence, including a daemon dial, is `cleanup-error` and does not print `retired`. A cleanup failure after an otherwise successful run is nonzero and keeps the earlier failure code when one already exists.
 
 Occupied default ports 8082, 8081, and 8083 fail as `port-occupied` without stopping the listener.
@@ -63,7 +75,10 @@ docker compose -p "$project" -f demos/vulnerable-web-app/compose.yml stop -t 45 
 docker compose -p "$project" -f demos/vulnerable-web-app/compose.yml up -d --no-build protected
 ```
 
-Podman is preferred when its CLI exists. On this host Podman is absent. Docker 29.9.0 and Compose 5.6.0 are installed, but the selected endpoint `/run/user/1000/podman/podman.sock` is missing, so these commands are not a completed live run. Do not point Docker at a different socket from this guide.
+Podman is preferred when its CLI exists. The accepted local run explicitly chose
+Docker with `MAZEWALL_CONTAINER_ENGINE=docker` and
+`DOCKER_HOST=unix:///var/run/docker.sock`; it did not change the default endpoint
+or use a runtime fallback. Use the operator-selected working endpoint explicitly.
 
 ## Host JUnit, no Compose
 
@@ -73,11 +88,20 @@ The core presentation tour does not start Compose or this script:
 ./gradlew :demos:vulnerable-web-app:presentationTest --console=plain
 ```
 
-Those tests compare a prepared service policy and a real publication/incomplete-refusal path. They are not a complete profile→enforcement sweep. That genuine JVM case is blocked: collector[1] drain did not complete, and collector[2] CONNECT was observed without a parsed destination. Do not describe it as passing.
+Those tests compare prepared service policy, real complete native publication and
+an explicitly interrupted-publication refusal, including a real denied upload
+through HTTP. The companion `VulnerableWebAppFreshJvmTest` suite also tests a
+genuinely fresh connection against the service ceiling.
+The complete five-row profile→enforcement comparison is separately qualified by
+the installed-container workflow above; the JUnit tour alone is not that sweep.
 
 ## Boundary
 
 Thread-scoped containment can deny a direct worker syscall. It does not isolate shared JVM memory or arbitrary hostile Java that hops onto an unrestricted pool. Permission exceptions are inferred evidence. Incomplete profile generations are refused unless an operator explicitly sets `-Dmazewall.allow-incomplete-profile-enforcement=true`. This workflow does not set that override.
+Existing process-shared descriptors and mappings are not revoked. A cached HTTP
+connection is already a capability; a test of new-connect denial must close its
+positive control's keepalive connection first. The process-wide baseline remains
+in force, but this demonstration is not a process-level arbitrary-code boundary.
 
 Profiling and enforcement stay mutually exclusive. The image runs as unprivileged `mazewall`. Only `/app/data` and `/app/uploads` are owned by that user. Published host ports stay on `127.0.0.1`.
 

@@ -23,8 +23,7 @@ internal object ProfilerPreparationMain {
                 with(arena) {
                     val notification = request.notification
                     val tid = Tid(notification.pid)
-                    val resolution = SyscallPathResolver(RealMemoryReader, SessionEventLedger()).resolveEvidence(tid, request.syscallName, notification.args)
-                    SyscallEvent.fromResolution<SyscallEventState.Resolved>(tid, request.syscallName, notification.args.toList(), resolution)
+                    SyscallPathResolver(RealMemoryReader, SessionEventLedger()).resolve(SyscallEvent<SyscallEventState.Raw>(tid, request.syscallName, notification.args.toList()))
                 }
             }
             ProfilerPreparationProtocol.writeResponse(output, request, event)

@@ -1,5 +1,6 @@
 package io.mazewall.profiler.internal
 
+import io.mazewall.platform.seccomp.daemon.SeccompStreamEnd
 import io.mazewall.profiler.api.TraceEvent
 
 /** Pure lifecycle reducer for trace-listener socket input. */
@@ -30,6 +31,15 @@ internal sealed interface TraceListenerEvent {
     ) : TraceListenerEvent
 
     data object SocketClosed : TraceListenerEvent
+
+    data class DrainConfirmed(
+        val reason: SeccompStreamEnd,
+        val requested: Boolean,
+    ) : TraceListenerEvent
+
+    data class ProtocolRejected(
+        val reason: String,
+    ) : TraceListenerEvent
 }
 
 /** Keeps listener lifecycle assignment independent from socket reads and their failure paths. */
@@ -50,22 +60,58 @@ internal object TraceListenerMachine {
     fun evaluate(
         state: TraceListenerState,
         event: TraceListenerEvent,
-    ): TraceListenerState {
-        if (state is TraceListenerState.ProtocolViolation || state is TraceListenerState.HandshakeRejected) return state
-        return when (event) {
+    ): TraceListenerState =
+        when (state) {
+        is TraceListenerState.ProtocolViolation, TraceListenerState.HandshakeRejected -> state
+        is TraceListenerState.Drained -> afterDrain(state, event)
+        TraceListenerState.Disconnected,
+        TraceListenerState.AwaitingEvent,
+        is TraceListenerState.ReadingHeader,
+        is TraceListenerState.ReadingSyscall,
+        is TraceListenerState.ReadingArguments,
+        is TraceListenerState.ProcessingEvent,
+        -> advanceInput(state, event)
+    }
+
+    private fun advanceInput(
+        state: TraceListenerState,
+        event: TraceListenerEvent,
+    ): TraceListenerState =
+        when (event) {
             TraceListenerEvent.HandshakeReceived ->
                 if (state is TraceListenerState.Disconnected) TraceListenerState.AwaitingEvent else violation(state, event)
             TraceListenerEvent.HandshakeRejected ->
                 if (state is TraceListenerState.Disconnected) TraceListenerState.HandshakeRejected else violation(state, event)
-            TraceListenerEvent.AwaitEvent ->
-                if (state is TraceListenerState.AwaitingEvent || state is TraceListenerState.ProcessingEvent) TraceListenerState.AwaitingEvent else violation(state, event)
+            TraceListenerEvent.AwaitEvent -> awaitEvent(state, event)
             is TraceListenerEvent.HeaderRead -> readHeader(state, event)
             is TraceListenerEvent.SyscallRead -> readSyscall(state, event)
             is TraceListenerEvent.ArgumentsRead -> readArguments(state, event)
             is TraceListenerEvent.EventRead -> readEvent(state, event)
+            is TraceListenerEvent.ProtocolRejected -> TraceListenerState.ProtocolViolation(event.reason)
+            is TraceListenerEvent.DrainConfirmed -> confirmDrain(state, event)
             TraceListenerEvent.SocketClosed ->
                 TraceListenerState.Disconnected
         }
+
+    private fun afterDrain(
+        state: TraceListenerState.Drained,
+        event: TraceListenerEvent,
+    ): TraceListenerState = if (event == TraceListenerEvent.SocketClosed) state else violation(state, event)
+
+    private fun awaitEvent(
+        state: TraceListenerState,
+        event: TraceListenerEvent,
+    ): TraceListenerState = if (state is TraceListenerState.AwaitingEvent || state is TraceListenerState.ProcessingEvent) TraceListenerState.AwaitingEvent else violation(state, event)
+
+    private fun confirmDrain(
+        state: TraceListenerState,
+        event: TraceListenerEvent.DrainConfirmed,
+    ): TraceListenerState {
+        val accepted = when (event.reason) {
+            SeccompStreamEnd.PRODUCER_EXIT -> true
+            SeccompStreamEnd.PASS_THROUGH -> event.requested
+        }
+        return if (state is TraceListenerState.AwaitingEvent && accepted) TraceListenerState.Drained(event.reason) else violation(state, event)
     }
 
     private fun readHeader(

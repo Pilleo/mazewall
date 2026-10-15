@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 133 | *Total Resolved Issues:* 684
+*Total Active Issues:* 131 | *Total Resolved Issues:* 688
 
-Active status detail: 132 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 130 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -48,6 +48,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261015-182018-091-prune-learned-filesystem-paths-covered-by-explicit](resolved/issue-20261015-182018-091-prune-learned-filesystem-paths-covered-by-explicit.md) | Prune learned filesystem paths covered by explicit base grants | high | core |
+| Archived [issue-20261015-172121-857-preserve-truthful-profiler-completion-across-termi](resolved/issue-20261015-172121-857-preserve-truthful-profiler-completion-across-termi.md) | Preserve truthful profiler completion across terminal effects and native network evidence | high | core |
 | Archived [issue-20261015-162735-795-align-mutation-selectors-with-migrated-platform-te](resolved/issue-20261015-162735-795-align-mutation-selectors-with-migrated-platform-te.md) | Align mutation selectors with migrated platform test namespaces | high | core |
 | Archived [issue-20261015-152513-703-diagnose-required-worker-rejection-cause-under-ci-](resolved/issue-20261015-152513-703-diagnose-required-worker-rejection-cause-under-ci-.md) | Diagnose required worker rejection cause under CI cleanup timing | high | core |
 | Archived [issue-20261015-141652-144-select-the-declared-root-kernel-aggregate-in-ci](resolved/issue-20261015-141652-144-select-the-declared-root-kernel-aggregate-in-ci.md) | Select the declared root kernel aggregate in CI | high | core |
@@ -72,8 +74,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261013-005316-364-verify-candidate617-through-authorized-remote-arti](issue-20261013-005316-364-verify-candidate617-through-authorized-remote-arti.md) | Verify candidate617 through authorized remote artifact retrieval | medium | integrations |
 | [issue-20261013-005316-772-provide-a-prepared-offline-presentation-demo-launc](issue-20261013-005316-772-provide-a-prepared-offline-presentation-demo-launc.md) | Provide a readable JUnit feature showcase for presentation | high | demos |
 | [issue-20261013-005317-053-make-supervised-agent-ssrf-controls-deterministic-](issue-20261013-005317-053-make-supervised-agent-ssrf-controls-deterministic-.md) | Make supervised agent SSRF controls deterministic and local | high | demos |
-| [issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out](issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out.md) | Derive web exploit report verdicts from actual outcomes | high | demos |
-| [issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta](issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta.md) | Repair owned profile-first vulnerable web demo startup | high | demos |
+| Archived [issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out](resolved/issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out.md) | Derive web exploit report verdicts from actual outcomes | high | demos |
+| Archived [issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta](resolved/issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta.md) | Repair owned profile-first vulnerable web demo startup | high | demos |
 | [issue-20261013-005317-886-expose-a-clear-deterministic-koog-portal-presentat](issue-20261013-005317-886-expose-a-clear-deterministic-koog-portal-presentat.md) | Expose Koog Portal features through readable JUnit showcase tests | medium | demos |
 | [issue-20261013-005318-218-make-spring-jdbc-and-context-integration-understan](issue-20261013-005318-218-make-spring-jdbc-and-context-integration-understan.md) | Make Spring JDBC and context integration understandable on stage | medium | demos |
 | [issue-20261013-005318-577-show-owned-invocation-admission-cancellation-and-p](issue-20261013-005318-577-show-owned-invocation-admission-cancellation-and-p.md) | Show owned invocation admission cancellation and physical drain | medium | demos |

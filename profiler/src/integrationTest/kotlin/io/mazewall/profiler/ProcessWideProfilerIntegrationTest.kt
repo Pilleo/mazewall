@@ -17,15 +17,9 @@ class ProcessWideProfilerIntegrationTest : BaseIntegrationTest() {
 
     @Test
     fun `test processWide profiling captures background thread syscalls`() {
-        val javaBin = System.getProperty("java.home") + "/bin/java"
-        val classpath = System.getProperty("java.class.path")
         val className = "io.mazewall.profiler.api.ProcessWideProfilerIntegrationTest\$SubprocessMain"
-
-        val pb = ProcessBuilder(javaBin, "--enable-native-access=ALL-UNNAMED", "-cp", classpath, className)
-        pb.inheritIO()
-        val process = pb.start()
-        val exitCode = process.waitFor()
-        kotlin.test.assertEquals(0, exitCode, "Process-wide profiling in subprocess failed")
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedTest(className)
     }
 
     object SubprocessMain {
@@ -35,13 +29,13 @@ class ProcessWideProfilerIntegrationTest : BaseIntegrationTest() {
             assertTrue(targetFile.exists())
 
             val latch = java.util.concurrent.CountDownLatch(1)
-            val testLatch = java.util.concurrent.CountDownLatch(1)
+            val completed = java.util.concurrent.CompletableFuture<String>()
             val bgThread = Thread {
                 latch.await()
                 try {
-                    targetFile.readText()
-                } finally {
-                    testLatch.countDown()
+                    completed.complete(targetFile.readText())
+                } catch (failure: Throwable) {
+                    completed.completeExceptionally(failure)
                 }
             }
             bgThread.start()
@@ -49,16 +43,15 @@ class ProcessWideProfilerIntegrationTest : BaseIntegrationTest() {
             try {
                 val result = Profiler.profile(processWide = true) {
                     latch.countDown()
-                    testLatch.await(5, TimeUnit.SECONDS)
+                    completed.get(5, TimeUnit.SECONDS)
                 }
+                assertTrue(result.value.isNotBlank(), "The actual background read must succeed")
                 val bob = result.behavior
                 assertTrue(bob.opens.contains("/etc/hostname"), "Process-wide profiling should capture /etc/hostname from background thread")
-            } catch (e: IllegalStateException) {
-                // If run on host without container privilege boundary, TSYNC will fail with EACCES
-                assertTrue(e.message?.contains("EACCES") == true || e.message?.contains("Permission denied") == true)
             } finally {
                 latch.countDown()
-                bgThread.join()
+                bgThread.join(5_000)
+                kotlin.test.assertFalse(bgThread.isAlive, "Background producer must physically retire")
                 Profiler.shutdown() // Explicitly shutdown daemon in subprocess
             }
         }

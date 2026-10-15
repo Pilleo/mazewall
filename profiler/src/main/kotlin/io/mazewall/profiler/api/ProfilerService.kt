@@ -5,6 +5,7 @@ import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.PolicyPresets
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
+import io.mazewall.platform.fd.ResourceRetirement
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
 import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import io.mazewall.profiler.internal.TraceListenerMachine
@@ -45,9 +46,18 @@ internal class ProfilerService(
         TraceListenerMachine.preload()
         ProfilerAckPreload.ensureLoaded()
         val context = runtime.daemonManager().getOrSpawnSharedDaemon()
-        return ProfilerSession(runtime, context, policy, processWide, captureStackTraces) { session ->
-            if (session.cleanupOutcome == SeccompCleanupOutcome.Complete) sessions.remove(session)
-        }.also(sessions::add)
+        val lease = context.lifetime.acquire()
+        return ResourceRetirement.runWithRollback(
+            {
+                ProfilerSession(runtime, context, policy, processWide, captureStackTraces) { session ->
+                    if (session.cleanupOutcome == SeccompCleanupOutcome.Complete) {
+                        sessions.remove(session)
+                        lease.close()
+                    }
+                }.also(sessions::add)
+            },
+            lease::close,
+        )
     }
 
     @Suppress("TooGenericExceptionCaught") // Transfer every workload failure across the dedicated worker boundary.

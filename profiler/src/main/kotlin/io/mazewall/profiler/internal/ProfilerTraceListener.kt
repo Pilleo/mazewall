@@ -11,6 +11,7 @@ import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
 import io.mazewall.profiler.api.PathResolution
 import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.api.profilerCleanupOutcome
 import io.mazewall.profiler.api.throwIfIncomplete
 import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import kotlinx.coroutines.channels.Channel
@@ -49,10 +50,22 @@ internal class ProfilerTraceListener(
     private val socketCloseLock = Any()
 
     @Volatile
-    var cleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
-        private set
+    private var socketCleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
+
+    @Volatile
+    private var threadCleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
+
+    val cleanupOutcome: SeccompCleanupOutcome
+        get() = when (val threads = threadCleanupOutcome) {
+            SeccompCleanupOutcome.Complete -> socketCleanupOutcome
+            is SeccompCleanupOutcome.Incomplete -> profilerCleanupOutcome(listOf(socketCleanupOutcome, threads), retryableOwnership())
+        }
     private var workerThread: Thread? = null
     private var collectorThread: Thread? = null
+
+    private enum class CollectionOutcome { COLLECTING, DRAINED, FAILED }
+
+    @Volatile private var collectionOutcome = CollectionOutcome.COLLECTING
 
     /**
      * Closes the underlying socket file descriptor exactly once in a thread-safe and idempotent manner.
@@ -74,7 +87,7 @@ internal class ProfilerTraceListener(
                 val result = native.fileSystem.close(socketFd)
                 // A returned native error may already have released the integer. Never retry it.
                 socketClosed.set(true)
-                cleanupOutcome = when (result) {
+                socketCleanupOutcome = when (result) {
                     is LinuxNative.SyscallResult.Success -> SeccompCleanupOutcome.Complete
                     is LinuxNative.SyscallResult.Error -> SeccompCleanupOutcome.Incomplete(
                         listOf(IllegalStateException("close(fd=${socketFd.value}) failed: errno=${result.errno}")),
@@ -94,7 +107,7 @@ internal class ProfilerTraceListener(
         // Native engines retire the generation before dispatch. An exception alone cannot
         // prove retryability, and a retired token must never be adopted or closed again.
         if (!socketFd.isLiveForIo()) socketClosed.set(true)
-        cleanupOutcome = SeccompCleanupOutcome.Incomplete(listOf(failure), retryableOwnership())
+        socketCleanupOutcome = SeccompCleanupOutcome.Incomplete(listOf(failure), retryableOwnership())
     }
 
     fun retryableOwnership(): List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> =
@@ -114,7 +127,7 @@ internal class ProfilerTraceListener(
     var state: TraceListenerState = TraceListenerState.Disconnected
         private set
 
-    /** True only after EOF that follows a locally initiated pass-through/shutdown. */
+    /** True only after a complete terminal record and physical reader/collector retirement. */
     @Volatile
     var drainComplete: Boolean = false
         private set
@@ -185,9 +198,12 @@ internal class ProfilerTraceListener(
                         onEventCollected?.invoke(event)
                     }
                 }
+                collectionOutcome = CollectionOutcome.DRAINED
             } catch (expectedCollectorFailure: Exception) {
+                collectionOutcome = CollectionOutcome.FAILED
                 logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed", expectedCollectorFailure)
             } finally {
+                if (collectionOutcome == CollectionOutcome.COLLECTING) collectionOutcome = CollectionOutcome.FAILED
                 collectorTerminatedLatch.countDown()
             }
         }.apply {
@@ -231,8 +247,7 @@ internal class ProfilerTraceListener(
             var workerJoined = false
             var collectorJoined = false
 
-            // Step 2: Wait for the listener thread to drain remaining events and see EOF.
-            // The thread exits via EOFException once the daemon closes its socket end.
+            // Step 2: Join the reader after its terminal record and then the consuming collector.
             workerThread?.let { workerJoined = joinWorkerForDrain(it) }
 
             collectorThread?.let {
@@ -249,21 +264,30 @@ internal class ProfilerTraceListener(
                 }
             }
 
-            drainComplete = gracefulDrainRequested.get() &&
-                workerJoined &&
+            drainComplete = workerJoined &&
                 collectorJoined &&
+                collectionOutcome == CollectionOutcome.DRAINED &&
                 droppedEvents == 0 &&
-                state == TraceListenerState.Disconnected
+                state is TraceListenerState.Drained
             if (!collectorJoined) {
                 droppedEvents += 1
             }
         } finally {
-            // Step 3: Close the socket FD only after draining in an idempotent way.
+            // Step 3: Retire the descriptor once and retain unfinished thread owners.
             closeSocketOnce()
-            workerThread = null
-            collectorThread = null
+            retainUnfinishedThreads()
         }
         return cleanupOutcome
+    }
+
+    private fun retainUnfinishedThreads() {
+        if (workerThread?.isAlive == false) workerThread = null
+        if (collectorThread?.isAlive == false) collectorThread = null
+        threadCleanupOutcome = if (workerThread != null || collectorThread != null) {
+            SeccompCleanupOutcome.Incomplete(listOf(IllegalStateException("Profiler reader or collector is still physically alive")), emptyList())
+        } else {
+            SeccompCleanupOutcome.Complete
+        }
     }
 
     /**
@@ -323,29 +347,14 @@ internal class ProfilerTraceListener(
                     return
                 }
                 advanceListener(TraceListenerEvent.HandshakeReceived)
-                // No config bytes are sent. The daemon uses fire-and-forget delivery;
-                // no bypassedTids or captureStackTraces negotiation is required.
+                // No config bytes are sent; event delivery uses the fixed per-frame ACK protocol.
             } finally {
                 readyLatch.countDown()
             }
 
             while (true) {
                 advanceListener(TraceListenerEvent.AwaitEvent)
-                val decoded = try {
-                    readNextEvent(dis)
-                } catch (_: java.io.EOFException) {
-                    break
-                } catch (expectedCloseIoFailure: java.io.IOException) {
-                    if (closed.get() && state !is TraceListenerState.ProtocolViolation) {
-                        logger.log(
-                            java.util.logging.Level.FINE,
-                            "Trace listener loop interrupted by close",
-                            expectedCloseIoFailure,
-                        )
-                        break
-                    }
-                    throw expectedCloseIoFailure
-                }
+                val decoded = readEventOrStop(dis) ?: break
 
                 advanceListener(TraceListenerEvent.EventRead(decoded.event))
                 processEvent(decoded.event, decoded.diagnosticRecord)
@@ -358,8 +367,26 @@ internal class ProfilerTraceListener(
         }
     }
 
-    private fun readNextEvent(dis: DataInputStream): DecodedTraceEvent {
+    private fun readEventOrStop(dis: DataInputStream): DecodedTraceEvent? =
+        try {
+            readNextEvent(dis)
+        } catch (_: java.io.EOFException) {
+            null
+        } catch (expectedCloseIoFailure: java.io.IOException) {
+            if (closed.get() && state !is TraceListenerState.ProtocolViolation) {
+                logger.log(java.util.logging.Level.FINE, "Trace listener loop interrupted by close", expectedCloseIoFailure)
+                null
+            } else {
+                throw expectedCloseIoFailure
+            }
+        }
+
+    private fun readNextEvent(dis: DataInputStream): DecodedTraceEvent? {
         val tidValue = dis.readInt()
+        if (tidValue == TraceStreamEndWire.MARKER) {
+            readTerminal(dis)
+            return null
+        }
         advanceListener(TraceListenerEvent.HeaderRead(tidValue))
         val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
         if (decoded is TraceEventDecodeResult.ProtocolViolation) {
@@ -379,6 +406,19 @@ internal class ProfilerTraceListener(
         // stack trace (via captureStackTrace) without the thread moving past the active syscall frame.
         // Once the stack trace is captured, we send the ACK to unblock the tracee.
         return DecodedTraceEvent(decoded.event, diagnosticRecord)
+    }
+
+    private fun readTerminal(dis: DataInputStream) {
+        val reason = try {
+            TraceStreamEndWire.read(dis)
+        } catch (_: java.io.IOException) {
+            advanceListener(TraceListenerEvent.ProtocolRejected("Truncated trace terminal record"))
+            return
+        } catch (_: IllegalArgumentException) {
+            advanceListener(TraceListenerEvent.ProtocolRejected("Invalid trace terminal record"))
+            return
+        }
+        advanceListener(TraceListenerEvent.DrainConfirmed(reason, gracefulDrainRequested.get()))
     }
 
     private fun advanceListener(event: TraceListenerEvent) {

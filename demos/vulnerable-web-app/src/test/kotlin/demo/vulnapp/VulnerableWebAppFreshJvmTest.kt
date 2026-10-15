@@ -32,6 +32,93 @@ import kotlin.test.assertTrue
 class VulnerableWebAppFreshJvmTest {
     @Test
     @EnabledIfLinuxAndSupported
+    fun `actual servlet multipart staging stays inside the declared upload resource`() {
+        IsolatedProcessTester.runIsolatedMethod(javaClass.name, "multipartStorageBody")
+    }
+
+    @Suppress("unused")
+    fun multipartStorageBody() {
+        val root = Files.createTempDirectory("web-multipart-storage-")
+        val bindings = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
+        try {
+            startApplication(enabled = false, bindings = bindings).use { application ->
+                val multipart = application.getBean(jakarta.servlet.MultipartConfigElement::class.java)
+                val location = java.nio.file.Path
+                    .of(multipart.location)
+                    .toAbsolutePath()
+                    .normalize()
+                assertTrue(location.startsWith(bindings.uploads.toRealPath()), "Servlet staging must use a declared resource, not a per-container scratch path: $location")
+                assertTrue(Files.isDirectory(location))
+                assertEquals(1_048_576L, multipart.maxFileSize)
+                assertEquals(10_485_760L, multipart.maxRequestSize)
+            }
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `learned network calls cannot relax the explicit service ceiling`() {
+        IsolatedProcessTester.runIsolatedMethod(javaClass.name, "networkCeilingBody")
+    }
+
+    @Suppress("unused")
+    fun networkCeilingBody() {
+        val root = Files.createTempDirectory("web-network-ceiling-")
+        val target = root.resolve("sbob.json")
+        val bindings = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
+        val server = com.sun.net.httpserver.HttpServer
+            .create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
+        val served = java.util.concurrent.atomic
+            .AtomicInteger()
+        server.createContext("/") { exchange ->
+            served.incrementAndGet()
+            val bytes = "owned-network-canary".toByteArray()
+            exchange.responseHeaders.add("Connection", "close")
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        val url = "http://127.0.0.1:${server.address.port}/"
+        val owner = ServiceExecutorOwner(java.time.Duration.ofSeconds(5))
+        try {
+            assertEquals(
+                "owned-network-canary",
+                demo.vulnapp.service
+                .DefaultProxyService()
+                .fetchUrl(url),
+            )
+            served.set(0)
+            ProfileArtifactPublisher.publish(
+                target,
+                BillOfBehavior(opens = setOf(System.getProperty("java.home")), syscalls = setOf(io.mazewall.platform.syscall.Syscall.SOCKET, io.mazewall.platform.syscall.Syscall.CONNECT)),
+                ExecutorDrain.Complete,
+                listOf(collectorCoverage()),
+            )
+            System.setProperty("mazewall.sbob.path", target.toString())
+            val response = demo.vulnapp.config
+                .MazewallConfig(owner, bindings)
+                .proxyService()
+                .fetchUrl(url)
+            assertEquals(0, served.get(), "Profile observation must not authorize a request prohibited by the service ceiling: $response")
+            assertTrue(
+                response.contains("Operation not permitted") || response.contains("Permission denied") || Regex("\\berror[=:]\\s*(1|13)\\b").containsMatchIn(response),
+                "A generic fetch failure is not proof of containment: $response",
+            )
+        } finally {
+            try {
+                assertEquals(ExecutorDrain.Complete, owner.stopAdmissionAndDrain())
+            } finally {
+                System.clearProperty("mazewall.sbob.path")
+                server.stop(0)
+                root.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
     fun `unprotected exploit succeeds without damaging preexisting paths`() {
         IsolatedProcessTester.runIsolatedMethod(javaClass.name, "unprotectedBody")
     }
@@ -54,10 +141,19 @@ class VulnerableWebAppFreshJvmTest {
         val root = Files.createTempDirectory("mazewall-web-incomplete-profile-")
         try {
             IsolatedProcessTester.runIsolatedMethod(javaClass.name, "profileIncompleteEvidenceBody", root.toString())
-            val reason = ObjectMapper().readTree(Files.readString(ProfileArtifactPublisher.readCurrent(root.resolve("sbob.json")).integrity)).path("reason").asText()
-            assertTrue(reason.contains("collector[1]: event drain did not complete"), reason)
-            assertTrue(reason.contains("collector[1]: collector drain did not complete"), reason)
-            assertTrue(reason.contains("collector[2]: CONNECT was observed without a parsed destination"), reason)
+            val target = root.resolve("sbob.json")
+            val complete = ProfileArtifactPublisher.readCurrent(target)
+            assertTrue(ObjectMapper().readTree(Files.readString(complete.integrity)).path("complete").asBoolean(), "Actual benign collection must complete before exercising the negative handoff")
+            assertEquals(complete.evidence, ProfileArtifactPublisher.resolveEvidencePath(target))
+            // The negative control models interrupted retirement, not an accidental collector defect.
+            ProfileArtifactPublisher.publish(target, BillOfBehavior.fromFile(complete.evidence), ExecutorDrain.Incomplete.Interrupted, listOf(collectorCoverage()))
+            assertTrue(
+                ObjectMapper()
+                .readTree(Files.readString(ProfileArtifactPublisher.readCurrent(target).integrity))
+                .path("reason")
+                .asText()
+                .contains("interrupted"),
+            )
             assertFailsWith<IncompleteProfileEvidenceException> {
                 ProfileArtifactPublisher.resolveEvidencePath(root.resolve("sbob.json"))
             }
@@ -69,11 +165,12 @@ class VulnerableWebAppFreshJvmTest {
     @Suppress("unused")
     fun unprotectedBody() {
         val root = Files.createTempDirectory("mazewall-web-unprotected-")
+        val bindings = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
         val marker = root.resolve("marker")
         Files.writeString(marker, "preserve")
         val created = root.resolve("created")
         try {
-            startApplication(enabled = false).use { application ->
+            startApplication(enabled = false, bindings = bindings).use { application ->
                 assertTrue(application.getBean(FileService::class.java) is DefaultFileService)
                 assertEquals("false", application.environment.getProperty(MazewallProtectionBootstrap.RESOLVED_PROPERTY))
                 assertEquals(404, missingCommandRoute(application).statusCode())
@@ -93,9 +190,7 @@ class VulnerableWebAppFreshJvmTest {
             }
             assertEquals("preserve", Files.readString(marker))
         } finally {
-            Files.deleteIfExists(created)
-            Files.deleteIfExists(marker)
-            Files.deleteIfExists(root)
+            root.toFile().deleteRecursively()
         }
     }
 
@@ -131,6 +226,35 @@ class VulnerableWebAppFreshJvmTest {
                 val upload = org.springframework.mock.web
                     .MockMultipartFile("file", "benign.zip", "application/zip", bytes.toByteArray())
                 application.getBean(FileService::class.java).extractZip(upload)
+                assertEquals("bound upload", Files.readString(bindings.uploads.resolve("benign.txt")))
+
+                val escape = root.resolve("http-escape")
+                val hostile = java.io.ByteArrayOutputStream()
+                java.util.zip.ZipOutputStream(hostile).use { zip ->
+                    zip.putNextEntry(java.util.zip.ZipEntry("../http-escape"))
+                    zip.write("forbidden escape".toByteArray())
+                    zip.closeEntry()
+                }
+                val boundary = "owned-upload-boundary"
+                val form = java.io.ByteArrayOutputStream().apply {
+                    write("--$boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"escape.zip\"\r\nContent-Type: application/zip\r\n\r\n".toByteArray())
+                    write(hostile.toByteArray())
+                    write("\r\n--$boundary--\r\n".toByteArray())
+                }
+                val request = HttpRequest
+                    .newBuilder(uri(application, "/upload"))
+                    .timeout(java.time.Duration.ofSeconds(5))
+                    .header("Content-Type", "multipart/form-data; boundary=$boundary")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(form.toByteArray()))
+                    .build()
+                val refused = HttpClient.newHttpClient().use { it.send(request, HttpResponse.BodyHandlers.ofString()) }
+                assertEquals(403, refused.statusCode(), "Actual containment denial must reach HTTP without becoming a generic server error: ${refused.body()}")
+                assertEquals("INFERRED_PERMISSION_FAILURE", ObjectMapper().readTree(refused.body()).path("evidence").asText())
+                assertFalse(Files.exists(escape))
+                application.getBean(FileService::class.java).extractZip(
+                    org.springframework.mock.web
+                    .MockMultipartFile("file", "after.zip", "application/zip", bytes.toByteArray()),
+                )
                 assertEquals("bound upload", Files.readString(bindings.uploads.resolve("benign.txt")))
 
                 val failure = runCatching {
@@ -173,7 +297,8 @@ class VulnerableWebAppFreshJvmTest {
                 val upload = org.springframework.mock.web
                     .MockMultipartFile("file", "benign.zip", "application/zip", bytes.toByteArray())
                 application.getBean(FileService::class.java).extractZip(upload)
-                application.getBean(ProxyService::class.java).fetchUrl("http://unprotected:8080/admin/log")
+                val fetched = application.getBean(ProxyService::class.java).fetchUrl(uri(application, "/admin/log").toString())
+                assertTrue(fetched.contains("Log processed"), "Profile a real owned successful fetch: $fetched")
                 assertFalse(Files.exists(target), "current-generation pointer must be published only during shutdown")
             }
         } finally {
@@ -184,11 +309,12 @@ class VulnerableWebAppFreshJvmTest {
     @Suppress("unused")
     fun profileBody() {
         val root = Files.createTempDirectory("mazewall-web-profile-")
+        val bindings = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
         val target = root.resolve("sbob.json")
         val marker = root.resolve("profile-marker")
         System.setProperty("mazewall.sbob.path", target.toString())
         try {
-            startApplication(enabled = false, profile = true, sbobPath = target).use { application ->
+            startApplication(enabled = false, profile = true, sbobPath = target, bindings = bindings).use { application ->
                 assertFalse(application.getBean(FileService::class.java) is DefaultFileService)
                 assertEquals(200, getAdmin(application, "profile-control").statusCode())
                 application.getBean(FileService::class.java).runCommand("printf profiled > '$marker'")

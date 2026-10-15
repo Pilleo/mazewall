@@ -132,6 +132,8 @@ internal class SeccompSessionHandler(
         val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
         val listenerRevents = pfd1.getRevents().toInt()
         if ((listenerRevents and errorOrHup) != 0) {
+            // Linux seccomp_notify_poll emits lone HUP only when no filter users remain.
+            if (listenerRevents == NativeConstants.POLLHUP.toInt()) notifHandler.endStream(SeccompStreamEnd.PRODUCER_EXIT)
             isTerminated = true
             return LoopAction.Break
         }
@@ -239,6 +241,7 @@ internal class SeccompSessionHandler(
                         NotifResult.HANDLED -> Unit
                         NotifResult.TERMINATE -> isTerminated = true
                         NotifResult.PASS_THROUGH -> if (!isTerminated) {
+                            notifHandler.endStream(SeccompStreamEnd.PASS_THROUGH)
                             isPassThrough = true
                             PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE)).setFd(-1)
                             closeControlSocket()
@@ -362,6 +365,7 @@ internal class SeccompSessionHandler(
                         onShutdown("Parent Command")
                         true
                     } else if (command == PASS_THROUGH_COMMAND_BYTE) {
+                        notifHandler.endStream(SeccompStreamEnd.PASS_THROUGH)
                         isPassThrough = true
                         // Disable polling on socketFd by setting its fd to -1
                         val pfd2 = PollFdSegment.of(pollFds.asSlice(Layouts.POLLFD_SIZE, Layouts.POLLFD_SIZE))

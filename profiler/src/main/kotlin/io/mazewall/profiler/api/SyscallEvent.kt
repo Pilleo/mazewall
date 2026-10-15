@@ -9,7 +9,7 @@ public sealed interface SyscallEventState {
     /** Raw registers captured from the kernel. */
     public interface Raw : SyscallEventState
 
-    /** Arguments resolved into human-readable strings (e.g. paths). */
+    /** Inspection finished; individual operand failures remain evidence, not proof of completeness. */
     public interface Resolved : SyscallEventState
 }
 
@@ -48,7 +48,9 @@ public class SyscallEvent<out S : SyscallEventState>(
     public val args: List<Long> = java.util.List.copyOf(args)
     public val pathResolution: PathResolution =
         if (paths is SyscallPaths && paths.syscallName == syscallName) paths.resolution else legacyPathResolution(syscallName, paths)
-    public val paths: List<String> = SyscallPaths(syscallName, pathResolution)
+    internal val connectResolution: ConnectResolution =
+        if (paths is SyscallPaths && paths.syscallName == syscallName && paths.connectArguments == this.args) paths.connect else legacyConnectResolution(syscallName)
+    public val paths: List<String> = SyscallPaths(syscallName, pathResolution, connectResolution, this.args)
     public val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
 
     override fun equals(other: Any?): Boolean {
@@ -58,6 +60,7 @@ public class SyscallEvent<out S : SyscallEventState>(
         if (syscallName != other.syscallName) return false
         if (args != other.args) return false
         if (pathResolution != other.pathResolution) return false
+        if (connectResolution != other.connectResolution) return false
         if (stackTrace != other.stackTrace) return false
         return true
     }
@@ -67,6 +70,7 @@ public class SyscallEvent<out S : SyscallEventState>(
         result = 31 * result + syscallName.hashCode()
         result = 31 * result + args.hashCode()
         result = 31 * result + pathResolution.hashCode()
+        result = 31 * result + connectResolution.hashCode()
         result = 31 * result + (stackTrace?.hashCode() ?: 0)
         return result
     }
@@ -76,6 +80,18 @@ public class SyscallEvent<out S : SyscallEventState>(
     }
 
     public companion object {
+        internal fun <S : SyscallEventState> fromEvidence(
+            tid: Tid,
+            syscallName: String,
+            args: List<Long>,
+            pathResolution: PathResolution,
+            connectResolution: ConnectResolution,
+            stackTrace: List<String>? = null,
+        ): SyscallEvent<S> {
+            require(syscallName.equals("CONNECT", ignoreCase = true) == (connectResolution != ConnectResolution.NotApplicable)) { "CONNECT evidence operation mismatch" }
+            return SyscallEvent(tid, syscallName, args, SyscallPaths(syscallName, pathResolution, connectResolution, java.util.List.copyOf(args)), stackTrace)
+        }
+
         public fun <S : SyscallEventState> fromResolution(
             tid: Tid,
             syscallName: String,
@@ -90,6 +106,8 @@ public class SyscallEvent<out S : SyscallEventState>(
 private class SyscallPaths(
     val syscallName: String,
     val resolution: PathResolution,
+    val connect: ConnectResolution = legacyConnectResolution(syscallName),
+    val connectArguments: List<Long>? = null,
 ) : java.util.AbstractList<String>() {
     override val size: Int get() = resolution.paths.size
 

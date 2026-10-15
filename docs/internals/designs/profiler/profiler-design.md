@@ -15,7 +15,20 @@ exception and closes the endpoint; it does not read another event or fabricate a
 invalid TID. Protocol violations record lost evidence before propagation, including during a
 locally requested graceful drain; joining the listener cannot make that profile complete.
 Rejected handshakes and protocol violations remain terminal during cleanup.
+Normal completion is a separate `Drained` state, reached only after an explicit
+terminal record. The state/event matrix checks its sealed-variant membership so
+new variants cannot silently escape the matrix. Reader/collector thread death
+alone is not completion evidence: the collector must have consumed its queue
+successfully, with no lost events or cleanup failure.
 Diagnostic report dumps use the JSON serializer, including control characters in probe output.
+Before any USER_NOTIF install, the ACK/result preloader initializes parser events,
+operand outcomes, codecs, file-facade helpers and ACK diagnostic dependencies.
+It also exercises a disposable heap-only queue's suspended receive, send and
+retirement; no synthetic record enters a profiling session. This prevents first-use
+class-file I/O in a process-wide filtered listener from waiting for its own ACK.
+Tests check coverage of all sealed parser/operand variants and perform an actual
+cold process-wide network profile in a bounded owned JVM. A permission failure is
+not accepted as successful process-wide profiling.
 
 ### Self-only diagnostic report scope
 
@@ -263,7 +276,45 @@ does not merge the profiler and supervisor reducers or alter their different aut
 
 Path inspection produces `PathResolution.NotApplicable`, `Resolved(paths)`, `Partial(paths, failures)`, or `Failed(failures)`. Failures identify the zero-based path operand ordinal and distinguish `VmReadDenied`, `Missing`, `DirFdUnresolved`, and `Truncated`. A failed first operand does not prevent inspecting the second operand of rename/link calls. Relative paths retain cwd/dirfd failure evidence; unterminated reads never publish a normalized prefix as a resolved path. The diagnostic contains heap strings describing the tracee, address or directory, and the original exception type/message where available. Exception objects and native segments do not cross the event boundary.
 
-The private profiler daemon/JVM event frame is now version 1: big-endian TID, version, syscall name, raw arguments, resolved path list, then an explicit resolution tag and bounded operand diagnostics. The listener rejects unknown versions, invalid tags, unordered failure operands, inconsistent outcomes, oversized fields, and truncated frames. A rejected body after a complete TID header still receives exactly one `0xAC` ACK before the listener terminates: this settles the outstanding notification without publishing malformed evidence. Rejection counts as a dropped event and prevents a complete drain, including when rejection races with graceful close. Daemon and listener are launched from the same distribution; mixed-version profiler pairs are unsupported. Portal wire frames are unchanged. The daemon still waits for the listener's ACK before issuing CONTINUE. Failed inspections remain observable diagnostic events and do not veto the tracee syscall.
+The private profiler daemon/JVM event frame uses the version 1 prefix: big-endian
+TID, version, syscall name, raw arguments, resolved path list, then an explicit
+resolution tag and bounded operand diagnostics. Version 2 adds bounded CONNECT
+resolution: a resolved endpoint or a typed inspection failure. Non-network
+events retain version 1 encoding. A legacy version 1 CONNECT remains explicitly
+uninspected and incomplete. The preparation helper and daemon preserve this
+evidence, notification identity, architecture and raw register identity.
+
+The listener rejects unknown versions, invalid tags, unordered failure operands,
+inconsistent outcomes, oversized fields, and truncated frames. A rejected body
+after a complete TID header still receives exactly one `0xAC` ACK before the
+listener terminates: this settles the outstanding notification without publishing
+malformed evidence. Rejection counts as a dropped event and prevents a complete
+drain, including when rejection races with graceful close. Daemon and listener
+are launched from the same distribution; mixed-version profiler pairs are
+unsupported. Portal wire frames are unchanged. The daemon still waits for the
+listener's ACK before issuing CONTINUE. Failed inspections remain observable
+diagnostic events and do not veto the tracee syscall.
+
+Normal stream termination has its own nine-byte record: reserved `Int.MIN_VALUE`
+header, terminal version 1, and one-byte reason (1: producer exit, 2: requested
+pass-through). A lone seccomp-listener `POLLHUP` proves that no filter users remain
+(`seccomp_notify_poll`); error or mixed flags do not certify producer retirement.
+Requested pass-through is confirmed only after any in-flight notification reply
+has settled, and is accepted only when locally requested. Terminal publication is
+a bounded nonblocking write. Missing, partial, malformed or failed publication
+leaves the profile incomplete. A complete record ends the logical stream;
+transport EOF/reset alone never certifies it. This avoids relying on a subsequent
+EOF when concurrent close commands can cause ECONNRESET after the complete record.
+
+CONNECT remote reads occur in the existing owned preparation helper, with an
+addrlen bounded to 128 bytes and exact read-length validation. Heap-only decoding
+uses Linux UAPI native family/scope order and network-order IP/port fields. IPv4,
+IPv6 (including scope), Unix pathname and abstract addresses are represented;
+unsupported families, malformed data, partial reads and permission failures stay
+incomplete with diagnostic evidence. No hostname resolution occurs. Successful
+decodes use the existing `ProfileObservation.Connect`; failure never creates a
+typed endpoint. The observation remains a requested address before CONTINUE,
+subject to the diagnostic TOCTOU/scope limitations above, not authorization.
 
 `SyscallEvent`, `TraceEvent`, and `ProfileObservation` retain immutable typed evidence, and `ProfilingCoverage.infer` exhaustively folds it into its compatibility quality summary plus `pathFailures`. Failed inspections bypass path deduplication, and the resolved-path cache preserves operand order. Event equality, stack-profile keys, and collector merge keys include immutable resolution evidence so distinct failure reasons remain distinct observations and can yield `MIXED` coverage. `SyscallEvent` retains TID-sensitive equality; `TraceEvent` behavioral equality intentionally remains independent of TID. Existing public constructors, accessors, copy methods and destructuring remain available. Constructors that accept only a legacy path list necessarily use a conservative compatibility adapter: they cannot recover missing operand identity or prove string termination. New collectors should provide typed evidence through the additive factories; coverage itself never reconstructs outcomes from path counts or path lengths.
 
@@ -300,7 +351,9 @@ To ensure a stable and leak-free profiling experience, the `:profiler` module ad
 * **Notification and ACK failures:** Production sessions implement the platform's pollable `NotificationWork` contract. The reactor alone claims and sends the terminal kernel reply. Structural preparation failures offer one terminal denial; failed/gone replies terminate without publishing another event or trying another response. The shared heap notification retains the kernel audit architecture in the bounded session ledger. Private ACK decoding has explicit acknowledged, pass-through, and rejected outcomes; unknown bytes reject the exchange even when mixed with an ACK. A failed or short listener ACK write closes the endpoint immediately, marks evidence dropped, and prevents processing any subsequently buffered event. Session diagnostics include bounded numeric metadata and exception types, excluding paths, syscall arguments, and arbitrary exception messages.
 
 *   **Session Ownership:** Internal `ProfilerService` instances capture their runtime dependencies and own their active sessions. Each `ProfilerSession` owns its trace listeners, TID mappings, event/stack buffers, deduplication cache, and cleanup result. `Profiler` is a compatibility facade containing only an atomic default-service reference. A trace listener receives its TID resolver and native dependencies explicitly; identical TIDs in different services cannot resolve through shared state. The captured native engine also governs Yama authorization, `PR_SET_NO_NEW_PRIVS`, BPF allocation, NEW_LISTENER/TSYNC installation, socket connection, SCM_RIGHTS transfer, and descriptor cleanup. Replacing the ambient engine cannot redirect an already constructed service's installation.
-*   **Deterministic Listener Lifecycle:** `ProfilerTraceListener` implements `AutoCloseable`. Ending a session requests pass-through, joins its listener and collector, and closes only its own socket. The session retains `SeccompCleanupOutcome`: a returned native close error is observable and never retried, while a failure before native dispatch retains the live owned token for retry. A descriptor generation already retired by the native engine is terminal even when the call throws. Cancellation propagates after the owner records the outcome. A fatal error also propagates unchanged, with its cause retained in the typed diagnostic; the service keeps the interrupted session and every unattempted listener reachable. Retry drains remaining listeners without closing consumed descriptors again. Session closure is published only after the complete cleanup fold succeeds, and a failed closure callback remains observable and retryable without repeating listener releases.
+*   **Deterministic Listener Lifecycle:** `ProfilerTraceListener` implements `AutoCloseable`. Ending a session requests pass-through, joins its listener and collector, and closes only its own socket. Completion additionally requires the normal terminal record and successful collector consumption; an exception followed by thread termination is incomplete. The session retains `SeccompCleanupOutcome`: a returned native close error is observable and never retried, while a failure before native dispatch retains the live owned token for retry. A descriptor generation already retired by the native engine is terminal even when the call throws. Cancellation propagates after the owner records the outcome. A fatal error also propagates unchanged, with its cause retained in the typed diagnostic; the service keeps the interrupted session and every unattempted listener reachable. Retry drains remaining listeners without closing consumed descriptors again. Session closure is published only after the complete cleanup fold succeeds, and a failed closure callback remains observable and retryable without repeating listener releases.
+*   **Concurrent JVM shutdown:** Each session leases its captured daemon until installation and listener cleanup settle. The daemon shutdown hook closes new admission and waits at most 30 seconds for application-owned sessions to retire, allowing concurrent Spring shutdown to drain and snapshot them first. Expiry, interruption or callback failure still attempts forced child reaping and every other resource release with fatal-first aggregation; it does not certify a profile. The original no-argument child-hook registration remains available. Explicit manager stop remains an explicit destructive retirement, not a completeness proof.
+*   **Interrupted or timed-out joins:** Native descriptor retirement and thread retirement are separate cleanup outcomes. A close cannot clear live reader/collector references or release its session lease as complete merely because the socket integer was closed: another thread's blocked native read may still own the open-file description. Live threads yield typed incomplete cleanup and remain joinable on retry; consumed descriptor generations are never closed twice. Physical cleanup retry cannot manufacture a normal terminal record or erase lost-event evidence.
 *   **Close During Installation:** BPF allocation and coordinator/handshake waits run outside the session's short lifecycle gate. Immediately before each irreversible NEW_LISTENER or TSYNC syscall, the captured installer acquires that gate, verifies the session is still open, and holds it only through the native install operation. Close marks the session closed under the same gate: if close wins, no subsequent install syscall can start; if installation wins, close waits only for that committed native operation before draining listeners. The service retains the session until outstanding installations settle. A socket arriving after close is drained through an isolated, non-publishing listener and disposed; its cleanup outcome remains reachable from the service. An installation interrupted by session close fails instead of running the workload. Close does not claim to cancel a native syscall already in progress or remove a permanent kernel filter.
 *   **Compatibility Shutdown:** `Profiler.shutdown()` drains current sessions of the default service. Later `profile` or `wrap` calls may open new sessions. The daemon remains alive to issue CONTINUE for permanently filtered worker, descendant, or background threads until the parent JVM exits. Executor-wrapper `shutdown` and `shutdownNow` continue to control their delegate executor; service shutdown drains the associated profiling sessions. Closed wrapper sessions remain in pass-through without creating further listeners.
 *   **FFM payload lifetime:** The shared daemon reactor owns one `SegmentLease` for each pooled notification/response buffer. Sessions return leases during cleanup; a stale lease cannot return a later rental of the same address. Domain events must materialize their data before the lease ends. `ManagedSegment` wraps the FFM lifetime but does not itself prove a payload's struct layout. See the [SegmentPool migration guide](../api/segment-pool-migration.md).

@@ -1,6 +1,7 @@
 package demo.vulnapp
 
 import demo.vulnapp.config.MazewallProtectionBootstrap
+import demo.vulnapp.config.ServiceResourceBindings
 import demo.vulnapp.service.FileService
 import org.junit.jupiter.api.Test
 import org.springframework.boot.SpringApplication
@@ -41,6 +42,7 @@ class VulnAppApplicationTests {
         val previousProfilePath = System.getProperty(PROFILE_PATH_PROPERTY)
         val previousLoggingSystem = System.getProperty(LOGGING_SYSTEM_PROPERTY)
         val root = Files.createTempDirectory("mazewall-web-context-")
+        val resources = ServiceResourceBindings(Files.createDirectory(root.resolve("data")), Files.createDirectory(root.resolve("uploads")))
         val output = root.resolve("sbob.json")
         System.setProperty(PROFILE_PATH_PROPERTY, output.toString())
         System.setProperty(LOGGING_SYSTEM_PROPERTY, "none")
@@ -48,6 +50,11 @@ class VulnAppApplicationTests {
         try {
             val application = SpringApplication(VulnAppApplication::class.java)
             application.addListeners(MazewallProtectionBootstrap())
+            application.addInitializers(
+                org.springframework.context.ApplicationContextInitializer<ConfigurableApplicationContext> { context ->
+                    context.beanFactory.registerSingleton("serviceResourceBindings", resources)
+                },
+            )
             application
                 .run(
                 "--mazewall.profile=true",

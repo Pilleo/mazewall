@@ -20,13 +20,24 @@ keywords: ["public-api", "profiling", "coverage", "session-lifecycle"]
 
 ### Session Ownership
 
-USER_NOTIF runtime ownership is now internal to `ProfilerService` and `ProfilerSession`; independent services isolate dependencies, listeners, TIDs, buffers and cleanup outcomes. The static `Profiler` API delegates to one default service. Its `shutdown()` drains current sessions into pass-through while preserving the daemon for installed filters and allowing later sessions. The executor wrapper still exposes mutable recent logs, and its shutdown methods control only the delegate executor. A public executor-session ownership API remains a separate proposal. Iterative profiling also retains its separate registration model.
+USER_NOTIF runtime ownership is now internal to `ProfilerService` and `ProfilerSession`; independent services isolate dependencies, listeners, TIDs, buffers and cleanup outcomes. The static `Profiler` API delegates to one default service. Its `shutdown()` drains current sessions into pass-through while preserving the daemon for installed filters and allowing later sessions. The executor wrapper still exposes mutable recent logs; its shutdown methods stop the delegate and close the associated profiling session. A public executor-session ownership API remains a separate proposal. Iterative profiling also retains its separate registration model.
 
 `ProfilerExecutorWrapper.snapshot()` now returns an immutable `ProfilingResult<Unit>` containing
 both behavior and collector coverage. Stop admission and drain the executor, then call
 `Profiler.shutdown()` before consuming a final snapshot. Active or incompletely drained collectors
 remain incomplete; a closed wrapper that never attempted collection contributes an empty drained
 snapshot. `compileBillOfBehavior()` remains compatible but carries no completeness proof by itself.
+Completeness requires an explicit normal stream-terminal record, successful
+collector consumption, physical thread retirement and successful cleanup.
+An observed producer exit can supply that record; bare EOF cannot. Session
+leases prevent concurrent JVM child-retirement hooks from killing the daemon
+before application shutdown drains its sessions, within a finite 30-second wait.
+
+USER_NOTIF CONNECT captures bounded socket-address evidence in its owned helper
+and emits the existing typed `ProfileObservation.Connect` only after decoding.
+Legacy, unsupported, denied and partial inspections remain incomplete. These
+addresses describe requested arguments in the observed thread scope, not an
+approved destination or coverage of future paths.
 
 ### Strategy Selection
 

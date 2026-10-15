@@ -121,6 +121,8 @@ public sealed class TraceEvent {
     public open val paths: List<String> get() = emptyList()
 
     private var resolutionEvidence: PathResolution? = null
+    private var connectEvidence: ConnectResolution? = null
+    internal val connectResolution: ConnectResolution get() = connectEvidence ?: legacyConnectResolution(syscallName)
 
     /** Typed collector evidence, or the explicitly lossy legacy-constructor projection. */
     public val pathResolution: PathResolution get() = resolutionEvidence ?: legacyPathResolution(syscallName, paths)
@@ -128,6 +130,7 @@ public sealed class TraceEvent {
     /** Copies attach immutable evidence before publishing the newly constructed event. */
     protected fun <E : TraceEvent> copyEvidenceTo(copy: E): E {
         if (copy.syscallName == syscallName && copy.paths == paths) (copy as TraceEvent).resolutionEvidence = resolutionEvidence
+        if (this is Generic && copy is Generic && copy.syscallName == syscallName && copy.args == args) (copy as TraceEvent).connectEvidence = connectEvidence
         return copy
     }
 
@@ -181,7 +184,7 @@ public sealed class TraceEvent {
             if (args != other.args) return false
             if (paths != other.paths) return false
             if (stackTrace != other.stackTrace) return false
-            return pathResolution == other.pathResolution
+            return pathResolution == other.pathResolution && connectResolution == other.connectResolution
         }
 
         override fun hashCode(): Int {
@@ -190,6 +193,7 @@ public sealed class TraceEvent {
             result = 31 * result + paths.hashCode()
             result = 31 * result + (stackTrace?.hashCode() ?: 0)
             result = 31 * result + pathResolution.hashCode()
+            result = 31 * result + connectResolution.hashCode()
             return result
         }
     }
@@ -493,6 +497,7 @@ public sealed class TraceEvent {
         public fun fromSyscallEvent(event: SyscallEvent<SyscallEventState.Resolved>): TraceEvent =
             invoke(event.tid.value, event.syscallName, event.args.toLongArray(), event.paths, event.stackTrace).also {
                 it.resolutionEvidence = event.pathResolution
+                it.connectEvidence = event.connectResolution
             }
 
         private const val INDEX_ADDR = 0

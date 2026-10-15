@@ -33,6 +33,7 @@ import io.mazewall.platform.seccomp.daemon.NotificationCompletionWakeup
 import io.mazewall.platform.seccomp.daemon.NotificationProgress
 import io.mazewall.platform.seccomp.daemon.NotificationWork
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
+import io.mazewall.platform.seccomp.daemon.SeccompStreamEnd
 import io.mazewall.profiler.api.PathResolution
 import io.mazewall.profiler.api.PathResolutionCause
 import io.mazewall.profiler.api.PathResolutionFailure
@@ -42,6 +43,7 @@ import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.api.combinePathResolution
 import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
+import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import io.mazewall.profiler.ffi.SeccompReplyResult
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.TraceEventPublisher
@@ -49,7 +51,7 @@ import io.mazewall.profiler.ffi.controlMemory
 import java.io.IOException
 
 /**
- * Profiler session: copies syscall evidence and ACKs 0xAC. It does not EPERM.
+ * Copies syscall evidence before ACK/CONTINUE; malformed protocol terminates rather than authorizing work.
  */
 internal class ProfilerSessionHandler(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
@@ -74,6 +76,10 @@ internal class ProfilerSessionHandler(
 
     var state: ProfilerState = ProfilerState.ActiveSession(socketFd, listenerFd)
         private set
+
+    override fun endStream(reason: SeccompStreamEnd) {
+        ProfilerNativeCommandWriter.writeStreamEnd(ioOps, socketFd, reason)
+    }
 
     override fun close() {
         sessionArena.close()
@@ -433,12 +439,12 @@ internal class ProfilerSessionHandler(
     ): SyscallEvent<SyscallEventState.Resolved> {
         val tid = Tid(pid)
         val syscallName = syscallMap[syscallNr] ?: "SYSCALL_$syscallNr"
-        val resolution = resolver.resolveEvidence(tid, syscallName, args)
-        return SyscallEvent.fromResolution(
+        return resolver.resolve(
+            SyscallEvent<SyscallEventState.Raw>(
             tid = tid,
             syscallName = syscallName,
             args = args.toCollection(ArrayList(args.size)),
-            pathResolution = resolution,
+        ),
         )
     }
 

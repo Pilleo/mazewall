@@ -17,11 +17,12 @@ internal fun directProfilerPreparation(reader: ProfilerMemoryReader): ProfilerPr
         NativeArena.ofConfined().use { arena ->
             with(arena) {
                 future.complete(
-                    SyscallEvent.fromResolution(
+                    SyscallPathResolver(reader, SessionEventLedger()).resolve(
+                        SyscallEvent<SyscallEventState.Raw>(
                         Tid(notification.pid),
                         name,
                         notification.args.toList(),
-                        SyscallPathResolver(reader, SessionEventLedger()).resolveEvidence(Tid(notification.pid), name, notification.args),
+                    ),
                     ),
                 )
             }

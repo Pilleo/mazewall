@@ -15,6 +15,7 @@ import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.socket.SocketManager
 import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import java.nio.file.Path
+import java.time.Duration
 import java.util.logging.Logger
 
 /**
@@ -25,6 +26,7 @@ internal data class DaemonContext(
     val socketDir: Path,
     val daemonProcess: Process,
     val shutdownHook: Thread,
+    val lifetime: ProfilerDaemonLifetime = ProfilerDaemonLifetime(),
 )
 
 /**
@@ -46,6 +48,7 @@ internal class ProfilerDaemonManager(
         private const val SHUTDOWN_WAIT_MS = 100L
         private const val SHUTDOWN_POLL_INTERVAL_MS = 10L
         private const val LATCH_TIMEOUT_SECONDS = 30L
+        private const val SESSION_SHUTDOWN_GRACE_SECONDS = 30L
         private val INSTANCE_DEFAULT = ProfilerDaemonManager()
 
         @JvmStatic
@@ -139,9 +142,12 @@ internal class ProfilerDaemonManager(
                 threadName = "profiler-daemon-output",
             )
 
-        startup.registerShutdownHook()
+        val lifetime = ProfilerDaemonLifetime()
+        startup.registerShutdownHook {
+            check(lifetime.awaitSessions(Duration.ofSeconds(SESSION_SHUTDOWN_GRACE_SECONDS))) { "Profiler sessions did not retire before daemon shutdown deadline" }
+        }
         startup.awaitReady(LATCH_TIMEOUT_SECONDS)
-        val context = DaemonContext(socketPath, socketDir, daemonProcess, startup.shutdownHook)
+        val context = DaemonContext(socketPath, socketDir, daemonProcess, startup.shutdownHook, lifetime)
         val resources = startup.commit()
         ownedResources = resources
         return context

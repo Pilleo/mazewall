@@ -1,12 +1,14 @@
 package demo.vulnapp.config
 
 import demo.vulnapp.service.*
+import io.mazewall.enforcer.api.FileSystemPolicy
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.SbobParser
 import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.restrictFurtherWith
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -23,7 +25,7 @@ internal class MazewallConfig(
 ) {
     private val logger = Logger.getLogger(MazewallConfig::class.java.name)
 
-    private fun prepareOperation(basePolicy: Policy<*, Uncompiled>): OwnedServiceOperation {
+    private fun prepareOperation(basePolicy: Policy<PolicyScope.ThreadLocalOnly, Uncompiled>): OwnedServiceOperation {
         val sbobPath = System.getProperty("mazewall.sbob.path") ?: "/app/sbob.json"
         val bobFile = Paths.get(sbobPath)
         check(Files.isRegularFile(bobFile)) {
@@ -31,7 +33,7 @@ internal class MazewallConfig(
         }
         val evidenceFile = ProfileArtifactPublisher.resolveEvidencePath(bobFile)
         logger.info("Engaging SBoB ENFORCEMENT mode. Loading ruleset from: $sbobPath")
-        val finalPolicy = SbobParser.parseToPolicy(evidenceFile, basePolicy)
+        val finalPolicy = SbobParser.parseToPolicy(evidenceFile, basePolicy).restrictFurtherWith(basePolicy)
 
         return executorOwner.prepare(finalPolicy)
     }
@@ -42,6 +44,8 @@ internal class MazewallConfig(
         val basePolicy = WorkerPolicyBuilder
             .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
+            .filesystem(FileSystemPolicy.DenyAll)
+            .allowJvmClasspath()
             .allowMmapExec()
             .build()
         val executor = prepareOperation(basePolicy)
@@ -56,6 +60,8 @@ internal class MazewallConfig(
         val basePolicy = WorkerPolicyBuilder
             .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
+            .filesystem(FileSystemPolicy.DenyAll)
+            .allowJvmClasspath()
             .allowMmapExec()
             .build()
         val executor = prepareOperation(basePolicy)

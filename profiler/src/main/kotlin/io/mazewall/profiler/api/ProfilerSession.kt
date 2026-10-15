@@ -158,7 +158,7 @@ internal class ProfilerSession(
 
     fun <T> result(value: T): ProfilingResult<T> {
         val observations = logs.map(ProfileObservation::fromTraceEvent)
-        val coverage = ProfilingCoverage.infer(
+        val inferred = ProfilingCoverage.infer(
             strategy = ProfileStrategy.USER_NOTIF,
             strategyReason = "Profiler.profile USER_NOTIF session",
             processWide = processWide,
@@ -174,6 +174,8 @@ internal class ProfilerSession(
             },
             environment = runtime.environment(),
         )
+        val failedConnections = logs.mapNotNull { (it.connectResolution as? ConnectResolution.Failed)?.detail }.distinct()
+        val coverage = inferred.withWarnings(inferred.warnings + failedConnections)
         return ProfilingResult(value, compileBillOfBehavior().copy(stackProfile = stackProfiles), stackProfiles, coverage, observations)
     }
 }

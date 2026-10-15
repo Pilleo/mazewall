@@ -45,9 +45,16 @@ internal class ChildStartupTransaction(
         resources.pump = JvmChildProcess.startStdoutPump(resources.process, sentinel, onLine, threadName, onStreamClosed)
     }
 
-    public fun registerShutdownHook() {
+    public fun registerShutdownHook() = registerShutdownHook {}
+
+    public fun registerShutdownHook(beforeClose: () -> Unit) {
         check(!committed && !resources.isClosed && resources.hook == null) { "Startup closed or shutdown hook already acquired" }
-        val hook = Thread({ resources.close() }, "mazewall-child-shutdown")
+        val hook = Thread({
+            val cleanup = ResourceRetirement()
+            cleanup.attempt(beforeClose)
+            cleanup.attempt(resources::close)
+            cleanup.finish()
+        }, "mazewall-child-shutdown")
         resources.launcher.addShutdownHook(hook)
         resources.hook = hook
     }

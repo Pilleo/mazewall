@@ -20,7 +20,14 @@ internal class SyscallPathResolver(
     private val ledger: SessionEventLedger,
 ) {
     context(arena: NativeArena) fun resolve(event: SyscallEvent<SyscallEventState.Raw>): SyscallEvent<SyscallEventState.Resolved> =
-        event.resolved(resolveEvidence(event.tid, event.syscallName, event.args.toLongArray()))
+        SyscallEvent.fromEvidence(
+            event.tid,
+            event.syscallName,
+            event.args,
+            resolveEvidence(event.tid, event.syscallName, event.args.toLongArray()),
+            ConnectAddressResolver(memoryReader).resolve(event.tid, event.syscallName, event.args),
+            event.stackTrace,
+        )
 
     context(arena: NativeArena) fun resolveEvidence(
         tid: Tid,

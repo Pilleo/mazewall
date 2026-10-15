@@ -30,6 +30,42 @@ import org.junit.jupiter.api.Test
 
 class SeccompSessionHandlerTest {
     @Test
+    fun `only a lone kernel producer HUP certifies normal stream completion`() {
+        val hup = NativeConstants.POLLHUP.toInt()
+        val errors = listOf(NativeConstants.POLLERR.toInt(), NativeConstants.POLLNVAL.toInt(), hup or NativeConstants.POLLERR.toInt(), hup or NativeConstants.POLLIN.toInt())
+        for ((revents, expected) in listOf(hup to listOf(SeccompStreamEnd.PRODUCER_EXIT)) + errors.map { it to emptyList() }) {
+            val ended = mutableListOf<SeccompStreamEnd>()
+            val handler = SeccompSessionHandler(
+                TestFileDescriptors.replace(10),
+                TestFileDescriptors.replace(11),
+                object : SeccompNotifHandler {
+                    override fun endStream(reason: SeccompStreamEnd) {
+                        ended += reason
+                    }
+
+                    context(arena: NativeArena) override fun beginNotification(
+                        notif: ManagedSegment,
+                        resp: ManagedSegment,
+                        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+                        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+                        deadline: Deadline,
+                    ): NotificationWork = error("Terminal listener must not start a notification")
+                },
+                engine = MockNativeEngine(),
+                socketManager = recordingSocketManager {},
+            )
+            handler.use {
+                NativeArena.ofConfined().use { arena ->
+                    val fds = arena.allocate(Layouts.POLLFD_SIZE * 2)
+                    PollFdSegment.of(fds).setRevents(revents.toShort())
+                    assertEquals(LoopAction.Break, with(arena) { handler.handleActiveListener(fds) })
+                    assertEquals(expected, ended)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `completion wakeup advances pending work before its fallback poll`() {
         var replyAttempts = 0
         var readyReplies = 0

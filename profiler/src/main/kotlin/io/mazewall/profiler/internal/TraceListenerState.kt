@@ -1,5 +1,6 @@
 package io.mazewall.profiler.internal
 
+import io.mazewall.platform.seccomp.daemon.SeccompStreamEnd
 import io.mazewall.profiler.api.TraceEvent
 
 /**
@@ -34,6 +35,11 @@ internal sealed interface TraceListenerState {
 
     /** The listener socket connection was terminated or closed. */
     data object Disconnected : TraceListenerState
+
+    /** The daemon explicitly confirmed the normal end of the logical stream. */
+    data class Drained(
+        val reason: SeccompStreamEnd,
+    ) : TraceListenerState
 
     /** The daemon did not prove it accepted the listener FD; no event stream is trusted. */
     data object HandshakeRejected : TraceListenerState
