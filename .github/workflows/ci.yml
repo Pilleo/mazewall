@@ -78,17 +78,6 @@ jobs:
             - name: Triage failed host verification
               if: steps.host_unit.outcome == 'failure'
               run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon
-            - name: Upload Gradle diagnostics
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: gradle-diagnostics
-                  path: |
-                      build/reports/problems/
-                      build/reports/triage/
-                      build/reports/gradle-baseline/
-                      **/build/test-results/**/*.xml
-                  if-no-files-found: ignore
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -160,6 +149,17 @@ jobs:
                           fi
                       fi
                   done
+            - name: Upload Gradle diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: gradle-diagnostics
+                  path: |
+                      build/reports/problems/
+                      build/reports/triage/
+                      build/reports/gradle-baseline/
+                      **/build/test-results/**/*.xml
+                  if-no-files-found: ignore
             - name: Save Container Gradle Cache (Master Only)
               uses: actions/cache/save@v4
               if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
