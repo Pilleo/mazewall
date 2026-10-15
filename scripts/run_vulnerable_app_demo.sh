@@ -343,7 +343,7 @@ import json, sys
 doc = json.load(open(sys.argv[1]))
 doc = doc[0] if isinstance(doc, list) else doc
 mounts = doc.get("Mounts") or []
-ok = any(item.get("Destination") == "/app/profiles" and item.get("Mode") == "ro" for item in mounts)
+ok = any(item.get("Destination") == "/app/profiles" and item.get("RW") is False for item in mounts)
 raise SystemExit(0 if ok else 1)
 PY
         echo "protected profile mount is not read-only" >&2

@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 131 | *Total Resolved Issues:* 688
+*Total Active Issues:* 131 | *Total Resolved Issues:* 689
 
 Active status detail: 130 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -48,6 +48,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261015-213544-220-verify-read-only-profile-mounts-using-explicit-run](resolved/issue-20261015-213544-220-verify-read-only-profile-mounts-using-explicit-run.md) | Verify read-only profile mounts using explicit runtime inspect flags | high | core |
 | Archived [issue-20261015-182018-091-prune-learned-filesystem-paths-covered-by-explicit](resolved/issue-20261015-182018-091-prune-learned-filesystem-paths-covered-by-explicit.md) | Prune learned filesystem paths covered by explicit base grants | high | core |
 | Archived [issue-20261015-172121-857-preserve-truthful-profiler-completion-across-termi](resolved/issue-20261015-172121-857-preserve-truthful-profiler-completion-across-termi.md) | Preserve truthful profiler completion across terminal effects and native network evidence | high | core |
 | Archived [issue-20261015-162735-795-align-mutation-selectors-with-migrated-platform-te](resolved/issue-20261015-162735-795-align-mutation-selectors-with-migrated-platform-te.md) | Align mutation selectors with migrated platform test namespaces | high | core |

@@ -222,6 +222,16 @@ permission fallback or data publication. The independent executable-mapping EPER
 issue remains open. Exact-head remote CI still gates integration; this primary
 cleanup item stays open until that checkpoint is accepted.
 
+Exact CI38807405275 at4d7d84dd passes host/kernel/all mutation gates and completes
+profiling, then exposes a portability error in the read-only mount guard: Podman
+uses Mode for SELinux options and RW for the read-write boolean. The
+[scoped correction](resolved/issue-20261015-213544-220-verify-read-only-profile-mounts-using-explicit-run.md)
+requires explicit boolean RW=false at the exact profile destination, rejecting
+unknown/ill-typed/writable metadata. All64 report/ownership controls, actual
+Docker comparison and a full build pass (`run-2b84520347c7`,
+`run-34fff32d25ce`, `run-f2ae644a6129`). No mount/check/fallback was relaxed;
+actual Podman and later security-stage acceptance still gate the remote merge.
+
 **Needed:**
 1. Make Gradle authoritative for host/full lint, test, coverage, and build guards.
 2. Port the source guard and all actual regression cases into Kotlin build logic.
