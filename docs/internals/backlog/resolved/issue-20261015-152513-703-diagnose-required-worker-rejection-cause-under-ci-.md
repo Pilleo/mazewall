@@ -1,7 +1,7 @@
 ---
 title: "Diagnose required worker rejection cause under CI cleanup timing"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -39,6 +39,17 @@ required-launch integration suite pass (`run-e547b593dc82`). The remote native
 cases remain required for closure.
 The complete included-module build also passes with this ordering
 (`run-ba47640b04fd`,462080ms). All real rejection and cleanup assertions remain.
+
+## Resolution
+
+Commit `7bfe8c462300e2663c4752a4488508c721568e5c` passes the actual host and
+kernel stages in CI run38766101235. Downloaded kernel JUnit evidence confirms
+all seven applicable required-launch cases pass, including the original
+negative-reason and physical cancellation/expiry retirement cases. The existing
+owned-delegated-cgroup case is skipped because that optional authority is not
+supplied on the hosted runner; it is not evidence of delegated-cgroup acceptance.
+The next failure is the independently tracked platform mutation selector issue,
+not worker rejection or cleanup (`run-a1d22b214df3`).
 
 ---
 <!-- id: issue-20261015-152513-703-diagnose-required-worker-rejection-cause-under-ci-  file: issue-20261015-152513-703-diagnose-required-worker-rejection-cause-under-ci-.md -->

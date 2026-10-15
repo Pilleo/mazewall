@@ -10,6 +10,7 @@ target_files:
   - ".gitignore"
   - "AGENTS.md"
   - "build.gradle.kts"
+  - "platform/build.gradle.kts"
   - "gradle/verification-metadata.xml"
   - "buildSrc"
   - ".github/workflows/ci.yml"

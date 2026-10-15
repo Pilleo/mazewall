@@ -108,7 +108,7 @@ pitest {
             "io.mazewall.platform.daemon.UnixListenDaemonMachine*",
             "io.mazewall.ffi.networking.SeccompConnectionMachine*",
             "io.mazewall.platform.syscall.PrctlCommand*",
-            "io.mazewall.core.NetworkSyscallMapper*",
+            "io.mazewall.platform.syscall.NetworkSyscallMapper*",
         ),
     )
     excludedClasses.set(
@@ -118,7 +118,7 @@ pitest {
             "io.mazewall.MockNativeEngine*",
             // ACT_KILL_THREAD's native code is the kernel's zero value, so PIT's
             // "replace return with zero" mutant is observationally equivalent.
-            "io.mazewall.core.SeccompAction${'$'}ACT_KILL_THREAD",
+            "io.mazewall.platform.syscall.SeccompAction${'$'}ACT_KILL_THREAD",
         ),
     )
     // Kotlin inserts this non-null check for AtomicReference.get(); stateRef's
@@ -127,11 +127,11 @@ pitest {
     excludedMethods.set(setOf("apply\\${'$'}io_mazewall_platform"))
     targetTests.set(
         setOf(
-            "io.mazewall.platform.syscall.SeccompActionTest",
+            "io.mazewall.platform.lifecycle.SeccompActionTest",
             "io.mazewall.platform.daemon.UnixListenDaemonMachineTest",
             "io.mazewall.ffi.networking.SeccompConnectionMachineTest",
-            "io.mazewall.platform.syscall.PrctlCommandTest",
-            "io.mazewall.core.NetworkSyscallMapperTest",
+            "io.mazewall.platform.lifecycle.PrctlCommandTest",
+            "io.mazewall.platform.lifecycle.NetworkSyscallMapperTest",
         ),
     )
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
