@@ -158,7 +158,9 @@ jobs:
                       build/reports/problems/
                       build/reports/triage/
                       build/reports/gradle-baseline/
+                      build/reports/test-health/
                       **/build/test-results/**/*.xml
+                      **/hs_err_pid*.log
                   if-no-files-found: ignore
             - name: Save Container Gradle Cache (Master Only)
               uses: actions/cache/save@v4
