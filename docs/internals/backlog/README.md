@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 134 | *Total Resolved Issues:* 680
+*Total Active Issues:* 133 | *Total Resolved Issues:* 682
 
-Active status detail: 133 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 132 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -48,8 +48,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261015-141652-144-select-the-declared-root-kernel-aggregate-in-ci](resolved/issue-20261015-141652-144-select-the-declared-root-kernel-aggregate-in-ci.md) | Select the declared root kernel aggregate in CI | high | core |
 | Archived [issue-20261015-132624-552-accept-exact-jdk-socket-refusal-diagnostic-in-jvm-](resolved/issue-20261015-132624-552-accept-exact-jdk-socket-refusal-diagnostic-in-jvm-.md) | Accept exact JDK socket refusal diagnostic in JVM floor probe | high | core |
-| [issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-](issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-.md) | Diagnose packaged worker exit before readiness in CI | high | core |
+| Archived [issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-](resolved/issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-.md) | Diagnose packaged worker exit before readiness in CI | high | core |
 | Archived [issue-20261015-124827-767-preserve-early-worker-preparation-failure-before-a](resolved/issue-20261015-124827-767-preserve-early-worker-preparation-failure-before-a.md) | Preserve early worker preparation failure before all workers start | high | core |
 | [issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-](issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md) | Diagnose executable mapping EPERM during enforcer worker completion | high | core |
 | Archived [issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-](resolved/issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md) | Decide required CI treatment of hardware-specific native performance gate | high | ci |

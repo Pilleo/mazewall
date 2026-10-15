@@ -1,7 +1,7 @@
 ---
 title: "Diagnose packaged worker exit before readiness in CI"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -45,6 +45,12 @@ the actual host capability and native behavior before this issue is resolved.
 
 References: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
 and https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2604-Readme.md.
+
+Run38748172105 on the compatible host passes all13 portal-codegen cases with
+zero failures/errors/skips, including the real external-directory worker
+readiness/RPC/exit assertion (`run-e86f5faa52f6`). All34 owned-runtime and10 floor
+cases also pass. The job then advances to the independently corrected kernel
+selector; no worker containment contract or readiness assertion was changed.
 
 ---
 <!-- id: issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-  file: issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-.md -->

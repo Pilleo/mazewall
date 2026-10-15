@@ -156,6 +156,11 @@ JVM-floor helper's overly narrow JDK connection-refusal spelling. The helper
 accepts the two exact ordinary refusal strings while actual acquired EPERM/EACCES
 still propagate. Five isolated floor cases and the full included-module build
 pass (`run-c492ffafc9d7`); the next remote result remains authoritative for merge.
+CI run38748172105 on the compatible Ubuntu26.04 host now passes host correctness,
+including all13 real portal-codegen cases and the previously failing runtime/floor
+suites. It then exposes a bare-selector error in the kernel container invocation;
+the workflow now selects the exact declared root `:kernelCheck` aggregate, retaining
+all intended kernel coverage gates and assembly. No failed test was skipped.
 The admission-test candidate passes the full included-module build on Ubuntu
 OpenJDK25.0.4.1 (`run-b7e52d1e97d0`). Local GraalVM mapping-denial worker exits
 remain independently recorded; the test-only change does not mask that issue.

@@ -117,7 +117,7 @@ jobs:
               run: |
                   set -o pipefail
                   # unitCheck already ran on the host for this exact checkout.
-                  ./scripts/run_containerized_tests.sh kernelCheck assemble 2>&1 | tee build.log
+                  ./scripts/run_containerized_tests.sh :kernelCheck assemble 2>&1 | tee build.log
             - name: Run PITest (Host Unit Tests Only)
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Pmazewall.pitest.threads=2
