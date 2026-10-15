@@ -139,8 +139,10 @@ CI then exposes an independent evidence-test admission timing assumption, fixed
 with a second bounded queued admission while retaining one physical worker and
 all denial/evidence assertions. All33 owned-runtime cases pass. The rootful job
 now reaches and honestly refuses its unchanged hardware-specific performance
-limits; see [the pending operator decision](issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md).
-The merge remains blocked by that benchmark gate; its limits are unchanged.
+limits. The operator subsequently approved local-only benchmarks and removing
+that job from required PR CI; see [the resolved decision](resolved/issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md).
+The local CLI's performance limits are unchanged. Build/security/kernel correctness
+gates remain required, and their outstanding failures still block the merge.
 The admission-test candidate passes the full included-module build on Ubuntu
 OpenJDK25.0.4.1 (`run-b7e52d1e97d0`). Local GraalVM mapping-denial worker exits
 remain independently recorded; the test-only change does not mask that issue.

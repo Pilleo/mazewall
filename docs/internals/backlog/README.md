@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 134 | *Total Resolved Issues:* 677
+*Total Active Issues:* 133 | *Total Resolved Issues:* 678
 
-Active status detail: 133 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 132 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -49,7 +49,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Issue | Title | Priority | Component |
 |---|---|---|---|
 | [issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-](issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md) | Diagnose executable mapping EPERM during enforcer worker completion | high | core |
-| [issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-](issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md) | Decide required CI treatment of hardware-specific native performance gate | high | ci |
+| Archived [issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-](resolved/issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md) | Decide required CI treatment of hardware-specific native performance gate | high | ci |
 | Archived [issue-20261015-115545-513-allow-admission-overlap-in-nested-containment-evid](resolved/issue-20261015-115545-513-allow-admission-overlap-in-nested-containment-evid.md) | Allow admission overlap in nested containment evidence regression | high | core |
 | Archived [issue-20261015-104822-523-include-build-verification-source-inputs-in-rootfu](resolved/issue-20261015-104822-523-include-build-verification-source-inputs-in-rootfu.md) | Include build verification source inputs in rootful transfer | high | core |
 | Archived [issue-20261015-104807-764-keep-host-verification-aggregates-from-realizing-o](resolved/issue-20261015-104807-764-keep-host-verification-aggregates-from-realizing-o.md) | Keep host verification aggregates from realizing optional native tasks | high | core |

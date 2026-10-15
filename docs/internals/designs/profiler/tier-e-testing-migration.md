@@ -68,6 +68,12 @@ retains evidence and only stops currently visible containers.
 
 ## Active ownership
 
+Benchmarks are explicit local operator runs. The operator-approved 2026-10-15
+cleanup removes the hardware-specific `tier-e-rootful` benchmark job from PR CI;
+ordinary host, build/security and privileged kernel correctness checks remain in
+the main CI job. Local benchmark thresholds and policy-ineligible verdicts retain
+their original meaning; no benchmark upload or cloud replacement is required.
+
 Build the installed CLI with `./gradlew :profiler:installDist`. Its generated
 entrypoint is `profiler/build/install/tier-e-daemon/bin/tier-e-tools`; it works
 independently of the invocation directory. For example, from the repository root:
