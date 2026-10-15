@@ -403,7 +403,15 @@ subprojects {
     apply(plugin = "base")
     listOf("build", "check").forEach { lifecycle ->
         tasks.named(lifecycle) {
-            dependsOn(childProjects.values.map { child -> child.tasks.matching { it.name == lifecycle } })
+            dependsOn(
+                provider {
+                    childProjects.values.flatMap { child ->
+                        child.tasks.names
+                            .filter { it == lifecycle }
+                            .map { child.tasks.named(it) }
+                    }
+                },
+            )
         }
     }
 
@@ -591,7 +599,7 @@ subprojects {
         tasks.register<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoKernelTestReport") {
             group = "verification"
             description = "Generates privileged kernel-test coverage only."
-            dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
+            dependsOn(provider { tasks.names.filter { it == "integrationTest" || it == "integrationTestFreshJvm" }.map { tasks.named(it) } })
             executionData.setFrom(kernelExecutionData)
             configureClasses()
         }
@@ -600,7 +608,7 @@ subprojects {
             group = "verification"
             description = "Generates informational combined unit and kernel coverage."
             dependsOn(unitTest)
-            dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
+            dependsOn(provider { tasks.names.filter { it == "integrationTest" || it == "integrationTestFreshJvm" }.map { tasks.named(it) } })
             // Platform's native wrappers are also exercised by enforcer containment
             // tests.  Make those execution-data producers explicit so Gradle does not
             // reject this cross-project report as an implicit dependency.
@@ -735,7 +743,7 @@ subprojects {
             tasks.register("kernelCheck") {
                 group = "verification"
                 description = "Runs privileged kernel and fresh-JVM integration tests."
-                dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
+                dependsOn(provider { tasks.names.filter { it == "integrationTest" || it == "integrationTestFreshJvm" }.map { tasks.named(it) } })
                 dependsOn(tasks.named("jacocoKernelTestReport"))
                 dependsOn(tasks.named("jacocoKernelCoverageVerification"))
             }
@@ -764,17 +772,25 @@ subprojects {
     }
 }
 
+// Dependency collections can realize unrelated tasks; resolve only selected registered names.
 tasks.register("unitCheck") {
     group = "verification"
     description = "Runs host-safe tests, coverage, lint, and static analysis for participating sources."
     dependsOn(
-        tasks.matching {
-            it.name in setOf("test", "ktlintCheck", "detektMain", "spotbugsMain", "detektWarningRatchet", "checkGradleLazyResolution", "checkCiCachePolicy", "validateBacklogIndex")
+        provider {
+            tasks.names
+                .filter {
+                    it in setOf("test", "ktlintCheck", "detektMain", "spotbugsMain", "detektWarningRatchet", "checkGradleLazyResolution", "checkCiCachePolicy", "validateBacklogIndex")
+                }.map { tasks.named(it) }
         },
     )
     dependsOn(
-        subprojects.filterNot { it.path.startsWith(":demos") }.map { child ->
-            child.tasks.matching { it.name in setOf("unitCheck", "ktlintCheck", "detektMain", "spotbugsMain") }
+        provider {
+            subprojects.filterNot { it.path.startsWith(":demos") }.flatMap { child ->
+                child.tasks.names
+                    .filter { it in setOf("unitCheck", "ktlintCheck", "detektMain", "spotbugsMain") }
+                    .map { child.tasks.named(it) }
+            }
         },
     )
 }
@@ -783,8 +799,12 @@ tasks.register("kernelCheck") {
     group = "verification"
     description = "Runs every module's privileged kernel-quality gate."
     dependsOn(
-        subprojects.filterNot { it.path.startsWith(":demos") }.map { child ->
-            child.tasks.matching { it.name == "kernelCheck" }
+        provider {
+            subprojects.filterNot { it.path.startsWith(":demos") }.flatMap { child ->
+                child.tasks.names
+                    .filter { it == "kernelCheck" }
+                    .map { child.tasks.named(it) }
+            }
         },
     )
 }

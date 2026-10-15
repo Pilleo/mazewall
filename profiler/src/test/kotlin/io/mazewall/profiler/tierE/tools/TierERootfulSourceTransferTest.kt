@@ -20,9 +20,16 @@ class TierERootfulSourceTransferTest {
             val untracked = Files.createDirectories(root.resolve("scripts")).resolve("scenario.sh")
             Files.writeString(tracked, "tracked")
             Files.writeString(untracked, "untracked")
+            val integration = "integrations/spring/mazewall-spring-boot/build.gradle.kts"
+            val consumer = "tests/consumers/java-api/build.gradle"
+            Files.createDirectories(root.resolve(integration).parent)
+            Files.createDirectories(root.resolve(consumer).parent)
+            Files.writeString(root.resolve(integration), "integration verification source")
+            Files.writeString(root.resolve(consumer), "consumer verification source")
             Files.writeString(root.resolve(".editorconfig"), "root = true\n[*.kt]\nktlint_standard_no-wildcard-imports = disabled\n")
             check(ProcessBuilder("git", "-C", root.toString(), "add", "profiler/entry.kt").start().waitFor() == 0)
             check(ProcessBuilder("git", "-C", root.toString(), "add", ".editorconfig").start().waitFor() == 0)
+            check(ProcessBuilder("git", "-C", root.toString(), "add", integration).start().waitFor() == 0)
             val deleted = root.resolve("profiler/deleted.kt")
             Files.writeString(deleted, "deleted")
             check(ProcessBuilder("git", "-C", root.toString(), "add", "profiler/deleted.kt").start().waitFor() == 0)
@@ -37,7 +44,13 @@ class TierERootfulSourceTransferTest {
             assertTrue("profiler/entry.kt" in listing)
             assertTrue("scripts/scenario.sh" in listing)
             assertTrue(".editorconfig" in listing)
+            assertTrue(integration in listing)
+            assertTrue(consumer in listing)
             assertFalse("profiler/deleted.kt" in listing)
+            val guest = Files.createDirectory(root.resolve("guest"))
+            assertEquals(0, ProcessBuilder("tar", "-xf", tar.toString(), "-C", guest.toString(), integration, consumer).start().waitFor())
+            assertEquals(Files.readString(root.resolve(integration)), Files.readString(guest.resolve(integration)))
+            assertEquals(Files.readString(root.resolve(consumer)), Files.readString(guest.resolve(consumer)))
         } finally {
             root.toFile().deleteRecursively()
         }

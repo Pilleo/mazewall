@@ -126,6 +126,13 @@ See [the resolved investigation](resolved/issue-20261015-094330-565-investigate-
 All19 focused checks pass without skips, and the current full included-module
 build passes (`run-74490f4ff1a6`, 2026-10-15). The cleanup is ready for scoped review.
 
+The initial cleanup is committed as `696ba718` and integrated into the existing
+`fast-master` review branch. PR531's clean CI exposed two additional source/build
+boundary gaps: eager optional-native task realization in the host aggregate and
+missing integration/consumer scripts in the rootful source archive. Both have
+meaningful RED/GREEN controls and a successful follow-up full build
+(`run-bd93ef1797a4`); the default-branch merge awaits the published CI result.
+
 **Needed:**
 1. Make Gradle authoritative for host/full lint, test, coverage, and build guards.
 2. Port the source guard and all actual regression cases into Kotlin build logic.

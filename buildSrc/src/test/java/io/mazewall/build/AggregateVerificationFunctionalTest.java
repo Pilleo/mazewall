@@ -21,7 +21,8 @@ final class AggregateVerificationFunctionalTest {
                 include(":group:leaf", ":plain", ":custom", ":demos:ignored")
                 """);
             write(fixture, "build.gradle.kts",
-                declaration(source, "unitCheck") + "\n" + declaration(source, "kernelCheck"));
+                "tasks.register(\"optionalNativeBuild\") { throw GradleException(\"UNSELECTED_NATIVE_TASK_REALIZED\") }\n"
+                    + declaration(source, "unitCheck") + "\n" + declaration(source, "kernelCheck"));
             String javaModule = """
                 plugins { java }
                 tasks.register("unitCheck") {
@@ -32,6 +33,9 @@ final class AggregateVerificationFunctionalTest {
                 tasks.register("spotbugsMain") { doLast { println("Java analysis gate executed") } }
                 tasks.register("kernelCheck") {
                     doLast { println("kernel gate executed") }
+                }
+                tasks.register("optionalNativeBuild") {
+                    throw GradleException("UNSELECTED_NATIVE_TASK_REALIZED")
                 }
                 """;
             write(fixture, "group/leaf/build.gradle.kts", javaModule);
@@ -49,6 +53,11 @@ final class AggregateVerificationFunctionalTest {
             assertSelectedGates(cached);
             if (!cached.getOutput().contains("Reusing configuration cache.")) {
                 throw new AssertionError("Aggregate task selection must reuse the configuration cache");
+            }
+            BuildResult explicit = GradleRunner.create().withProjectDir(fixture.toFile())
+                .withArguments(":plain:optionalNativeBuild").buildAndFail();
+            if (!explicit.getOutput().contains("UNSELECTED_NATIVE_TASK_REALIZED")) {
+                throw new AssertionError("Explicit optional native task failure must remain visible");
             }
         } catch (Exception failure) {
             throw new AssertionError("Production aggregate verification wiring failed", failure);

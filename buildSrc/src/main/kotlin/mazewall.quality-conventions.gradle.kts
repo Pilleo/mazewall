@@ -59,7 +59,7 @@ if (project != rootProject) {
     kernelCheck.configure {
         group = "verification"
         description = "Runs privileged kernel and fresh-JVM integration tests."
-        dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
+        dependsOn(provider { tasks.names.filter { it == "integrationTest" || it == "integrationTestFreshJvm" }.map { tasks.named(it) } })
         dependsOn("jacocoKernelTestReport", "jacocoKernelCoverageVerification")
     }
     tasks.named("check") {

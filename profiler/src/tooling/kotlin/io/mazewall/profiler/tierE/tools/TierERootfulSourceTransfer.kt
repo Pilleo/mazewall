@@ -16,6 +16,8 @@ public object TierERootfulSourceTransfer {
         "profiler",
         "profiler-native",
         "portals",
+        "integrations",
+        "tests",
         "demos",
         "infra",
         "config",

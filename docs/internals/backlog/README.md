@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 132 | *Total Resolved Issues:* 674
+*Total Active Issues:* 132 | *Total Resolved Issues:* 676
 
 Active status detail: 131 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -48,6 +48,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261015-104822-523-include-build-verification-source-inputs-in-rootfu](resolved/issue-20261015-104822-523-include-build-verification-source-inputs-in-rootfu.md) | Include build verification source inputs in rootful transfer | high | core |
+| Archived [issue-20261015-104807-764-keep-host-verification-aggregates-from-realizing-o](resolved/issue-20261015-104807-764-keep-host-verification-aggregates-from-realizing-o.md) | Keep host verification aggregates from realizing optional native tasks | high | core |
 | Archived [issue-20261015-094330-565-investigate-worker-liveness-after-sandboxdispatche](resolved/issue-20261015-094330-565-investigate-worker-liveness-after-sandboxdispatche.md) | Investigate worker liveness after SandboxDispatcher shutdown | high | core |
 | Archived [issue-20261014-192004-715-reject-incomplete-generated-native-preparation-art](resolved/issue-20261014-192004-715-reject-incomplete-generated-native-preparation-art.md) | Reject incomplete generated native preparation artifact inventories | high | core |
 | Archived [issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti](resolved/issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti.md) | Review missing checksum metadata for existing optional Spring Boot build inputs | high | core |
