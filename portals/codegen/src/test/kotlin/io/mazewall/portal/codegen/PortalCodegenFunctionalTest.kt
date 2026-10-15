@@ -152,6 +152,7 @@ class PortalCodegenFunctionalTest {
         val freshDirectory = Files.createTempDirectory("portal-worker-fresh-directory")
         val socketPath = freshDirectory.resolve("portal.sock")
         val server = RealSocketManager.createUnixServer(socketPath.toString())
+        val workerErrors = freshDirectory.resolve("worker.stderr")
         val coldStartNanos = System.nanoTime()
         val process =
             ProcessBuilder(
@@ -160,12 +161,12 @@ class PortalCodegenFunctionalTest {
                 WorkerBundleMaterializer.classpath(extracted.directory),
                 PortalWorkerMain::class.java.name,
                 socketPath.toString(),
-            ).directory(freshDirectory.toFile()).start()
+            ).directory(freshDirectory.toFile()).redirectError(workerErrors.toFile()).start()
         try {
             val peer = RealSocketManager.accept(server)
             val channel = PortalChannel(peer, RealSocketManager)
             try {
-                assertEquals(PortalWorkerMain.READY, process.inputStream.bufferedReader().readLine())
+                assertEquals(PortalWorkerMain.READY, process.inputStream.bufferedReader().readLine(), Files.readString(workerErrors))
                 val coldStartMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - coldStartNanos)
                 val payload = PortalCodec.encodeString("plain-java-example")
                 val warmStartNanos = System.nanoTime()

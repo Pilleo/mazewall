@@ -68,7 +68,9 @@ internal class OwnedDomain(
             })
         }
         validateResources()
-        executor.prestartAllCoreThreads()
+        val started = executor.prestartAllCoreThreads()
+        // Early failure can stop the executor before the remaining workers are created.
+        repeat((limits.workers - started).coerceAtLeast(0)) { startup.countDown() }
         if (!startup.await(deadline.remainingNanos(), TimeUnit.NANOSECONDS)) fail(TimeoutException("Required worker preparation did not finish"))
         val problem = synchronized(lock) {
             phase = GenerationLifecycle.evaluate(phase, GenerationEvent.PREPARED)

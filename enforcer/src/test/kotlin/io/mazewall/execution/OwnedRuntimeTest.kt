@@ -8,6 +8,7 @@ import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.syscall.PrctlCommand
 import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.nio.file.AccessDeniedException
@@ -23,6 +24,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class OwnedRuntimeTest {
@@ -191,9 +193,13 @@ class OwnedRuntimeTest {
                     },
                     )
                     mutable["name"] = "caller-change"
-                    assertEquals(name, Mazewall.callContained(runtime, domain, captured))
+                    val invocation = runtime.submit(domain, captured)
+                    assertEquals(name, invocation.result().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                    assertNull(assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure)
                     assertEquals("caller-change", declared.get()["name"])
-                    assertNull(Mazewall.callContained(runtime, domain, Callable { declared.get() }))
+                    val clean = runtime.submit(domain, Callable { declared.get() })
+                    assertNull(clean.result().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                    assertNull(assertIs<ExecutionEnd.Finished>(clean.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure)
                 }
             } finally {
                 unrelated.remove()
@@ -949,5 +955,31 @@ class OwnedRuntimeTest {
             assertFailsWith<PartialInstallationException> { runtime.prepare(policy(), DomainLimits(2, 2)) }
             assertFalse(Thread.getAllStackTraces().keys.any { it.isAlive && it.name.startsWith("mazewall-domain-") })
         }
+    }
+
+    @Test
+    fun `failed generation does not await workers that were never started`() {
+        val domain = io.mazewall.enforcer.internal.execution.OwnedDomain(
+            1,
+            DomainLimits(2, 2),
+            policy().definition,
+            InstallationEnvironment.capture(),
+            null,
+            null,
+            "unstarted-preparation-",
+            DefaultStacktraceScopingPolicy,
+        )
+        val failure = IllegalStateException("startup already failed")
+        domain.fail(failure)
+        assertTimeoutPreemptively(Duration.ofSeconds(5)) {
+            val actual = assertFailsWith<IllegalStateException> {
+                domain.prepare(
+                    io.mazewall.enforcer.internal.execution
+                    .Deadline(Duration.ofSeconds(30)),
+                )
+            }
+            assertSame(failure, actual)
+        }
+        assertTrue(domain.drainSnapshot().retired)
     }
 }

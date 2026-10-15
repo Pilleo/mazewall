@@ -18,6 +18,8 @@ target_files:
   - "src/sharedTest/kotlin/io/mazewall/IsolatedProcessTester.kt"
   - "enforcer/src/test/kotlin/io/mazewall/enforcer/ContainedExecutorWrapTest.kt"
   - "enforcer/src/test/kotlin/io/mazewall/execution/OwnedRuntimeTest.kt"
+  - "enforcer/src/main/kotlin/io/mazewall/enforcer/internal/execution/OwnedDomain.kt"
+  - "portals/codegen/src/test/kotlin/io/mazewall/portal/codegen/PortalCodegenFunctionalTest.kt"
   - "tests/consumers"
   - "benchmarks/integration-boundaries"
   - "profiler/hotspot-agentless"
@@ -143,6 +145,12 @@ limits. The operator subsequently approved local-only benchmarks and removing
 that job from required PR CI; see [the resolved decision](resolved/issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md).
 The local CLI's performance limits are unchanged. Build/security/kernel correctness
 gates remain required, and their outstanding failures still block the merge.
+The next correctness follow-up fixes startup accounting for workers never created
+after early failure, observes explicit execution end in the one-permit metadata
+test, and retains real child stderr for the unresolved CI-only portal startup
+refusal. All34 owned-runtime cases, the real portal launch fixture, and the full
+included-module build pass locally (`run-d231eece1093`). CI must verify the
+published follow-up; missing worker readiness remains a failure.
 The admission-test candidate passes the full included-module build on Ubuntu
 OpenJDK25.0.4.1 (`run-b7e52d1e97d0`). Local GraalVM mapping-denial worker exits
 remain independently recorded; the test-only change does not mask that issue.

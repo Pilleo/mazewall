@@ -513,6 +513,10 @@ readiness. Receipt registration is retained through physical retirement. Definit
 use the same immutable snapshot/compiler pipeline. `DomainLimits` bounds worker count
 and admitted logical work; AbortPolicy never redirects protected work to callers.
 Generation readiness/drain/failure/retirement decisions have a pure lifecycle evaluator.
+An early installation failure may stop executor prestart before all requested
+workers exist. Startup accounting excludes those uncreated workers while keeping
+the generation failed and preserving its original cause. Physically created
+workers still require retirement and receipt cleanup before release.
 
 Invocation result delivery and physical `ExecutionEnd` are separate minimal-stage
 views. Queued cancellation removes the never-started body and releases admission;

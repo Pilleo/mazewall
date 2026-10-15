@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 133 | *Total Resolved Issues:* 678
+*Total Active Issues:* 134 | *Total Resolved Issues:* 679
 
-Active status detail: 132 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 133 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -48,6 +48,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-](issue-20261015-125635-220-diagnose-packaged-worker-exit-before-readiness-in-.md) | Diagnose packaged worker exit before readiness in CI | high | core |
+| Archived [issue-20261015-124827-767-preserve-early-worker-preparation-failure-before-a](resolved/issue-20261015-124827-767-preserve-early-worker-preparation-failure-before-a.md) | Preserve early worker preparation failure before all workers start | high | core |
 | [issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-](issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md) | Diagnose executable mapping EPERM during enforcer worker completion | high | core |
 | Archived [issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-](resolved/issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md) | Decide required CI treatment of hardware-specific native performance gate | high | ci |
 | Archived [issue-20261015-115545-513-allow-admission-overlap-in-nested-containment-evid](resolved/issue-20261015-115545-513-allow-admission-overlap-in-nested-containment-evid.md) | Allow admission overlap in nested containment evidence regression | high | core |
