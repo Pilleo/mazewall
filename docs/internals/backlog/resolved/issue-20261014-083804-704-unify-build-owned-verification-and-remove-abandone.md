@@ -1,7 +1,7 @@
 ---
 title: "Unify build-owned verification and remove abandoned repository tooling"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -99,13 +99,13 @@ Task 4 migration parity passes both P617 consumer JDK rows and all four raw payl
 with identical descriptive summaries and all 320 named corruption outcomes.
 On 2026-10-14 the operator approved the checksum-policy scope extension. All 47
 missing entries were independently reviewed and added, preserving every existing
-approval and strict verification; see [the resolved checksum follow-up](resolved/issue-20261014-162921-507-approve-missing-checksum-metadata-for-existing-opt.md).
+approval and strict verification; see [the resolved checksum follow-up](issue-20261014-162921-507-approve-missing-checksum-metadata-for-existing-opt.md).
 Task 5's complete real isolated Koog bootstrap and both generated package variants
 now pass. Its five Koog Python files are retired after mapped behavior acceptance.
 Finished Boot/native and measurement migration remain unfinished; those four Python
 files retain their current acceptance role until equivalent behavior passes.
 The operator instructed consistent maintenance of the inherited verification policy.
-The [Spring checksum follow-up](resolved/issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti.md)
+The [Spring checksum follow-up](issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti.md)
 is resolved with independent artifact review and strict producer/native acceptance.
 Task5's finished Boot external review and all14 measurement collision checks now
 pass against the private current-source qualification fixture; all9 consumer Python
@@ -149,7 +149,7 @@ checks and source/cache-policy guards pass (`run-06644570f073`). The subsequentl
 observed worker-liveness assertion is resolved as a test-observation race: pool
 termination precedes JVM thread-exit hooks. The test now performs a bounded join
 and still requires physical worker death; production containment is unchanged.
-See [the resolved investigation](resolved/issue-20261015-094330-565-investigate-worker-liveness-after-sandboxdispatche.md).
+See [the resolved investigation](issue-20261015-094330-565-investigate-worker-liveness-after-sandboxdispatche.md).
 All19 focused checks pass without skips, and the current full included-module
 build passes (`run-74490f4ff1a6`, 2026-10-15). The cleanup is ready for scoped review.
 
@@ -166,7 +166,7 @@ with a second bounded queued admission while retaining one physical worker and
 all denial/evidence assertions. All33 owned-runtime cases pass. The rootful job
 now reaches and honestly refuses its unchanged hardware-specific performance
 limits. The operator subsequently approved local-only benchmarks and removing
-that job from required PR CI; see [the resolved decision](resolved/issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md).
+that job from required PR CI; see [the resolved decision](issue-20261015-115813-512-decide-required-ci-treatment-of-hardware-specific-.md).
 The local CLI's performance limits are unchanged. Build/security/kernel correctness
 gates remain required, and their outstanding failures still block the merge.
 The next correctness follow-up fixes startup accounting for workers never created
@@ -199,10 +199,10 @@ remain independently recorded; the test-only change does not mask that issue.
 After host/kernel/mutation CI reached the web comparison, the operator explicitly
 authorized the safest core profiler repair and investigation of the gaps behind
 exhaustive/pure models. The scoped owners are the resolved
-[profiler completion/ownership repair](resolved/issue-20261015-172121-857-preserve-truthful-profiler-completion-across-termi.md),
-[base-grant path pruning](resolved/issue-20261015-182018-091-prune-learned-filesystem-paths-covered-by-explicit.md),
-[owned web handoff](resolved/issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta.md), and
-[truthful report producer](resolved/issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out.md).
+[profiler completion/ownership repair](issue-20261015-172121-857-preserve-truthful-profiler-completion-across-termi.md),
+[base-grant path pruning](issue-20261015-182018-091-prune-learned-filesystem-paths-covered-by-explicit.md),
+[owned web handoff](issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta.md), and
+[truthful report producer](issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out.md).
 
 Explicit stream-terminal proof, successful consumption and physical cleanup are
 separate outcomes; daemon leases order concurrent shutdown; native CONNECT
@@ -225,12 +225,36 @@ cleanup item stays open until that checkpoint is accepted.
 Exact CI38807405275 at4d7d84dd passes host/kernel/all mutation gates and completes
 profiling, then exposes a portability error in the read-only mount guard: Podman
 uses Mode for SELinux options and RW for the read-write boolean. The
-[scoped correction](resolved/issue-20261015-213544-220-verify-read-only-profile-mounts-using-explicit-run.md)
+[scoped correction](issue-20261015-213544-220-verify-read-only-profile-mounts-using-explicit-run.md)
 requires explicit boolean RW=false at the exact profile destination, rejecting
 unknown/ill-typed/writable metadata. All64 report/ownership controls, actual
 Docker comparison and a full build pass (`run-2b84520347c7`,
 `run-34fff32d25ce`, `run-f2ae644a6129`). No mount/check/fallback was relaxed;
 actual Podman and later security-stage acceptance still gate the remote merge.
+
+## Remote acceptance and closure
+
+Exact-head CI38814643561 at `b6235c38cbb2e1114f04318a1753f520fd81c0f6`
+passes host quality, dependency reproducibility/configuration-cache reuse,
+privileged kernel/assembly, all mutations, the complete real Podman comparison,
+security analysis and cache ownership. PR531 is MERGEABLE/CLEAN. All nine cleanup
+tasks and operator-approved correctness follow-ups are accepted; integration
+remains through the PR, never a direct default-branch push.
+
+The security stage took46m38s because it fetched408708 NVD records; actual
+dependency analysis took2s. Prior warm PR34258057467 completed the scan in15s and
+logged that the NVD update was fresh within240minutes. The new PR restored a
+14.4MB Gradle-home entry from a run that had not reached scanning, then saved
+128.8MB including dependency-check-data. The current67cache entries are all scoped
+to PR531; no old default-branch cache remains. No cache path/key or scan threshold
+was changed to conceal a miss. A subsequent warm run remains the performance
+check; GitHub PR caches cannot seed default-branch cache scope.
+
+The scan still reports the independently tracked NVD URL-column ingestion defect
+for two CVEs. That issue and executable-mapping EPERM remain open; passing this
+scoped repair is not a claim of exhaustive vulnerability ingestion, process ACE,
+all-runtime qualification or resolution of those separate findings. Benchmark
+bundles and new raw diagnostic receipts remain local-only.
 
 **Needed:**
 1. Make Gradle authoritative for host/full lint, test, coverage, and build guards.
