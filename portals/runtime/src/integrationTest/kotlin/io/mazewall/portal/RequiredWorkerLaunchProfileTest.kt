@@ -205,7 +205,7 @@ class RequiredWorkerLaunchProfileTest {
                     "wrong-identity" -> "parent startup authorization does not match"
                     else -> error("unknown test mode")
                 }
-                assertTrue(reason in failure.stackTraceToString(), "$mode must reject for its actual launch condition")
+                assertTrue(reason in failure.stackTraceToString(), "$mode must reject for its actual launch condition: ${failure.stackTraceToString()}")
                 assertFalse("GUEST_ENTERED" in diagnostics, "$mode must reject before real guest constructor")
                 assertEquals(0, broker.spawnedWorkers())
                 assertEquals(0, broker.provisionalWorkers())

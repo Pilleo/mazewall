@@ -161,6 +161,11 @@ including all13 real portal-codegen cases and the previously failing runtime/flo
 suites. It then exposes a bare-selector error in the kernel container invocation;
 the workflow now selects the exact declared root `:kernelCheck` aggregate, retaining
 all intended kernel coverage gates and assembly. No failed test was skipped.
+The kernel gate now configures and runs; CI's remaining launch-profile failure
+retains ownership and rejects startup but its expected specific cause is missing.
+The fixture now includes the actual exception in its assertion message. Fifty
+negative local acquisitions pass; CI evidence is needed before changing lifecycle
+behavior. No generic-failure acceptance or cleanup weakening was introduced.
 The admission-test candidate passes the full included-module build on Ubuntu
 OpenJDK25.0.4.1 (`run-b7e52d1e97d0`). Local GraalVM mapping-denial worker exits
 remain independently recorded; the test-only change does not mask that issue.
