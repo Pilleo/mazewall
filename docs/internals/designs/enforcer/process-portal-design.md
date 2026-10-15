@@ -177,6 +177,10 @@ stateless maintenance. Each child output pump drains incrementally into at most 
 observation is diagnostic only for broker startup; only the required socket record authorizes
 publication. Child output is never appended to a shared file or
 forwarded continuously into broker logs. Startup failures carry the bounded diagnostic snapshot.
+The worker emits a bounded startup rejection reason before closing its RPC transport:
+transport closure permits immediate parent rollback and reaping, which can precede
+the JVM's default uncaught-exception output. This diagnostic never authorizes guest
+entry or replaces the required readiness/containment record.
 
 The worker request loop has the closed states `AwaitingRequest → Dispatching → SendingReply`.
 `ReplySucceeded` is the only transition back to `AwaitingRequest`; `ReplyFailed` terminates the

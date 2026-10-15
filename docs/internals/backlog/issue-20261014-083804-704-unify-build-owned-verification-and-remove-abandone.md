@@ -20,6 +20,8 @@ target_files:
   - "enforcer/src/test/kotlin/io/mazewall/execution/OwnedRuntimeTest.kt"
   - "enforcer/src/main/kotlin/io/mazewall/enforcer/internal/execution/OwnedDomain.kt"
   - "portals/codegen/src/test/kotlin/io/mazewall/portal/codegen/PortalCodegenFunctionalTest.kt"
+  - "portals/worker/src/main/kotlin/io/mazewall/portal/worker/PortalWorkerMain.kt"
+  - "portals/worker/src/test/kotlin/io/mazewall/portal/worker/PortalWorkerStartupTest.kt"
   - "tests/consumers"
   - "benchmarks/integration-boundaries"
   - "profiler/hotspot-agentless"

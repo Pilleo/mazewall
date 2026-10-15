@@ -163,6 +163,14 @@ public object PortalWorkerMain {
             initialized
         } catch (failure: Throwable) {
             var terminal = failure
+            // Closing RPC permits parent rollback before the JVM can print an uncaught failure.
+            runCatching {
+                System.err.println("portal worker startup rejected: ${failure.message?.take(1024)}")
+                System.err.flush()
+            }.exceptionOrNull()?.let {
+                terminal = io.mazewall.platform.fd.CleanupFailures
+                    .merge(terminal, it)
+            }
             runCatching(transport::close).exceptionOrNull()?.let {
                 terminal = io.mazewall.platform.fd.CleanupFailures
                 .merge(terminal, it)

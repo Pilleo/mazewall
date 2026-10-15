@@ -7,6 +7,40 @@ import java.io.IOException
 
 class PortalWorkerStartupTest {
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_ERR)
+    fun `startup rejection diagnostic is written before transport close permits parent rollback`() {
+        val output = java.io.ByteArrayOutputStream()
+        val original = System.err
+        val failure = IllegalArgumentException("declared marker does not match")
+        var diagnosticBeforeClose = false
+        val transport = object : PortalWorkerTransport {
+            override fun receive(): PortalWorkerReceive = error("receive before startup")
+
+            override fun send(frame: PortalFrame) = Unit
+
+            override fun close() {
+                diagnosticBeforeClose = output.toString(Charsets.UTF_8).contains(failure.message!!)
+            }
+        }
+        try {
+            System.setErr(java.io.PrintStream(output, true, Charsets.UTF_8))
+            val actual = assertThrows(IllegalArgumentException::class.java) {
+                PortalWorkerMain.runWorker(
+                    transport,
+                    { error("containment after rejection") },
+                    { error("guest after rejection") },
+                    { error("readiness after rejection") },
+                    authorizeParent = { throw failure },
+                )
+            }
+            assertSame(failure, actual)
+            assertTrue(diagnosticBeforeClose, "the child must publish its bounded rejection before closing the RPC transport")
+        } finally {
+            System.setErr(original)
+        }
+    }
+
+    @Test
     fun `fatal actual receipt retirement dominates ordinary startup or execution failure`() {
         for (startup in listOf(true, false)) {
             val ordinary = IOException("ordinary failure")
