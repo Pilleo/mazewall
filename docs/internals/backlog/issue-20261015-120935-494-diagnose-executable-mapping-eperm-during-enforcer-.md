@@ -28,5 +28,12 @@ The same candidate's full build passes on installed Ubuntu OpenJDK25.0.4.1
 policy changes. This establishes a passing supported-runtime check, not a fix
 or disproval of the retained GraalVM executable-mapping failure. The issue stays open.
 
+The failure also occurred during an Ubuntu OpenJDK25 floor-class check
+(`run-1ffce39ebb9f`, enforcer/hs_err_pid199455.log). The actual worker was
+pool-2-thread-1 in native-wrapper/CodeHeap expansion; do not constrain the
+investigation to GraalVM or treat the generic JVM out-of-memory text as RAM proof.
+Five isolated floor child cases subsequently pass, but that is not a fix for
+this independently retained fatal denial.
+
 ---
 <!-- id: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-  file: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md -->

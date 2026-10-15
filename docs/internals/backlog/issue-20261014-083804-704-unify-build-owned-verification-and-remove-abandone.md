@@ -151,6 +151,11 @@ test, and retains real child stderr for the unresolved CI-only portal startup
 refusal. All34 owned-runtime cases, the real portal launch fixture, and the full
 included-module build pass locally (`run-d231eece1093`). CI must verify the
 published follow-up; missing worker readiness remains a failure.
+CI at `50a70bc4` confirms all34 owned-runtime cases pass and now rejects only the
+JVM-floor helper's overly narrow JDK connection-refusal spelling. The helper
+accepts the two exact ordinary refusal strings while actual acquired EPERM/EACCES
+still propagate. Five isolated floor cases and the full included-module build
+pass (`run-c492ffafc9d7`); the next remote result remains authoritative for merge.
 The admission-test candidate passes the full included-module build on Ubuntu
 OpenJDK25.0.4.1 (`run-b7e52d1e97d0`). Local GraalVM mapping-denial worker exits
 remain independently recorded; the test-only change does not mask that issue.

@@ -39,6 +39,11 @@ class JvmFloorWorkloadTest {
     }
 
     @Test
+    fun `detailed JDK socket refusal is accepted by full floor classification`() {
+        runFloorChild("detailed-refusal")
+    }
+
+    @Test
     fun `cancellation after all Loom tasks acquired confirms executor physical end and interrupt`() {
         runFloorChild("acquired-loom")
     }
@@ -90,6 +95,12 @@ class JvmFloorWorkloadTest {
             }
             if (mode == "refusal") {
                 acquiredRefusal()
+                return
+            }
+            if (mode == "detailed-refusal") {
+                JvmFloorWorkload.runWithNetworkProbe(null) {
+                    throw java.net.ConnectException("Connection refused (connect failed)")
+                }
                 return
             }
             if (mode in setOf("acquired-loom", "acquired-worker", "worker-fatal")) {

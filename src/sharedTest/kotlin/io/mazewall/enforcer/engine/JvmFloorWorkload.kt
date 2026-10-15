@@ -188,7 +188,7 @@ object JvmFloorWorkload {
             } catch (e: ConnectException) {
                 // Accept the expected refused loopback connection, not arbitrary
                 // IO failures (in particular EPERM/EACCES from containment).
-                if (e.message != "Connection refused") throw e
+                if (e.message !in setOf("Connection refused", "Connection refused (connect failed)")) throw e
                 System.err.println("[JVM FLOOR] Expected loopback connection refusal: $e")
             }
         }
