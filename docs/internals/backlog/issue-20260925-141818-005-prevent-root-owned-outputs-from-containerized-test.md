@@ -8,9 +8,9 @@ component: "testing"
 target_modules: [":profiler"]
 target_files:
   - "scripts/run_containerized_tests.sh"
-  - "scripts/run_tier_e_rootful_gate.sh"
-  - "scripts/run_tier_e_trustworthy_benchmark.sh"
-  - "scripts/run_tier_e_split_privilege_fixture.sh"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/controller/TierESplitFixtureController.kt"
   - "infra/dev/compose.yml"
   - "infra/dev/README.md"
   - ".devcontainer/devcontainer.json"

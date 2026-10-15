@@ -25,7 +25,7 @@ target_files:
   - "experiments/hotspot-agentless/internal/output/jsonl.go"
   - "experiments/hotspot-agentless/cmd/mw-hotspot-demo/main.go"
   - "experiments/hotspot-agentless/Makefile"
-  - "experiments/hotspot-agentless/scripts/prepare-gadget.py"
+  - "experiments/hotspot-agentless/internal/tooling/prepare.go"
   - "experiments/hotspot-agentless/scripts/run-demo.sh"
   - "experiments/hotspot-agentless/tests/integration/structured_test.go"
   - "experiments/hotspot-agentless/gadgets/openat-stack/program.bpf.c"

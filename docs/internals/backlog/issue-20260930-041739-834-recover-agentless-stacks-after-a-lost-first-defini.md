@@ -15,7 +15,7 @@ target_files:
   - "experiments/hotspot-agentless/internal/model/record.go"
   - "experiments/hotspot-agentless/tests/integration/recovery_test.go"
   - "experiments/hotspot-agentless/tests/integration/structured_test.go"
-  - "experiments/hotspot-agentless/scripts/prepare-gadget.py"
+  - "experiments/hotspot-agentless/internal/tooling/prepare.go"
   - "experiments/hotspot-agentless/scripts/run-demo.sh"
   - "experiments/hotspot-agentless/Makefile"
   - "experiments/hotspot-agentless/patches/faults/drop-first-definition.patch"

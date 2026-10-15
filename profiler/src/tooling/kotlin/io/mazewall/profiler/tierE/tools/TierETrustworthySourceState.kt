@@ -20,10 +20,6 @@ public object TierETrustworthySourceState {
         "platform",
         "profiler",
         "profiler-native",
-        "scripts/build_tier_e_benchmark_bundle.sh",
-        "scripts/run_tier_e_trustworthy_benchmark.sh",
-        "scripts/run_tier_e_sustained_capacity.sh",
-        "scripts/tier_e_benchmark_source_state.sh",
     )
 
     public fun read(repository: Path): JsonObject {

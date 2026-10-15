@@ -1,0 +1,87 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package libpf
+
+import (
+	"errors"
+	"fmt"
+)
+
+type HotSpotEpochState uint32
+
+const (
+	HotSpotEpochUnknown HotSpotEpochState = iota
+	HotSpotEpochStable
+	HotSpotEpochReadError
+	HotSpotEpochInProgress
+	HotSpotEpochChanged
+	HotSpotEpochUnsupported
+	HotSpotEpochRegressed
+)
+
+// HotSpotIdentity is captured evidence, never a decoder result. Zero epoch is valid.
+type HotSpotIdentity struct {
+	Epoch     uint64
+	State     HotSpotEpochState
+	ReadError int32
+}
+
+func (i HotSpotIdentity) Validate() error {
+	if i.State > HotSpotEpochRegressed {
+		return fmt.Errorf("invalid HotSpot epoch state %d", i.State)
+	}
+	if i.State == HotSpotEpochStable && (i.Epoch&1 != 0 || i.Epoch >= 1<<63 || i.ReadError != 0) {
+		return fmt.Errorf("invalid stable HotSpot epoch record")
+	}
+	return nil
+}
+
+type HotSpotEpochTarget struct {
+	PID               PID
+	ProcessStartTicks uint64
+	CounterAddress    Address
+	InitialEpoch      uint64
+}
+
+func (t HotSpotEpochTarget) Validate() error {
+	if t.PID <= 0 || t.ProcessStartTicks == 0 || t.CounterAddress == 0 || uint64(t.CounterAddress)&7 != 0 || uint64(t.CounterAddress) >= 1<<63 || t.InitialEpoch&1 != 0 || t.InitialEpoch >= 1<<63 {
+		return fmt.Errorf("invalid HotSpot epoch target")
+	}
+	return nil
+}
+
+type HotSpotValidationState uint8
+
+const (
+	HotSpotValidationUnknown HotSpotValidationState = iota
+	HotSpotValidationChecked
+	HotSpotValidationUnavailable
+)
+
+type HotSpotValidation struct {
+	State HotSpotValidationState
+	Err   error
+}
+
+type HotSpotEpochError struct {
+	State HotSpotEpochState
+	Cause error
+}
+
+func (e *HotSpotEpochError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("HotSpot epoch %d: %v", e.State, e.Cause)
+	}
+	return fmt.Sprintf("HotSpot epoch %d", e.State)
+}
+func (e *HotSpotEpochError) Unwrap() error { return e.Cause }
+func IsHotSpotEpochFatal(err error) bool {
+	if err == nil {
+		return false
+	}
+	var e *HotSpotEpochError
+	if errors.As(err, &e) {
+		return e.Cause != nil || e.State == HotSpotEpochRegressed
+	}
+	return true
+}

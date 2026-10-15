@@ -1,0 +1,15 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package interpreter
+
+import "go.opentelemetry.io/ebpf-profiler/libpf"
+
+// Optional strict capability; the existing Instance interface is unchanged.
+type HotSpotEpochInstance interface {
+	ConfigureHotSpotEpoch(libpf.HotSpotEpochTarget) error
+	BeginHotSpotEpoch(libpf.HotSpotIdentity) (HotSpotEpochDecoder, error)
+}
+type HotSpotEpochDecoder interface {
+	Symbolize(libpf.EbpfFrame, *libpf.Frames, libpf.FrameMapping) error
+	Finish(error) libpf.HotSpotValidation
+}

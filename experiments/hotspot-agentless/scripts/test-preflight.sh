@@ -6,8 +6,8 @@ docker_cmd=("${DOCKER:-docker}")
 if [[ -n "${COLLECTOR_DOCKER_HOST:-}" ]]; then
     docker_cmd+=(--host "$COLLECTOR_DOCKER_HOST")
 fi
-go_image=$(python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["go"])')
-jdk_image=$(python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["jdk"])')
+go_image=$("${GO:-go}" run ./cmd/mw-collector-tools image --key go)
+jdk_image=$("${GO:-go}" run ./cmd/mw-collector-tools image --key jdk)
 target=''
 cleanup() {
     if [[ -n "$target" ]]; then
@@ -50,15 +50,5 @@ if bash scripts/preflight.sh --pid "$pid" > build/preflight-unprivileged.json; t
     printf '%s\n' 'Preflight unexpectedly loaded BPF without collector privileges' >&2
     exit 1
 fi
-python3 - <<'PY'
-import json
-from pathlib import Path
-valid = json.loads(Path('build/preflight-supported.json').read_text())
-assert valid['ready_for_attach_test'] and not valid['failures'], valid
-assert valid['environment']['target_uid'] == 1000, valid
-root = json.loads(Path('build/preflight-root-refused.json').read_text())
-assert not root['ready_for_attach_test'] and 'privileged_target' in root['failures'], root
-unprivileged = json.loads(Path('build/preflight-unprivileged.json').read_text())
-assert not unprivileged['ready_for_attach_test'] and 'bpf_permission_denied' in unprivileged['failures'], unprivileged
-print('Preflight: ordinary-user HotSpot accepted; root target and unprivileged collector refused.')
-PY
+"${GO:-go}" run -modfile build/experiment.go.mod ./cmd/mw-experiment-tools preflight-verdict build
+printf '%s\n' 'Preflight: ordinary-user HotSpot accepted; root target and unprivileged collector refused.'

@@ -3,6 +3,7 @@ build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
+!buildSrc/src/verification/**/build/
 
 ### IntelliJ IDEA ###
 .idea
@@ -121,3 +122,7 @@ target/
 /.omo/
 /.superpowers/
 /.skillopt-sleep/
+
+### Local Benchmark Bundles ###
+/docs/internals/evidence/**/*.tar.gz
+/docs/internals/evidence/**/*.tar.zst

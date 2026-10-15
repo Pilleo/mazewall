@@ -93,43 +93,50 @@ short-lived/pre-delivery reconstruction cannot hide between process snapshots.
 The denied/crash/oversized service is test-only and never advertised to the model.
 Selector-looking text is data. Host mappings/codecs remain outside protection.
 
-## Production packaging check
+## Bootstrap freshness and generated packaging checks
 
 ```bash
 flock "$lock" bash scripts/koog-build.sh -- \
   :integrations:koog:ktlintCheck :integrations:koog:detekt \
   :demos:koog-contained-tool:jar :demos:koog-contained-tool:portalCheck
-python3 tests/consumers/koog-portal/check-worker-package.py \
-  demos/koog-contained-tool/build/libs/koog-contained-tool-0.1.0-SNAPSHOT.jar
+
+# The task owns the lock; do not wrap it in another flock on the same path.
+./gradlew consumerBootstrapCheck -PverificationLock="$lock" --console=plain
+# Host-safe process, fixture and malformed-package regressions:
+./gradlew consumerHarnessTest
 ```
 
-The package checker requires actual format2 resource metadata and matching ZIP
-digest, generated dispatcher/implementation in the worker, no loadable host guest
-classes, no Koog/Spring or host TextTools in the worker, and no test service in the
-production manifests/ZIP. `--native-fixture` checks the separate native package.
-
-## Bootstrap freshness and failure checks
-
-```bash
-python3 tests/consumers/koog-portal/bootstrap-test.py
-python3 tests/consumers/koog-portal/producer-exclusion-test.py
-python3 tests/consumers/koog-portal/fixture-ownership-test.py
-```
-
-This test acquires the fleet lock itself. It executes actual Gradle builds,
+The Kotlin bootstrap suite acquires the shared lock itself. On independent
+checkouts its default is `mazewall/verification.lock` under the Git common
+directory; the active fleet uses the explicit override above. It executes actual
+Gradle builds in a fresh disposable clone of the current tracked/untracked source
+inventory, retaining executable modes and checking the original checkout unchanged.
+No producer output is borrowed or hidden. It
 checks default-core exclusion, adds/changes/removes a temporary producer resource,
 verifies its real plugin JAR contents after refresh, rejects missing/changed JARs,
 wrong-worktree/version/missing receipts and cached demo evaluation, and injects
 an actual producer build failure plus a missing selected task. Producer failure
 must not admit the second stage; each failure must propagate its original output
-and nonzero status. Inputs are exclusively created and mutated through retained
-owned descriptors; exact no-clobber restoration attempts preserve unknown
-replacements and original backups rather than deleting or overwriting them.
-The ownership fault suite verifies real filesystem replacement/race conflicts.
-The exclusion suite adds real Kotlin source and requires rejection of direct
+and nonzero status. The exclusion cases add real Kotlin source and require rejection of direct
 excluded/conditionally skipped compilation plus all supported wrapper exclusion
-forms before the selected stage. Individual logs/recovery files remain under the
-printed same-filesystem `build/task10-evidence/round1/` evidence directories.
+forms before the selected stage, preserving the immediately preceding valid receipt.
+The initial cold build runs the mandatory buildSrc checks before root configuration;
+its timeout is ten minutes, subsequent commands have four-minute bounds, and the
+suite has a thirty-minute deadline on its owning cleanup thread. It remains an
+explicit, non-cacheable acceptance task.
+
+Both actual production and native-fixture packages are generated and inspected.
+The checker requires format2 resource metadata and matching ZIP digest, generated
+dispatcher/implementation in the worker, no loadable host guest classes, no
+Koog/Spring or host TextTools in the worker, and the exact fixture-dependent service
+and denied-probe inventory. Native containment is verified by the independent
+consumer procedure above.
+
+All argv/cwd, separate streams, exits and timeout/reap outcomes remain under the
+printed clone's `bootstrap-evidence/` directory. Evidence descriptors are exclusively
+acquired and retained; timeout state is recorded before bounded cleanup of acquired
+process ancestry. Clones and evidence are retained on failure for inspection.
+Ordinary host verification runs only the self-contained harness regressions.
 
 ## Evidence and remaining gates
 

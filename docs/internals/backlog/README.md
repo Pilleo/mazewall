@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 131 | *Total Resolved Issues:* 670
+*Total Active Issues:* 132 | *Total Resolved Issues:* 674
 
-Active status detail: 130 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 131 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -48,6 +48,11 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261015-094330-565-investigate-worker-liveness-after-sandboxdispatche](resolved/issue-20261015-094330-565-investigate-worker-liveness-after-sandboxdispatche.md) | Investigate worker liveness after SandboxDispatcher shutdown | high | core |
+| Archived [issue-20261014-192004-715-reject-incomplete-generated-native-preparation-art](resolved/issue-20261014-192004-715-reject-incomplete-generated-native-preparation-art.md) | Reject incomplete generated native preparation artifact inventories | high | core |
+| Archived [issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti](resolved/issue-20261014-180023-219-review-missing-checksum-metadata-for-existing-opti.md) | Review missing checksum metadata for existing optional Spring Boot build inputs | high | core |
+| Archived [issue-20261014-162921-507-approve-missing-checksum-metadata-for-existing-opt](resolved/issue-20261014-162921-507-approve-missing-checksum-metadata-for-existing-opt.md) | Approve missing checksum metadata for existing optional Koog 1.3.0 build inputs | high | core |
+| [issue-20261014-083804-704-unify-build-owned-verification-and-remove-abandone](issue-20261014-083804-704-unify-build-owned-verification-and-remove-abandone.md) | Unify build-owned verification and remove abandoned repository tooling | high | core |
 | [issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-](issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-.md) | Keep executable buildSrc TestKit storage checkout-owned | high | testing |
 | [issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing](issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md) | Investigate Dependency-Check NVD record processing failure | high | ci |
 | [issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe](issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe.md) | Preserve canonical backlog totals and active membership after evidence closure | medium | core |

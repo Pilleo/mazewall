@@ -445,8 +445,9 @@ gate opens, but never reports recovered coverage. Missing or unreadable artifact
 `UNVERIFIED`; missing declared edges are `INCOMPLETE`; contradictory rows are `FAILED`. Normal
 deployments emit neither this file nor its additional collector work.
 
-`TIER_E_SPLIT_COVERAGE=1 bash scripts/run_tier_e_split_privilege_fixture.sh` is the bounded
-72-edge rootful smoke. It runs the target non-root and the collector privileged, and retains the
+After `./gradlew :profiler:installDist`, run
+`profiler/build/install/tier-e-daemon/bin/tier-e-tools fixture-run config/testing/tier-e/smoke.json "$PWD" "$PWD/build/tier-e-smoke"`
+for the bounded 72-edge rootful smoke. It runs the target non-root and the collector privileged, and retains the
 target oracle, collector manifest, terminal report, dictionary envelope, logs, and verdict. The
 default smoke uses one operation per path; `TIER_E_SPLIT_COVERAGE_OPERATIONS=75000` explicitly
 selects the paced sustained stress schedule and must retain its own incomplete evidence if a
@@ -470,7 +471,8 @@ unclosed, and wrong-session cases. Each is incomplete with failed transport, att
 lifecycle dimensions; none upgrades to policy eligibility. This does not yet establish stale-PID,
 PID-reuse, delayed-closure, or split-topology application-overhead qualifications.
 
-`bash scripts/run_tier_e_coverage_benchmark.sh smoke` runs a reduced corpus retaining all 72
+`profiler/build/install/tier-e-daemon/bin/tier-e-tools coverage-run smoke "$PWD" "$PWD/build/tier-e-coverage"`
+runs a reduced corpus retaining all 72
 paths. The `full` argument runs five rotated forks of baseline, dictionary/full-stream,
 dictionary/unique-edge, inline/full-stream, and inline/unique-edge at 1,250 operations/s. The
 workload JVM starts on its assigned CPU; benchmark attachment setup targets that CPU before

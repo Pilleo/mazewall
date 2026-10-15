@@ -173,10 +173,13 @@ public object TierETrustworthyRunner {
                     "-w",
                     repository.toString(),
                     image,
-                    "bash",
-                    "scripts/build_tier_e_benchmark_bundle.sh",
-                    "/artifacts/bundle",
-                    (System.getProperty("os.arch") in setOf("amd64", "x86_64")).toString(),
+                    *TierEBenchmarkBootstrap
+                        .command(
+                        repository,
+                        Path.of("/artifacts/bundle"),
+                        System.getProperty("os.arch") in setOf("amd64", "x86_64"),
+                        nativePackage?.let { Path.of("/native-package") },
+                    ).toTypedArray(),
                 )
                 builderCreated = true
                 command("start", "-a", builderName, timeout = Duration.ofMinutes(20), log = artifacts.resolve("build.log"))
@@ -208,6 +211,8 @@ public object TierETrustworthyRunner {
                         image,
                         repository.resolve("gradlew").toString(),
                         "--no-daemon",
+                        "--project-cache-dir",
+                        cache.resolve("gradle-verification-project-cache").toString(),
                         ":profiler:test",
                         "--tests",
                         "io.mazewall.profiler.tierE.stress.TierECommonFileWorkloadTest",

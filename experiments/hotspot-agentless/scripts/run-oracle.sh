@@ -3,8 +3,9 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 artifact=$(mktemp -d "$root/build/oracle.XXXXXX")
+run=$("${GO:-go}" run -modfile build/experiment.go.mod ./cmd/mw-experiment-tools token)
 MW_CORPUS_MODE=c2 MW_CORPUS_WORKERS=1 \
-MW_CORPUS_RUN=$(python3 -c 'import secrets;print(secrets.token_hex(8))') \
+MW_CORPUS_RUN="$run" \
     bash scripts/run-demo.sh > "$artifact/candidate.log" 2>&1
 candidate=$(rg '^Capture artifacts: ' "$artifact/candidate.log")
 candidate=${candidate#Capture artifacts: }

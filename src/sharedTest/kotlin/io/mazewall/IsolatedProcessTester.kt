@@ -174,25 +174,39 @@ object IsolatedProcessTester {
         timeout: Duration,
         command: List<String>,
         lifecycle: ProcessLifecycleOperations,
+    ) = withLifecycle(process, timeout, lifecycle, {}) { completed ->
+        check(completed) {
+            "Isolated test process exceeded ${timeout.seconds}s and was terminated.\n" +
+                "Command: ${command.joinToString(" ")}"
+        }
+        val exitCode = process.exitValue()
+        check(exitCode == 0) {
+            "Isolated test process failed with exit code $exitCode.\nCommand: ${command.joinToString(" ")}"
+        }
+    }
+
+    /** Finished-JAR reviewers need actual nonzero outcomes and evidence before timeout cleanup. */
+    fun awaitOwnedProcess(
+        process: Process,
+        timeout: Duration,
+        beforeWait: () -> Unit,
+        waitCompleted: (Boolean) -> Unit,
+    ) = withLifecycle(process, timeout, JdkProcessLifecycle {}, beforeWait, waitCompleted)
+
+    private fun withLifecycle(
+        process: Process,
+        timeout: Duration,
+        lifecycle: ProcessLifecycleOperations,
+        beforeWait: () -> Unit,
+        waitCompleted: (Boolean) -> Unit,
     ) {
         var failure: Throwable? = null
         var interrupted = Thread.interrupted()
         try {
         val waiting = runCatching {
             if (interrupted) throw InterruptedException("Isolated test waiter was already interrupted")
-            if (!lifecycle.waitFor(process, timeout)) {
-                failure = IllegalStateException(
-                    "Isolated test process exceeded ${timeout.seconds}s and was terminated.\n" +
-                        "Command: ${command.joinToString(" ")}",
-                )
-            } else {
-                val exitCode = process.exitValue()
-                if (exitCode != 0) {
-                    failure = IllegalStateException(
-                        "Isolated test process failed with exit code $exitCode.\nCommand: ${command.joinToString(" ")}",
-                    )
-                }
-            }
+            beforeWait()
+            waitCompleted(lifecycle.waitFor(process, timeout))
         }
         waiting.exceptionOrNull()?.let { caught ->
             failure = when (caught) {

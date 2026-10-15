@@ -1,10 +1,13 @@
 # Agentless HotSpot event profiler experiment
 
-This is the test/evidence harness for the [canonical collector](../../profiler/hotspot-agentless/README.md).
-Runtime packages, module pins, native gadget and overlays are source links to
-that single tree; preparation and collector builds delegate there. Benchmark,
-oracle, stress fixtures and historical results stay here. The canonical module
-retains its existing Go import namespace for internal-package compatibility.
+This is the standalone test/evidence snapshot of the
+[canonical collector](../../profiler/hotspot-agentless/README.md). Runtime packages,
+module pins, native gadget and overlays are checked-in physical copies with
+[committed source provenance](source-snapshot.json); preparation and builds use this
+local tree. Benchmark, oracle, stress fixtures and historical results stay here.
+The existing Go import namespace is retained for internal-package compatibility.
+Snapshot updates are explicit source changes with a recorded source revision;
+later canonical edits do not silently change this experiment.
 The current implementation covers dependency/preflight verification, live
 event-triggered capture and **typed, bounded enrichment**. The `--capture` mode
 emits versioned event, terminal enrichment and session-summary JSONL records.
@@ -62,9 +65,12 @@ locks module content. `make graph` records the original graph in
 notation replacements explicitly. Do not use upstream `main` as a build input.
 
 `make deps` verifies the original modules, checks the locked Gadget and profiler
-checksums, applies scoped patches without fuzz to generated sources under ignored
-`profiler/hotspot-agentless/build/deps/`, and writes temporary module replacements
-for this harness. The patch/addition
+checksums, applies scoped patches without fuzz to generated sources in the ignored
+local `build/deps/` directory, and writes local temporary module replacements.
+Its Go owner is `go run ./cmd/mw-collector-tools prepare`; diagnostic and definition-drop
+builds retain their separate explicit flags. Reuse requires the complete generated
+native-artifact hash inventory, not just whichever entries remain in its JSON file.
+The patch/addition
 bundle hash is embedded in the collector and preserved in every terminal result.
 The module cache is never edited. Build/test through Make, which selects
 `build/experiment.go.mod`; direct `go test ./...` against the unpatched upstream
@@ -145,6 +151,25 @@ real queued-tail, detach, native pressure, timeout and exact-discard controls.
 Producer capacity loss remains possible even when buffer drain succeeds.
 
 ## Three-mode measurements and event-loss control
+
+`make experiment-tools` builds the Go benchmark/candidate driver against the
+prepared local module graph. The benchmark shell boundary calls its `benchmark`
+command; report decisions remain in `internal/benchmark`. Candidate acquisition
+and offline oracle comparison are explicit commands:
+
+```bash
+make experiment-tools
+build/mw-experiment-tools candidates --assets /absolute/verified/assets \
+  --output /absolute/new/candidate-evidence --docker-host unix:///var/run/docker.sock
+build/mw-experiment-tools verify-runtime /absolute/case/manifest.json /absolute/case/capture.jsonl
+build/mw-experiment-tools verify-loom /absolute/case/oracle.jsonl /absolute/case/capture.jsonl
+```
+
+Each candidate retains its actual VM flags, logs, capture and verdict. Carrier-only
+virtual observations stay carrier-only, and every candidate remains explicitly
+non-production-qualified. Oracle route checks do not establish a metadata lifetime
+lease. Capture/file/command failures abort acquisition; bounded cleanup removes
+only containers whose IDs were acquired by the current invocation.
 
 ```bash
 DOCKER_HOST=unix:///var/run/docker.sock make benchmark-fixture benchmark-report build

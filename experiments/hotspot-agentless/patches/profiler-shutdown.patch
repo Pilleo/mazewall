@@ -1,0 +1,25 @@
+--- a/tracer/events.go
++++ b/tracer/events.go
+@@ -160,4 +160,5 @@
+ 	readErrorCount := &t.traceReaderCounters.readError
+ 	noDataCount := &t.traceReaderCounters.noData
++	t.traceReaderCounters.done = make(chan struct{})
+ 	t.traceReaderCounters.bufferBytesPerCPU = eventReader.BufferSize()
+ 	t.traceReaderCounters.ready.Store(true)
+@@ -164,2 +165,4 @@
+ 	go func() {
++		defer close(t.traceReaderCounters.done)
++		defer eventReader.Close()
+ 		var data perf.Record
+@@ -245,2 +248,5 @@
+-				traceOutChan <- trace
++				if !sendTrace(ctx, traceOutChan, trace) {
++					t.tracePool.Put(trace)
++					return
++				}
+ 				if eventCount == maxEvents {
+@@ -271,1 +277,3 @@
+-				traceOutChan <- nil
++				if !sendTrace(ctx, traceOutChan, nil) {
++					return
++				}

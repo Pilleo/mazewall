@@ -7,7 +7,7 @@ dependencies: []
 component: "profiler"
 target_modules: [profiler]
 target_files:
-  - "experiments/hotspot-agentless/scripts/run-capability-candidates.py"
+  - "experiments/hotspot-agentless/internal/candidate/runner.go"
 target_symbols:
   - "run"
 open_questions: false

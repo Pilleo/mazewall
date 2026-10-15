@@ -1,0 +1,106 @@
+--- a/interpreter/hotspot/instance.go
++++ b/interpreter/hotspot/instance.go
+@@ -77,2 +77,6 @@
+ 	addrToMethod *freelru.LRU[libpf.Address, *hotspotMethod]
++	epochTarget libpf.HotSpotEpochTarget
++	epochHighWater uint64
++	epochPoisoned bool
++	metadataEpoch libpf.HotSpotIdentity
+ 
+@@ -181,2 +184,5 @@
+ func (d *hotspotInstance) getSymbol(addr libpf.Address) libpf.String {
++	return d.getSymbolMemory(d.rm, addr)
++}
++func (d *hotspotInstance) getSymbolMemory(rm remotememory.RemoteMemory, addr libpf.Address) libpf.String {
+ 	if value, ok := d.addrToSymbol.Get(addr); ok {
+@@ -191,2 +197,2 @@
+-	if d.rm.Read(addr, buf[:]) != nil {
++	if rm.Read(addr, buf[:]) != nil {
+ 		return libpf.NullString
+@@ -205,2 +211,2 @@
+-		if d.rm.Read(addr+libpf.Address(vms.Symbol.Body+prefixLen), tmp[prefixLen:]) != nil {
++		if rm.Read(addr+libpf.Address(vms.Symbol.Body+prefixLen), tmp[prefixLen:]) != nil {
+ 			return libpf.NullString
+@@ -221,2 +227,5 @@
+ func (d *hotspotInstance) getPoolSymbol(addr libpf.Address, ndx uint16) libpf.String {
++	return d.getPoolSymbolMemory(d.rm, addr, ndx)
++}
++func (d *hotspotInstance) getPoolSymbolMemory(rm remotememory.RemoteMemory, addr libpf.Address, ndx uint16) libpf.String {
+ 	// Zero index is not valid
+@@ -229,2 +238,2 @@
+-	cpoolVal := d.rm.Ptr(addr + offs)
++	cpoolVal := rm.Ptr(addr + offs)
+ 	// The lowest bit is reserved by JVM to indicate if the value has been
+@@ -233,2 +242,2 @@
+-	return d.getSymbol(cpoolVal &^ 1)
++	return d.getSymbolMemory(rm, cpoolVal &^ 1)
+ }
+@@ -237,2 +246,5 @@
+ func (d *hotspotInstance) getStubName(ripOrBci uint32, addr libpf.Address) libpf.String {
++	return d.getStubNameMemory(d.rm, ripOrBci, addr)
++}
++func (d *hotspotInstance) getStubNameMemory(rm remotememory.RemoteMemory, ripOrBci uint32, addr libpf.Address) libpf.String {
+ 	if value, ok := d.addrToStubName.Get(addr); ok {
+@@ -242,4 +254,4 @@
+-	constStubNameAddr := d.rm.Ptr(addr + libpf.Address(vms.CodeBlob.Name))
+-	stubName := d.rm.String(constStubNameAddr)
++	constStubNameAddr := rm.Ptr(addr + libpf.Address(vms.CodeBlob.Name))
++	stubName := rm.String(constStubNameAddr)
+ 
+-	a := d.rm.Ptr(addr+libpf.Address(vms.CodeBlob.CodeBegin)) + libpf.Address(ripOrBci)
++	a := rm.Ptr(addr+libpf.Address(vms.CodeBlob.CodeBegin)) + libpf.Address(ripOrBci)
+@@ -260,2 +272,5 @@
+ func (d *hotspotInstance) getMethod(addr libpf.Address, _ uint32) (*hotspotMethod, error) {
++	return d.getMethodMemory(d.rm, addr)
++}
++func (d *hotspotInstance) getMethodMemory(rm remotememory.RemoteMemory, addr libpf.Address) (*hotspotMethod, error) {
+ 	if value, ok := d.addrToMethod.Get(addr); ok {
+@@ -265,4 +280,4 @@
+-	constMethodAddr := d.rm.Ptr(addr + libpf.Address(vms.Method.ConstMethod))
++	constMethodAddr := rm.Ptr(addr + libpf.Address(vms.Method.ConstMethod))
+ 	constMethod := make([]byte, vms.ConstMethod.Sizeof)
+-	if err := d.rm.Read(constMethodAddr, constMethod); err != nil {
++	if err := rm.Read(constMethodAddr, constMethod); err != nil {
+ 		return nil, fmt.Errorf("invalid ConstMethod ptr: %v", err)
+@@ -273,2 +288,2 @@
+-	if err := d.rm.Read(cpoolAddr, cpool); err != nil {
++	if err := rm.Read(cpoolAddr, cpool); err != nil {
+ 		return nil, fmt.Errorf("invalid ConstantPool ptr: %v", err)
+@@ -279,2 +294,2 @@
+-	if err := d.rm.Read(instanceKlassAddr, instanceKlass); err != nil {
++	if err := rm.Read(instanceKlassAddr, instanceKlass); err != nil {
+ 		return nil, fmt.Errorf("invalid PoolHolder ptr: %v", err)
+@@ -287,2 +302,2 @@
+-		sourceFileName = d.getPoolSymbol(cpoolAddr,
++		sourceFileName = d.getPoolSymbolMemory(rm, cpoolAddr,
+ 			npsr.Uint16(cpool, vms.ConstantPool.SourceFileNameIndex))
+@@ -291,2 +306,2 @@
+-		sourceFileName = d.getPoolSymbol(cpoolAddr,
++		sourceFileName = d.getPoolSymbolMemory(rm, cpoolAddr,
+ 			npsr.Uint16(instanceKlass, vms.InstanceKlass.SourceFileNameIndex))
+@@ -295,2 +310,2 @@
+-		sourceFileName = d.getSymbol(
++		sourceFileName = d.getSymbolMemory(rm,
+ 			npsr.Ptr(instanceKlass, vms.InstanceKlass.SourceFileName))
+@@ -298,5 +313,5 @@
+-	klassName := d.getSymbol(npsr.Ptr(instanceKlass, vms.Klass.Name)).String()
+-	methodName := d.getPoolSymbol(cpoolAddr, npsr.Uint16(constMethod,
++	klassName := d.getSymbolMemory(rm, npsr.Ptr(instanceKlass, vms.Klass.Name)).String()
++	methodName := d.getPoolSymbolMemory(rm, cpoolAddr, npsr.Uint16(constMethod,
+ 		vms.ConstMethod.NameIndex))
+-	signature := d.getPoolSymbol(cpoolAddr, npsr.Uint16(constMethod,
++	signature := d.getPoolSymbolMemory(rm, cpoolAddr, npsr.Uint16(constMethod,
+ 		vms.ConstMethod.SignatureIndex))
+@@ -328,2 +343,2 @@
+-	err := d.rm.Read(constMethodAddr+libpf.Address(vms.ConstMethod.Sizeof), byteCode)
++	err := rm.Read(constMethodAddr+libpf.Address(vms.ConstMethod.Sizeof), byteCode)
+ 	if err != nil {
+@@ -350,2 +365,2 @@
+-		r := newRecordingReader(d.rm, int64(constMethodAddr)+int64(vms.ConstMethod.Sizeof)+
++		r := newRecordingReader(rm, int64(constMethodAddr)+int64(vms.ConstMethod.Sizeof)+
+ 			int64(bytecodeSize), 256)
+@@ -757,2 +772,4 @@
+ 	procInfo := support.HotspotProcInfo{
++		Counter_address: uint64(d.epochTarget.CounterAddress),
++		Initial_epoch: d.epochTarget.InitialEpoch,
+ 		Nmethod_deopt_offset:   uint16(vms.Nmethod.DeoptimizeOffset),

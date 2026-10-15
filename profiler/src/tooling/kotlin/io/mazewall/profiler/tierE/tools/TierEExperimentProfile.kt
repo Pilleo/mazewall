@@ -76,7 +76,7 @@ public data class TierEExperimentProfile(
                     name in setOf("TIER_E_DOCKER_IMAGE", "TIER_E_CONTAINER_ENGINE")
             }
             require(conflicts.isEmpty()) {
-                "Profile-selected Tier E run conflicts with legacy settings: ${conflicts.sorted()}; use --legacy-env for historical replay"
+                "Profile-selected Tier E run conflicts with legacy settings: ${conflicts.sorted()}; select an explicit legacy subcommand for historical replay"
             }
         }
 

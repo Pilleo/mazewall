@@ -5,7 +5,8 @@ repository=$(cd "$root/../.." && pwd)
 cd "$root"
 docker_cmd=("${DOCKER:-docker}")
 if [[ -n "${COLLECTOR_DOCKER_HOST:-}" ]]; then docker_cmd+=(--host "$COLLECTOR_DOCKER_HOST"); fi
-jdk_image=$(python3 -c 'import json;print(json.load(open("dependencies.lock.json"))["images"]["jdk"])')
+jdk_image=$("${GO:-go}" run ./cmd/mw-collector-tools image --key jdk)
+make experiment-tools
 # Export the already pinned JDK for an ordinary-user host reference process.
 # No application-container privilege or host security setting is changed.
 jdk="$root/build/reference-jdk-${jdk_image##*@sha256:}"
@@ -25,10 +26,5 @@ artifact=$(mktemp -d "$root/build/reference.XXXXXX")
 timeout 120s "$jdk/bin/java" --enable-native-access=ALL-UNNAMED \
     -cp "$root/build/reference-classes:$classpath" InlineReferenceFixture "$artifact" 1000 \
     > "$artifact/reference.log" 2>&1
-python3 - "$artifact" "$jdk_image" <<'PY'
-import hashlib,json,os,pathlib,platform,sys
-root=pathlib.Path(sys.argv[1])
-data={"jdk_image":sys.argv[2],"target_uid":os.getuid(),"kernel":platform.release(),"reference":"USER_NOTIF","independent_jvm":True,"source_sha256":hashlib.sha256(pathlib.Path("fixtures/java/InlineReferenceFixture.java").read_bytes()).hexdigest(),"class_sha256":hashlib.sha256(pathlib.Path("build/reference-classes/InlineReferenceFixture.class").read_bytes()).hexdigest()}
-(root/"reference-environment.json").write_text(json.dumps(data,indent=2)+"\n")
-PY
+build/mw-experiment-tools reference-environment "$artifact" "$jdk_image"
 printf 'Independent reference artifacts: %s\n' "$artifact"

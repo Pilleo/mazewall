@@ -8,7 +8,6 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
-import java.nio.file.Path
 
 class TierENodeNoiseQualificationTest {
     @Test
@@ -52,17 +51,18 @@ class TierENodeNoiseQualificationTest {
 
     @Test
     fun `real archived control is eligible while five-missing-ID target remains rejected`() {
-        val repository = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
-            .first { Files.isRegularFile(it.resolve("docs/internals/evidence/tier-e-clean-node-noise-20260927/raw-diagnostics.tar.gz")) }
-        val archive = repository.resolve("docs/internals/evidence/tier-e-clean-node-noise-20260927/raw-diagnostics.tar.gz")
         val output = Files.createTempDirectory("tier-e-noise-replay-")
         try {
-            val extracted = ProcessBuilder("tar", "-xzf", archive.toString(), "-C", output.toString()).inheritIO().start()
-            assertEquals(0, extracted.waitFor())
-            val control = TierENodeNoiseQualification.verifyTarget(output.resolve("unaudited_no_noise_control/target"))
+            for (fixture in listOf("control", "noisy")) {
+                val target = Files.createDirectory(output.resolve(fixture))
+                for (name in listOf("terminal.json", "manifest.json", "results.jsonl")) {
+                    requireNotNull(javaClass.getResourceAsStream("/tier-e/node-noise/$fixture/$name")).use { Files.copy(it, target.resolve(name)) }
+                }
+            }
+            val control = TierENodeNoiseQualification.verifyTarget(output.resolve("control"))
             assertEquals("0,1", control.cpuSet)
             assertThrows(IllegalArgumentException::class.java) {
-                TierENodeNoiseQualification.verifyTarget(output.resolve("default_noisy_incomplete/target"))
+                TierENodeNoiseQualification.verifyTarget(output.resolve("noisy"))
             }
         } finally {
             output.toFile().deleteRecursively()

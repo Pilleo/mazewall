@@ -1,0 +1,109 @@
+--- a/pkg/operators/ebpf/ebpf.go
++++ b/pkg/operators/ebpf/ebpf.go
+@@ -169,8 +169,10 @@
+ 	return newInstance, nil
+ }
+ 
+ type ebpfInstance struct {
++	eventFinalizer *eventStopOwner
++	eventStopOptions *operators.EventFinalizationOptions
+ 	mu          sync.Mutex
+ 	bpfOperator *ebpfOperator
+ 
+ 	config *viper.Viper
+--- a/pkg/operators/ebpf/tracer.go
++++ b/pkg/operators/ebpf/tracer.go
+@@ -34,8 +34,9 @@
+ 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+ )
+ 
+ type Tracer struct {
++	eventDrain *eventDrainReader
+ 	mapName    string
+ 	structName string
+ 
+ 	ds              datasource.DataSource
+--- a/pkg/operators/ebpf/tracer.go
++++ b/pkg/operators/ebpf/tracer.go
+@@ -124,8 +124,11 @@
+ 	return nil
+ }
+ 
+-func (t *Tracer) receiveEvents(gadgetCtx operators.GadgetContext, wg *sync.WaitGroup) error {
++func (t *Tracer) receiveEvents(gadgetCtx operators.GadgetContext, wg *sync.WaitGroup) (resultErr error) {
+ 	defer wg.Done()
++	if t.eventDrain != nil {
++		defer func() { t.eventDrain.finish(resultErr); if resultErr != nil { gadgetCtx.Cancel() } }()
++	}
+ 
+ 	var readCb func() (data []byte, lost uint64, err error)
+ 
+@@ -139,7 +142,7 @@
+ 		var rec ringbuf.Record
+ 		lostSamples := uint64(0)
+ 
+-		if t.lostSampleMap != nil {
++		if t.lostSampleMap != nil && t.eventDrain == nil {
+ 			readLostSamples := func() {
+ 				ticker := time.NewTicker(time.Second)
+ 				defer ticker.Stop()
+@@ -203,6 +206,10 @@
+ 	for {
+ 		sample, lost, err := readCb()
+ 		if err != nil {
++			if t.eventDrain != nil {
++				if errors.Is(err, ringbuf.ErrFlushed) && t.eventDrain.flushing.Load() { return nil }
++				return fmt.Errorf("owned event read: %w", err)
++			}
+ 			if errors.Is(err, os.ErrClosed) {
+ 				return err
+ 			}
+@@ -214,7 +221,9 @@
+ 			gadgetCtx.Logger().Warnf("reading event: lost %d samples", lost)
+ 		}
+ 
++		if t.eventDrain != nil && len(sample) != int(t.eventSize) { return fmt.Errorf("owned event size mismatch: %d/%d", len(sample), t.eventSize) }
+ 		if err := t.processEventRead(gadgetCtx, sample, lost); err != nil {
++			if t.eventDrain != nil { return err }
+ 			gadgetCtx.Logger().Warnf("error processing event: %v", err)
+ 			continue
+ 		}
+@@ -328,6 +337,7 @@
+ 		}
+ 	}
+ 
++	if i.eventFinalizer != nil { tracer.eventDrain = newEventDrainReader() }
+ 	i.wg.Add(1)
+ 	go tracer.receiveEvents(gadgetCtx, &i.wg)
+ 
+--- a/pkg/operators/ebpf/ebpf.go
++++ b/pkg/operators/ebpf/ebpf.go
+@@ -731,6 +731,10 @@
+ 		return fmt.Errorf("parsing parameter values: %w", err)
+ 	}
+ 
++	if err := i.prepareEventFinalization(gadgetCtx, paramMap); err != nil {
++		return err
++	}
++
+ 	if paramMap[ParamTraceKernel].AsBool() {
+ 		err := i.tracePipe(gadgetCtx)
+ 		if err != nil {
+@@ -1073,6 +1077,7 @@
+ }
+ 
+ func (i *ebpfInstance) Stop(gadgetCtx operators.GadgetContext) error {
++	if i.eventFinalizer != nil { return i.stopOwnedEvents() }
+ 	for _, t := range i.tracers {
+ 		t.close()
+ 	}
+@@ -1103,6 +1108,9 @@
+ }
+ 
+ func (i *ebpfInstance) Close(gadgetCtx operators.GadgetContext) error {
++	if i.eventFinalizer != nil {
++		if err := i.closeOwnedEvents(); err != nil { return err }
++	}
+ 	i.detachRawPrograms()
+ 
+ 	if i.collection != nil {

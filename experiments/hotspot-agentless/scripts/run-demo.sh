@@ -6,8 +6,8 @@ docker_cmd=("${DOCKER:-docker}")
 if [[ -n "${COLLECTOR_DOCKER_HOST:-}" ]]; then
     docker_cmd+=(--host "$COLLECTOR_DOCKER_HOST")
 fi
-go_image=$(python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["go"])')
-jdk_image=$(python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["jdk"])')
+go_image=$("${GO:-go}" run ./cmd/mw-collector-tools image --key go)
+jdk_image=$("${GO:-go}" run ./cmd/mw-collector-tools image --key jdk)
 binary="${MW_COLLECTOR_BINARY:-build/mw-hotspot-demo}"
 gate="${MW_CAPTURE_GATE:-TestStructuredCaptureHasOneTerminalPerEventAndTypedJavaFrames}"
 modfile="${MW_CAPTURE_MODFILE:-build/experiment.go.mod}"
@@ -141,27 +141,12 @@ if [[ -n "$corpus_run" || "$unload_stress" == true ]]; then
     fi
 fi
 if [[ -n "$corpus_run" ]]; then
-    python3 - "$artifact" "$corpus_run" "$pid" "$jdk_image" "$workers" "${java_flags[@]}" <<'PY'
-import hashlib, json, os, pathlib, platform, sys
-artifact=pathlib.Path(sys.argv[1])
-source_files=["fixtures/java/InlineCorpusFixture.java","internal/corpus/compiler.go","internal/corpus/report.go","tests/integration/corpus_test.go","scripts/run-demo.sh"]
-data={"run":sys.argv[2],"host_pid":int(sys.argv[3]),"jdk_image":sys.argv[4],"jvm_flags":sys.argv[5:],"kernel_release":platform.release(),"per_path":1000,"workers":1,"warmup_per_path":3000,"event_semantics":"openat_handler_entry","collector_agent_injected":False,"class_sha256":hashlib.sha256(pathlib.Path("build/inline-corpus-classes/InlineCorpusFixture.class").read_bytes()).hexdigest(),"source_sha256":{p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in source_files},"gadget_image":pathlib.Path("build/gadget-image.ref").read_text().strip(),"dependencies":json.loads(pathlib.Path("dependencies.lock.json").read_text()),"patch_manifest":json.loads(pathlib.Path("build/patch-manifest.json").read_text())}
-data["target_agent_injected"]=data.pop("collector_agent_injected")
-data["workers"]=int(sys.argv[5])
-data["runtime_mode"]=os.environ.get("MW_CORPUS_MODE","c2")
-data["jvm_flags"]=sys.argv[6:]
-data["target_uid"]=os.getuid()
-(artifact/"corpus-environment.json").write_text(json.dumps(data,indent=2)+"\n")
-PY
+    "${GO:-go}" run -modfile "$modfile" ./cmd/mw-experiment-tools corpus-environment \
+        "$artifact" "$corpus_run" "$pid" "$jdk_image" "$workers" "${java_flags[@]}"
 fi
 if [[ "$unload_stress" == true ]]; then
-    python3 - "$artifact" "$pid" "$jdk_image" "${java_flags[@]}" <<'PY'
-import hashlib, json, pathlib, platform, sys
-a=pathlib.Path(sys.argv[1])
-files=["fixtures/java/UnloadDriver.java","fixtures/java/UnloadG00000.java","internal/unloading/report.go","tests/integration/unloading_test.go","scripts/run-demo.sh"]
-data={"host_pid":int(sys.argv[2]),"jdk_image":sys.argv[3],"jvm_flags":sys.argv[4:],"kernel_release":platform.release(),"target_agent_injected":False,"gadget_image":pathlib.Path("build/gadget-image.ref").read_text().strip(),"patch_manifest":json.loads(pathlib.Path("build/patch-manifest.json").read_text()),"source_sha256":{p:hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() for p in files},"template_class_sha256":hashlib.sha256(pathlib.Path("build/unload-classes/UnloadG00000.class").read_bytes()).hexdigest()}
-(a/"unloading-environment.json").write_text(json.dumps(data,indent=2)+"\n")
-PY
+    "${GO:-go}" run -modfile "$modfile" ./cmd/mw-experiment-tools unloading-environment \
+        "$artifact" "$pid" "$jdk_image" "${java_flags[@]}"
 fi
 printf 'Capture artifacts: %s\n' "$artifact"
 MW_CORPUS_MODE="$corpus_mode" MW_CORPUS_WORKERS="$workers" MW_CAPTURE_JSONL="$artifact/events.jsonl" MW_CAPTURE_LOG="$artifact/collector.log" MW_TARGET_PID="$pid" go test -modfile "$modfile" -tags integration ./tests/integration -run "$gate" -count=1

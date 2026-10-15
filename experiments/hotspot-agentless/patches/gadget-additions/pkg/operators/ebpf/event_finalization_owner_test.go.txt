@@ -1,0 +1,193 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"golang.org/x/sys/unix"
+	"sync"
+	"testing"
+	"time"
+)
+
+type stopBackendFixture struct {
+	mu                    sync.Mutex
+	flushStarted, release chan struct{}
+	joined, retired       bool
+	retirements           int
+	failedPhase           string
+	failure               error
+}
+
+func newStopBackendFixture() *stopBackendFixture {
+	return &stopBackendFixture{flushStarted: make(chan struct{}), release: make(chan struct{})}
+}
+func (b *stopBackendFixture) fail(phase string) error {
+	if b.failedPhase == phase {
+		return b.failure
+	}
+	return nil
+}
+func (b *stopBackendFixture) Quiesce() error { return b.fail("quiesce") }
+func (b *stopBackendFixture) Flush() error   { close(b.flushStarted); return b.fail("flush") }
+func (b *stopBackendFixture) Join(ctx context.Context) error {
+	if err := b.fail("join"); err != nil {
+		return err
+	}
+	select {
+	case <-b.release:
+		b.mu.Lock()
+		b.joined = true
+		b.mu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func (b *stopBackendFixture) Sample() (uint64, error) { return 7, b.fail("sample") }
+func (b *stopBackendFixture) Retire() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.joined {
+		return errors.New("retiring under active callback")
+	}
+	if err := b.fail("retire"); err != nil {
+		return err
+	}
+	b.retired = true
+	b.retirements++
+	return nil
+}
+
+func TestEventFinalizationWaitsForCallbackAndSharesStop(t *testing.T) {
+	b := newStopBackendFixture()
+	o := newEventStopOwner(b)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 2)
+	go func() { _, err := o.stop(ctx); done <- err }()
+	select {
+	case <-b.flushStarted:
+	case err := <-done:
+		t.Fatal("stop completed before callback release", err)
+	case <-ctx.Done():
+		t.Fatal("flush not requested")
+	}
+	if o.snapshot().BufferDrained || o.snapshot().ResourcesRetired {
+		t.Fatal("active callback certified complete")
+	}
+	go func() { _, err := o.stop(ctx); done <- err }()
+	close(b.release)
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := o.snapshot()
+	if !r.ProducersQuiesced || !r.BufferDrained || !r.ReceiverJoined || !r.FinalCounterRead || !r.ResourcesRetired || r.LossComplete || r.NativeReserveFailures == nil || *r.NativeReserveFailures != 7 {
+		t.Fatal("wrong component evidence", r)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.retirements != 1 {
+		t.Fatal("resource retired twice", b.retirements)
+	}
+}
+func TestEventFinalizationDeadlineNeverRetiresActiveCallback(t *testing.T) {
+	b := newStopBackendFixture()
+	o := newEventStopOwner(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := o.stop(ctx); done <- err }()
+	select {
+	case <-b.flushStarted:
+	case err := <-done:
+		cancel()
+		t.Fatal("stop did not wait", err)
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("flush not requested")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatal("deadline/cancel lost", err)
+	}
+	select {
+	case <-o.done:
+	case <-time.After(time.Second):
+		t.Fatal("stop owner did not settle")
+	}
+	if o.snapshot().ResourcesRetired || o.snapshot().BufferDrained {
+		t.Fatal("deadline turned into successful drain")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.retired {
+		t.Fatal("callback resource retired before completion")
+	}
+}
+func TestEventFinalizationCanceledDuplicateDoesNotAbortOwner(t *testing.T) {
+	b := newStopBackendFixture()
+	o := newEventStopOwner(b)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := o.stop(ctx); done <- err }()
+	select {
+	case <-b.flushStarted:
+	case err := <-done:
+		t.Fatal("owner failed", err)
+	case <-ctx.Done():
+		t.Fatal("owner did not flush")
+	}
+	duplicate, cancelDuplicate := context.WithCancel(context.Background())
+	cancelDuplicate()
+	if _, err := o.stop(duplicate); !errors.Is(err, context.Canceled) {
+		t.Fatal("duplicate wait cancellation lost", err)
+	}
+	close(b.release)
+	if err := <-done; err != nil {
+		t.Fatal("duplicate canceled shared owner", err)
+	}
+	if !o.snapshot().ResourcesRetired {
+		t.Fatal("owner could not finish after duplicate cancellation")
+	}
+}
+func TestEventFinalizationPropagatesFailuresWithoutInventedEvidence(t *testing.T) {
+	for _, phase := range []string{"quiesce", "flush", "join", "sample", "retire"} {
+		for _, failure := range []error{unix.EPERM, unix.EACCES} {
+			t.Run(phase+failure.Error(), func(t *testing.T) {
+				b := newStopBackendFixture()
+				b.failedPhase, b.failure = phase, failure
+				close(b.release)
+				o := newEventStopOwner(b)
+				r, err := o.stop(context.Background())
+				if !errors.Is(err, failure) {
+					t.Fatal("native failure downgraded", err)
+				}
+				if r.ResourcesRetired || r.LossComplete {
+					t.Fatal("failed finalization certified complete", r)
+				}
+				if (phase == "quiesce" || phase == "flush" || phase == "join") && r.BufferDrained {
+					t.Fatal("reader completion invented", r)
+				}
+				if phase != "retire" && r.NativeReserveFailures != nil {
+					t.Fatal("counter sample invented", r)
+				}
+			})
+		}
+	}
+}
+
+func TestEventFinalizationTransitionsRejectSkippedPhases(t *testing.T) {
+	if _, err := advanceEventStop(eventStopRequested, eventReceiverJoined); err == nil {
+		t.Fatal("join accepted before writer retirement and flush")
+	}
+	if _, err := advanceEventStop(eventStopFailed, eventResourcesRetired); err == nil {
+		t.Fatal("failed owner reopened")
+	}
+	if _, err := advanceEventStop(eventResourcesRetired, eventResourcesRetired); err == nil {
+		t.Fatal("retirement repeated")
+	}
+}

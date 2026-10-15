@@ -25,8 +25,9 @@ later consumer/documentation HEAD. **E** below is the operator-owned evidence ro
 The current benchmark strict lock is
 [`locks/0.1.0-candidate.617fc10d.lockfile`](locks/0.1.0-candidate.617fc10d.lockfile);
 keep it and historical locks unchanged, with no `--write-locks` during acceptance.
-All Gradle/native commands acquire the shared verification lock; do not wrap an
-internally locking consumer script again.
+Native/build acceptance commands acquire the shared verification lock; do not wrap
+an internally locking consumer task again. Read-only observation validation needs no
+native lock.
 
 ```bash
 cd /home/leanid/Documents/code/java/jseccomp/.worktrees/integration-contract-completion-20261011
@@ -48,8 +49,9 @@ flock -w 600 "$lock" timeout --kill-after=30s 600s ./gradlew \
 
 # Read-only validation of the accepted logs, after verifying companion custody.
 for size in 1 22 1024 65536; do
-  python3 benchmarks/integration-boundaries/check_raw.py --selfcheck \
-    --custody "$accepted/publication-freeze.json" "$accepted/payload-$size.log"
+  ./gradlew verifyIntegrationBoundaryEvidence --console=plain \
+    -PboundaryCustody="$accepted/publication-freeze.json" \
+    -PboundaryRaw="$accepted/payload-$size.log"
 done
 ```
 
@@ -84,7 +86,7 @@ Current custody and exact execution receipts are existing files under E:
   committed locks, unchanged publication and later consumer/evidence checkpoint.
 
 Verify companion publication/strict-resolution custody before accepting raw data.
-The raw checker's `--custody` binds the observed bundle to the expected hash; it
+The raw checker's `boundaryCustody` binds the observed bundle to the expected hash; it
 does not authenticate the manifest or repository. A fresh run needs new output/cache
 paths and its own source/JAR/lock/argv/log/exit/physical-end receipts. Reuse the
 existing P617 publication and strict lock; Task6a's historical evidence scripts/constants
@@ -123,10 +125,15 @@ That metadata freeze starts at fixround1: it does **not** claim unrecorded equal
 at the original native smoke's start. Original source/JAR/worker/lock/physical receipts
 are retained and the unchanged native executable is carried, not re-run.
 
-`--custody` is required by the raw checker and binds the raw worker-bundle identity
+`boundaryCustody` is required by the raw checker and binds the raw worker-bundle identity
 to the expected bundle hash in the frozen manifest. It does not authenticate the
 manifest itself or the repository. Verify companion publication/strict-resolution
 custody first; the raw checker validates observations, not publication provenance.
+The root Kotlin task always runs the 80 independent corruption controls and emits
+the descriptive JSON summary. It reads each UTF-8 input with a 10 MB bound; ordinary
+`build` runs only its self-contained harness regressions. Historical validator
+commands remain reproducible from the recorded source; this migration does not
+relabel accepted measurement or publication identities.
 For a new producer/candidate, create a new coordinate-specific freeze and corresponding
 resolution receipts before acceptance. The Task6a evidence scripts/constants refer
 to this exact WIP coordinate and cannot stand in for a new producer's freeze.

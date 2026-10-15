@@ -21,7 +21,8 @@ publications. All Gradle operations below acquire the shared fleet lock.
 revision=$(git rev-parse HEAD)
 version="0.1.0-candidate.${revision:0:8}"
 repository="$PWD/build/fleet-consumer-repository/${revision:0:8}"
-lock=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-06-mazewall-integration-foundation-plan/verification.lock
+lock="$(git rev-parse --path-format=absolute --git-common-dir)/mazewall/verification.lock"
+mkdir -p "$(dirname "$lock")"
 
 flock "$lock" ./gradlew --console=plain --no-build-cache \
   --no-configuration-cache --rerun-tasks \
@@ -31,15 +32,16 @@ flock "$lock" ./gradlew --console=plain --no-build-cache \
   :enforcer:publishAllPublicationsToConsumerBaselineRepository
 
 # Explicitly generate locks for a new coordinate; review the new lockfiles.
-./scripts/check_integration_consumers.sh --repository "$repository" \
-  --version "$version" --write-locks --evidence-dir "$PWD/build/consumer-lock-generation"
+./gradlew consumerCheck -PconsumerRepository="$repository" \
+  -PconsumerVersion="$version" -PconsumerWriteLocks=true \
+  -PconsumerEvidence="$PWD/build/consumer-lock-generation"
 
 # Acceptance uses the recorded locks without rewriting them.
-./scripts/check_integration_consumers.sh --repository "$repository" \
-  --version "$version" --evidence-dir "$PWD/build/consumer-acceptance"
+./gradlew consumerCheck -PconsumerRepository="$repository" \
+  -PconsumerVersion="$version" -PconsumerEvidence="$PWD/build/consumer-acceptance"
 ```
 
-The script acquires that same lock internally for its entire matrix. It does not
+The Kotlin test acquires that same `flock` lock internally for its entire matrix. It does not
 publish anything. The init script adds only the selected file publication target;
 the staging commands do not select remote publication or Maven Local tasks.
 
@@ -55,6 +57,13 @@ expected error, so missing symbols/classes cannot masquerade as scope rejection.
 Callable, declared-context capture and custom-scoping `prepare` examples compile
 but do not install containment or execute work.
 Policies use canonical fixed-scope builders and `PolicyState.Uncompiled`.
+
+These 14 small source files live under `src/rejected-api`: they are compiler
+rejection probes, not retained production implementations. Their Gradle task is
+`verifyRejectedApi`. Host-only harness checks run with `./gradlew consumerHarnessTest`.
+Set `-PverificationLock=/absolute/path` for an existing shared fleet; staging and
+acceptance must use the same override. Do not externally wrap `consumerCheck`
+in that same lock because it owns the matrix lease internally.
 
 The version probes resolve upstream Koog **1.3.0** and Boot **4.1.1**, both alone
 and with the staged candidate. They log selected versions, including serialization

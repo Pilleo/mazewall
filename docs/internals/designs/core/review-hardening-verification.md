@@ -32,7 +32,8 @@ unobserved by that aggregate counter.
 
 ## Reproduction and artifacts
 
-Run `python3 scripts/validate_review_evidence.py` to validate the two 30-row ID sets,
+For historical replay, use a disposable full-history checkout of `96789e51` and
+run `python3 scripts/validate_review_evidence.py` there to validate the two 30-row ID sets,
 commit object existence, current RH regression class/method names and local core
 documentation link targets. It does not claim that a named test passed or that a
 historical commit is sufficient to prove an invariant without review.

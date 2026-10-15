@@ -8,7 +8,7 @@ component: "experiment"
 target_modules: []
 target_files:
   - "experiments/hotspot-agentless/patches"
-  - "experiments/hotspot-agentless/scripts/prepare-gadget.py"
+  - "experiments/hotspot-agentless/internal/tooling/prepare.go"
   - "experiments/hotspot-agentless/internal/capture/**"
   - "experiments/hotspot-agentless/internal/model/**"
   - "experiments/hotspot-agentless/Makefile"

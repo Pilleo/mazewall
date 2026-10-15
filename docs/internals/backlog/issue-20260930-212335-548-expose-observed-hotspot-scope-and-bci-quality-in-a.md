@@ -11,7 +11,7 @@ target_files:
   - "experiments/hotspot-agentless/internal/model/**"
   - "experiments/hotspot-agentless/internal/quality/**"
   - "experiments/hotspot-agentless/internal/capture/lookup.go"
-  - "experiments/hotspot-agentless/scripts/prepare-gadget.py"
+  - "experiments/hotspot-agentless/internal/tooling/prepare.go"
   - "experiments/hotspot-agentless/scripts/run-demo.sh"
   - "experiments/hotspot-agentless/Makefile"
   - "experiments/hotspot-agentless/tests/integration/quality_test.go"

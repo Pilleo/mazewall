@@ -31,7 +31,7 @@
 **Files:**
 - Modify: `profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmark.kt`
 - Modify: `profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmarkJsonTest.kt`
-- Modify: `scripts/run_tier_e_trustworthy_benchmark.sh`
+- Modify: `profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyRunner.kt`
 
 **Interfaces:**
 - Produces: `paired_direct_effects` in the summary JSON.
@@ -116,7 +116,7 @@
 **Files:**
 - Modify: `profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierESharedOpenatOracleWorkload.kt`
 - Modify: `profiler/src/main/kotlin/io/mazewall/profiler/tierE/stress/TierEMatchedBenchmark.kt`
-- Modify: `scripts/run_tier_e_trustworthy_benchmark.sh`
+- Modify: `profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyRunner.kt`
 - Test: `profiler/src/test/kotlin/io/mazewall/profiler/tierE/stress/TierECommonFileWorkloadTest.kt`
 
 **Interfaces:**

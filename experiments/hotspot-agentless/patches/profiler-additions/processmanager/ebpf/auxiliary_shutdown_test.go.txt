@@ -1,0 +1,58 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpf
+
+import (
+	"context"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestAuxiliaryCanceledMapAdmissionAndNilDeleteCleanup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	w.queue <- asyncMapInMapUpdate{} // A deletion owns no inner-map descriptor.
+	done := make(chan struct{})
+	producer := make(chan struct{})
+	go func() { defer close(producer); p.EnqueueUpdate(nil, 1, nil) }()
+	cancel()
+	go func() { defer close(done); w.serve() }()
+	deadline := time.After(time.Second)
+	select {
+	case <-producer:
+	case <-deadline:
+		t.Fatal("canceled producer remained blocked")
+	}
+	select {
+	case <-done:
+	case <-deadline:
+		t.Fatal("canceled worker remained blocked")
+	}
+	if len(w.queue) != 0 {
+		t.Fatal("orphaned post-cancel map update")
+	}
+}
+
+func TestAuxiliaryMapWorkerPoolJoinsOwnedScope(t *testing.T) {
+	s := periodiccaller.NewOwnedScope(context.Background(), nil)
+	p := newAsyncMapUpdaterPool(s.Context(), 2, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := s.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var callers sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		callers.Add(1)
+		go func() { defer callers.Done(); p.EnqueueUpdate(nil, 1, nil) }()
+	}
+	callers.Wait()
+	for _, w := range p.workers {
+		if len(w.queue) != 0 {
+			t.Fatal("sealed worker accepted update")
+		}
+	}
+}

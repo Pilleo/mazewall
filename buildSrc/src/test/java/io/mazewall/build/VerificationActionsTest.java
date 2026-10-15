@@ -34,6 +34,9 @@ public final class VerificationActionsTest {
         }
         equal(true, malformedRejected);
         verifiesFreshJvmClassMetadata();
+        CiCachePolicyTest.run();
+        GradleSourceGuardTest.run();
+        GradleSourceInventoryTest.run();
         verifiesBacklogContracts();
         verifiesTestHealthAggregation();
         TestHealthPluginFunctionalTest.verify();

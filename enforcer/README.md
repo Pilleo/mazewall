@@ -85,7 +85,7 @@ For a detailed class hierarchy and structural relationship map, see the [Enforce
 
 ## Source Tree
 
-> Use `kotlin scripts/file_structure.main.kts <file>` to inspect any file's API surface before reading its full content.
+> Use `./scripts/adkw slice <file-or-class> --json` for a structural outline of an unfamiliar source file.
 
 ```
 enforcer/src/main/kotlin/io/mazewall/

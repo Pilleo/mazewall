@@ -43,7 +43,7 @@ class TierERootfulContainerEndpointIntegrationTest {
 
     private fun prepareFixture(endpoint: ContainerEndpoint): PreparedFixture {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
-            .first { Files.exists(it.resolve("scripts/run_tier_e_split_privilege_fixture.sh")) }
+            .first { Files.exists(it.resolve("gradlew")) }
         val configuration = TierERunConfiguration.load(
             root.resolve("config/testing/tier-e/smoke.json"),
             environment = mapOf("TIER_E_DOCKER_IMAGE" to (System.getenv("TIER_E_DOCKER_IMAGE") ?: "")),
@@ -132,8 +132,12 @@ class TierERootfulContainerEndpointIntegrationTest {
         val shared = Files.createTempDirectory("tier-e-owned-$runId-")
         val owner = TierEContainerRun(endpoint, runId, destination, ownedShared = shared)
         TierEFixtureLifecycle(owner, creationLock, extraCleanup = extraCleanup).run(start = {
-            ProcessBuilder("bash", prepared.root.resolve("scripts/run_tier_e_split_privilege_fixture.sh").toString())
-                .directory(prepared.root.toFile())
+            ProcessBuilder(
+                prepared.root.resolve("profiler/build/install/tier-e-daemon/bin/tier-e-tools").toString(),
+                "fixture-run-env",
+                prepared.root.toString(),
+                destination.toString(),
+            ).directory(prepared.root.toFile())
                 .redirectErrorStream(true)
                 .redirectOutput(destination.resolve("$runId.controller.log").toFile())
                 .apply {
@@ -472,7 +476,7 @@ class TierERootfulContainerEndpointIntegrationTest {
             assertEquals(
                 0,
                 runContainerCommand(endpoint.command("inspect", "$runId-target")).exitCode,
-                "Kotlin owner must receive the source container before shell cleanup",
+                "Kotlin owner must receive the source container before controller cleanup",
             )
             assertTrue(Files.readString(destination.resolve("coverage-verdict.json")).contains("\"recovered_edges\":72"))
             assertTrue(Files.readString(destination.resolve("terminal-report.json")).contains("\"evidence_integrity\":\"COMPLETE\""))

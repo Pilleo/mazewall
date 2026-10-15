@@ -3,7 +3,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 provider=$(realpath -- "$1")
 case "$provider" in "$root"/build/deps/profiler-*) ;; *) printf 'Refusing unowned provider directory\n' >&2; exit 1 ;; esac
-builder=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["images"]["gadget_builder"])' "$root/dependencies.lock.json")
+builder=$(cd "$root" && "${GO:-go}" run ./cmd/mw-collector-tools image --key gadget_builder)
 docker_cmd=("${DOCKER:-docker}")
 if [[ -n "${DOCKER_HOST:-}" ]]; then docker_cmd+=(--host "$DOCKER_HOST"); fi
 "${docker_cmd[@]}" run --rm --network none --user "$(id -u):$(id -g)" \

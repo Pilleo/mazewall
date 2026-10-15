@@ -5,7 +5,7 @@ import kotlinx.serialization.json.JsonObject
 
 private const val GADGET_REVISION = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 private const val PROFILER_REVISION = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
-private const val PATCH_SHA256 = "e908bb2689936481f8a696dd2347457cc44b6344c1fa78ca65b37772032703eb"
+private const val PATCH_SHA256 = "618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c"
 private const val JVM_BUILD_ID = "e4dad22744e32e4d71755f4a58c5cf1f1d336f87"
 private const val JVM_SHA256 = "5e0fb6e83a5676090f28ff0b453e9199df06af1ff90d473c1b9837e41096114c"
 

@@ -26,7 +26,13 @@ internal object HotSpotChildFixture {
 
         fun identify(text: String): JsonObject =
             JsonObject(
-            objectValue(text).toMutableMap().apply {
+            // Synthetic child sessions rebind provider identity along with schema, PID and session.
+            objectValue(
+                text.replace(
+                "e908bb2689936481f8a696dd2347457cc44b6344c1fa78ca65b37772032703eb",
+                "618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c",
+            ),
+            ).toMutableMap().apply {
             put("schema_version", JsonPrimitive(2))
             put("session_id", JsonPrimitive("test-session"))
             if (containsKey("event_id")) put("event_id", JsonPrimitive("test-session:8:61"))

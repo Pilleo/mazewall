@@ -170,15 +170,23 @@ allprojects {
 }
 
 val checkGradleLazyResolution =
-    tasks.register<Exec>("checkGradleLazyResolution") {
+    tasks.register<io.mazewall.build.CheckGradleLazyResolution>("checkGradleLazyResolution") {
         group = "verification"
         description = "Reject eager Gradle configuration resolution in Kotlin build scripts"
-        commandLine("bash", "$rootDir/scripts/check_gradle_lazy_resolution.sh")
+        checkoutPath.set(layout.projectDirectory.asFile.absolutePath)
     }
 
 tasks.named("check") {
     dependsOn(checkGradleLazyResolution)
 }
+
+tasks.register<io.mazewall.build.CheckCiCachePolicy>("checkCiCachePolicy") {
+    group = "verification"
+    description = "Verifies host/container and mutable dependency-data cache ownership in CI."
+    workflow.set(layout.projectDirectory.file(".github/workflows/ci.yml"))
+}
+
+tasks.named("check") { dependsOn("checkCiCachePolicy") }
 
 tasks.register("format") {
     group = "formatting"
@@ -257,6 +265,78 @@ dependencies {
 
 tasks.named<Test>("test") {
     useJUnitPlatform()
+}
+
+val consumerVerification =
+    sourceSets.create("consumerVerification") {
+        kotlin.srcDir("src/consumerVerification/kotlin")
+        compileClasspath += configurations.testRuntimeClasspath.get() + sourceSets["sharedTest"].output
+        runtimeClasspath += output + compileClasspath
+    }
+
+tasks.register<Test>("consumerHarnessTest") {
+    group = "verification"
+    description = "Checks portable consumer harness ownership without requiring published applications."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence") }
+}
+
+tasks.register<Test>("consumerCheck") {
+    group = "verification"
+    description = "Runs the independent real-publication JDK22/JDK25 consumer matrix."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("packaged-consumer") }
+    systemProperty("consumerWorkspace", layout.projectDirectory.asFile.absolutePath)
+    for (name in listOf("consumerRepository", "consumerVersion", "consumerKotlinVersion", "consumerEvidence", "consumerWriteLocks", "verificationLock")) {
+        providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
+    }
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
+tasks.matching { it.name == "unitCheck" }.configureEach { dependsOn("consumerHarnessTest") }
+
+tasks.register<Test>("verifyIntegrationBoundaryEvidence") {
+    group = "verification"
+    description = "Validates bounded boundary observations and corruption controls; custody authentication remains separate."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("boundary-evidence") }
+    for (name in listOf("boundaryRaw", "boundaryCustody")) {
+        providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
+    }
+    testLogging.showStandardStreams = true
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
+tasks.register<Test>("consumerBootstrapCheck") {
+    group = "verification"
+    description = "Exercises real Portal producer freshness and packaging in a disposable checkout."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("consumer-bootstrap") }
+    systemProperty("consumerWorkspace", layout.projectDirectory.asFile.absolutePath)
+    providers.gradleProperty("verificationLock").orNull?.let { systemProperty("verificationLock", it) }
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
+tasks.register<Test>("consumerNativeCheck") {
+    group = "verification"
+    description = "Checks finished publication bytes, external fixture review and required native application effects."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("consumer-native") }
+    maxParallelForks = 1
+    systemProperty("consumerWorkspace", layout.projectDirectory.asFile.absolutePath)
+    for (name in listOf("verificationLock", "consumerRepository", "consumerVersion", "consumerRevision", "consumerKoogJar", "consumerBootJar", "consumerEvidence")) {
+        providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
+    }
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
 }
 
 dependencyCheck {
@@ -686,10 +766,15 @@ subprojects {
 
 tasks.register("unitCheck") {
     group = "verification"
-    description = "Runs every module's host-safe unit-quality gate."
+    description = "Runs host-safe tests, coverage, lint, and static analysis for participating sources."
+    dependsOn(
+        tasks.matching {
+            it.name in setOf("test", "ktlintCheck", "detektMain", "spotbugsMain", "detektWarningRatchet", "checkGradleLazyResolution", "checkCiCachePolicy", "validateBacklogIndex")
+        },
+    )
     dependsOn(
         subprojects.filterNot { it.path.startsWith(":demos") }.map { child ->
-            child.tasks.matching { it.name == "unitCheck" }
+            child.tasks.matching { it.name in setOf("unitCheck", "ktlintCheck", "detektMain", "spotbugsMain") }
         },
     )
 }
@@ -797,7 +882,7 @@ val gitHooksDir: File by lazy {
 tasks.register<Copy>("installGitHooks") {
     group = "git"
     description = "Installs the pre-commit audit and verification hook"
-    from("$rootDir/scripts/git-audit-hook.sh") {
+    from("$rootDir/scripts/hooks/pre-commit") {
         rename { "pre-commit" }
     }
     into(gitHooksDir)

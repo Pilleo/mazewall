@@ -10,7 +10,7 @@ target_files:
   - "profiler-native/tests/AgentWorkload.java"
   - "scripts/probe_tier_e_real_pid_reuse.py"
   - "scripts/tests/test_probe_tier_e_real_pid_reuse.py"
-  - "scripts/run_tier_e_split_privilege_fixture.sh"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEToolsMain.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/controller/TierESplitFixtureController.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERealPidReuseProbe.kt"
   - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierELegacyFixtureLaunch.kt"

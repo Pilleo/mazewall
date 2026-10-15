@@ -12,7 +12,7 @@ target_files:
   - "experiments/hotspot-agentless/internal/capture/health_test.go"
   - "experiments/hotspot-agentless/internal/model/record.go"
   - "experiments/hotspot-agentless/patches/**"
-  - "experiments/hotspot-agentless/scripts/prepare-gadget.py"
+  - "experiments/hotspot-agentless/internal/tooling/prepare.go"
   - "experiments/hotspot-agentless/Makefile"
   - "experiments/hotspot-agentless/tests/integration/structured_test.go"
   - "experiments/hotspot-agentless/README.md"

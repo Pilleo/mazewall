@@ -143,8 +143,8 @@ For detailed class diagrams and relationship maps of the individual modules:
 `architectural-map.md` is the canonical cross-module knowledge map. The module design documents
 above are the canonical locations for their generated PlantUML/SVG class diagrams; do not rely on
 historical module maps for independent architecture claims. Those entry points redirect here.
-Canonical generated outputs live in `docs/diagrams/`; the unreferenced root `class_diagram.puml`
-is a historical artifact, not a generated source of truth.
+Canonical generated outputs live in `docs/diagrams/`. The obsolete root diagram
+was retired; its historical bytes remain in Git at `96789e51`.
 
 ## 5. Critical Memory Layouts (FFM)
 

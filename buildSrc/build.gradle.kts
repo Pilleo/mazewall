@@ -52,6 +52,14 @@ val verification = sourceSets.create("verification") {
     compileClasspath += sourceSets.main.get().output
     runtimeClasspath += sourceSets.main.get().output
 }
+kotlin.sourceSets.named("verification") { kotlin.srcDir("src/verification/kotlin") }
+tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileVerificationKotlin") {
+    compilerOptions.freeCompilerArgs.addAll(
+        providers.provider {
+            listOf("-Xfriend-paths=" + sourceSets.main.get().output.classesDirs.files.joinToString(",") { it.absolutePath })
+        },
+    )
+}
 sourceSets.test.get().java.setSrcDirs(emptyList<String>())
 configurations.named(verification.implementationConfigurationName) {
     extendsFrom(configurations.testImplementation.get())

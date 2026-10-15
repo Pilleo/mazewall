@@ -19,7 +19,7 @@ public final class VerifyCompilation {
         } else if (args[0].equals("scope")) {
             verify(args, "ProcessFilesystem", "compiler.err.cant.resolve.location.args");
             verify(args, "WorkerAsProcess", "compiler.err.prob.found.req");
-        } else if (args[0].equals("retired")) {
+        } else if (args[0].equals("rejected-api")) {
             for (var name : List.of("WrapVararg", "WrapScoping", "WrapTyped", "SingleFactory", "FixedFactory", "CachedFactory")) {
                 verify(args, name, "compiler.err.cant.resolve.location.args");
             }
@@ -44,7 +44,7 @@ public final class VerifyCompilation {
             boolean expected = expectedCode == null ? compiled && errors.isEmpty()
                 : !compiled && errors.size() == 1 && errors.getFirst().getCode().equals(expectedCode)
                     && errors.getFirst().getSource().getName().endsWith(name + ".java");
-            if (expected && args[0].equals("retired")) {
+            if (expected && args[0].equals("rejected-api")) {
                 var symbol = switch (name) {
                     case "WrapVararg", "WrapScoping" -> "wrap(";
                     case "WrapTyped" -> "wrapTyped(";

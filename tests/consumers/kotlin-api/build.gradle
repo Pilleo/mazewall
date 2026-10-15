@@ -13,13 +13,13 @@ application { mainClass = 'consumer.KotlinApiConsumerKt' }
 
 // Invoke the actual stable plugin compiler on each independent diagnostic fixture.
 def probes = [
-    WrapVararg: ['retired', 'UNRESOLVED_REFERENCE', 'wrap'],
-    WrapScoping: ['retired', 'UNRESOLVED_REFERENCE', 'wrap'],
-    WrapTyped: ['retired', 'UNRESOLVED_REFERENCE', 'wrapTyped'],
-    SingleFactory: ['retired', 'UNRESOLVED_REFERENCE', 'newSingleThreadExecutor'],
-    FixedFactory: ['retired', 'UNRESOLVED_REFERENCE', 'newFixedThreadPool'],
-    CachedFactory: ['retired', 'UNRESOLVED_REFERENCE', 'newCachedThreadPool'],
-    ExecutorType: ['retired', 'UNRESOLVED_REFERENCE', 'ContainedExecutor'],
+    WrapVararg: ['rejected-api', 'UNRESOLVED_REFERENCE', 'wrap'],
+    WrapScoping: ['rejected-api', 'UNRESOLVED_REFERENCE', 'wrap'],
+    WrapTyped: ['rejected-api', 'UNRESOLVED_REFERENCE', 'wrapTyped'],
+    SingleFactory: ['rejected-api', 'UNRESOLVED_REFERENCE', 'newSingleThreadExecutor'],
+    FixedFactory: ['rejected-api', 'UNRESOLVED_REFERENCE', 'newFixedThreadPool'],
+    CachedFactory: ['rejected-api', 'UNRESOLVED_REFERENCE', 'newCachedThreadPool'],
+    ExecutorType: ['rejected-api', 'UNRESOLVED_REFERENCE', 'ContainedExecutor'],
     ProcessFilesystem: ['scope', 'UNRESOLVED_REFERENCE', 'allowFsRead'],
     WorkerAsProcess: ['scope', 'ARGUMENT_TYPE_MISMATCH', 'ProcessWideSafe']
 ]
@@ -56,5 +56,5 @@ probes.each { name, expected ->
         }
     }
 }
-tasks.register('verifyRetiredApi') { dependsOn probes.findAll { it.value[0] == 'retired' }.keySet().collect { "verify${it}" } }
+tasks.register('verifyRejectedApi') { dependsOn probes.findAll { it.value[0] == 'rejected-api' }.keySet().collect { "verify${it}" } }
 tasks.register('verifyScopeBoundaries') { dependsOn 'verifyProcessFilesystem', 'verifyWorkerAsProcess' }

@@ -1,9 +1,9 @@
 # Finished executable Boot adoption proof
 
 The application is the [clean standalone demo](../../../demos/spring-boot-sandbox/README.md).
-This Python-standard-library harness is an **external private known-fixture reviewer**
+The root Kotlin/JUnit harness is an **external private known-fixture reviewer**
 and disposable non-web `java -jar` acceptance test. It never modifies an operator's
-deployment or unknown files: each run creates and preserves its own private `mkdtemp`
+deployment or unknown files: each case creates and preserves its own private temporary
 deployment. Evidence destinations must be new. No sibling producer outputs, expanded
 classpath, source-project substitution, fallback or required skip are accepted.
 
@@ -27,14 +27,17 @@ Use absolute paths for fleet work. Every Gradle, native acceptance and commit co
 serialized with the same lock. The following shell variables contain no credentials:
 
 ```bash
-ROOT=/home/leanid/Documents/code/java/jseccomp/.worktrees/fleet-20261008-boot-demo
-LOCK=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-06-mazewall-integration-foundation-plan/verification.lock
-VERSION=0.1.0-task13.a8307928
-REPOSITORY="$ROOT/build/task13-maven"
+ROOT="$PWD"
+REVISION=$(git rev-parse HEAD)
+VERSION="0.1.0-cleanup.${REVISION:0:12}"
+REPOSITORY="$ROOT/build/boot-maven-$REVISION"
+# Independent checkouts default to the shared Git common-directory lock.
+LOCK="$(git rev-parse --path-format=absolute --git-common-dir)/mazewall/verification.lock"
+# The active fleet passes its existing verification.lock path instead.
+mkdir -p "$(dirname "$LOCK")"
 cd "$ROOT"
 
 flock "$LOCK" ./gradlew -PincludeSpringIntegration=true \
-  -I "$ROOT/tests/consumers/spring-boot/optional-modules.init.gradle" \
   -I "$ROOT/tests/consumers/stage.init.gradle" \
   -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
   :platform:publishMavenJavaPublicationToConsumerBaselineRepository \
@@ -47,18 +50,23 @@ flock "$LOCK" ./gradlew -p "$ROOT/demos/spring-boot-sandbox" \
   -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
   bootJar --no-configuration-cache --no-parallel
 
-flock "$LOCK" python3 "$ROOT/tests/consumers/spring-boot/verify.py" \
-  --jar "$ROOT/demos/spring-boot-sandbox/build/libs/report-application.jar" \
-  --java /home/leanid/.sdkman/candidates/java/25.4.4+1-graal/bin/java \
-  --evidence "$ROOT/build/task13-evidence-new" \
-  --revision a83079282691a98d0a5b07df55da6a1176db7806 \
-  --version "$VERSION" --repository "$REPOSITORY"
+# Internally locking acceptance; do not wrap it in another flock on this path.
+./gradlew consumerNativeCheck --tests '*SpringBoot*' \
+  -PverificationLock="$LOCK" -PconsumerRevision="$REVISION" \
+  -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
+  -PconsumerBootJar="$ROOT/demos/spring-boot-sandbox/build/libs/report-application.jar" \
+  -PconsumerEvidence="$ROOT/build/boot-evidence-$(date +%s%N)"
 ```
 
 Choose a fresh local version/repository when producer inputs change. The producer
 revision is the library source baseline, not a claim that new uncommitted demo sources
 were present at that revision. Demo/harness source identity is recorded independently.
-No full root build or container gate is implied by this focused consumer pass.
+The producer must be committed and match the declared producer input inventory;
+dirty or unidentified producer files fail before fixture approval. A private owned
+clone can qualify an uncommitted cleanup snapshot with its own local commit and
+fresh coordinate, without changing the operator's branch or historical publication.
+This focused pass has its own source/JAR/evidence identity; the full root/container
+gates retain their separate roles.
 
 The evidence directory records every command/cwd/exit code, actual measurement and
 native logs, missing/stale/unsupported negative logs, candidate documents, actual
@@ -69,19 +77,18 @@ not labeled protected body, and SQL rollback is not labeled rollback of external
 
 ## Ownership and failure checks
 
-`fixture_io.py` creates private-fixture files with genuine `O_EXCL|O_NOFOLLOW`
-descriptors. It retains those acquisitions for sidecar/JAR/template mutations, checks
-the exact named inode and single-link identity, and restores every independent original
-in a failure boundary. Replaced/symlink/hardlink names are preserved; restoration failures
-are attached to the original failure rather than masking it. A restoration cannot stop
-another independent restore. These are private fixture tools, not general operator-file
-rewrite or production review capabilities.
+Each missing/stale review, changed whole-JAR/template and unsupported-declaration
+negative gets a new private deployment. There is no shared deployment to borrow or
+restore. Inputs and external sidecars are created exclusively in those owned directories;
+the original executable and operator checkout remain untouched. Evidence destinations
+must be new. These are known private fixtures, not arbitrary operator-file rewrite or
+production review capabilities.
 
 Every executable invocation records argv/cwd **before launch**, direct separate stdout
-and stderr files, PID, exit code, timed-out and reaped state. On a timeout, partial streams
-and the timeout state are persisted before signalling the exact owned `Popen` child;
-bounded terminate/kill/wait reaps it and records the final outcome. No process group or
-unrelated process is signalled. The combined log and all separate streams are retained.
+and stderr files through retained exclusive descriptors, PID, exit code, timed-out and
+reaped state. On timeout, partial streams and the timeout state are persisted before
+bounded terminate/kill/reap of the acquired child and observed ancestry. Unrelated
+processes are preserved. The combined log and all separate streams are retained.
 
 Focused commands, using the same ROOT/LOCK/VERSION/REPOSITORY above:
 
@@ -89,36 +96,22 @@ Focused commands, using the same ROOT/LOCK/VERSION/REPOSITORY above:
 flock "$LOCK" ./gradlew -p "$ROOT/demos/spring-boot-sandbox" \
   -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
   ownershipTest bootJar --no-configuration-cache --no-parallel
-cd "$ROOT/tests/consumers/spring-boot"
-flock "$LOCK" python3 -m unittest -v test_fixture_io
-flock "$LOCK" python3 "$ROOT/tests/consumers/spring-boot/test_measurement.py" \
-  --jar "$ROOT/demos/spring-boot-sandbox/build/libs/report-application.jar" \
-  --java /home/leanid/.sdkman/candidates/java/25.4.4+1-graal/bin/java \
-  --evidence "$ROOT/build/task13-measurement-new"
+./gradlew consumerHarnessTest
+# consumerNativeCheck above also executes all14 finished-JAR ownership negatives.
 ```
 
 The Java gate uses real filesystem collisions, symlinks/hardlinks, replacement identities,
-complete-byte publication and actual permission-denied cleanup. Python checks genuine
-restoration failures and a real timeout/kill/reap with partial streams while a separately
+complete-byte publication and actual permission-denied cleanup. Kotlin checks real
+no-clobber evidence acquisition and timeout/kill/reap with partial streams while a separately
 owned unrelated process survives. The finished-JAR negatives exercise both measurement
 entry points and operator-file/directory aliases; the original eight acceptance cases
 remain intact. Required failures are not skipped when filesystem/permission features are
 unavailable. The measurement pair's per-file atomicity/stable topology limits are in the
 demo guide; external finished-JAR approval remains independent trusted fixture authority.
 
-## Coordinator-only root patch
+## Declared optional producer
 
-The executable already builds standalone; no root inclusion is needed for the proof.
-To register the existing optional normal starter under the Spring-integration opt-in,
-the minimal root settings patch is:
-
-```diff
- if (providers.gradleProperty("includeSpringIntegration").orNull == "true") {
-     include(":integrations:spring:mazewall-spring-boot")
-+    include(":integrations:spring:mazewall-spring-boot-starter")
- }
-```
-
-`optional-modules.init.gradle` supplies this scoped inclusion for local publication.
-The standalone executable continues resolving published coordinates; it needs no root
-catalog/index edit or application auto-configuration API delta.
+Root settings already include both existing Spring producer modules under
+`includeSpringIntegration=true`. The standalone executable continues resolving
+published coordinates. `optional-modules.init.gradle` is retained in the historical
+source/input inventory; current staging requires no extra inclusion patch.

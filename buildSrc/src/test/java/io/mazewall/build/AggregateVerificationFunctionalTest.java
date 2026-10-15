@@ -27,6 +27,9 @@ final class AggregateVerificationFunctionalTest {
                 tasks.register("unitCheck") {
                     doLast { println("unit gate executed") }
                 }
+                tasks.register("ktlintCheck") { doLast { println("style gate executed") } }
+                tasks.register("detektMain") { doLast { println("analysis gate executed") } }
+                tasks.register("spotbugsMain") { doLast { println("Java analysis gate executed") } }
                 tasks.register("kernelCheck") {
                     doLast { println("kernel gate executed") }
                 }
@@ -55,7 +58,9 @@ final class AggregateVerificationFunctionalTest {
     private static void assertSelectedGates(BuildResult result) {
         for (String selected : List.of(
             ":group:leaf:unitCheck", ":group:leaf:kernelCheck",
-            ":plain:unitCheck", ":plain:kernelCheck", ":custom:unitCheck"
+            ":plain:unitCheck", ":plain:kernelCheck", ":custom:unitCheck",
+            ":group:leaf:ktlintCheck", ":group:leaf:detektMain", ":group:leaf:spotbugsMain",
+            ":plain:ktlintCheck", ":plain:detektMain", ":plain:spotbugsMain"
         )) {
             var task = result.task(selected);
             if (task == null || task.getOutcome() != TaskOutcome.SUCCESS) {

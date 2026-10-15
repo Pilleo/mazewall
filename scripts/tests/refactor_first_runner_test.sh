@@ -15,10 +15,10 @@ git -C "$fixture" init -q
 git -C "$fixture" config user.name "RefactorFirst Test"
 git -C "$fixture" config user.email "refactor-first-test@example.invalid"
 
-scopes=(platform enforcer profiler portal portal-codegen portal-worker)
+scopes=(platform enforcer profiler portals/runtime portals/codegen portals/worker)
 for scope in "${scopes[@]}"; do
     mkdir -p "$fixture/$scope/src/main/kotlin/example"
-    printf 'package example\nclass %sMain\n' "${scope//-/}" > "$fixture/$scope/src/main/kotlin/example/Main.kt"
+    printf 'package example\nclass %sMain\n' "${scope//[^[:alnum:]]/}" > "$fixture/$scope/src/main/kotlin/example/Main.kt"
 done
 
 excluded_paths=(

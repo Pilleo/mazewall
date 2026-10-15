@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.tools
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -16,6 +17,10 @@ class TierEBenchmarkBundleFingerprintTest {
             check(ProcessBuilder("git", "-C", repository.toString(), "add", "profiler/source.kt").start().waitFor() == 0)
             val first = TierEBenchmarkBundleFingerprint.read(repository, false, "Release")
             assertTrue(first.matches(Regex("[a-f0-9]{64}")))
+            assertEquals(first, TierEBenchmarkBundleFingerprint.read(repository, false, "Release"))
+            source.toFile().setExecutable(true)
+            assertNotEquals(first, TierEBenchmarkBundleFingerprint.read(repository, false, "Release"))
+            source.toFile().setExecutable(false)
             Files.writeString(source, "v2")
             assertNotEquals(first, TierEBenchmarkBundleFingerprint.read(repository, false, "Release"))
             Files.delete(source)

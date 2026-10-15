@@ -24,6 +24,11 @@ paperclip_identifier: "MAZ-1488"
 # 🟡 [Severity: MEDIUM]: Implement automated tombstoning and stale memory pruning via Codanna AST verification
 
 **Context:**
+The original Python target and commands below are historical. The operator-approved
+2026-10-14 cleanup retired this bespoke helper; its bytes remain available at
+`96789e51`. Any future automatic memory-deletion capability needs a fresh scope
+under the existing agent memory/control-plane tools, rather than restoring that script.
+
 As a codebase evolves through refactorings, classes and methods get renamed, moved, or deleted entirely. Negative memories and past bug records in `agentmemory` that reference deleted symbols become obsolete noise, cluttering the token budget and confusing autonomous agents with ghost invariants. By leveraging Codanna's fast AST symbol index, an automated audit script can verify the existence and caller counts of all symbols referenced in memory, pruning or tombstoning records whose target symbols no longer exist in the code tree.
 
 **Needed:**

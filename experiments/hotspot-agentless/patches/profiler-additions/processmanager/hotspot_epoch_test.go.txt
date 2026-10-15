@@ -1,0 +1,125 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package processmanager
+
+import (
+	"errors"
+	"syscall"
+	"testing"
+
+	lru "github.com/elastic/go-freelru"
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+	"go.opentelemetry.io/ebpf-profiler/util"
+)
+
+type epochTestInstance struct {
+	interpreter.InstanceStubs
+	begins, decodes int
+	epoch           uint64
+	endErr          error
+}
+
+func (*epochTestInstance) Detach(interpreter.EbpfHandler, libpf.PID) error      { return nil }
+func (*epochTestInstance) ConfigureHotSpotEpoch(libpf.HotSpotEpochTarget) error { return nil }
+func (i *epochTestInstance) BeginHotSpotEpoch(c libpf.HotSpotIdentity) (interpreter.HotSpotEpochDecoder, error) {
+	i.begins++
+	if c.Epoch != i.epoch {
+		return nil, &libpf.HotSpotEpochError{State: libpf.HotSpotEpochChanged}
+	}
+	return i, nil
+}
+func (i *epochTestInstance) Symbolize(_ libpf.EbpfFrame, f *libpf.Frames, _ libpf.FrameMapping) error {
+	i.decodes++
+	name := "GenerationTwo"
+	if i.epoch == 4 {
+		name = "GenerationFour"
+	}
+	f.Append(&libpf.Frame{Type: libpf.HotSpotFrame, FunctionName: libpf.Intern(name)})
+	return nil
+}
+func (i *epochTestInstance) Finish(e error) libpf.HotSpotValidation {
+	if i.endErr != nil {
+		return libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable, Err: i.endErr}
+	}
+	if e != nil {
+		return libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable, Err: e}
+	}
+	return libpf.HotSpotValidation{State: libpf.HotSpotValidationChecked}
+}
+
+type epochTestReporter struct {
+	reporter.TraceReporter
+	trace *libpf.Trace
+	err   error
+}
+
+func (r *epochTestReporter) ReportTraceEvent(t *libpf.Trace, _ *samples.TraceEventMeta) error {
+	r.trace = t
+	return r.err
+}
+func epochPM(t *testing.T) (*ProcessManager, *epochTestInstance, *epochTestReporter) {
+	t.Helper()
+	c, e := lru.New[frameCacheKey, libpf.Frames](frameCacheSize, hashFrameCacheKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	i := &epochTestInstance{epoch: 2}
+	r := &epochTestReporter{}
+	p := &ProcessManager{frameCache: c, traceReporter: r, interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{123: {util.OnDiskFileIdentifier{}: i}}}
+	if e := p.ConfigureHotSpotEpochTarget(libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}, func(error) {}); e != nil {
+		t.Fatal(e)
+	}
+	return p, i, r
+}
+
+func TestHotSpotEpochConfigurationRequiresFatalOwner(t *testing.T) {
+	p := &ProcessManager{}
+	if err := p.ConfigureHotSpotEpochTarget(libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}); err == nil {
+		t.Fatal("strict mode accepted without fatal owner")
+	}
+}
+func epochRaw(e uint64) *libpf.EbpfTrace {
+	f := libpf.NewEbpfFrame(libpf.HotSpotFrame, libpf.FrameFlags(4), 3, 0)
+	f[1] = 0x100
+	f[2] = 64
+	return &libpf.EbpfTrace{PID: 123, TID: 456, NumFrames: 1, FrameData: f, HotSpotIdentity: libpf.HotSpotIdentity{Epoch: e, State: libpf.HotSpotEpochStable}}
+}
+func TestHotSpotEpochActualFrameCacheHitsStillValidate(t *testing.T) {
+	p, i, r := epochPM(t)
+	p.HandleTrace(epochRaw(2))
+	p.HandleTrace(epochRaw(2))
+	if i.begins != 2 || i.decodes != 1 {
+		t.Fatal("cache bypassed guard or failed reuse", i.begins, i.decodes)
+	}
+	i.epoch = 4
+	p.HandleTrace(epochRaw(4))
+	if i.decodes != 2 || r.trace.Frames[0].Value().FunctionName.String() != "GenerationFour" {
+		t.Fatal("cross-epoch cached label", r.trace)
+	}
+}
+func TestHotSpotEpochEndFailureAdmitsNoTentativeFrames(t *testing.T) {
+	p, i, r := epochPM(t)
+	i.endErr = &libpf.HotSpotEpochError{State: libpf.HotSpotEpochChanged}
+	p.HandleTrace(epochRaw(2))
+	if len(r.trace.Frames) != 0 || r.trace.HotSpotValidation.State != libpf.HotSpotValidationUnavailable {
+		t.Fatal("tentative Java published", r.trace)
+	}
+	i.endErr = nil
+	p.HandleTrace(epochRaw(2))
+	if i.decodes != 2 {
+		t.Fatal("rejected frame admitted to cache")
+	}
+}
+func TestHotSpotEpochFatalDeliveredWithoutLookup(t *testing.T) {
+	p, i, _ := epochPM(t)
+	var fatal error
+	p.epochFatal = func(e error) { fatal = e }
+	i.endErr = &libpf.HotSpotEpochError{State: libpf.HotSpotEpochReadError, Cause: syscall.EACCES}
+	p.HandleTrace(epochRaw(2))
+	if !errors.Is(fatal, syscall.EACCES) {
+		t.Fatal("unlooked-up native error not session-fatal", fatal)
+	}
+}

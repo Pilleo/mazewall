@@ -74,7 +74,7 @@ For orchestrator changes, include its opt-in module:
 ./gradlew build -PincludeOrchestrator=true
 ```
 
-For kernel-specific iteration, select the owning module's `integrationTest` or `integrationTestFreshJvm` task, or use `./scripts/run_tests.sh` in the configured container environment. The full build already selects integration suites; equivalent commands are alternatives, not additional completion gates. See [the testing strategy](docs/internals/designs/core/testing-strategy.md) for prerequisites and current cache behavior.
+For kernel-specific iteration, select the owning module's `integrationTest` or `integrationTestFreshJvm` task, or use `./scripts/run_containerized_tests.sh kernelCheck` in the configured container environment. The full build already selects integration suites; equivalent commands are alternatives, not additional completion gates. See [the testing strategy](docs/internals/designs/core/testing-strategy.md) for prerequisites and current cache behavior.
 
 Documentation-only changes need reference/link checks, `git diff --check`, and backlog validation; run compilation/tests when executable behavior or build wiring changes.
 

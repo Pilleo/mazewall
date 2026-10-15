@@ -203,7 +203,7 @@ For the critical ACK loop architecture and deadlock prevention rules, see [desig
 
 ## Source Tree
 
-> Use `kotlin scripts/file_structure.main.kts <file>` to inspect any file's API surface before reading its full content.
+> Use `./scripts/adkw slice <file-or-class> --json` for a structural outline of an unfamiliar source file.
 
 ```
 profiler/src/main/kotlin/io/mazewall/profiler/

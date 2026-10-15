@@ -7,8 +7,8 @@ is meaningful only when its tier is named.
 
 ### Gradle resolution scanner
 
-`bash scripts/check_gradle_lazy_resolution.sh` scans Kotlin and Groovy Gradle
-scripts in the caller's checkout. The Python-standard-library lexer recognizes
+`./gradlew checkGradleLazyResolution` scans Kotlin and Groovy Gradle
+scripts in the caller's checkout. The Kotlin/JDK lexer recognizes
 the bodies of `doFirst`/`doLast`, `providers.provider`, `@TaskAction` methods,
 and declared `asArguments` methods. Nested bodies retain their enclosing action
 context; action/provider call arguments remain configuration-time expressions.
@@ -22,12 +22,12 @@ Outside those bodies, `.asPath` and `.singleFile` consumption fails with a file
 and line diagnostic. Configuration-origin `.files`/`.getFiles()` consumption
 also fails, including indexed `configurations["name"]` receivers;
 `inputs.files(configuration)` remains lazy input registration.
-`bash scripts/tests/gradle_lazy_resolution_test.sh` executes the production
-entrypoint against disposable positive and negative scripts, including the
+The mandatory buildSrc Kotlin suite executes production
+decisions against 96 retained positive and negative language fixtures, including the
 multiline Spring action regression and the now-deferred actual Java consumer.
 Selected eager regressions assert the complete file/line/text diagnostic inventory,
 including an independent copy of the original eager consumer's line17.
-Run this focused shell check when changing
+Run `./gradlew -p buildSrc verificationActionsTest` when changing
 the scanner; it is independent of native/kernel verification.
 
 Source discovery is a separate contract. The scanner first enumerates CWD files
@@ -50,7 +50,7 @@ snapshots use the same explicit filesystem discovery. Directory enumeration
 errors and source read/permission failures remain nonzero scan failures; no
 cache ownership, permissions or content are repaired by the scanner.
 
-`python3 scripts/tests/gradle_source_discovery_test.py` exercises the production
+The mandatory `GradleSourceInventoryTest` Kotlin suite exercises the production
 entrypoint with real temporary Git/source files, unreadable generated directories,
 unreadable real source, tracked ignored scripts under inherited alternate indexes,
 linked-worktree default indexes, untracked modules and source symlinks.
@@ -67,11 +67,11 @@ path while reading its verified physical target.
 
 Resolution consumes components in filesystem order: a reached symlink's raw
 target is expanded before any later `..`, rather than lexically collapsing the
-whole target with `abspath`. Absolute targets must begin with the physical
+whole target lexically. Absolute targets must begin with the physical
 checkout's exact component prefix; no external prefix is traversed to admit an
 equivalent spelling. Dot components within that anchor are supported. A parent
 component cannot erase a private/root boundary crossing, an unreadable intermediate
-directory, or a non-directory traversal. The 44 real-filesystem methods include
+directory, or a non-directory traversal. The 52 real-filesystem cases include
 the symlink-before-parent eager-source regression with a clean lexical decoy,
 relative/dot/absolute variants and explicit boundary/permission failures.
 
@@ -112,7 +112,8 @@ Unterminated comments/strings/interpolations and unbalanced delimiters fail the
 scan rather than granting an exemption. A passing scan establishes only these
 source-level contracts.
 
-`./gradlew unitCheck` runs the ordinary `test` source set and verifies
+`./gradlew unitCheck` runs the ordinary `test` source set, selected host lint/static
+analysis, the warning ratchet and CI cache-policy checks, and verifies
 `build/jacoco/test.exec` plus owned unit-child files in
 `build/jacoco/unit-children/*.exec`. It never selects kernel execution files.
 It is the required gate for CI runners that cannot
@@ -258,7 +259,7 @@ this is a cooperative test harness, not an arbitrary-process containment boundar
 completion gate for included modules: formatting, lint/static analysis, tests,
 and configured coverage thresholds. Its task graph already selects kernel and
 fresh-JVM integration suites. Select owning-module integration tasks for focused
-iteration, or use `./scripts/run_tests.sh` as the containerized test runner;
+iteration, or use `./scripts/run_containerized_tests.sh kernelCheck` as the containerized test runner;
 equivalent test commands are alternatives, not additional gates after a successful
 full build. The container runner requires a usable configured Podman or Docker
 engine. A missing runner or failed kernel test is recorded as a failed/unavailable

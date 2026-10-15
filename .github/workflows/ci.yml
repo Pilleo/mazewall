@@ -22,7 +22,9 @@ jobs:
                   java-version: "25"
                   distribution: "temurin"
             - name: Run privileged Tier E gate
-              run: ./scripts/run_tier_e_rootful_gate.sh
+              run: |
+                  ./gradlew :profiler:installDist
+                  ./profiler/build/install/tier-e-daemon/bin/tier-e-tools rootful-gate-profile "$PWD" "$PWD/build/tier-e-evidence" "$PWD/config/testing/tier-e/rootful-gate.json"
             - name: Upload Tier E evidence
               if: always()
               uses: actions/upload-artifact@v5
@@ -98,10 +100,6 @@ jobs:
               run: |
                   ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
                   ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
-            - name: Verify CI cache policy
-              run: ./scripts/check_ci_cache_policy.sh
-            - name: Verify host/kernel Gradle lifecycle split
-              run: ./scripts/check_gradle_lifecycle.sh
             - name: Triage failed host verification
               if: steps.host_unit.outcome == 'failure'
               run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon

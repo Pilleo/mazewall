@@ -47,9 +47,24 @@ This is historical reproduction, not a current-source qualification run. Immutab
 
 ## Not in the Tier E deletion batch
 
-- The nine non-Tier-E `scripts/*.py` files need a **separate control-plane/hook inventory**. `pre_invocation_sync.py` and `auto_memory_capture.py` are invoked from `.agents/hooks.json`; `backlog_negative_indexer.py` is invoked from `scripts/git_async_indexer.sh`. `validate_review_evidence.py` is a manual core-evidence checker. Removing any of these would be a different migration.
+- The nine non-Tier-E Python helpers were outside the original Tier E batch. The operator-approved 2026-10-14 repository cleanup subsequently retired their custom memory hooks and historical checking tools; agent memory remains provided by the configured agent tools. Historical helpers remain available at `96789e51`.
 - Five Python exploit/demo files serve the vulnerable-app demonstration; `scripts/run_vulnerable_app_demo.sh` calls its exploit runner and result verifier, so deleting them would break that demo.
-- Existing `run_tier_e_*.sh` entrypoints are active compatibility launchers into `scripts/tier_e_tools` and Kotlin, rather than hidden Python/Node controllers. Removing their CLI names is a separate compatibility decision.
+- The operator subsequently approved retiring the twenty-three Tier E script-tree launchers/tests in the 2026-10-14 repository cleanup. Current entrypoints come from Gradle's `CreateStartScripts` in the existing distribution; use `./gradlew :profiler:installDist`, then `profiler/build/install/tier-e-daemon/bin/tier-e-tools`. Current command/profile examples are in [execution ownership](tier-e-testing-migration.md#active-ownership).
+
+The retired shell batch, including the unused 558-line `_legacy.sh` controller,
+is available at `96789e513136948338870ce7255fdec14e22c162`. Run saved shell commands
+inside a disposable checkout of that revision. This is separate from the earlier
+Node/Python replay pin `07dcdb22`; neither historical evidence identity is changed.
+
+Current bundle builders cold-bootstrap `installDist` with owned Gradle home and
+bootstrap project-cache directories inside the selected builder image, then exec
+the installed `bundle-build` command. Bootstrap failure propagates before bundle
+construction. Native/runtime cache ownership, prepared-native verification and
+verified prior bundle preservation remain Kotlin-owned. The current v3 bundle
+fingerprint includes actual source permission bits as well as bytes and native
+mode, so an executable-mode change invalidates reuse; historical v2 inputs retain
+their pinned replay semantics. No earlier native qualification transfers to the
+cleanup source revision.
 
 ## Verification and limits
 

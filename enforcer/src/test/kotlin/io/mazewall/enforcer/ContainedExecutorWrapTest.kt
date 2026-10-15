@@ -34,7 +34,10 @@ class ContainedExecutorWrapTest {
         } finally {
             SandboxDispatcher.shutdownAll()
         }
-        assertFalse(checkNotNull(worker).isAlive)
+        val ownedWorker = checkNotNull(worker)
+        // Executor termination can precede JVM thread-exit hooks.
+        ownedWorker.join(5_000)
+        assertFalse(ownedWorker.isAlive, "Contained platform worker did not physically terminate")
     }
 
     @Test

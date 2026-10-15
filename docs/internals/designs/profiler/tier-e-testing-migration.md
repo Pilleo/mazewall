@@ -68,10 +68,36 @@ retains evidence and only stops currently visible containers.
 
 ## Active ownership
 
-These are still substantive controllers, not thin launchers:
+Build the installed CLI with `./gradlew :profiler:installDist`. Its generated
+entrypoint is `profiler/build/install/tier-e-daemon/bin/tier-e-tools`; it works
+independently of the invocation directory. For example, from the repository root:
 
-- `scripts/run_tier_e_split_privilege_fixture.sh` is a launcher. Without
-  `TIER_E_SPLIT_CREATE_LOCK` it executes `fixture-run-env`. Real guest PID
+```bash
+./gradlew :profiler:installDist
+tools="$PWD/profiler/build/install/tier-e-daemon/bin/tier-e-tools"
+"$tools" version
+"$tools" fixture-run "$PWD/config/testing/tier-e/smoke.json" "$PWD" "$PWD/build/tier-e-smoke"
+"$tools" rootful-gate-profile "$PWD" "$PWD/build/tier-e-evidence" "$PWD/config/testing/tier-e/rootful-gate.json"
+"$tools" experiment-run "$PWD/config/testing/tier-e/trustworthy.json" "$PWD" "$PWD/build/tier-e-trustworthy-benchmark"
+```
+
+Capacity and node-noise profiles use `capacity-profile` and `node-noise-profile`
+with the same profile/repository/fresh-output argument order. Historical
+environment selection is explicit: `trustworthy-run`, `capacity-run`,
+`node-noise-run`, and `rootful-gate` take repository/output paths; `fixture-run-env`
+uses the existing validated fixture environment adapter. Profile commands retain
+their rejection of conflicting legacy experiment variables.
+
+The twenty-three script-tree launchers/tests are retired. Native CMake diagnostics
+remain `native-scenarios release|matched`, `native-transports`, `native-phase-gate`,
+and `ring-microbenchmark decoder|mapped-drain`; their existing Kotlin arguments
+and evidence boundaries are unchanged. `tier-e-checks` and `coverage-run` retain
+their explicit level/repository/output arguments. Saved shell commands run from
+the pinned historical checkout described in the retirement guide.
+
+The installed CLI dispatches to the existing substantive Kotlin controllers:
+
+- `fixture-run-env` preserves the environment-selected fixture. Real guest PID
   reuse requires a disposable Linux guest with a bounded guest-only PID limit
   and an explicit v2 hybrid registered profile; a normal host's PID controls
   remain unchanged. The Kotlin controller observed a real guest-host PID
@@ -87,18 +113,18 @@ These are still substantive controllers, not thin launchers:
   writing artifacts or creating containers; failure receipts mark those
   resources `EXTERNALLY_OWNED`. The legacy script is no longer the active
   controller.
-- `scripts/run_tier_e_split_coverage_matrix.sh` launches `coverage-matrix`.
+- `coverage-matrix` runs the coverage scheduler.
   Skip-existing, allowed-incomplete coverage, and non-default arm timeouts are
   rejected. `:profiler:tierELongMatchedBenchmark` calls the same Kotlin
   scheduler directly and remains outside `build`/`check`.
-- `scripts/run_tier_e_split_negative_matrix.sh` launches `negative-matrix`.
+- `negative-matrix` runs the negative fixture matrix.
   It no longer shells out to `jq`.
-- `scripts/run_tier_e_hybrid_fault_matrix.sh` launches `fault-matrix`.
+- `fault-matrix` runs the native fault matrix.
   Live snapshots and phase instrumentation are rejected.
-- `scripts/run_tier_e_hybrid_live_comparison.sh` launches `live-matrix`.
+- `live-matrix` runs the native comparison matrix.
   Phase instrumentation and live snapshot admission are fixture inputs. This
   does not reverse `REJECT_DEFAULT_PROMOTION`.
-- `scripts/run_tier_e_split_matched_benchmark.sh` launches `matched-matrix`.
+- `matched-matrix` runs the matched scheduler.
   Non-default timeouts, capture profiles, and attachment backends are rejected.
   Matched, fault and live matrices pin image, native agent, JAR and source
   identities before their first arm and compare binary identities afterwards;

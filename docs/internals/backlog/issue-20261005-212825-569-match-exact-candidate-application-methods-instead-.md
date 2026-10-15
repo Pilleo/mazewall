@@ -7,7 +7,7 @@ dependencies: []
 component: "profiler"
 target_modules: [profiler]
 target_files:
-  - "experiments/hotspot-agentless/scripts/verify-runtime-candidate.py"
+  - "experiments/hotspot-agentless/internal/candidate/verify.go"
 target_symbols:
   - "verify"
 open_questions: false

@@ -105,11 +105,16 @@ ancestry and complete loss accounting remain unsupported.
 
 The optimized Kotlin reader defers canonical diagnostics and reuses a strict UTF8
 decoder, with unchanged field/identity/refusal rules. Actual dense600case still
-rejects; moved serialization cost is measured separately. Kernel SHA256, pinned
+rejects; moved serialization cost is measured separately. Pinned
 JIT/GC, virtual-thread identity and loss accounting currently have experimental
 qualification tools, not broader production admission. See the
 [readout evidence](../docs/plans/2026-10-05-hotspot-dense-readout-evidence.md) and
 [workstream design](../docs/plans/2026-10-05-hotspot-performance-capability-design.md).
+
+The uncalled kernel-SHA256 qualification prototype is retained only for historical
+replay at `96789e51`; it was never a production hash provider. Recover its exact
+`profiler/hotspot-agentless/scripts/kernel-digest.py` and paired self-test with
+`git show 96789e51:<path>`. Normal asset admission retains full byte hashing.
 
 ## Attach a supported existing JVM
 

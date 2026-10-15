@@ -253,3 +253,21 @@ records gate freshness/counts, descriptive raw metrics and limitations. Pre-enab
 CET, production approval/launch authority, operator remote repository and independent
 unfamiliar-human exercises remain prerequisites; optional tooling87-error debt and
 observed unsupported FORK callback gap remain open.
+
+## Verification entrypoint migration — 2026-10-14
+
+Current source owns packaged matrix acceptance through root `consumerCheck`, with
+`consumerRepository`, `consumerVersion` and stable `consumerKotlinVersion` inputs.
+The task holds the shared `flock` lease across both cleaned JDK rows; its default
+path is the Git common directory's `mazewall/verification.lock`. The active fleet
+continues to pass its explicit `verificationLock` override. See
+[current staging and strict acceptance](../../../tests/consumers/README.md).
+The unchanged compiler rejection probes now use `src/rejected-api` and
+`verifyRejectedApi`; the names describe their purpose.
+
+Root `verifyIntegrationBoundaryEvidence` uses `boundaryRaw` and `boundaryCustody`,
+always checks the 80 genuine corruption cases and preserves the original
+descriptive summary and observation/provenance distinction. Kotlin migration parity
+was checked against all four retained P617 payloads, without editing their custody,
+strict locks or publication bytes. Historical recipes and source identities above
+remain historical; this parity is not qualification of a newly published producer.

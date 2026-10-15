@@ -8,7 +8,7 @@ dependencies {
 
 application { mainClass = 'consumer.JavaApiConsumer' }
 
-['verifyCallableEntry': 'callable', 'verifyScopeBoundaries': 'scope', 'verifyRetiredApi': 'retired'].each { taskName, fixture ->
+['verifyCallableEntry': 'callable', 'verifyScopeBoundaries': 'scope', 'verifyRejectedApi': 'rejected-api'].each { taskName, fixture ->
     tasks.register(taskName, JavaExec) {
         dependsOn tasks.named('classes')
         javaLauncher = javaToolchains.launcherFor(java.toolchain)

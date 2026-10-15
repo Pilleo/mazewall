@@ -1,0 +1,62 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+
+package symbolizer
+
+import (
+	"context"
+	"errors"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+var (
+	ErrStackUnavailable              = errors.New("stack definition unavailable")
+	ErrStackIdentityMismatch         = errors.New("stack definition task identity mismatch")
+	ErrStructuredResolverUnavailable = errors.New("no structured stack resolver enabled")
+)
+
+// StructuredStack is the provider's ordered sequence, without native-address
+// overlays or rendered-name parsing. Returned does not imply a complete walk.
+type StructuredStack struct {
+	HotSpotIdentity   libpf.HotSpotIdentity
+	HotSpotValidation libpf.HotSpotValidation
+	Frames            libpf.Frames
+	PID               uint32
+	TID               uint32
+}
+
+// StructuredResolver is an optional capability; existing resolvers remain
+// source-compatible and the existing rendered result API is unchanged.
+type StructuredResolver interface {
+	ResolveStructured(context.Context, Task) (StructuredStack, error)
+}
+
+func (s *Symbolizer) ResolveStructured(ctx context.Context, task Task) (StructuredStack, error) {
+	if err := ctx.Err(); err != nil {
+		return StructuredStack{}, err
+	}
+	s.ensurePruning()
+	for _, resolver := range s.resolvers {
+		if structured, ok := resolver.(StructuredResolver); ok {
+			return structured.ResolveStructured(ctx, task)
+		}
+	}
+	return StructuredStack{}, ErrStructuredResolverUnavailable
+}
+
+func (s *Symbolizer) ensurePruning() {
+	s.pruneMu.Lock()
+	defer s.pruneMu.Unlock()
+	if s.pruneLoopStarted || s.pruneStopped {
+		return
+	}
+	for _, resolver := range s.resolvers {
+		if resolver.IsPruningNeeded() {
+			s.pruneLoopStarted = true
+			s.pruneDone = make(chan struct{})
+			go s.pruneLoop()
+			return
+		}
+	}
+}

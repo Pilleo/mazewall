@@ -52,14 +52,17 @@ class HotSpotProtocolTest {
     }
 
     @Test
-    fun `real measured lifecycle decodes without claiming useful stack readiness`() {
+    fun `historical measured lifecycle retains its original now unsupported provider identity`() {
         val measured = HotSpotProtocol(1113254, 33129030uL)
-        val events = mutableListOf<HotSpotSessionEvent>()
+        var records = 0
         requireNotNull(javaClass.getResourceAsStream("/hotspot/production-lifecycle-projection.jsonl")).use { input ->
-            HotSpotWireReader(HotSpotReplayLimits(), 2uL).read(input) { events.add(requireNotNull(measured.controlEvent(it))) }
+            HotSpotWireReader(HotSpotReplayLimits(), 2uL).read(input) {
+                val refusal = assertFailsWith<IllegalArgumentException> { measured.controlEvent(it) }
+                assertEquals("unsupported production provider provenance", refusal.message)
+                records++
+            }
         }
-        assertIs<HotSpotSessionEvent.Started>(events[0])
-        assertIs<HotSpotSessionEvent.Ready>(events[1])
+        assertEquals(2, records)
     }
 
     @Test
@@ -88,6 +91,6 @@ class HotSpotProtocolTest {
         "jvm_sha256":"5e0fb6e83a5676090f28ff0b453e9199df06af1ff90d473c1b9837e41096114c",
         "provider":{"name":"otel-ebpf-profiler-via-gadget","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
         "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
-        "patch_sha256":"e908bb2689936481f8a696dd2347457cc44b6344c1fa78ca65b37772032703eb"}}}
+        "patch_sha256":"618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c"}}}
     """.trimIndent().replace("\n", "")
 }

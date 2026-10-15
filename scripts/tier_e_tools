@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-compgen -G "${ROOT}/profiler/build/install/tier-e-daemon/lib/tier-e-tools-*.jar" >/dev/null || {
-    echo 'missing Kotlin Tier E tooling distribution; run ./gradlew :profiler:installDist' >&2
-    exit 1
-}
-exec java -cp "${ROOT}/profiler/build/install/tier-e-daemon/lib/*" \
-    io.mazewall.profiler.tierE.tools.TierEToolsMainKt "$@"

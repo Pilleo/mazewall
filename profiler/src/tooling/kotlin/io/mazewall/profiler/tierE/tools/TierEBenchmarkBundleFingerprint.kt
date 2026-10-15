@@ -6,7 +6,7 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
-/** Input identity compatible with the saved v2 bundle fingerprint contract. */
+/** Current byte/permission identity; historical v2 identities remain bound to pinned replay. */
 public object TierEBenchmarkBundleFingerprint {
     public fun read(
         repository: Path,
@@ -51,13 +51,19 @@ public object TierEBenchmarkBundleFingerprint {
         val input = ByteArrayOutputStream()
 
         fun write(text: String) = input.write(text.toByteArray(Charsets.UTF_8))
-        write("tier-e-benchmark-bundle-v2\u0000usdt=$usdt\u0000native_build_type=$nativeBuildType\u0000")
+        write("tier-e-benchmark-bundle-v3\u0000usdt=$usdt\u0000native_build_type=$nativeBuildType\u0000")
         write("cmake=${command("cmake", "--version").lineSequence().first()}\u0000")
         write("compiler=${command("c++", "--version").lineSequence().first()}\u0000")
         write("java=${command("java", "-version").lineSequence().first()}\u0000")
         for (path in paths) {
             write("path=$path\u0000")
             if (Files.exists(repository.resolve(path), java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                val permissions = Files
+                    .getPosixFilePermissions(repository.resolve(path), java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    .map { it.name }
+                    .sorted()
+                    .joinToString(",")
+                write("permissions=$permissions\u0000")
                 write(command("sha256sum", path))
             } else {
                 write("MISSING  $path\n")

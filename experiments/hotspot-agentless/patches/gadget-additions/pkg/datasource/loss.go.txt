@@ -1,0 +1,13 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package datasource
+
+// ReportedLossReader is optional so the DataSource interface stays unchanged.
+// Counts are forwarded reports, not proof of complete native loss accounting.
+type ReportedLossReader interface{ ReportedLoss() uint64 }
+
+func (ds *dataSource) ReportedLoss() uint64 {
+	ds.lock.RLock()
+	defer ds.lock.RUnlock()
+	return ds.reportedLoss
+}

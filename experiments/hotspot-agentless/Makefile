@@ -1,14 +1,15 @@
 SHELL := /bin/bash
 GO ?= go
 DOCKER ?= docker
+OUTPUT ?= build/mw-hotspot-demo
 # Override explicitly when Docker's configured context is unavailable.
 DOCKER_HOST_ARG ?=
-GO_IMAGE := $(shell python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["go"])')
-GADGET_BUILDER := $(shell python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["gadget_builder"])')
-JDK_IMAGE := $(shell python3 -c 'import json; print(json.load(open("dependencies.lock.json"))["images"]["jdk"])')
+GO_IMAGE := $(shell $(GO) run ./cmd/mw-collector-tools image --key go)
+GADGET_BUILDER := $(shell $(GO) run ./cmd/mw-collector-tools image --key gadget_builder)
+JDK_IMAGE := $(shell $(GO) run ./cmd/mw-collector-tools image --key jdk)
 
 .PHONY: deps unit upstream-test quality-fuzz kernel-cache-test build gadget demo container-build preflight preflight-test graph verify
-.PHONY: benchmark-fixture benchmark-report benchmark loss-gadget event-loss-control
+.PHONY: benchmark-fixture benchmark-report experiment-tools benchmark loss-gadget event-loss-control
 .PHONY: event-read-kernel-test
 .PHONY: queued-tail-kernel-test
 .PHONY: event-finalization-kernel-test
@@ -42,7 +43,7 @@ event-read-kernel-test: deps
 		--mount type=bind,src="$$(pwd)",dst=/work,readonly \
 		--entrypoint /work/build/event-read-kernel.test $(GO_IMAGE) \
 		-test.run TestKernelEventReadRetainsPayloadAfterRingPressure -test.v
-loss-gadget:
+loss-gadget: deps
 	bash scripts/build-loss-gadget.sh
 
 event-loss-control: build benchmark-fixture benchmark-report loss-gadget
@@ -57,15 +58,16 @@ benchmark-fixture:
 benchmark-report: deps
 	$(GO) build -modfile build/experiment.go.mod -trimpath -o build/mw-benchmark-report ./cmd/mw-benchmark-report
 
+experiment-tools: deps
+	$(GO) build -modfile build/experiment.go.mod -trimpath -o build/mw-experiment-tools ./cmd/mw-experiment-tools
+
 benchmark: build gadget benchmark-fixture benchmark-report
 	bash scripts/run-benchmark.sh
 deps:
-	python3 scripts/prepare-gadget.py
+	$(GO) run ./cmd/mw-collector-tools prepare
 
 unit: deps
-	$(MAKE) -C ../../profiler/hotspot-agentless unit
 	$(GO) test -race -modfile build/experiment.go.mod ./...
-	python3 scripts/test-run-benchmark.py
 
 upstream-test: deps
 	$(GO) test -race -modfile build/experiment.go.mod github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer/otel github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer github.com/inspektor-gadget/inspektor-gadget/pkg/datasource
@@ -88,7 +90,10 @@ kernel-cache-test: deps
 		-test.run TestKernelLRUEvictionPreservesTwoCyclePruning -test.v
 
 build: deps
-	$(MAKE) -C ../../profiler/hotspot-agentless build OUTPUT="$$(pwd)/build/mw-hotspot-demo"
+	patch=$$($(GO) run ./cmd/mw-collector-tools patch-id) && \
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -modfile build/experiment.go.mod -trimpath -buildvcs=false \
+		-ldflags "-s -w -X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
+		-o "$(OUTPUT)" ./cmd/mw-hotspot-demo
 
 .PHONY: recovery-test-build recovery recovery-epoch
 recovery-epoch: recovery-test-build gadget
@@ -113,8 +118,8 @@ unloading-fixture:
 		$(JDK_IMAGE) javac -g -d /out /work/fixtures/java/UnloadDriver.java /work/fixtures/java/UnloadG00000.java
 
 identity-test-build:
-	python3 scripts/prepare-gadget.py --identity-observations
-	patch=$$(python3 -c 'import json;print(json.load(open("build/identity-test-manifest.json"))["patch_sha256"])'); \
+	$(GO) run ./cmd/mw-collector-tools prepare --identity-observations
+	patch=$$($(GO) run ./cmd/mw-collector-tools patch-id --identity-observations) && \
 	$(GO) build -modfile build/identity-test.go.mod -trimpath \
 		-ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
 		-o build/mw-hotspot-identity ./cmd/mw-hotspot-demo
@@ -131,7 +136,8 @@ corpus-fixture:
 		$(JDK_IMAGE) javac -g -d /out /work/fixtures/java/InlineCorpusFixture.java
 
 inline-corpus: build gadget corpus-fixture
-	MW_CORPUS_RUN="$$(python3 -c 'import secrets; print(secrets.token_hex(8))')" bash scripts/run-demo.sh
+	run=$$($(GO) run -modfile build/experiment.go.mod ./cmd/mw-experiment-tools token) && \
+	MW_CORPUS_RUN="$$run" bash scripts/run-demo.sh
 
 corpus-matrix: build gadget corpus-fixture
 	bash scripts/run-corpus-matrix.sh
@@ -140,8 +146,8 @@ oracle: build gadget corpus-fixture
 	bash scripts/run-oracle.sh
 
 recovery-test-build:
-	python3 scripts/prepare-gadget.py --drop-first-definition
-	patch=$$(python3 -c 'import json; print(json.load(open("build/recovery-test-manifest.json"))["patch_sha256"])'); \
+	$(GO) run ./cmd/mw-collector-tools prepare --drop-first-definition
+	patch=$$($(GO) run ./cmd/mw-collector-tools patch-id --drop-first-definition) && \
 	$(GO) build -modfile build/recovery-test.go.mod -trimpath \
 		-ldflags "-X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$patch" \
 		-o build/mw-hotspot-recovery ./cmd/mw-hotspot-demo
@@ -155,7 +161,7 @@ gadget:
 	$(GO) run ./cmd/mw-gadget-build --builder-image $(GADGET_BUILDER) \
 		--builder-image-pull always --output "$$(pwd)/build/gadget" \
 		--tag mw-hotspot-openat:v1 gadgets/openat-stack
-	python3 -c 'import json,pathlib; index=json.loads((pathlib.Path.home()/".ig/oci-store/index.json").read_text()); m=next(m for m in index["manifests"] if m.get("annotations",{}).get("org.opencontainers.image.ref.name", "").endswith("/mw-hotspot-openat:v1")); pathlib.Path("build/gadget-image.ref").write_text("ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@"+m["digest"]+"\n")'
+	image=$$($(GO) run ./cmd/mw-collector-tools oci-ref --store "$$HOME/.ig/oci-store" --name mw-hotspot-openat:v1) && printf '%s\n' "$$image" > build/gadget-image.ref
 
 demo: build gadget
 	bash scripts/run-demo.sh
@@ -167,8 +173,12 @@ graph: deps
 	$(GO) mod verify
 
 container-build: deps
-	$(MAKE) -C ../../profiler/hotspot-agentless container-build
-	cp ../../profiler/hotspot-agentless/build/mw-hotspot-collector build/mw-hotspot-demo
+	$(DOCKER) $(DOCKER_HOST_ARG) run --rm --user $$(id -u):$$(id -g) \
+		-e GOCACHE=/tmp/go-build -e GOPATH=/tmp/go -e HOME=/tmp \
+		-e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
+		-e GADGET_PATCH_ID="$$($(GO) run ./cmd/mw-collector-tools patch-id)" \
+		-v "$$(pwd):/work" -w /work $(GO_IMAGE) \
+		sh -c 'go build -modfile build/experiment.go.mod -trimpath -buildvcs=false -ldflags "-s -w -X io.mazewall/experiments/hotspot-agentless/internal/capture.GadgetPatchSHA=$$GADGET_PATCH_ID" -o build/mw-hotspot-demo ./cmd/mw-hotspot-demo'
 
 preflight: build
 	bash scripts/preflight.sh --pid "$(PID)"

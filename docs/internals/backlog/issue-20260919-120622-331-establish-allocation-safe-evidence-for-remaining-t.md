@@ -9,7 +9,7 @@ target_modules:
   - "profiler"
 target_files:
   - "docs/internals/evidence/tier-e-integration-readiness-audit-20260919.json"
-  - "scripts/run_tier_e_trustworthy_benchmark.sh"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyRunner.kt"
   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierEProfilerSession.kt"
 target_symbols:
   - "TierEProfilerSession"

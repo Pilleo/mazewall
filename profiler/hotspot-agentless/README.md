@@ -13,16 +13,16 @@ native source/cache and Go are required only for this optional packaging task.
 The versioned output destination must not already exist.
 
 The engine retains its historical `io.mazewall/experiments/hotspot-agentless`
-module namespace so the experiment's verification tools can share Go `internal`
-packages without maintaining a second runtime. The experiment delegates its
-preparer/build and links runtime source; only verification tools, fixtures and
-results remain there. Ordinary Kotlin builds have no dependency on these Make
+module namespace for Go `internal` compatibility. The experiment now carries an
+explicit physical source snapshot and local preparation/build tooling with recorded
+provenance; canonical runtime changes require deliberate snapshot updates.
+Ordinary Kotlin builds have no dependency on these Make
 targets or the Go/Docker toolchains.
 
 ## Explicit build, verification and installation
 
 ```bash
-# Go 1.26, Python 3 and an explicitly configured rootful Docker builder are needed at build time.
+# Go 1.26 and an explicitly configured rootful Docker builder are needed at build time.
 DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:buildHotSpotAssets
 ./gradlew :profiler:verifyHotSpotAssets
 ./gradlew :profiler:installHotSpotAssets -PhotSpotAssetsDirectory=/absolute/new/assets-directory
@@ -31,7 +31,8 @@ DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:buildHotSpotAssets
 The equivalent Make commands are `make bundle`, `make verify-bundle`, and
 `make install DESTDIR=/absolute/new/assets-directory` in this directory.
 Installation verifies first, stages in an owned temporary sibling, then publishes
-to a new destination. Existing destinations are refused. Serialize installation
+to a new destination using Linux atomic no-replace rename. Existing destinations,
+including empty directories created during publication, are refused. Serialize installation
 with any other operator modifying that directory. To rebuild changed source into
 the fixed `build/assets` output, first move aside that owned generated bundle.
 
@@ -48,8 +49,18 @@ the external symbol table are omitted to reduce bytes hashed by interpreter
 admission. Go runtime/build metadata and embedded profiler BPF objects remain.
 Debugger-oriented builds can omit those flags explicitly; they are separate from
 the release artifact. Source/license archives remain complete. Verify real release
-artifacts with `python3 scripts/test-release-footprint.py <baseline> <candidate>`.
+artifacts with `go run ./cmd/mw-collector-tools footprint --baseline <baseline> --candidate <candidate>`.
+This verifies the actual prepared-source identity and generated native hashes,
+stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
+
+The current verified overlay identity is
+`618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c`.
+Moving the rebuild driver's pinned-image lookup from Python to Go changes its
+hashed source bytes. Older `e908…` bundles and recorded lifecycle projections keep
+their historical identity; current asset/protocol admission requires the rebuilt
+bundle. The generated native layouts and both architecture BPF objects remain
+byte-identical across this tooling-only transition.
 
 `manifest.json` locks collector version 2, production wire schema 2, capture ABI 2, Linux-amd64,
 upstream revisions and the verified overlay fingerprint. Every listed file has a
@@ -59,6 +70,22 @@ unsupported versions and unlisted transitive OCI data. Kotlin admission also
 bounds JSON depth. The manifest is trusted distribution/operator input, **not a
 signature or protection against an operator replacing the manifest and files**.
 The operator owns the directory and must keep it stable during validation/use.
+
+Asset maintenance uses the existing Go owner:
+
+```bash
+go run ./cmd/mw-collector-tools pack --collector build/mw-hotspot-collector \
+  --store "$HOME/.ig/oci-store" --image "$(cat build/gadget-image.ref)" --output /absolute/new/bundle
+go run ./cmd/mw-collector-tools verify --bundle /absolute/existing/bundle
+go run ./cmd/mw-collector-tools install --bundle /absolute/existing/bundle --output /absolute/new/install
+go run ./cmd/mw-collector-tools release --bundle /absolute/existing/bundle \
+  --output /absolute/new/release.tar.gz --library-version 0.1.0-SNAPSHOT
+```
+
+The optional Gradle tasks declare compilation of this tool from its sources and
+pins. Verify/install do not construct native assets; distribution uses existing
+verified prepared source. Root and adjacent archive checksums cover every release
+file, selected-module notices and reproducible corresponding-source archives.
 
 ## Offline local loader
 

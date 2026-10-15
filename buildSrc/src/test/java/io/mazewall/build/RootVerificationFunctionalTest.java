@@ -40,6 +40,7 @@ final class RootVerificationFunctionalTest {
                     alias(libs.plugins.kotlin) apply false
                     alias(libs.plugins.detekt)
                     alias(libs.plugins.spotbugs)
+                    alias(libs.plugins.ktlint) apply false
                 }
                 allprojects { repositories { mavenCentral() } }
                 sourceSets { create("sharedTest") }
@@ -89,9 +90,10 @@ final class RootVerificationFunctionalTest {
                 }
                 """);
             for (String leaf : List.of("integrations/koog", "core", "portals/leaf")) {
-                write(fixture, leaf + "/build.gradle.kts", "plugins { alias(libs.plugins.kotlin) }\n");
+                write(fixture, leaf + "/build.gradle.kts", "plugins {\n    alias(libs.plugins.kotlin)\n    alias(libs.plugins.ktlint)\n}\n");
                 write(fixture, leaf + "/src/main/kotlin/io/mazewall/Answer.kt", """
                     package io.mazewall
+
                     object Answer {
                         fun value(): Int = 42
                     }
@@ -122,6 +124,14 @@ final class RootVerificationFunctionalTest {
                 throw new AssertionError("Expected genuine inadequate coverage rejection: " + coverageFailure.getOutput());
             }
             Files.writeString(leafBuild, passingBuild);
+            Files.writeString(leafBuild, """
+                tasks.named<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+                    violationRules { rule { limit { minimum = "0.99".toBigDecimal() } } }
+                }
+                """, java.nio.file.StandardOpenOption.APPEND);
+            BuildResult hostCoverageFailure = run(fixture, true, ":unitCheck");
+            outcome(hostCoverageFailure, ":integrations:spring:java-leaf:jacocoTestCoverageVerification", TaskOutcome.FAILED);
+            Files.writeString(leafBuild, passingBuild);
             // Grouping projects never acquire fake source sets, analyzers or coverage gates.
             for (String group : List.of(":integrations", ":integrations:spring", ":portals")) {
                 for (String task : List.of("compileJava", "test", "spotbugsMain", "detektMain", "jacocoTestReport")) {
@@ -144,25 +154,30 @@ final class RootVerificationFunctionalTest {
                     }
                 }
                 """);
-            BuildResult javaFailure = run(fixture, true, ":integrations:check");
+            BuildResult javaFailure = run(fixture, true, ":unitCheck");
             outcome(javaFailure, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.FAILED);
             Files.delete(fixture.resolve("integrations/spring/java-leaf/src/main/java/io/mazewall/Broken.java"));
 
             Path javaTest = fixture.resolve("integrations/spring/java-leaf/src/test/java/io/mazewall/AnswerTest.java");
             String passingTest = Files.readString(javaTest);
             Files.writeString(javaTest, passingTest.replace("assertEquals(42,", "assertEquals(0,"));
-            BuildResult testFailure = run(fixture, true, ":integrations:build");
+            BuildResult testFailure = run(fixture, true, ":unitCheck");
             outcome(testFailure, ":integrations:spring:java-leaf:test", TaskOutcome.FAILED);
             Files.writeString(javaTest, passingTest);
 
             write(fixture, "integrations/koog/src/main/kotlin/io/mazewall/Broken.kt", """
                 package io.mazewall
+
                 fun broken(): Int {
                     TODO("unfinished implementation")
                 }
                 """);
-            BuildResult kotlinFailure = run(fixture, true, ":integrations:koog:detektMain");
+            BuildResult kotlinFailure = run(fixture, true, ":unitCheck");
             outcome(kotlinFailure, ":integrations:koog:detektMain", TaskOutcome.FAILED);
+            Files.delete(fixture.resolve("integrations/koog/src/main/kotlin/io/mazewall/Broken.kt"));
+            write(fixture, "core/src/main/kotlin/io/mazewall/Answer.kt", "package io.mazewall\nobject Answer{fun value():Int=42}\n");
+            BuildResult styleFailure = run(fixture, true, ":unitCheck");
+            outcome(styleFailure, ":core:ktlintMainSourceSetCheck", TaskOutcome.FAILED);
             System.out.println("Root verification: implicit/explicit groups, Java tests/SpotBugs, Kotlin Detekt, core and lazy aggregates passed.");
         } catch (Exception failure) {
             throw new AssertionError("Production root verification wiring failed", failure);
@@ -365,6 +380,8 @@ final class RootVerificationFunctionalTest {
                     }
                 }
                 """);
+            // Compile the collector against the changed fixture buildSrc before withholding Test events.
+            run(fixture, false, ":profiler:jar");
             for (String label : List.of("delayed-cc-first", "delayed-cc-reuse", "delayed-no-cc")) {
                 BuildResult delayed = label.equals("delayed-no-cc")
                     ? triageRun(fixture, label, true, true, false, ":leaf:test", "--no-configuration-cache")

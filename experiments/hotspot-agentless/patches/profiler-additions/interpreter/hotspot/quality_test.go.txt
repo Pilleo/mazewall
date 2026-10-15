@@ -1,0 +1,213 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import (
+	"bytes"
+	"encoding/binary"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	"strings"
+	"syscall"
+	"testing"
+)
+
+func qualityInstance(t *testing.T) (*hotspotInstance, *hotspotMethod) {
+	t.Helper()
+	d := &hotspotData{}
+	_, err := d.GetOrInit(func() (hotspotVMData, error) {
+		v := hotspotVMData{unsigned5X: 1}
+		v.vmStructs.PcDesc.Sizeof = 12
+		v.vmStructs.PcDesc.PcOffset = 0
+		v.vmStructs.PcDesc.ScopeDecodeOffset = 4
+		v.vmStructs.Nmethod.Sizeof = 8
+		v.vmStructs.Nmethod.CompileID = 0
+		v.vmStructs.ConstMethod.Sizeof = 16
+		return v, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := make([]byte, 0x208)
+	binary.LittleEndian.PutUint64(mem[0x100:], 0x200)
+	i, err := d.Attach(nil, 0, 0, remotememory.RemoteMemory{ReaderAt: bytes.NewReader(mem)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ii := i.(*hotspotInstance)
+	m := &hotspotMethod{constMethodAddr: 0x200, methodName: libpf.Intern("fixture.leaf"), bytecodeSize: 16, lineTable: []byte{0}}
+	ii.addrToMethod.Add(0x100, m)
+	return ii, m
+}
+
+func qualityJIT(m *hotspotMethod) *hotspotJITInfo {
+	pcs := make([]byte, 24)
+	binary.LittleEndian.PutUint32(pcs, 10)
+	binary.LittleEndian.PutUint32(pcs[4:], 1)
+	binary.LittleEndian.PutUint32(pcs[12:], 20)
+	meta := make([]byte, 8)
+	binary.LittleEndian.PutUint64(meta, 0x100)
+	// JDK25 unsigned5 exclusion=1: next=0, method=1, encoded BCI=1.
+	return &hotspotJITInfo{method: m, scopesPcs: pcs, scopesData: []byte{0, 1, 2, 2}, metadata: meta}
+}
+
+func TestHotSpotQualityMethodBCIRange(t *testing.T) {
+	ii, m := qualityInstance(t)
+	for _, bci := range []uint32{0, 15, 16, 0xffff} {
+		var frames libpf.Frames
+		m.symbolize(bci, ii, &frames, libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeInterpreter, BCIState: libpf.HotSpotBCIObservedInRange})
+		f := frames[0].Value()
+		q := f.HotSpotQuality
+		if q.RawBCI != bci {
+			t.Fatal("raw BCI lost")
+		}
+		if bci < 16 {
+			if q.BCIState != libpf.HotSpotBCIObservedInRange || uint32(f.AddressOrLineno) != bci {
+				t.Fatal("observed BCI lost")
+			}
+		} else if q.BCIState != libpf.HotSpotBCIOutOfRange || f.AddressOrLineno != 0 {
+			t.Fatal("invalid BCI disguised as observed zero")
+		}
+	}
+	m.bytecodeSize = 0
+	var frames libpf.Frames
+	m.symbolize(0, ii, &frames, libpf.HotSpotQuality{BCIState: libpf.HotSpotBCIObservedInRange})
+	if frames[0].Value().HotSpotQuality.BCIState != libpf.HotSpotBCIOutOfRange {
+		t.Fatal("empty bytecode claimed valid zero")
+	}
+}
+
+func TestHotSpotQualityJITProvenance(t *testing.T) {
+	ii, m := qualityInstance(t)
+	for _, tc := range []struct {
+		delta int32
+		scope libpf.HotSpotScopeLookup
+	}{{10, libpf.HotSpotScopeExactPC}, {11, libpf.HotSpotScopePrecedingPC}, {0, libpf.HotSpotScopeMethodOnly}, {20, libpf.HotSpotScopeMethodOnly}} {
+		var frames libpf.Frames
+		if err := qualityJIT(m).symbolize(tc.delta, ii, &frames); err != nil {
+			t.Fatal(err)
+		}
+		q := frames[0].Value().HotSpotQuality
+		if q.ScopeLookup != tc.scope {
+			t.Fatalf("delta %d: %+v", tc.delta, q)
+		}
+		if tc.scope == libpf.HotSpotScopeMethodOnly {
+			if q.BCIState != libpf.HotSpotBCIUnavailable {
+				t.Fatal("method fallback has BCI")
+			}
+		} else if q.BCIState != libpf.HotSpotBCIObservedInRange || q.RawBCI != 0 || q.ScopeWalk != libpf.HotSpotScopeWalkReturned {
+			t.Fatalf("genuine scope zero lost: %+v", q)
+		}
+	}
+	jit := qualityJIT(m)
+	jit.scopesData[3] = 1
+	var frames libpf.Frames
+	if err := jit.symbolize(10, ii, &frames); err != nil {
+		t.Fatal(err)
+	}
+	if frames[0].Value().HotSpotQuality.BCIState != libpf.HotSpotBCIUnavailable {
+		t.Fatal("encoded zero treated as BCI zero")
+	}
+	jit.scopesPcs = nil
+	frames = nil
+	if err := jit.symbolize(10, ii, &frames); err != nil {
+		t.Fatal(err)
+	}
+	if frames[0].Value().HotSpotQuality.ScopeLookup != libpf.HotSpotScopeMethodOnly {
+		t.Fatal("empty PC table claimed exact lookup")
+	}
+}
+
+func TestHotSpotQualityMalformedScopes(t *testing.T) {
+	ii, m := qualityInstance(t)
+	for _, tc := range []struct {
+		name string
+		data []byte
+		meta []byte
+	}{
+		{"self link", []byte{0, 2, 2, 2}, nil}, {"increasing link", []byte{0, 3, 2, 2}, nil}, {"truncated", []byte{0, 1, 2}, nil}, {"method index", []byte{0, 1, 3, 2}, nil}, {"null pointer", []byte{0, 1, 2, 2}, make([]byte, 8)}, {"unreadable method", []byte{0, 1, 2, 2}, []byte{0, 2, 0, 0, 0, 0, 0, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			jit := qualityJIT(m)
+			jit.scopesData = tc.data
+			if tc.meta != nil {
+				jit.metadata = tc.meta
+			}
+			originalReader := ii.rm.ReaderAt
+			if tc.name == "unreadable method" {
+				ii.rm.ReaderAt = identityReader(func([]byte, int64) (int, error) { return 0, syscall.EIO })
+				defer func() { ii.rm.ReaderAt = originalReader }()
+			}
+			var frames libpf.Frames
+			err := jit.symbolize(10, ii, &frames)
+			if err == nil {
+				t.Fatal("malformed scope silently succeeded")
+			}
+			for _, f := range frames {
+				q := f.Value().HotSpotQuality
+				if q.ScopeWalk != libpf.HotSpotScopeWalkPartial || q.Diagnostic.String() == "" {
+					t.Fatal("retained frames lack partial diagnostic")
+				}
+			}
+		})
+	}
+	jit := qualityJIT(m)
+	binary.LittleEndian.PutUint32(jit.scopesPcs[4:], uint32(len(jit.scopesData)))
+	var frames libpf.Frames
+	if jit.symbolize(10, ii, &frames) == nil {
+		t.Fatal("out-of-range first scope succeeded")
+	}
+	if _, err := ii.getJITInfo(0, 1); err == nil || !strings.Contains(err.Error(), "evicted") {
+		t.Fatalf("compile cookie mismatch bypassed: %v", err)
+	}
+}
+
+func TestHotSpotScopePCBounds(t *testing.T) {
+	for _, tc := range []struct {
+		data              []byte
+		stride, pc, scope uint
+	}{{nil, 0, 0, 4}, {make([]byte, 12), 12, 10, 4}, {make([]byte, 13), 12, 0, 4}, {make([]byte, 12), 12, 0, ^uint(0)}} {
+		if _, _, err := selectScopePC(tc.data, tc.stride, tc.pc, tc.scope, 10); err == nil {
+			t.Fatal("invalid descriptor layout accepted")
+		}
+	}
+	pcs := make([]byte, 12)
+	binary.LittleEndian.PutUint32(pcs, ^uint32(0))
+	binary.LittleEndian.PutUint32(pcs[4:], 1)
+	if off, mode, err := selectScopePC(pcs, 12, 0, 4, 0); err != nil || off != 1 || mode != libpf.HotSpotScopePrecedingPC {
+		t.Fatal("negative sentinel PC lost")
+	}
+}
+
+func TestHotSpotQualityCapturedSubtypes(t *testing.T) {
+	ii, _ := qualityInstance(t)
+	for _, subtype := range []uint8{support.FrameHotspotStub, support.FrameHotspotVtable, support.FrameHotspotInterpreter} {
+		ef := libpf.NewEbpfFrame(libpf.HotSpotFrame, 0, 3, 0)
+		ef[1] = 0x100
+		ef[2] = uint64(subtype) << 60
+		if subtype == support.FrameHotspotInterpreter {
+			ef[2] |= 0x200 >> 3
+		}
+		var frames libpf.Frames
+		if err := ii.Symbolize(ef, &frames, libpf.FrameMapping{}); err != nil {
+			t.Fatal(err)
+		}
+		q := frames[0].Value().HotSpotQuality
+		if subtype == support.FrameHotspotInterpreter {
+			if q.ScopeLookup != libpf.HotSpotScopeInterpreter || q.BCIState != libpf.HotSpotBCIObservedInRange {
+				t.Fatal("captured interpreter provenance lost")
+			}
+		} else if q.ScopeLookup != libpf.HotSpotScopeStub || q.BCIState != libpf.HotSpotBCIUnavailable {
+			t.Fatal("stub claimed BCI")
+		}
+	}
+}
+
+func FuzzHotSpotScopePC(f *testing.F) {
+	f.Add([]byte{}, uint16(12), uint16(0), uint16(4), int32(10))
+	f.Add(make([]byte, 12), uint16(0), uint16(0), uint16(4), int32(10))
+	f.Fuzz(func(t *testing.T, data []byte, stride, pc, scope uint16, delta int32) {
+		_, _, _ = selectScopePC(data, uint(stride), uint(pc), uint(scope), delta)
+	})
+}

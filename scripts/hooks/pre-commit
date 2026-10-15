@@ -61,7 +61,7 @@ fi
 CORE_FILES=$(git diff --cached --name-only | grep -E 'BpfFilter\.kt|LinuxNative\.kt' || true)
 if [ -n "$CORE_FILES" ]; then
   echo "WARNING: Modifications to core security engine files detected: $CORE_FILES"
-  echo "Please ensure these changes are fully validated through './scripts/run_tests.sh'."
+  echo "Please ensure these changes are fully validated through './gradlew build'."
 fi
 
 # 3. Run host unit tests to verify no structural/logic breakages

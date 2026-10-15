@@ -1,0 +1,147 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+
+package otel
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func fixtureResolver() *otelResolverInstance {
+	return &otelResolverInstance{
+		correlationMap: make(map[uint64]correlatedFrames),
+		waiters:        make(map[uint64]*correlationWaiter),
+		pruneCandidate: make(map[uint64]bool),
+	}
+}
+
+func fixtureFrames() libpf.Frames {
+	var frames libpf.Frames
+	frames.Append(&libpf.Frame{Type: libpf.NativeFrame, FunctionName: libpf.Intern("nativeLeaf"), AddressOrLineno: 4096})
+	frames.Append(&libpf.Frame{Type: libpf.HotSpotFrame, FunctionName: libpf.Intern("pathA"), AddressOrLineno: 17, SourceLine: 42})
+	return frames
+}
+
+func TestStructuredLookupPreservesFramesAndRejectsWrongTask(t *testing.T) {
+	o := fixtureResolver()
+	o.storeTrace(7, fixtureFrames(), 123, 456)
+	task := symbolizer.Task{CorrelationID: 7, Tgid: 123, PidNumbers: []symbolizer.PidNumbers{{Pid: 456}}}
+	result, err := o.ResolveStructured(context.Background(), task)
+	if err != nil || len(result.Frames) != 2 {
+		t.Fatalf("frames=%+v err=%v", result, err)
+	}
+	if result.Frames[0].Value().Type != libpf.NativeFrame || result.Frames[1].Value().AddressOrLineno != 17 || result.Frames[1].Value().SourceLine != 42 {
+		t.Fatal("frame order, domain or source information changed")
+	}
+	result.Frames[0] = result.Frames[1]
+	if o.correlationMap[7].frames[0].Value().FunctionName.String() != "nativeLeaf" {
+		t.Fatal("caller mutated cached frame sequence")
+	}
+	task.Tgid = 124
+	if _, err := o.ResolveStructured(context.Background(), task); !errors.Is(err, symbolizer.ErrStackIdentityMismatch) {
+		t.Fatalf("wrong PID accepted: %v", err)
+	}
+	task.Tgid = 123
+	task.PidNumbers[0].Pid = 457
+	if _, err := o.ResolveStructured(context.Background(), task); !errors.Is(err, symbolizer.ErrStackIdentityMismatch) {
+		t.Fatalf("wrong TID accepted: %v", err)
+	}
+}
+
+func TestStructuredLookupPreservesHotSpotQuality(t *testing.T) {
+	o := fixtureResolver()
+	var frames libpf.Frames
+	frames.Append(&libpf.Frame{Type: libpf.NativeFrame, AddressOrLineno: 4096})
+	frames.Append(&libpf.Frame{Type: libpf.HotSpotFrame, HotSpotQuality: libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeExactPC, BCIState: libpf.HotSpotBCIObservedInRange, ScopeWalk: libpf.HotSpotScopeWalkReturned}})
+	frames.Append(&libpf.Frame{Type: libpf.HotSpotFrame, HotSpotQuality: libpf.HotSpotQuality{ScopeLookup: libpf.HotSpotScopeMethodOnly, BCIState: libpf.HotSpotBCIUnavailable}})
+	o.storeTrace(7, frames, 123, 456)
+	for range 2 {
+		r, err := o.ResolveStructured(context.Background(), symbolizer.Task{CorrelationID: 7, Tgid: 123, PidNumbers: []symbolizer.PidNumbers{{Pid: 456}}})
+		if err != nil || len(r.Frames) != 3 {
+			t.Fatal("lookup failed", err)
+		}
+		for i := range frames {
+			if r.Frames[i] != frames[i] {
+				t.Fatal("quality/frame order changed")
+			}
+		}
+		r.Frames[1] = r.Frames[2]
+	}
+	if o.correlationMap[7].frames[1].Value().HotSpotQuality.ScopeLookup != libpf.HotSpotScopeExactPC {
+		t.Fatal("caller mutated metadata")
+	}
+}
+
+func TestOneCancelledWaiterDoesNotOrphanOtherWaiters(t *testing.T) {
+	o := fixtureResolver()
+	task := symbolizer.Task{CorrelationID: 7, Tgid: 123, PidNumbers: []symbolizer.PidNumbers{{Pid: 456}}}
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	second := make(chan error, 1)
+	secondCtx, cancelSecond := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	defer cancelSecond()
+	go func() { _, err := o.ResolveStructured(firstCtx, task); first <- err }()
+	go func() { _, err := o.ResolveStructured(secondCtx, task); second <- err }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		o.mu.Lock()
+		w := o.waiters[7]
+		ready := w != nil && w.refs == 2
+		o.mu.Unlock()
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("both waiters did not register")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancelFirst()
+	if err := <-first; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled waiter: %v", err)
+	}
+	o.storeTrace(7, fixtureFrames(), 123, 456)
+	if err := <-second; err != nil {
+		t.Fatalf("remaining waiter was orphaned: %v", err)
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if len(o.waiters) != 0 {
+		t.Fatal("waiter leaked")
+	}
+}
+
+func TestMissingDefinitionCannotUseAnotherReference(t *testing.T) {
+	o := fixtureResolver()
+	o.storeTrace(8, fixtureFrames(), 123, 456)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	_, err := o.ResolveStructured(ctx, symbolizer.Task{CorrelationID: 7, Tgid: 123, PidNumbers: []symbolizer.PidNumbers{{Pid: 456}}})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("missing reference substituted: %v", err)
+	}
+}
+
+func TestExistingTwoCyclePruningAndReappearance(t *testing.T) {
+	o := fixtureResolver()
+	o.storeTrace(7, fixtureFrames(), 123, 456)
+	o.pruneCorrelationMap(map[uint64]bool{})
+	if len(o.correlationMap) != 1 {
+		t.Fatal("pruned after one cycle")
+	}
+	o.pruneCorrelationMap(map[uint64]bool{7: true})
+	o.pruneCorrelationMap(map[uint64]bool{})
+	if len(o.correlationMap) != 1 {
+		t.Fatal("reappearance did not reset candidate")
+	}
+	o.pruneCorrelationMap(map[uint64]bool{})
+	if len(o.correlationMap) != 0 {
+		t.Fatal("stale definition survived two absent cycles")
+	}
+}

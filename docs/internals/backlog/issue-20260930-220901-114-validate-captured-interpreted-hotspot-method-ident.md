@@ -8,7 +8,7 @@ component: "experiment"
 target_modules: []
 target_files:
   - "experiments/hotspot-agentless/patches/**"
-  - "experiments/hotspot-agentless/scripts/prepare-gadget.py"
+  - "experiments/hotspot-agentless/internal/tooling/prepare.go"
   - "experiments/hotspot-agentless/README.md"
   - "experiments/hotspot-agentless/tests/fixtures/InterpretedIdentityCollisionProbe.go.txt"
   - "experiments/hotspot-agentless/scripts/probe-identity-boundary.sh"

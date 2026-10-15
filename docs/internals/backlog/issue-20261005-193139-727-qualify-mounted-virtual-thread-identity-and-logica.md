@@ -9,8 +9,8 @@ target_modules: [profiler]
 target_files:
   - "profiler/hotspot-agentless/internal/qualification/loom"
   - "experiments/hotspot-agentless/fixtures/java/VirtualThreadOracle.java"
-  - "experiments/hotspot-agentless/scripts/run-capability-candidates.py"
-  - "experiments/hotspot-agentless/scripts/verify-loom-candidate.py"
+  - "experiments/hotspot-agentless/internal/candidate/runner.go"
+  - "experiments/hotspot-agentless/internal/candidate/verify.go"
   - "experiments/hotspot-agentless/tests/unit"
   - "docs/plans/2026-10-05-hotspot-loom-evidence.md"
 target_symbols:

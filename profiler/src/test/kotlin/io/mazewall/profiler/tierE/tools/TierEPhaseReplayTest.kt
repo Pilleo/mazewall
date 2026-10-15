@@ -15,15 +15,16 @@ class TierEPhaseReplayTest {
     @Test
     fun `replay preserves six raw inputs and invalidates prior complete terminal on failure`() {
         val repository = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
-            .first { Files.isRegularFile(it.resolve("docs/internals/evidence/tier-e-separated-phase-gate-20260927/raw-receipts.tar.gz")) }
+            .first { Files.isRegularFile(it.resolve("profiler-native/tier-e-benchmark-baseline.env")) }
         val source = Files.createTempDirectory("tier-e-phase-input-")
         val output = Files.createTempDirectory("tier-e-phase-output-")
         try {
-            val archive = repository.resolve("docs/internals/evidence/tier-e-separated-phase-gate-20260927/raw-receipts.tar.gz")
             val names = listOf("full", "unique").flatMap { mode -> (1..3).map { "$mode-$it.log" } }
-            val command = listOf("tar", "-xzf", archive.toString(), "-C", source.toString()) + names.map { "phase/$it" }
-            assertEquals(0, ProcessBuilder(command).inheritIO().start().waitFor())
-            val input = source.resolve("phase")
+            val input = Files.createDirectory(source.resolve("phase"))
+            for (name in names) {
+                val resource = "/tier-e/phase-replay/${name.removeSuffix(".log")}.txt"
+                requireNotNull(javaClass.getResourceAsStream(resource)).use { Files.copy(it, input.resolve(name)) }
+            }
             val hashes = names.associateWith { name -> hash(input.resolve(name)) }
             val baseline = repository.resolve("profiler-native/tier-e-benchmark-baseline.env")
 

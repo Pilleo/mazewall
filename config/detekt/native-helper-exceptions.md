@@ -26,8 +26,12 @@ bypasses the configured `ForbiddenSuppress` rule.
 
 Compatibility shims use narrowly reviewed `UnusedParameter` annotations because removing the
 parameters would break linkage, while using them would fabricate descriptor ownership. Their
-adjacent rationale and exact sites are listed in `approved-suppressions.txt`. One pre-installation
-vararg composition retains the established policy API and has a scoped `SpreadOperator` entry.
+adjacent rationale remains with the declarations. One pre-installation vararg composition
+retains the established policy API and its scoped `SpreadOperator` annotation.
+
+The obsolete file/line approval audit was retired with operator approval on 2026-10-14.
+Suppression enforcement remains with configured Detekt rules and the existing warning ratchet;
+warning inventories and rule thresholds were not relaxed.
 
 The thresholds, forbidden-suppression configuration, full warning inventories, and coverage
 exclusions are unchanged. Future signature changes require re-review rather than a baseline refresh.

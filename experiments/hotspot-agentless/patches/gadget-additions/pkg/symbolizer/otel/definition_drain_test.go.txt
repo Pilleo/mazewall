@@ -1,0 +1,82 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"errors"
+	"golang.org/x/sys/unix"
+	"testing"
+	"time"
+)
+
+type definitionDrainFixture struct {
+	readerDone, release chan struct{}
+	failure             error
+}
+
+func (b *definitionDrainFixture) Quiesce(context.Context) error     { return b.failure }
+func (b *definitionDrainFixture) DrainReader(context.Context) error { close(b.readerDone); return nil }
+func (b *definitionDrainFixture) JoinConsumer(ctx context.Context) error {
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func TestDefinitionConsumerDrainJoinsFinalCallback(t *testing.T) {
+	b := &definitionDrainFixture{readerDone: make(chan struct{}), release: make(chan struct{})}
+	o := newDefinitionDrainOwner(b)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { _, err := o.stop(ctx); done <- err }()
+	select {
+	case <-b.readerDone:
+	case err := <-done:
+		t.Fatal("reader drain skipped", err)
+	case <-ctx.Done():
+		t.Fatal("reader not drained")
+	}
+	select {
+	case err := <-done:
+		t.Fatal("consumer join invented", err)
+	default:
+	}
+	close(b.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	r, err := o.stop(ctx)
+	if err != nil || !r.ReaderStopped || !r.ConsumerStopped || !r.BuffersDrained {
+		t.Fatal("final handoff lost", r, err)
+	}
+}
+func TestDefinitionConsumerDrainTimeoutAndPermissionStayPartial(t *testing.T) {
+	for _, failure := range []error{unix.EPERM, unix.EACCES} {
+		o := newDefinitionDrainOwner(&definitionDrainFixture{failure: failure})
+		r, err := o.stop(context.Background())
+		if !errors.Is(err, failure) || r.BuffersDrained {
+			t.Fatal("permission failure downgraded", r, err)
+		}
+	}
+	b := &definitionDrainFixture{readerDone: make(chan struct{}), release: make(chan struct{})}
+	o := newDefinitionDrainOwner(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := o.stop(ctx); done <- err }()
+	select {
+	case <-b.readerDone:
+	case err := <-done:
+		cancel()
+		t.Fatal("drain skipped", err)
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("reader did not drain")
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatal("consumer timeout lost", err)
+	}
+}
