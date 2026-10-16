@@ -146,5 +146,29 @@ Operator approved all four follow-ups after PR533: fix Koog strict dependency ve
   both legacy and observed constructor signatures, still requiring exactly one
   error and actual package-access evidence, plus positive public-facade compilation.
 
+## Published consumer continuation evidence
+
+- Corrected producer `0592f882fbd25fe38d0c312567e330721dcba47d` now stages actual
+  source-bound publications successfully. Retained candidate is
+  `0.1.0-integration.0592f882fbd2`, with opaque native-fixture package verification.
+- Real javax.tools diagnostics use the singular or plural constructor-applicability
+  envelope depending on compiler context. Both still require the explicit actual
+  package-private access cause. The retained published consumer independently
+  rejects both constructor signatures and compiles the public observation facade
+  (`run-ebaf20a263cf`); no wrong-symbol/arity-only rejection is accepted.
+- The strict JAR-only native Koog probe passes from a fresh owned directory with
+  27 staged JARs, actual registry/denial/crash/cancel and diagnostic checks
+  (`run-d6ee3a858ecd`). Ordinary-JAR JDBC, Security and readable presentation pass
+  (`run-416394c01cef`), as does actual finished-Boot packaging/presentation
+  (`run-3ef94c2e259e`). Example-local diagnostic variables were renamed to avoid
+  shadowing existing Java catch variables; producer library bytes are unchanged.
+- Full finished-JAR source/ownership/negative acceptance passes with the actual
+  full producer revision and a newly acquired evidence destination
+  (`run-dfd4d9540e18`). The earlier mistyped manual revision is a rejected input,
+  not an accepted producer or a library failure.
+- These continuations retain the exact published producer and separately modified
+  consumer inputs. The final combined gate must still execute automatically on
+  the final committed source before completion.
+
 ---
 <!-- id: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only  file: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md -->

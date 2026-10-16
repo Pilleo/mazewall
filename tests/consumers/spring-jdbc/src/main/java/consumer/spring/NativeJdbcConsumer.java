@@ -407,10 +407,10 @@ public final class NativeJdbcConsumer {
         check(!target.worker.isAlive(), "Actual captured physical worker terminated");
         lifecycle.stop();
         check(lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Actual owned runtime/manager/resource physical retirement");
-        var retired = lifecycle.diagnostics();
-        check(retired.getState() == ExecutionDiagnosticState.CLOSED && retired.getRetirementComplete()
-                && retired.getLiveWorkers() == 0 && retired.getUnfinishedInvocations() == 0
-                && retired.getInvocations().getEnded() > 0, "Canonical diagnostic retirement required");
+        var retiredSnapshot = lifecycle.diagnostics();
+        check(retiredSnapshot.getState() == ExecutionDiagnosticState.CLOSED && retiredSnapshot.getRetirementComplete()
+                && retiredSnapshot.getLiveWorkers() == 0 && retiredSnapshot.getUnfinishedInvocations() == 0
+                && retiredSnapshot.getInvocations().getEnded() > 0, "Canonical diagnostic retirement required");
         System.out.println("DIAGNOSTICS_CLOSED operation=" + lifecycle.operationId());
         try { resources.validate(); throw new AssertionError("Retired resource owner stayed available"); }
         catch (IllegalStateException retired) { /* Exact public owner closes only after physical retirement. */ }

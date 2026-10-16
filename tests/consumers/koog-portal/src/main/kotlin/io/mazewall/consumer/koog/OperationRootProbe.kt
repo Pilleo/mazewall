@@ -35,7 +35,7 @@ fun main() {
             val error = errors.single()
             val message = error.getMessage(Locale.ROOT)
             val accessFailure = error.code == "compiler.err.not.def.public.cant.access" ||
-                (error.code == "compiler.err.cant.apply.symbols" &&
+                (error.code in setOf("compiler.err.cant.apply.symbol", "compiler.err.cant.apply.symbols") &&
                     "is not public in io.mazewall.portal.PreparedPortalOperation; cannot be accessed from outside package" in message)
             check(accessFailure && "PreparedPortalOperation" in message) {
                 "expected actual package-private constructor rejection, got $errors"

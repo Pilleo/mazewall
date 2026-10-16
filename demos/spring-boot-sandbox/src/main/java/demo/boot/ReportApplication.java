@@ -161,12 +161,12 @@ public final class ReportApplication {
         check(!state.worker.physicalThread().isAlive(), "Captured physical worker actually terminated");
         bootstrap.lifecycle().stop();
         check(bootstrap.lifecycle().lastDrain() == DrainReport.Complete.INSTANCE, "Exact runtime/resources physical retirement");
-        var retired = bootstrap.lifecycle().diagnostics();
-        check(retired.getState() == ExecutionDiagnosticState.CLOSED && retired.getRetirementComplete()
-                && retired.getLiveWorkers() == 0 && retired.getUnfinishedInvocations() == 0
-                && retired.getInvocations().getEnded() > 0, "Diagnostics must observe canonical physical retirement");
+        var retiredSnapshot = bootstrap.lifecycle().diagnostics();
+        check(retiredSnapshot.getState() == ExecutionDiagnosticState.CLOSED && retiredSnapshot.getRetirementComplete()
+                && retiredSnapshot.getLiveWorkers() == 0 && retiredSnapshot.getUnfinishedInvocations() == 0
+                && retiredSnapshot.getInvocations().getEnded() > 0, "Diagnostics must observe canonical physical retirement");
         System.out.println("DIAGNOSTICS_CLOSED operation=" + bootstrap.lifecycle().operationId()
-                + " ended=" + retired.getInvocations().getEnded() + " retirementComplete=true");
+                + " ended=" + retiredSnapshot.getInvocations().getEnded() + " retirementComplete=true");
         try { bootstrap.resources().validate(); throw new AssertionError("Retired owner still available"); }
         catch (IllegalStateException retired) { /* Genuine public owner is physically retired. */ }
         check(jdbc.queryForObject("select count(*) from effects where name='cancel'", Integer.class) == 0, "Cancelled JDBC rollback");
