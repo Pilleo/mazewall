@@ -40,6 +40,7 @@ Skills live in `.agents/skills/` and are loaded when their task applies; do not 
 
 ## Documentation and worktree safety
 
+- Never create or use Git worktrees unless the operator explicitly authorizes their use for the current task. Work in the current checkout by default; a skill, isolation preference, or generic instruction to continue does not grant worktree permission.
 - Read the relevant design document before changing behavior, threat model, native layout, or protocol semantics.
 - Keep design documentation and public guidance accurate when behavior changes; archive a backlog item only with evidence.
 - Treat existing uncommitted work as user-owned. Stage only files belonging to the current change.
