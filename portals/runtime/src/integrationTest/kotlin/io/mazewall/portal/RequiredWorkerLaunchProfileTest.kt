@@ -1,5 +1,6 @@
 package io.mazewall.portal
 
+import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
@@ -19,6 +20,7 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.tools.ToolProvider
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -225,7 +227,7 @@ class RequiredWorkerLaunchProfileTest {
             receipts.beforeReturn = { child ->
                 assertEquals("MAZEWALL_PORTAL_PARENT_AUTH_PENDING", CompletableFuture.supplyAsync { child.inputStream.bufferedReader().readLine() }.get(5, TimeUnit.SECONDS))
                 entered.countDown()
-                if (cancel) assertTrue(release.await(5, TimeUnit.SECONDS)) else assertFalse(release.await(2100, TimeUnit.MILLISECONDS))
+                if (cancel) assertTrue(release.await(10, TimeUnit.SECONDS)) else assertFalse(release.await(2100, TimeUnit.MILLISECONDS))
             }
             val broker =
                 ProcessBroker(
@@ -233,27 +235,52 @@ class RequiredWorkerLaunchProfileTest {
                     sockets = receipts.sockets,
                     workerClasspath = fixture,
                     launchProfile = selectedProfile(),
-                    limits = PortalRuntimeLimits(startupTimeoutMs = 2000, closeTimeoutMs = 200),
+                    limits = PortalRuntimeLimits(startupTimeoutMs = if (cancel) 10_000 else 2000, closeTimeoutMs = 5_000),
                 )
             val startup = CompletableFuture.supplyAsync { runCatching { broker.start() }.exceptionOrNull() }
+            var primary: Throwable? = null
             try {
                 assertTrue(entered.await(5, TimeUnit.SECONDS))
                 assertTrue(receipts.child!!.isAlive)
                 if (cancel) {
-                    assertFailsWith<IncompleteBrokerCleanupException> { broker.close() }
-                    assertEquals(1, broker.provisionalWorkers(), "held launch still physically owns actual child")
-                    assertTrue(receipts.child!!.isAlive)
-                    release.countDown()
+                    val closeReturned = CompletableFuture<Throwable?>()
+                    val closeInterrupted = AtomicBoolean()
+                    val closer = Thread.ofPlatform().unstarted {
+                        val failure = runCatching { broker.close() }.exceptionOrNull()
+                        closeInterrupted.set(Thread.currentThread().isInterrupted)
+                        closeReturned.complete(failure)
+                    }
+                    try {
+                        closer.start()
+                        io.mazewall.testing.awaitCondition(java.time.Duration.ofSeconds(5), "selected launch entered close") {
+                            broker.lifecycleState() == ProcessBrokerLifecycle.Closing
+                        }
+                        closer.interrupt()
+                        val failure = closeReturned.get(5, TimeUnit.SECONDS)
+                        assertTrue(failure is IncompleteBrokerCleanupException, failure?.stackTraceToString().orEmpty())
+                        assertTrue(closeInterrupted.get(), "incomplete close must preserve its caller interruption")
+                        assertEquals(1, broker.provisionalWorkers(), "held launch still physically owns actual child")
+                        assertTrue(receipts.child!!.isAlive)
+                    } finally {
+                        release.countDown()
+                        closer.join(5_000)
+                        assertFalse(closer.isAlive, "the actual close caller must physically end")
+                    }
                 }
                 val failure = requireNotNull(startup.get(8, TimeUnit.SECONDS))
                 assertFalse("GUEST_ENTERED" in failure.suppressed.joinToString { it.message.orEmpty() })
                 broker.close()
                 assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
                 receipts.assertRetired()
+            } catch (failure: Throwable) {
+                primary = failure
+                throw failure
             } finally {
                 release.countDown()
-                startup.handle { _, _ -> Unit }.get(8, TimeUnit.SECONDS)
-                broker.close()
+                val cleanup = CleanupCollector()
+                cleanup.attempt("selected launch completion") { startup.handle { _, _ -> Unit }.get(8, TimeUnit.SECONDS) }
+                cleanup.attempt("selected launch broker retirement") { broker.close() }
+                cleanup.outcome().failureOrNull()?.let { throw CleanupFailures.merge(primary, it) }
             }
         }
     }

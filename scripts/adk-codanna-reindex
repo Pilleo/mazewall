@@ -1,8 +1,52 @@
 #!/usr/bin/env bash
-# ADK-managed: refresh Codanna after git moves the tree.
+# ADK-managed: refresh Codanna code atlas index after git moves the tree.
+# Safe in all environments: cleanly no-ops if codanna is missing, unconfigured, or already indexing.
+
 set -euo pipefail
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-command -v codanna >/dev/null 2>&1 || exit 0
-test -f "$ROOT/.codanna/settings.toml" || exit 0
-(cd "$ROOT" && nohup codanna index . --no-progress >/dev/null 2>&1 &)
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+
+# 1. Check if repository is configured for Codanna
+if [ ! -f "$ROOT/.codanna/settings.toml" ]; then
+    exit 0
+fi
+
+# 2. Locate codanna binary safely
+CODANNA_BIN=""
+if [ -f "$SCRIPT_DIR/find-tool.sh" ]; then
+    # shellcheck source=scripts/find-tool.sh
+    source "$SCRIPT_DIR/find-tool.sh"
+    CODANNA_BIN="$(find_codanna 2>/dev/null || true)"
+fi
+
+if [ -z "$CODANNA_BIN" ]; then
+    if command -v codanna >/dev/null 2>&1; then
+        CODANNA_BIN="$(command -v codanna)"
+    elif [ -x "$HOME/.local/bin/codanna" ]; then
+        CODANNA_BIN="$HOME/.local/bin/codanna"
+    elif [ -x "$HOME/.cargo/bin/codanna" ]; then
+        CODANNA_BIN="$HOME/.cargo/bin/codanna"
+    elif [ -x "/usr/local/bin/codanna" ]; then
+        CODANNA_BIN="/usr/local/bin/codanna"
+    fi
+fi
+
+# If tool is not available, skip gracefully
+if [ -z "$CODANNA_BIN" ] || [ ! -x "$CODANNA_BIN" ]; then
+    exit 0
+fi
+
+# 3. Check if another indexer is already running to prevent lock contention
+if pgrep -f "codanna index" >/dev/null 2>&1; then
+    exit 0
+fi
+
+# 4. Trigger background reindex safely
+(
+    cd "$ROOT"
+    nohup "$CODANNA_BIN" index . --no-progress >/dev/null 2>&1 &
+    touch "$ROOT/.codanna/.last_indexed" 2>/dev/null || true
+) 2>/dev/null || true
+
 exit 0

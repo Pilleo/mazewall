@@ -117,6 +117,7 @@ target/
 /.worktrees/
 /.taskplane-kb/
 /docs/superpowers/
+/presentation-output/
 
 ### Local Agent Session Artifacts ###
 /.omo/

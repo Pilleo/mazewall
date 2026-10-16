@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 130 | *Total Resolved Issues:* 692
+*Total Active Issues:* 143 | *Total Resolved Issues:* 694
 
-Active status detail: 129 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 142 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -19,6 +19,8 @@ Their index rows remain below with resolved links; historical/operator rows are 
 Optional tooling87-error debt and unsupported FORK callback bypass remain active.
 
 Agent-development documentation resolved: [canonical build guidance, coding standards, and removal of unused workflow documents](resolved/issue-20261010-223954-987-consolidate-agent-documentation-and-remove-unused-.md).
+
+OpenCode language-server configuration resolved: [Kotlin and C/C++ LSP startup and configuration evidence](resolved/issue-20261010-231809-473-enable-kotlin-and-c-language-servers-for-opencode.md).
 
 Tier E attribution correctness resolved: [re-entrant path suppression and CAUSAL_UNCERTAIN](resolved/issue-20260912-232402-204-enforce-re-entrant-path-suppression-and-causal-unc.md), [process incarnation identity gating](resolved/issue-20260912-232404-647-enforce-process-incarnation-identity-gating-across.md), [sys_enter observation scope](resolved/issue-20260912-232406-760-differentiate-selected-sys-enter-observations-from.md), and [bounded dictionary streaming watermarking](resolved/issue-20260912-232409-587-integrate-bounded-dictionary-streaming-watermarkin.md).
 
@@ -48,6 +50,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |
+| Archived [issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi](resolved/issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi.md) | Recover broker cleanup regression controls from historical worktrees | high | core |
+| [issue-20261016-015032-003-repair-first-time-library-installation-guidance](issue-20261016-015032-003-repair-first-time-library-installation-guidance.md) | Repair first-time library installation guidance | high | core |
 | Archived [issue-20261016-010021-700-allow-bounded-result-and-execution-end-overlap-in-](resolved/issue-20261016-010021-700-allow-bounded-result-and-execution-end-overlap-in-.md) | Allow bounded result and execution-end overlap in Java metadata fixture | high | core |
 | Archived [issue-20261015-234007-259-keep-native-errno-diagnostics-free-of-cold-dynamic](resolved/issue-20261015-234007-259-keep-native-errno-diagnostics-free-of-cold-dynamic.md) | Keep native errno diagnostics free of cold dynamic JVM bootstraps | high | core |
 | Archived [issue-20261015-213544-220-verify-read-only-profile-mounts-using-explicit-run](resolved/issue-20261015-213544-220-verify-read-only-profile-mounts-using-explicit-run.md) | Verify read-only profile mounts using explicit runtime inspect flags | high | core |
@@ -104,19 +109,24 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261011-211526-976-complete-explicit-owned-invocation-metadata-captur](resolved/issue-20261011-211526-976-complete-explicit-owned-invocation-metadata-captur.md) | Complete explicit owned invocation metadata capture and restoration | high | enforcer |
 | Archived [issue-20261011-165557-976-require-operator-owned-portal-launch-profiles-and-](resolved/issue-20261011-165557-976-require-operator-owned-portal-launch-profiles-and-.md) | Require operator-owned Portal launch profiles and independent readiness | high | portal-runtime |
 | Archived [issue-20261011-160846-071-compile-canonical-owned-runtime-and-coverage-prese](resolved/issue-20261011-160846-071-compile-canonical-owned-runtime-and-coverage-prese.md) | Compile canonical owned-runtime and coverage-preserving profile recipes | high | core |
+| [issue-20261009-064529-480-preserve-fatal-first-cancellation-and-physical-own](issue-20261009-064529-480-preserve-fatal-first-cancellation-and-physical-own.md) | Preserve fatal-first cancellation and physical ownership in native test harness cleanup | high | core |
+| [issue-20261009-051311-338-collect-owned-boot-child-coverage-and-bind-nonempt](issue-20261009-051311-338-collect-owned-boot-child-coverage-and-bind-nonempt.md) | Collect owned Boot child coverage and bind nonempty kernel coverage classes | high | core |
+| [issue-20261009-043520-499-clear-existing-shared-test-and-enforcer-test-detek](issue-20261009-043520-499-clear-existing-shared-test-and-enforcer-test-detek.md) | Clear existing shared-test and enforcer test Detekt errors without weakening native verification | high | core |
+| [issue-20261009-013010-665-clear-final-candidate-detekt-zip-constants-and-por](issue-20261009-013010-665-clear-final-candidate-detekt-zip-constants-and-por.md) | Clear final candidate Detekt ZIP constants and Portal declaration naming findings | high | core |
+| [issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati](issue-20261009-014853-723-classify-transient-unreadable-descriptor-observati.md) | Classify transient unreadable descriptor observations in ForeignFdGuard | high | core |
 | [issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr](issue-20261008-072138-928-adopt-typed-prepared-ordinary-jar-resources-in-spr.md) | Adopt typed prepared ordinary-JAR resources in Spring and prove native JDBC lifecycle | high | spring-integration |
 | [issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-](issue-20261008-072506-227-declare-optional-koog-production-plugin-bootstrap-.md) | Declare optional Koog production plugin bootstrap and Portal runtime publication | high | integrations |
 | [issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin](issue-20261008-072510-298-bind-supported-exploded-and-boot-deployment-origin.md) | Bind supported exploded and Boot deployment origins to genuine prepared owners | high | enforcer |
 | [issue-20261008-104505-709-root-verification-graph-must-select-grouping-java-](issue-20261008-104505-709-root-verification-graph-must-select-grouping-java-.md) | Root verification graph must select grouping Java and Kotlin quality gates by plugin | high | core |
 | [issue-20261008-111819-937-prove-clean-executable-boot-singleton-report-with-](issue-20261008-111819-937-prove-clean-executable-boot-singleton-report-with-.md) | Prove clean executable Boot singleton report with reviewed typed resources | high | spring-integration |
-| [issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge](issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge.md) | Implement bounded upstream Koog Portal tool and generated packaged consumer | high | integrations |
-| [issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio](issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio.md) | Bind prepared core resources and reviewed operation identities | high | enforcer |
-| [issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati](issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md) | Bind approved synchronous Spring singleton operations and JDBC outcomes | high | spring-integration |
 | [issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s](issue-20261008-142748-453-restrict-gradle-resolution-discovery-to-checkout-s.md) | Restrict Gradle resolution discovery to checkout source inventory | high | core |
 | [issue-20261009-002130-433-diagnose-eperm-executable-mmap-crashing-iterative-](issue-20261009-002130-433-diagnose-eperm-executable-mmap-crashing-iterative-.md) | Diagnose EPERM executable mmap crashing iterative profiler task JVM | high | profiler |
 | [issue-20261009-000016-699-investigate-intermittent-interrupted-broker-close-](issue-20261009-000016-699-investigate-intermittent-interrupted-broker-close-.md) | Investigate intermittent interrupted broker close cleanup classification | medium | portal-runtime |
 | [issue-20261008-232414-071-investigate-ao-sigquit-during-monitored-native-ver](issue-20261008-232414-071-investigate-ao-sigquit-during-monitored-native-ver.md) | Investigate AO SIGQUIT during monitored native verification and preserve no-replay recovery | high | profiler |
 | [issue-20261008-192836-364-require-durable-restart-and-blocked-tool-recovery-](issue-20261008-192836-364-require-durable-restart-and-blocked-tool-recovery-.md) | Require durable restart and blocked-tool recovery before fleet supervisor adoption | high | orchestrator |
+| [issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge](issue-20261008-034925-367-implement-bounded-upstream-koog-portal-tool-and-ge.md) | Implement bounded upstream Koog Portal tool and generated packaged consumer | high | integrations |
+| [issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio](issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio.md) | Bind prepared core resources and reviewed operation identities | high | enforcer |
+| [issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati](issue-20261008-033416-558-bind-approved-synchronous-spring-singleton-operati.md) | Bind approved synchronous Spring singleton operations and JDBC outcomes | high | spring-integration |
 | [issue-20261008-011322-838-prove-actual-spring-advisor-placement-on-owned-inv](issue-20261008-011322-838-prove-actual-spring-advisor-placement-on-owned-inv.md) | Prove actual Spring advisor placement on owned invocation chain | high | integrations |
 | [issue-20261008-011223-216-isolate-git-local-commit-environment-from-gradle-f](issue-20261008-011223-216-isolate-git-local-commit-environment-from-gradle-f.md) | Isolate Git-local commit environment from Gradle foreign repository tests | high | core |
 | [issue-20261008-003135-816-bind-portal-readiness-to-actual-installation-recei](issue-20261008-003135-816-bind-portal-readiness-to-actual-installation-recei.md) | Bind Portal readiness to actual installation receipt and launch generation | high | core |
@@ -150,10 +160,10 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261006-212230-350-correct-cet-uapi-and-require-verified-current-thre](issue-20261006-212230-350-correct-cet-uapi-and-require-verified-current-thre.md) | Correct CET UAPI and require verified current-thread shadow-stack locking | high | core |
 | [issue-20261006-191042-005-quarantine-failed-installations-before-cached-poli](issue-20261006-191042-005-quarantine-failed-installations-before-cached-poli.md) | Quarantine failed installations before cached-policy reuse | high | core |
 | [issue-20261006-181603-339-capture-installation-fallback-once-and-retain-fail](issue-20261006-181603-339-capture-installation-fallback-once-and-retain-fail.md) | Capture installation fallback once and retain failed-stage evidence | high | core |
-| [issue-20261006-172913-068-require-effective-installation-before-contained-ex](issue-20261006-172913-068-require-effective-installation-before-contained-ex.md) | Require effective installation before contained executor target entry | high | core |
 | [issue-20261006-174206-021-make-socket-helper-owner-death-procfs-observation-](issue-20261006-174206-021-make-socket-helper-owner-death-procfs-observation-.md) | Make socket helper owner-death procfs observation disappearance-safe | high | core |
-| [issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces](issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces.md) | Replace scope-promoting builders with fixed process and worker construction | high | core |
+| [issue-20261006-172913-068-require-effective-installation-before-contained-ex](issue-20261006-172913-068-require-effective-installation-before-contained-ex.md) | Require effective installation before contained executor target entry | high | core |
 | [issue-20261006-161104-257-align-profiler-compile-artifacts-with-declared-kot](issue-20261006-161104-257-align-profiler-compile-artifacts-with-declared-kot.md) | Align profiler compile artifacts with declared Kotlin friend paths | high | core |
+| [issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces](issue-20261006-155730-233-replace-scope-promoting-builders-with-fixed-proces.md) | Replace scope-promoting builders with fixed process and worker construction | high | core |
 | [issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge](issue-20261006-153913-826-make-executable-mapping-boolean-configuration-a-ge.md) | Make executable mapping Boolean configuration a genuine setter | high | core |
 | [issue-20261006-152422-003-establish-packaged-java-and-kotlin-integration-con](issue-20261006-152422-003-establish-packaged-java-and-kotlin-integration-con.md) | Establish packaged Java and Kotlin integration consumer baselines | high | core |
 | [issue-20261006-022633-064-preserve-runtime-profile-when-composing-dedicated-](issue-20261006-022633-064-preserve-runtime-profile-when-composing-dedicated-.md) | Preserve runtime profile when composing dedicated worker policies | high | profiler |
@@ -196,6 +206,12 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20260930-012719-798-lock-agentless-hotspot-experiment-dependencies-and](issue-20260930-012719-798-lock-agentless-hotspot-experiment-dependencies-and.md) | Lock agentless HotSpot experiment dependencies and preflight | high | experiment |
 | [issue-20260929-075557-179-add-opt-in-tier-e-all-target-syscall-capture-and-i](issue-20260929-075557-179-add-opt-in-tier-e-all-target-syscall-capture-and-i.md) | Add opt-in Tier E all-target syscall capture and independent stop barrier | high | core |
 | [issue-20260929-075625-151-export-bounded-terminal-tier-e-event-jsonl-with-ra](issue-20260929-075625-151-export-bounded-terminal-tier-e-event-jsonl-with-ra.md) | Export bounded terminal Tier E event JSONL with raw capture identities and stack evidence | high | core |
+| [issue-20260926-122439-817-make-tier-e-shutdown-terminal-across-service-and-c](issue-20260926-122439-817-make-tier-e-shutdown-terminal-across-service-and-c.md) | Make Tier E shutdown terminal across service and control state | medium | profiler |
+| [issue-20260926-122447-716-bind-cached-tier-e-terminal-results-to-admitted-sn](issue-20260926-122447-716-bind-cached-tier-e-terminal-results-to-admitted-sn.md) | Bind cached Tier E terminal results to admitted snapshot identity | medium | profiler |
+| [issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c](issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md) | Preserve Tier E resource ownership until cleanup completes | high | profiler |
+| [issue-20260926-121456-910-bound-user-notif-session-evidence-retention](issue-20260926-121456-910-bound-user-notif-session-evidence-retention.md) | Bound USER_NOTIF session evidence retention | high | profiler |
+| [issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread](issue-20260926-121505-981-cancel-profiling-workloads-when-the-calling-thread.md) | Cancel profiling workloads when the calling thread is interrupted | high | profiler |
+| [issue-20260926-121514-401-make-profiler-listener-startup-and-native-cleanup-](issue-20260926-121514-401-make-profiler-listener-startup-and-native-cleanup-.md) | Make profiler listener startup and native cleanup exception-safe | medium | profiler |
 | [issue-20260918-210822-014-integrate-a-production-owned-tier-e-collector-loop](issue-20260918-210822-014-integrate-a-production-owned-tier-e-collector-loop.md) | Integrate a production-owned Tier E collector loop | high | profiler |
 | [issue-20260919-120622-331-establish-allocation-safe-evidence-for-remaining-t](issue-20260919-120622-331-establish-allocation-safe-evidence-for-remaining-t.md) | Establish allocation-safe Tier E evidence | high | profiler |
 | [issue-20260919-222031-545-evaluate-tier-e-scoped-tracepoint-attachment-after](issue-20260919-222031-545-evaluate-tier-e-scoped-tracepoint-attachment-after.md) | Evaluate Tier E scoped tracepoint attachment | high | profiler |

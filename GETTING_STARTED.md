@@ -8,20 +8,68 @@ This guide shows how to evaluate kernel-enforced restrictions for selected JVM w
 
 | Requirement | Minimum | Recommended |
 |---|---|---|
-| **JDK** | 22 | 22+ |
-| **Linux kernel** | 3.17 (Seccomp basic) | **6.2+** (full feature set) |
+| **JDK (application runtime)** | 22 | 25 |
+| **Linux kernel** | 3.17 (Seccomp basic) | Verify the features required by your policy |
 | **Landlock filesystem isolation** | kernel 5.13 | 6.7+ (adds TCP `bind`/`connect` port restrictions; not general network control) |
 
 > [!NOTE]
-> mazewall detects unavailable host features at runtime. The effective behavior depends on the configured fallback policy, kernel capabilities, and outer container restrictions. A kernel 6.2+ host (or the provided dev container) provides the broadest supported feature set.
+> These kernel versions are feature minimums, not a full-feature guarantee. mazewall detects unavailable host features at runtime. The effective behavior depends on the configured fallback policy, kernel capabilities, and outer container restrictions; a dev container uses its host's kernel.
 
 **No native C libraries or kernel modules are required. Root is not required on a compatible Linux host, but an outer container profile or runtime policy can prevent filter installation.**
+
+Building this repository requires **JDK 25**. Kotlin consumers need a compiler
+compatible with the library's metadata; the packaged consumer checks use stable
+Kotlin **2.4.20** (the producer version is in [the version catalog](gradle/libs.versions.toml)).
 
 ---
 
 ## Installation
 
-### Option 1: JitPack (Easiest)
+### Option 1: Build locally (recommended for evaluation)
+
+With JDK 25 selected through `JAVA_HOME`, clone the repository and publish the
+enforcer and its platform dependency to your local Maven repository:
+
+```bash
+git clone https://github.com/Pilleo/mazewall.git
+cd mazewall
+./gradlew :platform:publishToMavenLocal :enforcer:publishToMavenLocal
+```
+
+This builds the library artifacts without installing containment in your application
+or running the kernel integration suites. It installs `io.mazewall` version
+`0.1.0-SNAPSHOT` locally; repeating it replaces that local snapshot. It does not
+publish to a remote package service.
+
+In a **separate application project**, add the local repository and dependency:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        mavenLocal {
+            content { includeGroup("io.mazewall") }
+        }
+        mavenCentral()
+    }
+}
+
+// build.gradle.kts
+dependencies {
+    implementation("io.mazewall:enforcer:0.1.0-SNAPSHOT")
+}
+```
+
+Use `--enable-native-access=ALL-UNNAMED` when running a classpath application that
+installs containment. Installing the dependency alone does not apply any policy;
+continue with the trusted bootstrap and owned-worker example below.
+
+### Option 2: JitPack (on-demand builds)
+
+JitPack builds the selected Git revision on demand. Check the
+[build status](https://jitpack.io/#Pilleo/mazewall) before using this path; it is not
+the locally verified installation above. The repository is `Pilleo/mazewall` and
+its default branch is `master`:
 
 ```kotlin
 // settings.gradle.kts
@@ -34,11 +82,14 @@ dependencyResolutionManagement {
 
 // build.gradle.kts
 dependencies {
-    implementation("com.github.Pilleo.jseccomp:enforcer:main-SNAPSHOT")
+    implementation("com.github.Pilleo.mazewall:enforcer:master-SNAPSHOT")
 }
 ```
 
-### Option 2: GitHub Packages (Verified Builds)
+### Option 3: GitHub Packages
+
+This path requires package access and an available published version. Configure
+credentials through your existing Gradle properties or operator-managed environment:
 
 ```kotlin
 // settings.gradle.kts
@@ -276,17 +327,23 @@ This is the list of "scary JVM + Linux edge cases" that mazewall deals with inte
 
 ## Running the Test Suite
 
-Tests that interact with the Linux kernel require specific capabilities and a custom seccomp profile. We provide orchestration scripts to run these safely inside a Podman container.
+Run these commands from the library checkout, not your application project.
+Kernel integration tests require a compatible Linux host and sufficient permissions
+under its outer Seccomp profile. The [testing strategy](docs/internals/designs/core/testing-strategy.md)
+describes the prerequisites and the host/kernel split.
 
 ```bash
-# 1. Run host-side unit tests only (fast, no kernel interaction)
-./gradlew test
+# Host-safe unit tests, static analysis, and coverage
+./gradlew unitCheck
 
-# 2. Run the full integration suite (requires Podman on the host)
-./scripts/run_tests.sh
+# Kernel integration suites in the configured Podman/Docker environment
+./scripts/run_containerized_tests.sh :kernelCheck
 
-# 3. Run specific integration tests (e.g., enforcer module only)
-./scripts/run_tests.sh :enforcer:integrationTest
+# A specific kernel suite in the same environment
+./scripts/run_containerized_tests.sh :enforcer:integrationTest
+
+# Full quality gate on a suitably configured host
+./gradlew build
 ```
 
 ---

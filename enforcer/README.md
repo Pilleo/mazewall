@@ -129,20 +129,10 @@ enforcer/src/main/kotlin/io/mazewall/
 
 ## Installation
 
-Add `mazewall-enforcer` to your project via **JitPack** or **GitHub Packages**.
-
-### Gradle (Kotlin)
-
-```kotlin
-repositories {
-    mavenCentral()
-    maven { url = uri("https://jitpack.io") }
-}
-
-dependencies {
-    implementation("com.github.Pilleo.jseccomp:enforcer:main-SNAPSHOT")
-}
-```
+Follow [Getting Started: Installation](../GETTING_STARTED.md#installation) to build
+and consume `io.mazewall:enforcer:0.1.0-SNAPSHOT` locally with JDK 25, or configure
+one of the optional package repositories. The guide distinguishes the build JDK
+from the JDK 22+ application runtime requirement.
 
 ---
 
@@ -341,12 +331,15 @@ To prevent JVM deadlocks and stability issues, `:enforcer` implements several in
 
 ## Testing
 
-Tests require a Linux host (6.2+) or the provided dev container environment.
+Run from the library checkout. Kernel suites require a compatible Linux host and
+outer runtime permissions; a dev container uses its host's kernel. See
+[Getting Started: Running the Test Suite](../GETTING_STARTED.md#running-the-test-suite)
+for prerequisites and full quality gates.
 
 ```bash
 # Unit tests (no kernel interaction)
 ./gradlew :enforcer:test
 
-# Full check including integration tests (requires Podman)
-./scripts/run_tests.sh :enforcer:integrationTest
+# Enforcer kernel integration suite (configured Podman/Docker environment)
+./scripts/run_containerized_tests.sh :enforcer:integrationTest
 ```
