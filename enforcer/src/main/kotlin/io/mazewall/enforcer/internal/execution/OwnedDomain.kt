@@ -6,6 +6,10 @@ import io.mazewall.enforcer.api.InstallationReceipt
 import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.api.StacktraceScopingPolicy
 import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState
+import io.mazewall.enforcer.api.execution.ExecutionDiagnostics
+import io.mazewall.enforcer.api.execution.ExecutionGeneration
+import io.mazewall.enforcer.api.execution.InvocationDiagnostics
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.platform.fd.ResourceRetirement
 import java.util.concurrent.ArrayBlockingQueue
@@ -19,6 +23,7 @@ import java.util.concurrent.ThreadFactory
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 /** Fixed physical generation; only its trusted bootstrap thread can construct workers. */
@@ -40,6 +45,11 @@ internal class OwnedDomain(
     private val threads = CopyOnWriteArrayList<Thread>()
     private val pending = ConcurrentHashMap.newKeySet<OwnedInvocation<*>>()
     private val admission = Semaphore(limits.maxAdmissions)
+    private val admitted = AtomicLong()
+    private val rejected = AtomicLong()
+    private val cancellationRequests = AtomicLong()
+    private val delivered = AtomicLong()
+    private val ended = AtomicLong()
     val cleanupFailure = AtomicReference<Throwable?>()
     private val threadBuilder = Thread.ofPlatform().name(name, 0L).inheritInheritableThreadLocals(false)
     private val executor = ThreadPoolExecutor(
@@ -124,13 +134,21 @@ internal class OwnedDomain(
     fun <T> submit(action: Callable<T>): InvocationHandle<T> {
         val task: OwnedInvocation<T>
         synchronized(lock) {
-            if (phase != GenerationPhase.READY) throw RejectedExecutionException("Domain generation is not admitting", failure)
-            if (!admission.tryAcquire()) throw RejectedExecutionException("Domain admission limit reached")
+            if (phase != GenerationPhase.READY) {
+                recordRejection()
+                throw RejectedExecutionException("Domain generation is not admitting", failure)
+            }
+            if (!admission.tryAcquire()) {
+                recordRejection()
+                throw RejectedExecutionException("Domain admission limit reached")
+            }
             task = OwnedInvocation(this, action)
             pending.add(task)
+            admitted.incrementAndGet()
             try {
                 executor.execute(task)
             } catch (rejected: RejectedExecutionException) {
+                recordRejection()
                 task.generationFailed(rejected)
                 fail(rejected)
             } catch (replacementRefused: IllegalStateException) {
@@ -251,6 +269,42 @@ internal class OwnedDomain(
     fun liveWorkers(): Int = threads.count { it.isAlive } + if (retirement?.live() == true) 1 else 0
 
     fun unfinished(): Int = pending.size
+
+    fun recordRejection() {
+        rejected.incrementAndGet()
+    }
+
+    fun recordCancellation() {
+        cancellationRequests.incrementAndGet()
+    }
+
+    fun recordDelivery() {
+        delivered.incrementAndGet()
+    }
+
+    fun recordEnd() {
+        ended.incrementAndGet()
+    }
+
+    fun diagnostics(runtimeAccepting: Boolean): ExecutionDiagnostics =
+        synchronized(lock) {
+        val cleanupFailed = cleanupFailure.get() != null
+        val sampled = when (phase) {
+            GenerationPhase.PREPARING -> ExecutionDiagnosticState.PREPARING
+            GenerationPhase.READY -> if (runtimeAccepting) ExecutionDiagnosticState.READY else ExecutionDiagnosticState.DRAINING
+            GenerationPhase.DRAINING -> ExecutionDiagnosticState.DRAINING
+            GenerationPhase.FAILED -> ExecutionDiagnosticState.FAILED
+            GenerationPhase.CLOSED -> ExecutionDiagnosticState.CLOSED
+        }
+        ExecutionDiagnostics(
+            if (failure != null || cleanupFailed) ExecutionDiagnosticState.FAILED else sampled,
+            ExecutionGeneration.InProcess(generation),
+            InvocationDiagnostics(admitted.get(), rejected.get(), cancellationRequests.get(), delivered.get(), ended.get()),
+            liveWorkers(),
+            unfinished(),
+            phase == GenerationPhase.CLOSED && retired() && !cleanupFailed && pending.isEmpty(),
+        )
+    }
 
     fun removeQueued(task: OwnedInvocation<*>) {
         executor.remove(task)

@@ -68,5 +68,37 @@ Operator approved all four follow-ups after PR533: fix Koog strict dependency ve
   then reuses the configuration cache (`run-c95b08fe9dc4`). Existing checksum
   approvals and coordinates are preserved.
 
+## Diagnostics checkpoint
+
+- Added the maintained [read-only diagnostics contract](../designs/core/execution-diagnostics.md).
+  The ABI adds only immutable diagnostic models/source and the domain observation
+  method; existing declarations remain present. Prepared Portal operations retain
+  their original package-private constructor and expose no public constructor.
+- Tests first rejected missing diagnostics APIs (`run-2c3ada1e33b9`,
+  `run-a14c88eafef6`, `run-3fbb61d35d46`, `run-f0cc3079302a`,
+  `run-bff2663b2c9b`). A strengthened real-thread test also failed when polling
+  incorrectly certified retirement before the canonical drain boundary
+  (`run-da2b17746903`, exact assertion `run-c32ba707c3ae`). The guarded observation
+  then passes (`run-2b42d37fd32a`).
+- Native Portal checks observe the actual launch/readiness input tuple, reject
+  publication after failed readiness, preserve held retirement/admission, and
+  retain post-close views. Actual scoped checkpoints pass (`run-0b3655ff68e7`,
+  `run-c2d454fd5ca1`).
+- The final checkpoint includes **66 selected core ownership/architecture cases,
+  148 Portal host cases, 5 selected Portal native cases, 6 Koog cases and 103 Spring
+  cases**, all with zero failures/errors/skips. Additive ABI checking, Spring
+  static analysis and the unchanged Detekt warning ratchet pass. Existing separate
+  optional native prerequisites are not relabeled as passes.
+- Health/read endpoints are independently optional, explicit-property enabled,
+  immutable and passive over existing singleton sources. Actual context tests
+  cover absent APIs, disabled/default behavior, independent API absence, user
+  override and no lazy-source initialization. Health rejects unknown, failed,
+  draining and closed observations and never masks source failures.
+- Strict optional-module locks are generated; the six added optional Boot4.1.1 /
+  managed Jackson-annotation artifacts match independent Maven Central bytes
+  (`run-d95e29bf5a9e`, `run-8b23216f2393`). No existing checksum changes or dependency
+  version drift are approved. Root lock changes only add the actual consumer
+  verification configuration association for existing versions.
+
 ---
 <!-- id: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only  file: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md -->

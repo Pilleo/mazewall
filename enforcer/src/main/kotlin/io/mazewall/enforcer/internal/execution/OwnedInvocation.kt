@@ -95,7 +95,8 @@ internal class OwnedInvocation<T>(
             }
         }
         val failure = CancellationException("Owned invocation cancellation requested")
-        if (neverStarted) finishNotStarted(failure) else delivered.completeExceptionally(failure)
+        owner.recordCancellation()
+        if (neverStarted) finishNotStarted(failure) else deliverFailure(failure)
         return CancellationDisposition.REQUESTED
     }
 
@@ -115,17 +116,21 @@ internal class OwnedInvocation<T>(
                 }
             }
         }
-        if (neverStarted) finishNotStarted(failure) else delivered.completeExceptionally(failure)
+        if (neverStarted) finishNotStarted(failure) else deliverFailure(failure)
     }
 
     private fun finishNotStarted(failure: Throwable) {
         owner.removeQueued(this)
         owner.finished(this)
         try {
-            delivered.completeExceptionally(failure)
+            deliverFailure(failure)
         } finally {
-            ended.complete(ExecutionEnd.NotStarted(failure))
+            if (ended.complete(ExecutionEnd.NotStarted(failure))) owner.recordEnd()
         }
+    }
+
+    private fun deliverFailure(failure: Throwable) {
+        if (delivered.completeExceptionally(failure)) owner.recordDelivery()
     }
 
     @Suppress("TooGenericExceptionCaught") // owned body boundary retains original fatal identity and physical lease
@@ -140,14 +145,14 @@ internal class OwnedInvocation<T>(
         try {
             val value = RuntimeWorkerContext.withInvocation(this) { action.call() }
             observedFailure.get()?.let { throw it }
-            delivered.complete(value)
+            if (delivered.complete(value)) owner.recordDelivery()
         } catch (bodyFailure: Throwable) {
             failure = containmentFailureForCaller(
                 io.mazewall.platform.fd.CleanupFailures
                 .merge(observedFailure.get(), bodyFailure),
             )
             if (failure is Error) owner.fail(failure)
-            delivered.completeExceptionally(failure)
+            deliverFailure(failure)
         } finally {
             synchronized(lock) {
                 phase = Phase.ENDED
@@ -155,7 +160,7 @@ internal class OwnedInvocation<T>(
             }
             Thread.interrupted()
             owner.finished(this)
-            ended.complete(ExecutionEnd.Finished(failure))
+            if (ended.complete(ExecutionEnd.Finished(failure))) owner.recordEnd()
         }
         if (failure is Error) throw failure
     }

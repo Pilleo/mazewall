@@ -11,4 +11,7 @@ public class InProcessDomain internal constructor(
 ) {
     public val generation: Long get() = resource.generation
     public val limits: DomainLimits get() = resource.limits
+
+    /** Observes this exact generation without admission, validation, native probing or drain. */
+    public fun diagnostics(): ExecutionDiagnostics = owner.diagnostics(this)
 }

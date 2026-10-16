@@ -66,6 +66,95 @@ class OwnedRuntimeTest {
 
     private fun policy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
 
+    @Test
+    fun `diagnostics retain physical lifetime after cancellation and never advance retirement`() {
+        val entered = CountDownLatch(1)
+        val cleanupEntered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val worker = java.util.concurrent.atomic
+            .AtomicReference<Thread>()
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val initial = domain.diagnostics()
+            assertEquals(ExecutionDiagnosticState.READY, initial.state)
+            assertEquals(domain.generation, assertIs<ExecutionGeneration.InProcess>(initial.generation).generation)
+            assertEquals(0L, initial.invocations.admitted)
+            try {
+                val handle = runtime.submit(
+                    domain,
+                    Callable {
+                    worker.set(Thread.currentThread())
+                    entered.countDown()
+                    try {
+                        CountDownLatch(1).await()
+                    } finally {
+                        cleanupEntered.countDown()
+                        check(release.await(5, TimeUnit.SECONDS))
+                    }
+                },
+                )
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { error("capacity rejection entered") }) }
+                assertEquals(CancellationDisposition.REQUESTED, handle.requestCancellation())
+                assertTrue(cleanupEntered.await(5, TimeUnit.SECONDS))
+                assertTrue(handle.result().toCompletableFuture().isCompletedExceptionally)
+                assertFalse(handle.executionEnd().toCompletableFuture().isDone)
+                assertIs<DrainReport.Incomplete>(runtime.drain(Duration.ofMillis(20)))
+                val held = domain.diagnostics()
+                assertEquals(ExecutionDiagnosticState.DRAINING, held.state)
+                assertEquals(1, held.unfinishedInvocations)
+                assertTrue(held.liveWorkers > 0)
+                assertFalse(held.retirementComplete)
+                assertEquals(1L, held.invocations.admitted)
+                assertEquals(1L, held.invocations.rejected)
+                assertEquals(1L, held.invocations.cancellationRequests)
+                assertEquals(1L, held.invocations.delivered)
+                assertEquals(0L, held.invocations.ended)
+                assertEquals(held, domain.diagnostics(), "polling must not drain or advance the owner")
+                assertFailsWith<RejectedExecutionException> { runtime.submit(domain, Callable { error("draining owner admitted") }) }
+                release.countDown()
+                worker.get().join(5_000)
+                assertFalse(worker.get().isAlive)
+                assertFalse(domain.diagnostics().retirementComplete, "only the existing drain boundary may publish complete retirement")
+                assertEquals(DrainReport.Complete, runtime.drain(timeout))
+                val ended = domain.diagnostics()
+                assertEquals(ExecutionDiagnosticState.CLOSED, ended.state)
+                assertTrue(ended.retirementComplete)
+                assertEquals(0, ended.liveWorkers)
+                assertEquals(0, ended.unfinishedInvocations)
+                assertEquals(2L, ended.invocations.rejected)
+                assertEquals(1L, ended.invocations.ended)
+                assertEquals(0L, initial.invocations.admitted, "captured snapshots must remain immutable")
+                assertFalse(held.retirementComplete, "later retirement cannot upgrade a captured pending snapshot")
+            } finally {
+                release.countDown()
+            }
+        }
+    }
+
+    @Test
+    fun `diagnostics retain failed generation identity after fatal delivery`() {
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            val fatal = LinkageError("diagnostic failed-generation control")
+            val handle = runtime.submit(domain, Callable<Int> { throw fatal })
+            assertSame(
+                fatal,
+                assertFailsWith<java.util.concurrent.ExecutionException> {
+                handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS)
+            }.cause,
+            )
+            assertEquals(ExecutionDiagnosticState.FAILED, domain.diagnostics().state)
+            assertEquals(domain.generation, assertIs<ExecutionGeneration.InProcess>(domain.diagnostics().generation).generation)
+            assertEquals(DrainReport.Complete, runtime.drain(timeout))
+            val snapshot = domain.diagnostics()
+            assertEquals(ExecutionDiagnosticState.FAILED, snapshot.state)
+            assertTrue(snapshot.retirementComplete)
+            assertEquals(1L, snapshot.invocations.delivered)
+            assertEquals(1L, snapshot.invocations.ended)
+        }
+    }
+
     private val declared = ThreadLocal<Map<String, String>>()
 
     @Test

@@ -1,5 +1,7 @@
 package io.mazewall.portal
 
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState
+import io.mazewall.enforcer.api.execution.ExecutionGeneration
 import io.mazewall.platform.process.ProcessLauncher
 import io.mazewall.platform.process.RealProcessLauncher
 import org.junit.jupiter.api.Test
@@ -10,10 +12,51 @@ import javax.tools.ToolProvider
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class RequiredWorkerGenerationTest {
     @TempDir var directory: Path? = null
+
+    @Test
+    fun `passive diagnostics expose only the generation accepted by actual worker readiness`() {
+        var child: Process? = null
+        var requested: String? = null
+        val launcher = object : ProcessLauncher by RealProcessLauncher {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+                preparation: io.mazewall.platform.process.JvmLaunchPreparation,
+            ): Process {
+                requested = args[args.indexOf("--worker-generation") + 1]
+                return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also { child = it }
+            }
+        }
+        val broker = ProcessBroker(launcher = launcher)
+        try {
+            repeat(3) {
+                assertEquals(ExecutionDiagnosticState.UNKNOWN, broker.diagnostics().state)
+                assertIs<ExecutionGeneration.Unavailable>(broker.diagnostics().generation)
+                assertNull(child, "diagnostic polling cannot start the lazy worker")
+            }
+            broker.start()
+            val ready = broker.diagnostics()
+            assertEquals(ExecutionDiagnosticState.READY, ready.state)
+            val generation = assertIs<ExecutionGeneration.PortalInputs>(ready.generation)
+            assertEquals(requested, "${generation.inputsSha256}:${generation.manifestsSha256}:${generation.runtimeSha256}")
+            assertEquals(1, ready.liveWorkers)
+            assertEquals(ready, broker.diagnostics(), "polling cannot dispatch work or replace the worker")
+            assertFalse(ready.retirementComplete)
+        } finally {
+            broker.close()
+        }
+        assertFalse(checkNotNull(child).isAlive)
+        val closed = broker.diagnostics()
+        assertEquals(ExecutionDiagnosticState.CLOSED, closed.state)
+        assertTrue(closed.retirementComplete)
+        assertEquals(0, closed.liveWorkers)
+    }
 
     @Test
     fun `actual worker rejects changed expected generation after parent ACK`() {
@@ -36,6 +79,7 @@ class RequiredWorkerGenerationTest {
             assertFalse(checkNotNull(child).isAlive)
             assertEquals(0, broker.trackedWorkers())
             assertEquals(0, broker.provisionalWorkers())
+            assertIs<ExecutionGeneration.Unavailable>(broker.diagnostics().generation, "rejected readiness cannot publish an input generation")
         }
     }
 

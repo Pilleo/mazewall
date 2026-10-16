@@ -7,6 +7,11 @@ java {
     withSourcesJar()
 }
 
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode.set(LockMode.STRICT)
+}
+
 dependencies {
     api(platform("org.springframework.boot:spring-boot-dependencies:4.1.1"))
     api(project(":integrations:spring:mazewall-spring-boot"))

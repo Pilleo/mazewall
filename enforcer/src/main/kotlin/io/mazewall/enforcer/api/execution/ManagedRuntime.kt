@@ -277,8 +277,11 @@ public class ManagedRuntime private constructor(
     ): InvocationHandle<T> {
         val validation = synchronized(lock) {
         require(domain.owner === this && domains[domain.generation] === domain.resource) { "Domain belongs to a different runtime" }
-        requireOpen()
-        if (RuntimeWorkerContext.current != null) throw RejectedExecutionException("Nested dispatch requires an approved execution transition")
+        requireOpen(domain.resource)
+        if (RuntimeWorkerContext.current != null) {
+            domain.resource.recordRejection()
+            throw RejectedExecutionException("Nested dispatch requires an approved execution transition")
+        }
         if (!domain.resource.needsResourceValidation()) return domain.resource.submit(action)
         manager.submit(Callable { domain.resource.validateResources() })
         }
@@ -289,9 +292,15 @@ public class ManagedRuntime private constructor(
             throw failure
         }
         return synchronized(lock) {
-            requireOpen()
+            requireOpen(domain.resource)
             domain.resource.submit(action)
         }
+    }
+
+    internal fun diagnostics(domain: InProcessDomain): ExecutionDiagnostics =
+        synchronized(lock) {
+        require(domain.owner === this && domains[domain.generation] === domain.resource) { "Domain belongs to a different runtime" }
+        domain.resource.diagnostics(phase == Phase.OPEN)
     }
 
     internal fun <T> callContained(
@@ -376,8 +385,11 @@ public class ManagedRuntime private constructor(
         }
     }
 
-    private fun requireOpen() {
-        if (phase != Phase.OPEN) throw RejectedExecutionException("Runtime is not admitting")
+    private fun requireOpen(rejectedDomain: OwnedDomain? = null) {
+        if (phase != Phase.OPEN) {
+            rejectedDomain?.recordRejection()
+            throw RejectedExecutionException("Runtime is not admitting")
+        }
     }
 
     private fun <T> await(future: Future<T>): T =

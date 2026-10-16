@@ -8,6 +8,11 @@ plugins {
 kotlin { jvmToolchain(25) }
 java { withSourcesJar() }
 
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode.set(LockMode.STRICT)
+}
+
 dependencies {
     api(project(":portals:runtime"))
     api("ai.koog:agents-tools:1.3.0")

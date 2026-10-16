@@ -2,6 +2,8 @@ package io.mazewall.koog
 
 import ai.koog.agents.core.tools.Tool
 import ai.koog.serialization.TypeToken
+import io.mazewall.enforcer.api.execution.ExecutionDiagnostics
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticsSource
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.portal.PreparedPortalOperation
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -26,7 +28,12 @@ public class PortalToolAdapter<A, R>(
     description: String,
     private val validateArguments: (A) -> Unit,
     private val validateResult: (R) -> Unit,
-) : Tool<A, R>(argsType, resultType, name, description) {
+) : Tool<A, R>(argsType, resultType, name, description),
+    ExecutionDiagnosticsSource {
+    override fun operationId(): String = name
+
+    override fun diagnostics(): ExecutionDiagnostics = operation.diagnostics()
+
     override suspend fun execute(args: A): R {
         validateArguments(args)
         return suspendCancellableCoroutine { continuation ->

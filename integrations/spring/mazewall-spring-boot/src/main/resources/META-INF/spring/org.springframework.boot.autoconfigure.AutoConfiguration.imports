@@ -1,1 +1,2 @@
 io.mazewall.spring.MazewallSecurityAutoConfiguration
+io.mazewall.spring.diagnostics.MazewallDiagnosticsAutoConfiguration

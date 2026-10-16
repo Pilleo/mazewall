@@ -2,6 +2,9 @@ package io.mazewall.spring;
 
 import io.mazewall.enforcer.api.ReviewedOperationArtifact;
 import io.mazewall.enforcer.api.execution.DomainLimits;
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState;
+import io.mazewall.enforcer.api.execution.ExecutionDiagnostics;
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticsSource;
 import io.mazewall.enforcer.api.execution.DrainReport;
 import io.mazewall.enforcer.api.execution.IncompleteDrainException;
 import io.mazewall.enforcer.api.execution.ManagedRuntime;
@@ -13,16 +16,16 @@ import java.util.function.Supplier;
 import org.springframework.context.SmartLifecycle;
 
 /** Application-owned explicit preparation. The caller bootstraps the runtime beforehand. */
-public final class DomainLifecycle implements SmartLifecycle {
-    private enum State { NEW, READY, DRAINING, CLOSED, FAILED }
+public final class DomainLifecycle implements SmartLifecycle, ExecutionDiagnosticsSource {
+    private enum State { NEW, PREPARING, READY, DRAINING, CLOSED, FAILED }
     private final Supplier<InvocationDispatcher> prepare;
     private final Function<Duration, DrainReport> drain;
     private final Duration timeout;
     private final ReviewedOperationArtifact artifact;
     private final PreparedOperationResources resources;
-    private State state = State.NEW;
-    private InvocationDispatcher dispatcher;
-    private DrainReport lastDrain;
+    private volatile State state = State.NEW;
+    private volatile InvocationDispatcher dispatcher;
+    private volatile DrainReport lastDrain;
 
     /** Takes responsibility for the genuine owner after successful construction; no metadata-only fallback. */
     public DomainLifecycle(ManagedRuntime owner, ReviewedOperationArtifact artifact, DomainLimits limits,
@@ -59,6 +62,7 @@ public final class DomainLifecycle implements SmartLifecycle {
     @Override public synchronized void start() {
         if (state == State.READY) return;
         if (state != State.NEW) throw new IllegalStateException("Explicit new owner required after retirement: " + state);
+        state = State.PREPARING;
         try {
             dispatcher = Objects.requireNonNull(prepare.get());
             state = State.READY;
@@ -100,6 +104,39 @@ public final class DomainLifecycle implements SmartLifecycle {
     @Override public boolean isAutoStartup() { return false; }
     @Override public int getPhase() { return Integer.MAX_VALUE; }
     public synchronized DrainReport lastDrain() { return lastDrain; }
+
+    @Override public String operationId() {
+        return artifact == null ? "unprotected-host-characterization" : artifact.getBinding().getOperationId();
+    }
+
+    /** Never waits for preparation/drain, starts an owner, or treats host characterization as protection. */
+    @Override public ExecutionDiagnostics diagnostics() {
+        State observed = state;
+        InvocationDispatcher current = dispatcher;
+        ExecutionDiagnostics owned = current instanceof ManagedRuntimeDispatcher managed
+                ? managed.diagnostics() : ExecutionDiagnostics.UNAVAILABLE;
+        DrainReport report = lastDrain;
+        ExecutionDiagnosticState phase = switch (observed) {
+            case NEW -> ExecutionDiagnosticState.UNKNOWN;
+            case PREPARING -> ExecutionDiagnosticState.PREPARING;
+            case READY -> owned.getState();
+            case DRAINING -> owned.getState() == ExecutionDiagnosticState.FAILED
+                    ? ExecutionDiagnosticState.FAILED : ExecutionDiagnosticState.DRAINING;
+            case CLOSED -> owned.getState() == ExecutionDiagnosticState.FAILED
+                    ? ExecutionDiagnosticState.FAILED : ExecutionDiagnosticState.CLOSED;
+            case FAILED -> ExecutionDiagnosticState.FAILED;
+        };
+        if (report instanceof DrainReport.Incomplete incomplete && incomplete.getCleanupFailure() != null) {
+            phase = ExecutionDiagnosticState.FAILED;
+        }
+        boolean actual = current instanceof ManagedRuntimeDispatcher;
+        int live = actual ? owned.getLiveWorkers() : report instanceof DrainReport.Incomplete incomplete ? incomplete.getLiveWorkers() : 0;
+        int pending = actual ? owned.getUnfinishedInvocations() : report instanceof DrainReport.Incomplete incomplete ? incomplete.getUnfinishedInvocations() : 0;
+        boolean retired = (phase == ExecutionDiagnosticState.CLOSED || phase == ExecutionDiagnosticState.FAILED)
+                && (actual ? owned.getRetirementComplete() : report == DrainReport.Complete.INSTANCE);
+        return new ExecutionDiagnostics(phase, owned.getGeneration(), owned.getInvocations(), live, pending, retired);
+    }
+
     synchronized InvocationDispatcher dispatcher() {
         if (state != State.READY) throw new IllegalStateException("Required Spring domain is inactive: " + state);
         return dispatcher;

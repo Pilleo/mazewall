@@ -1,7 +1,9 @@
 package io.mazewall.portal
 
 import io.mazewall.enforcer.api.execution.CancellationDisposition
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState
 import io.mazewall.enforcer.api.execution.ExecutionEnd
+import io.mazewall.enforcer.api.execution.ExecutionGeneration
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
@@ -46,6 +48,9 @@ class PreparedPortalOperationIntegrationTest {
         val release = CountDownLatch(1)
         PortalRuntime.open(config).use { runtime ->
             val echo = runtime.prepare(OwnedEchoService::class.java, PortalServiceId("owned-echo"), PortalOperationCall<OwnedEchoService, String, String> { service, text -> service.echo(text) })
+            val prepared = echo.diagnostics()
+            assertEquals(ExecutionDiagnosticState.READY, prepared.state)
+            assertIs<ExecutionGeneration.PortalInputs>(prepared.generation)
             assertEquals(
                 "hello",
                 echo
@@ -81,6 +86,11 @@ class PreparedPortalOperationIntegrationTest {
                 release.countDown()
             }
             runtime.close()
+            val retired = echo.diagnostics()
+            assertEquals(ExecutionDiagnosticState.CLOSED, retired.state)
+            assertTrue(retired.retirementComplete)
+            assertEquals(0, retired.unfinishedInvocations)
+            assertEquals(0L, prepared.invocations.admitted, "the captured ready snapshot cannot become a later invocation record")
             assertIs<ExecutionEnd.NotStarted>(
                 echo
                 .submit("closed")

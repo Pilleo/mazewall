@@ -705,6 +705,11 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.api.execution.ExecutionEnd\$NotStarted",
                 "io.mazewall.enforcer.api.execution.ExecutionEnd\$Finished",
             ),
+            "io.mazewall.enforcer.api.execution.ExecutionGeneration" to setOf(
+                "io.mazewall.enforcer.api.execution.ExecutionGeneration\$Unavailable",
+                "io.mazewall.enforcer.api.execution.ExecutionGeneration\$InProcess",
+                "io.mazewall.enforcer.api.execution.ExecutionGeneration\$PortalInputs",
+            ),
             "io.mazewall.enforcer.api.execution.DrainReport" to setOf(
                 "io.mazewall.enforcer.api.execution.DrainReport\$Complete",
                 "io.mazewall.enforcer.api.execution.DrainReport\$Incomplete",
