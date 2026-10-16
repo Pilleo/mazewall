@@ -1,3 +1,5 @@
+import io.mazewall.build.PublicCompileClasspathArguments
+
 plugins {
     `java-library`
 }
@@ -29,10 +31,10 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-    doFirst {
-        // Resolve the already-owned test task classpath at execution, excluding every test output.
-        systemProperty("mazewall.spring.publicCompileClasspath", (classpath - sourceSets.test.get().output).asPath)
-    }
+    val publicCompileClasspath = classpath - sourceSets.test.get().output
+    jvmArgumentProviders.add(objects.newInstance<PublicCompileClasspathArguments>().apply {
+        classpath.from(publicCompileClasspath)
+    })
 }
 
 publishing {

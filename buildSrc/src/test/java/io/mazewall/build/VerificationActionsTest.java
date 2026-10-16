@@ -17,6 +17,7 @@ public final class VerificationActionsTest {
             writeSuccessMarker(successMarker);
             return;
         }
+        PublicCompileClasspathFunctionalTest.verify(rootBuild.getParent());
         String xml = "<file name=\"module/Example.kt\">\n"
             + "<error line=\"12\" column=\"4\" severity=\"warning\" message=\"first\nsecond\" source=\"detekt.Example\" />\n</file>";
         List<String> normalized = DetektWarningRatchetAction.normalize(xml.lines().toList());
