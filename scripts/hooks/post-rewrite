@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Git post-rewrite hook
+# Runs after git commit --amend or git rebase.
+# Safe in all environments: gracefully skips any tools that are not installed.
+
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+# Universal async indexer
+if [ -x "$ROOT_DIR/scripts/git_async_indexer.sh" ]; then
+    "$ROOT_DIR/scripts/git_async_indexer.sh" &
+fi
+
+# ADK-managed Codanna indexer
+if [ -x "$ROOT_DIR/scripts/adk-codanna-reindex" ]; then
+    "$ROOT_DIR/scripts/adk-codanna-reindex" || true
+fi
+
+# JetBrains Context semantic indexer
+if [ -x "$ROOT_DIR/scripts/adk-jbcontext-reindex" ]; then
+    "$ROOT_DIR/scripts/adk-jbcontext-reindex" || true
+fi
+
+exit 0

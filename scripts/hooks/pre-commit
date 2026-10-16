@@ -15,7 +15,8 @@ set -euo pipefail
 
 echo "==> Auditing codebase changes for security exceptions and bypasses..."
 
-ALLOWLIST_FILE=".agents/security-audit-allowlist.txt"
+ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+ALLOWLIST_FILE="$ROOT_DIR/.agents/security-audit-allowlist.txt"
 
 # 1. Check for unauthorized seccomp/bypass modifications in source files
 FORBIDDEN_PATTERNS=(
@@ -72,7 +73,7 @@ fi
 # Inclusion is read directly from settings.gradle.kts: probing via './gradlew projects'
 # would cost two full Gradle configuration passes per commit for statically known facts.
 TEST_TASKS=("test")
-if grep -Eq '^[[:space:]]*include\(":portals:runtime"\)' settings.gradle.kts; then
+if grep -Eq '^[[:space:]]*include\(":portals:runtime"\)' "$ROOT_DIR/settings.gradle.kts"; then
   TEST_TASKS+=(":portals:runtime:integrationTest" ":portals:runtime:test")
 else
   # Explicit operator exclusion (like :tools:orchestrator) must stay visible,
@@ -103,6 +104,38 @@ if ! (
   echo "-------------------"
   echo "ERROR: Host unit tests failed. Commit aborted. Full log: /tmp/mazewall-precommit-test.log"
   exit 1
+fi
+
+# 4. Optional AST-grep structural verification (cleanly skips if ast-grep is unavailable)
+AST_GREP_BIN=""
+if [ -f "$ROOT_DIR/scripts/find-tool.sh" ]; then
+  # shellcheck source=scripts/find-tool.sh
+  source "$ROOT_DIR/scripts/find-tool.sh"
+  AST_GREP_BIN="$(find_ast_grep 2>/dev/null || true)"
+elif command -v ast-grep >/dev/null 2>&1; then
+  AST_GREP_BIN="$(command -v ast-grep)"
+fi
+
+if [ -n "$AST_GREP_BIN" ] && [ -x "$AST_GREP_BIN" ] && [ -f "$ROOT_DIR/sgconfig.yml" ]; then
+  echo "==> Running AST-level structural checks (ast-grep)..."
+  "$AST_GREP_BIN" scan --no-repo-update || true
+fi
+
+# 5. Keep Codanna code atlas index fresh (optional, non-blocking background refresh)
+CODANNA_BIN=""
+if [ -f "$ROOT_DIR/scripts/find-tool.sh" ]; then
+  CODANNA_BIN="$(find_codanna 2>/dev/null || true)"
+elif command -v codanna >/dev/null 2>&1; then
+  CODANNA_BIN="$(command -v codanna)"
+fi
+
+if [ -n "$CODANNA_BIN" ] && [ -x "$CODANNA_BIN" ] && [ -f "$ROOT_DIR/.codanna/settings.toml" ]; then
+  echo "==> Refreshing Codanna code atlas index (background)..."
+  (
+    cd "$ROOT_DIR"
+    nohup "$CODANNA_BIN" index . --no-progress >/dev/null 2>&1 &
+    touch "$ROOT_DIR/.codanna/.last_indexed" 2>/dev/null || true
+  ) 2>/dev/null || true
 fi
 
 echo "==> Security audit and unit tests passed successfully."

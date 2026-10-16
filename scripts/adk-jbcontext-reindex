@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Refresh JetBrains Context semantic index after git moves the tree.
+# Safe in all environments: cleanly no-ops if jbcontext is missing, unconfigured, or already indexing.
+
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+
+# 1. Locate jbcontext binary safely
+JBCONTEXT_BIN="${JBCONTEXT:-}"
+if [ -z "$JBCONTEXT_BIN" ] && [ -f "$SCRIPT_DIR/find-tool.sh" ]; then
+    # shellcheck source=scripts/find-tool.sh
+    source "$SCRIPT_DIR/find-tool.sh"
+    JBCONTEXT_BIN="$(find_jbcontext 2>/dev/null || true)"
+fi
+
+if [ -z "$JBCONTEXT_BIN" ]; then
+    if command -v jbcontext >/dev/null 2>&1; then
+        JBCONTEXT_BIN="$(command -v jbcontext)"
+    elif [ -x "$HOME/.jbcontext/bin/jbcontext" ]; then
+        JBCONTEXT_BIN="$HOME/.jbcontext/bin/jbcontext"
+    elif [ -x "$HOME/.local/bin/jbcontext" ]; then
+        JBCONTEXT_BIN="$HOME/.local/bin/jbcontext"
+    elif [ -x "/usr/local/bin/jbcontext" ]; then
+        JBCONTEXT_BIN="/usr/local/bin/jbcontext"
+    fi
+fi
+
+# If tool is not available, skip gracefully
+if [ -z "$JBCONTEXT_BIN" ] || [ ! -x "$JBCONTEXT_BIN" ]; then
+    exit 0
+fi
+
+# 2. Check if another indexer is already running to avoid piling background workers
+if pgrep -f "jbcontext index" >/dev/null 2>&1; then
+    exit 0
+fi
+
+# 3. Trigger incremental index in background safely
+(
+    cd "$ROOT"
+    nohup "$JBCONTEXT_BIN" index --silent --only-incremental >/dev/null 2>&1 &
+) 2>/dev/null || true
+
+exit 0

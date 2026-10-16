@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // An LSP object enables built-ins, including clangd for C/C++.
+  "lsp": {
+    // Use the installed Kotlin server; OpenCode's bundled downloader uses the old archive format.
+    "kotlin-ls": {
+      "command": ["kotlin-lsp", "--stdio"]
+    }
+  }
+}
