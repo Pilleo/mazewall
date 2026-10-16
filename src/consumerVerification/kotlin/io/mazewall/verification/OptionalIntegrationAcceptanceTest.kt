@@ -119,7 +119,11 @@ class OptionalIntegrationAcceptanceTest {
                 )
                 println("OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence")
             } finally {
-                check(before == ConsumerFixture.snapshot(original)) { "Optional integration acceptance changed the operator checkout" }
+                val after = ConsumerFixture.snapshot(original)
+                check(before == after) {
+                    val changed = (before.keys + after.keys).filter { before[it] != after[it] }.sorted()
+                    "Optional integration acceptance changed the operator checkout: $changed"
+                }
             }
         }
     }
