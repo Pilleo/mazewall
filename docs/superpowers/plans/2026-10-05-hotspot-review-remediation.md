@@ -78,16 +78,16 @@ Task5 depends on all four. Keep each fix independently reviewable.
 
 ## Task2: Exact application method names (R2)
 
-- [ ] Reproduce false usefulness for WrongFixture.leafCorrupt,
+- [x] Reproduce false usefulness for WrongFixture.leafCorrupt,
   Fixture.leafCorrupt and routeACorrupt; add reordered/malformed/native-only controls.
-- [ ] Parse exact ASCII fixture owner/method from renderer display
+- [x] Parse exact ASCII fixture owner/method from renderer display
   `void Fixture.leaf(java.nio.file.Path)`, including constructor names.
   Require a single exact manifest owner and compare ordered application prefixes;
   never substring-match method/owner names.
-- [ ] Other owner/native-only stays application_unavailable; present wrong or
+- [x] Other owner/native-only stays application_unavailable; present wrong or
   reordered same-owner application prefix rejects. Preserve application_route_prefix
   scope and false lifetime/production qualification.
-- [ ] Run candidate/driver race tests, then retained C1/C2/G1 packet revalidation.
+- [x] Run candidate/driver race tests, then retained C1/C2/G1 packet revalidation.
 
 ## Task3: Failure-preserving remote ownership (R3)
 

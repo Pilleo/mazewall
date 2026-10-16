@@ -9,7 +9,7 @@ target_modules: [profiler]
 target_files:
   - "experiments/hotspot-agentless/internal/candidate/verify.go"
 target_symbols:
-  - "verify"
+  - "routeMatches"
 open_questions: false
 ---
 
@@ -20,6 +20,10 @@ Review reproduces WrongFixture.leafCorrupt and WrongFixture.routeACorrupt counte
 
 **Needed:**
 1. Add false-useful route reproductions and parse exact owner method names before ordered comparison
+
+**Execution:** Exact renderer owner/method and ordered-prefix regressions now pass
+in the Go verifier; see [remediation evidence](../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
+Retained packet revalidation remains required before archival.
 
 ---
 <!-- id: issue-20261005-212825-569-match-exact-candidate-application-methods-instead-  file: issue-20261005-212825-569-match-exact-candidate-application-methods-instead-.md -->

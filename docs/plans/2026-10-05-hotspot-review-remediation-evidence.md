@@ -20,5 +20,28 @@ remains historical evidence, not a description of retired Python tooling today.
 - Focused `go test -race ./internal/candidate ./internal/driver` passed17tests
   (`run-12008fe47c6e`). These are host parsing/identity checks, not live lifetime proof.
 
-R2/R3/R4, retained/live evidence revalidation and final gates remain in progress.
+R1 committed as `05c0503b`. Its full commit gate passes on installed Ubuntu
+OpenJDK25 (`run-912f155266ca`). GraalVM hit the independently retained executable
+mapping denial tracked by [the existing enforcer issue](../internals/backlog/issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md);
+no policy, assertion or hook was disabled.
+
+## R2: Exact application method prefixes
+
+- Red `run-f74f8841c849` reproduced useful1 for a different owner, malformed
+  renderer display, leafCorrupt/routeACorrupt and acceptance of mixed manifest owners.
+- The shared matcher now parses an exact renderer owner/method (including
+  constructors), validates one manifest owner and compares the ordered prefix.
+  Other-owner/native-only frames remain application_unavailable, not useful.
+- Candidate/driver race checks pass26tests (`run-c2aa8f32188b`).
+- Retained native packets exposed legitimate empty function names on unresolved
+  native frames (381/415/355 in C1/C2/G1). The boundary now distinguishes a present
+  empty string from missing/null names, preserving native-only outcomes. Its red
+  regression is `run-c1d299054b37`; all27candidate/driver race tests pass
+  (`run-ed22107aac8b`).
+- Hardened CLI revalidation on the prepared pinned Go graph preserves all40marked
+  tokens: C1 useful28/unavailable12 (`run-1d8dc96bf25c`), C2 useful31/unavailable9
+  (`run-424b43c207ba`), interpreter/G1 useful26/unavailable14 (`run-72f4d7b472f6`).
+  All lifetime flags remain false. Original captures/manifests were read-only.
+
+R3/R4, retained/live evidence revalidation and final gates remain in progress.
 Production qualification and whole-collection policy completeness remain false.

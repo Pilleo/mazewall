@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const completeRowsJSON = `[{"schema_version":1,"kind":"event","session_id":"s","event_id":"s:0:1","event":{"session_id":"s","event_id":"s:0:1","host_pid":123,"host_tid":124,"process_start_ticks":456,"clock_domain":"CLOCK_BOOTTIME","event_kind":"openat_handler_entry","capture_boot_ns":0,"filename":"/fixture/A"}},{"schema_version":1,"kind":"enrichment","session_id":"s","event_id":"s:0:1","evidence":{"attribution":"event_correlated","frames":[{"function_name":"Fixture.leaf"},{"function_name":"Fixture.routeA"}]}},{"schema_version":1,"kind":"collector_attached","session_id":"s"},{"schema_version":1,"kind":"session_summary","session_id":"s","summary":{"enrichment":{"received":1,"resolved":1,"unavailable":0,"skipped":0},"terminal_accounting_complete":true}}]`
+const completeRowsJSON = `[{"schema_version":1,"kind":"event","session_id":"s","event_id":"s:0:1","event":{"session_id":"s","event_id":"s:0:1","host_pid":123,"host_tid":124,"process_start_ticks":456,"clock_domain":"CLOCK_BOOTTIME","event_kind":"openat_handler_entry","capture_boot_ns":0,"filename":"/fixture/A"}},{"schema_version":1,"kind":"enrichment","session_id":"s","event_id":"s:0:1","evidence":{"attribution":"event_correlated","frames":[{"function_name":"void Fixture.leaf(java.nio.file.Path)"},{"function_name":"void Fixture.routeA(java.nio.file.Path)"}]}},{"schema_version":1,"kind":"collector_attached","session_id":"s"},{"schema_version":1,"kind":"session_summary","session_id":"s","summary":{"enrichment":{"received":1,"resolved":1,"unavailable":0,"skipped":0},"terminal_accounting_complete":true}}]`
 
 func TestRuntimeRequiresWholeCaptureIdentityAndPairing(t *testing.T) {
 	manifest := decode[RuntimeManifest](t, runtimeManifestJSON)
@@ -24,12 +24,15 @@ func TestRuntimeRequiresWholeCaptureIdentityAndPairing(t *testing.T) {
 		{`"process_start_ticks":456`, `"process_start_ticks":457`},
 		{`"capture_boot_ns":0,`, ``},
 		{`"filename":"/fixture/A"`, `"filename":null`},
-		{`"function_name":"Fixture.leaf"`, `"function_name":null`},
+		{`"function_name":"void Fixture.leaf(java.nio.file.Path)"`, `"function_name":null`},
 		{`"clock_domain":"CLOCK_BOOTTIME"`, `"clock_domain":"CLOCK_MONOTONIC"`},
 		{`"resolved":1`, `"resolved":0`},
 		{`"terminal_accounting_complete":true`, `"terminal_accounting_complete":false`},
 	} {
-		rows := decode[[]Record](t, strings.Replace(completeRowsJSON, change[0], change[1], 1))
+		var rows []Record
+		if err := json.Unmarshal([]byte(strings.Replace(completeRowsJSON, change[0], change[1], 1)), &rows); err != nil {
+			continue
+		}
 		if _, err := VerifyRuntime(manifest, rows); err == nil {
 			t.Errorf("accepted corrupt %v", change)
 		}

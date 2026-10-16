@@ -74,11 +74,6 @@ func validateCapture(rows []Record, target TargetIdentity) (captureIndex, error)
 				if evidence == nil || evidence.Frames == nil || len(evidence.Frames) > maxCaptureFrames {
 					return index, fmt.Errorf("missing or excessive terminal frames")
 				}
-				for _, frame := range evidence.Frames {
-					if frame.FunctionName == "" {
-						return index, fmt.Errorf("missing frame name")
-					}
-				}
 				if _, found := index.terminals[row.EventID]; found {
 					return index, fmt.Errorf("duplicate terminal")
 				}

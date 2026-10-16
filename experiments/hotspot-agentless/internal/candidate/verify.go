@@ -7,13 +7,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"unicode/utf8"
 )
 
 type Frame struct {
 	FunctionName string `json:"function_name"`
 }
+
+func (f *Frame) UnmarshalJSON(data []byte) error {
+	var value struct {
+		FunctionName *string `json:"function_name"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	if value.FunctionName == nil {
+		return fmt.Errorf("missing frame name")
+	}
+	// Empty names are valid unresolved native frames, never application matches.
+	f.FunctionName = *value.FunctionName
+	return nil
+}
+
 type Evidence struct {
 	Attribution string  `json:"attribution"`
 	Frames      []Frame `json:"frames"`
@@ -82,20 +98,28 @@ type VirtualVerdict struct {
 	ProductionQualified bool `json:"production_qualified"`
 }
 
+var methodDisplay = regexp.MustCompile(`^(?:[^\s]+\s+)?([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\.([A-Za-z_$][A-Za-z0-9_$]*|<init>|<clinit>)\([^)]*\)$`)
+
 func routeMatches(frames []Frame, expected []string) (bool, error) {
 	if len(expected) == 0 {
 		return false, fmt.Errorf("missing expected application route")
 	}
-	first := expected[0]
-	owner := first
-	if index := strings.LastIndex(first, "."); index >= 0 {
-		owner = first[:index]
+	first := methodDisplay.FindStringSubmatch(expected[0] + "()")
+	if first == nil {
+		return false, fmt.Errorf("invalid expected method")
 	}
-	owner += "."
+	owner := first[1]
+	for _, name := range expected {
+		parsed := methodDisplay.FindStringSubmatch(name + "()")
+		if parsed == nil || parsed[1] != owner || parsed[1]+"."+parsed[2] != name {
+			return false, fmt.Errorf("invalid or mixed expected owners")
+		}
+	}
 	var application []string
 	for _, frame := range frames {
-		if strings.Contains(frame.FunctionName, owner) {
-			application = append(application, frame.FunctionName)
+		parsed := methodDisplay.FindStringSubmatch(frame.FunctionName)
+		if parsed != nil && parsed[1] == owner {
+			application = append(application, parsed[1]+"."+parsed[2])
 		}
 	}
 	if len(application) == 0 {
@@ -105,7 +129,7 @@ func routeMatches(frames []Frame, expected []string) (bool, error) {
 		return false, fmt.Errorf("wrong or reordered application route")
 	}
 	for index, name := range expected {
-		if !strings.Contains(application[index], name) {
+		if application[index] != name {
 			return false, fmt.Errorf("wrong or reordered application route")
 		}
 	}
