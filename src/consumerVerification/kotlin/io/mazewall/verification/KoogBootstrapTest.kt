@@ -53,7 +53,8 @@ class KoogBootstrapTest {
                 val projects = Regex("(?m)^project '(:[^']+)' - ").findAll(default.substringAfterLast("Project locations:\n")).map { it.groupValues[1] }.toSet()
                 assertTrue(setOf(":enforcer", ":platform").all { it in projects }, "Missing actual projects listing")
                 assertFalse(":integrations:koog" in projects || ":demos:koog-contained-tool" in projects)
-                run("normal-producer-and-demo", wrapper + selected)
+                // The first real producer compiles codegen and libraries; projects only warmed configuration.
+                run("normal-producer-and-demo", wrapper + selected, timeout = Duration.ofMinutes(10))
                 assertTrue("source.buildSrc/build.gradle.kts=" in Files.readString(receipt))
                 assertTrue("source.profiler/src/main/" in Files.readString(receipt))
                 val resource = root.resolve("portals/codegen/src/main/resources/task10-freshness-probe.txt")

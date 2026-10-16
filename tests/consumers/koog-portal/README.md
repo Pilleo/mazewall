@@ -114,8 +114,9 @@ must not admit the second stage; each failure must propagate its original output
 and nonzero status. The exclusion cases add real Kotlin source and require rejection of direct
 excluded/conditionally skipped compilation plus all supported wrapper exclusion
 forms before the selected stage, preserving the immediately preceding valid receipt.
-The initial cold build runs the mandatory buildSrc checks before root configuration;
-its timeout is ten minutes, subsequent commands have four-minute bounds, and the
+The initial cold configuration and first real two-stage producer both have ten-minute
+setup windows: listing projects does not compile the codegen/library closure. Warm
+subsequent commands have four-minute bounds, and the
 suite has a thirty-minute deadline on its owning cleanup thread. It remains an
 explicit, non-cacheable acceptance task.
 

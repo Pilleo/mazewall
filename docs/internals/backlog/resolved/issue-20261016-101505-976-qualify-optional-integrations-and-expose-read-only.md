@@ -1,7 +1,7 @@
 ---
 title: "Qualify optional integrations and expose read-only execution diagnostics"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -26,7 +26,7 @@ target_symbols: []
 open_questions: false
 ---
 
-# 🟡 [Severity: MEDIUM]: Qualify optional integrations and expose read-only execution diagnostics
+# Resolved: Qualify optional integrations and expose read-only execution diagnostics
 
 **Context:**
 Operator approved all four follow-ups after PR533: fix Koog strict dependency verification and Spring configuration-cache capture, add optional integration CI/publication, refresh guides/showcases, and implement read-only lifecycle/admission/cancellation/retirement/identity diagnostics with optional Spring Actuator exposure.
@@ -70,7 +70,7 @@ Operator approved all four follow-ups after PR533: fix Koog strict dependency ve
 
 ## Diagnostics checkpoint
 
-- Added the maintained [read-only diagnostics contract](../designs/core/execution-diagnostics.md).
+- Added the maintained [read-only diagnostics contract](../../designs/core/execution-diagnostics.md).
   The ABI adds only immutable diagnostic models/source and the domain observation
   method; existing declarations remain present. Prepared Portal operations retain
   their original package-private constructor and expose no public constructor.
@@ -122,8 +122,8 @@ Operator approved all four follow-ups after PR533: fix Koog strict dependency ve
   instructions. Existing JUnit stories now assert real ready/held-draining/closed
   diagnostics and optional Actuator absence against published artifacts. Reference,
   anchor and Bash-syntax checks passed for 18 relative links (`run-3c3e28979da7`).
-- Full source-bound native/package acceptance and the final included-module build
-  remain completion gates; implementation wiring is not claimed as a native pass.
+- At this checkpoint, full source-bound native/package acceptance and the final
+  included-module build remained outstanding; their final results are recorded below.
 
 ## Cold-gate and connected-review corrections
 
@@ -167,8 +167,45 @@ Operator approved all four follow-ups after PR533: fix Koog strict dependency ve
   (`run-dfd4d9540e18`). The earlier mistyped manual revision is a rejected input,
   not an accepted producer or a library failure.
 - These continuations retain the exact published producer and separately modified
-  consumer inputs. The final combined gate must still execute automatically on
-  the final committed source before completion.
+  consumer inputs. Final acceptance below additionally executes the combined gate
+  automatically on the committed implementation checkpoint.
+
+## Final local acceptance
+
+- Immutable library/consumer checkpoint **P =
+  `4edb465fd2cc014f5c9b1af886dd4f0931271172`**. Later harness-timeout/backlog metadata
+  does not relabel this producer, its artifacts or native receipts.
+- Full **`build` with both optional integrations included** passed in **7m4s**
+  (`run-6b517f055232`), preserving ABI, lint/static analysis, coverage and kernel gates.
+- Actual **`optionalIntegrationCheck` passed in 9m59s**, one owning JUnit case with
+  zero failures/errors/skips. Candidate `0.1.0-integration.4edb465fd2cc`, source-bound
+  evidence under `/tmp/mazewall-consumer-bootstrap-130149253302231107/checkout/optional-integration-evidence`.
+  All automatic phase checks passed: producer identity, real publications, opaque
+  worker package, new-coordinate locks, strict fresh Koog native, ordinary-JAR
+  JDBC/Security, finished-Boot showcase and complete Boot ownership/negative matrix.
+  The opaque native-fixture worker contains 13 JARs and no host frameworks; original
+  checkout/source integrity is asserted by the actual owning harness.
+- The supplementary existing bootstrap fault suite first exhausted its four-minute
+  first-producer setup limit after the producer itself succeeded in 3m48s. The cold
+  configuration case had not compiled that closure. Only the first real two-stage
+  producer received the same ten-minute cold-setup window; warm bounds and failure
+  controls remain unchanged. The complete suite then **passed in 15m27s**
+  (`run-9fba04cdb40f`): 29 named CLI cases plus the direct exclusion case,
+  production/native package variants, no failures/errors/skips.
+- Persisted successful combined/bootstrap XML and phase counts were rechecked
+  (`run-6fb83d6f2520`). The externally interrupted bootstrap attempt has no accepted
+  completion receipt and is not counted as a pass.
+- One connected-code review produced the actual-archive and early-singleton fixes
+  above; the final native/publication and bootstrap gates cover their relevant
+  boundaries. No production containment downgrade or retry/fallback was added.
+- Final issue archival passes both `adkw check-backlog` and Gradle
+  `validateBacklogIndex`; all 215 relative links in the canonical index and three
+  resolved issues exist. The local execution plan and raw receipts remain untracked.
+
+This resolves the approved local implementation and engineering acceptance scope.
+Hosted PR review/CI and actual credentialed master publication remain their normal
+separate delivery boundary. Production reviewer/launch/cgroup authority, hardware
+prerequisites and independent human comprehension are not invented or closed.
 
 ---
 <!-- id: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only  file: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md -->

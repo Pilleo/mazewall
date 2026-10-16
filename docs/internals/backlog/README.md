@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 144 | *Total Resolved Issues:* 694
+*Total Active Issues:* 141 | *Total Resolved Issues:* 697
 
-Active status detail: 143 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 140 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,7 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only](issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md) | Qualify optional integrations and expose read-only execution diagnostics | high | core |
+| Archived [issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only](resolved/issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md) | Qualify optional integrations and expose read-only execution diagnostics | high | core |
 | [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |
 | Archived [issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi](resolved/issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi.md) | Recover broker cleanup regression controls from historical worktrees | high | core |
 | [issue-20261016-015032-003-repair-first-time-library-installation-guidance](issue-20261016-015032-003-repair-first-time-library-installation-guidance.md) | Repair first-time library installation guidance | high | core |
@@ -85,8 +85,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261013-005317-053-make-supervised-agent-ssrf-controls-deterministic-](issue-20261013-005317-053-make-supervised-agent-ssrf-controls-deterministic-.md) | Make supervised agent SSRF controls deterministic and local | high | demos |
 | Archived [issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out](resolved/issue-20261013-005317-374-derive-web-exploit-report-verdicts-from-actual-out.md) | Derive web exploit report verdicts from actual outcomes | high | demos |
 | Archived [issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta](resolved/issue-20261013-005317-622-repair-owned-profile-first-vulnerable-web-demo-sta.md) | Repair owned profile-first vulnerable web demo startup | high | demos |
-| [issue-20261013-005317-886-expose-a-clear-deterministic-koog-portal-presentat](issue-20261013-005317-886-expose-a-clear-deterministic-koog-portal-presentat.md) | Expose Koog Portal features through readable JUnit showcase tests | medium | demos |
-| [issue-20261013-005318-218-make-spring-jdbc-and-context-integration-understan](issue-20261013-005318-218-make-spring-jdbc-and-context-integration-understan.md) | Make Spring JDBC and context integration understandable on stage | medium | demos |
+| Archived [issue-20261013-005317-886-expose-a-clear-deterministic-koog-portal-presentat](resolved/issue-20261013-005317-886-expose-a-clear-deterministic-koog-portal-presentat.md) | Expose Koog Portal features through readable JUnit showcase tests | medium | demos |
+| Archived [issue-20261013-005318-218-make-spring-jdbc-and-context-integration-understan](resolved/issue-20261013-005318-218-make-spring-jdbc-and-context-integration-understan.md) | Make Spring JDBC and context integration understandable on stage | medium | demos |
 | [issue-20261013-005318-577-show-owned-invocation-admission-cancellation-and-p](issue-20261013-005318-577-show-owned-invocation-admission-cancellation-and-p.md) | Show owned invocation admission cancellation and physical drain | medium | demos |
 | [issue-20261013-005318-944-align-presentation-deck-and-demo-guidance-with-cur](issue-20261013-005318-944-align-presentation-deck-and-demo-guidance-with-cur.md) | Align presentation deck and demo guidance with current feature evidence | high | docs |
 | [issue-20261013-005319-256-rehearse-the-complete-feature-tour-with-an-unfamil](issue-20261013-005319-256-rehearse-the-complete-feature-tour-with-an-unfamil.md) | Rehearse the complete feature tour with an unfamiliar developer | high | demos |
