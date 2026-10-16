@@ -18,7 +18,7 @@ type captureIndex struct {
 }
 
 // Validate the complete stream before oracle selection, including carrier-only rows.
-func validateCapture(rows []Record, target TargetIdentity) (captureIndex, error) {
+func validateCapture(rows []Record, target targetIdentity) (captureIndex, error) {
 	index := captureIndex{events: map[string]Event{}, terminals: map[string]Evidence{}}
 	if target.PID == 0 || target.PID > math.MaxInt32 || target.StartTicks == 0 || len(rows) == 0 || len(rows) > maxCaptureRows {
 		return index, fmt.Errorf("invalid capture target/row count")
@@ -60,9 +60,6 @@ func validateCapture(rows []Record, target TargetIdentity) (captureIndex, error)
 				}
 				if event.ClockDomain != "CLOCK_BOOTTIME" || event.EventKind != "openat_handler_entry" || event.CaptureBootNS == nil {
 					return index, fmt.Errorf("unsupported event/clock")
-				}
-				if event.Filename == "" {
-					return index, fmt.Errorf("missing event path")
 				}
 				if _, found := index.events[row.EventID]; found {
 					return index, fmt.Errorf("duplicate event")

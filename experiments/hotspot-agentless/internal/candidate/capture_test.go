@@ -118,6 +118,24 @@ func TestCaptureNumericTypesAndOracleIdentityAreStrict(t *testing.T) {
 	}
 }
 
+func TestEmptyOpenatPathIsNotAMissingPathField(t *testing.T) {
+	rows := decode[[]Record](t, strings.Replace(completeRowsJSON, `"filename":"/fixture/A"`, `"filename":""`, 1))
+	if _, err := validateCapture(rows, virtualTarget); err != nil {
+		t.Fatalf("valid empty pathname attempt rejected: %v", err)
+	}
+	if _, err := VerifyRuntime(RuntimeManifest{PID: 123, StartTicks: 456, Tokens: map[string][]string{"": {"Fixture.leaf", "Fixture.routeA"}}}, rows); err == nil {
+		t.Error("relative/empty expected token path accepted")
+	}
+	for _, replacement := range []string{`"filename":null`, `"unused":0`} {
+		var rows []Record
+		if err := json.Unmarshal([]byte(strings.Replace(completeRowsJSON, `"filename":"/fixture/A"`, replacement, 1)), &rows); err == nil {
+			if _, err := validateCapture(rows, virtualTarget); err == nil {
+				t.Errorf("missing/null pathname accepted: %s", replacement)
+			}
+		}
+	}
+}
+
 func TestCaptureFileRequiresNewlineAndBoundedRows(t *testing.T) {
 	root := t.TempDir()
 	manifest := filepath.Join(root, "manifest.json")

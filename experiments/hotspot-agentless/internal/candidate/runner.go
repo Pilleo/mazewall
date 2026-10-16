@@ -147,7 +147,7 @@ func runCase(docker candidateDocker, c candidateCase, assets, out, classes strin
 	if err != nil {
 		return nil, err
 	}
-	if err := driver.WriteJSON(filepath.Join(root, "identity.json"), TargetIdentity{PID: uint32(pid), StartTicks: ticks, FixtureRoot: root}); err != nil {
+	if err := driver.WriteJSON(filepath.Join(root, "identity.json"), targetIdentity{PID: uint32(pid), StartTicks: ticks, FixtureRoot: root}); err != nil {
 		return nil, err
 	}
 	flags, flagsErr := docker.Output(20*time.Second, "exec", target, "jcmd", strconv.Itoa(pid), "VM.flags", "-all")

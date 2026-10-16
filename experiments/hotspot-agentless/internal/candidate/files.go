@@ -65,7 +65,7 @@ func VerifyFiles(virtual bool, oraclePath, capturePath string) (any, error) {
 		return nil, err
 	}
 	if virtual {
-		var target TargetIdentity
+		var target targetIdentity
 		if err := driver.ReadJSON(filepath.Join(filepath.Dir(oraclePath), "identity.json"), &target); err != nil {
 			return nil, fmt.Errorf("independent virtual identity: %w", err)
 		}

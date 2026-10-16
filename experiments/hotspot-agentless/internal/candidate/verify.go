@@ -43,7 +43,7 @@ type ThreadIdentity struct {
 	ParentAvailable *bool   `json:"parent_available"`
 }
 type Event struct {
-	Filename      string
+	Filename      string          `json:"filename"`
 	SessionID     string          `json:"session_id"`
 	EventID       string          `json:"event_id"`
 	ClockDomain   string          `json:"clock_domain"`
@@ -54,6 +54,23 @@ type Event struct {
 	TID           uint32          `json:"host_tid"`
 	Identity      *ThreadIdentity `json:"thread_identity"`
 }
+
+func (e *Event) UnmarshalJSON(data []byte) error {
+	type payload Event
+	value := struct {
+		*payload
+		Filename *string `json:"filename"`
+	}{payload: (*payload)(e)}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	if value.Filename == nil {
+		return fmt.Errorf("missing event path")
+	}
+	e.Filename = *value.Filename
+	return nil
+}
+
 type Record struct {
 	SchemaVersion int `json:"schema_version"`
 	Kind          string
@@ -69,7 +86,7 @@ type captureSummary struct {
 	TerminalAccountingComplete *bool `json:"terminal_accounting_complete"`
 }
 type terminalCounters struct{ Received, Resolved, Unavailable, Skipped *uint64 }
-type TargetIdentity struct {
+type targetIdentity struct {
 	PID         uint32 `json:"pid"`
 	StartTicks  uint64 `json:"start_ticks"`
 	FixtureRoot string `json:"fixture_root"`
@@ -138,12 +155,17 @@ func routeMatches(frames []Frame, expected []string) (bool, error) {
 
 func VerifyRuntime(manifest RuntimeManifest, rows []Record) (RuntimeVerdict, error) {
 	result := RuntimeVerdict{Scope: "application_route_prefix"}
-	index, err := validateCapture(rows, TargetIdentity{PID: manifest.PID, StartTicks: manifest.StartTicks})
+	index, err := validateCapture(rows, targetIdentity{PID: manifest.PID, StartTicks: manifest.StartTicks})
 	if err != nil {
 		return result, err
 	}
 	if len(manifest.Tokens) == 0 {
 		return result, fmt.Errorf("empty token manifest")
+	}
+	for path := range manifest.Tokens {
+		if !filepath.IsAbs(path) {
+			return result, fmt.Errorf("expected token path must be absolute")
+		}
 	}
 	seen := map[string]bool{}
 	for key, event := range index.events {
@@ -182,7 +204,7 @@ func VerifyRuntime(manifest RuntimeManifest, rows []Record) (RuntimeVerdict, err
 	return result, nil
 }
 
-func VerifyVirtual(oracle map[string]VirtualOracle, rows []Record, target TargetIdentity) (VirtualVerdict, error) {
+func VerifyVirtual(oracle map[string]VirtualOracle, rows []Record, target targetIdentity) (VirtualVerdict, error) {
 	var result VirtualVerdict
 	index, err := validateCapture(rows, target)
 	if err != nil {

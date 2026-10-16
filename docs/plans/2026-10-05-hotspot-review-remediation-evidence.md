@@ -110,5 +110,29 @@ is inferred.
   This remains isolated selected-producer qualification, not the default Gadget
   owner binding or all-source completeness proof.
 
-Final review/documentation/quality gates remain in progress.
+## Scoped connected-code review
+
+Reviewed capture/file/manifest boundaries, both verifier callers, runner publication,
+owned create/start/wait/retire and the shared helper's benchmark caller, plus native
+Aggregate and its actual kernel consumer. Expected load is one explicit six-case
+qualification invocation with bounded rows/frames and a small owned container set.
+Codanna impact output was partial (index missing); direct caller inspection supplied
+the connected-code evidence.
+
+The scoped review caught empty openat pathnames being conflated with absent fields
+(red `run-edcd231ffb1d`). Typed JSON presence now permits a present empty string,
+while missing/null rejects; independently expected runtime token paths must remain
+absolute (red `run-eccf5768b679`). New target context visibility is package-private.
+The complete prepared experimental Go host/race suite passes158tests in18packages
+(`run-6442fdc7539a`). Production HotSpot readout/wire/compatibility tests and both
+ABI gates pass (`run-6cc465599fa5`); formatting/static analysis use the current
+Gradle build because the old lint script was retired by the baseline migration.
+
+The unchanged benchmark caller still loses ambiguous acquisition requests when
+Docker returns an error; its known-ID cleanup benefits from the shared fix, but
+acquisition needs the separate [registered follow-up](../internals/backlog/issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md).
+The existing GraalVM/late-executable-mapping issue also remains open. No additional
+blocking defect remains within the four-finding remediation scope.
+
+Final documentation/quality gates remain in progress.
 Production qualification and whole-collection policy completeness remain false.

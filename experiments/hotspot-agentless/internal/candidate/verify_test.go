@@ -13,7 +13,7 @@ const runtimeRowsJSON = completeRowsJSON
 const virtualOracleJSON = `{"vt-7-3-A":{"logical_id":7,"route":["Fixture.leaf","Fixture.routeA"]}}`
 
 var virtualRowsJSON = strings.Replace(runtimeRowsJSON, `"filename":"/fixture/A"`, `"filename":"/fixture/vt-7-3-A","thread_identity":{"scope":"mounted_virtual","source":"candidate_native","logical_id":7,"object_lease":true,"mount_capture":1,"mount_decode":1,"parent_available":false}`, 1)
-var virtualTarget = TargetIdentity{PID: 123, StartTicks: 456, FixtureRoot: "/fixture"}
+var virtualTarget = targetIdentity{PID: 123, StartTicks: 456, FixtureRoot: "/fixture"}
 
 func decode[T any](t *testing.T, value string) T {
 	t.Helper()
