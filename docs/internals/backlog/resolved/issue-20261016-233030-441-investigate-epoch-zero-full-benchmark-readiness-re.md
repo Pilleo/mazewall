@@ -1,7 +1,7 @@
 ---
 title: "Investigate epoch-zero full benchmark readiness refusal"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -20,6 +20,17 @@ Actual pinned Temurin Xint/Serial benchmark runs run-cd82fdd7f2a2 and run-a67ba1
 
 **Needed:**
 1. Isolate the fixture/capture epoch-zero precondition with pinned native evidence and distinguish valid conservative refusal from a missing initial epoch contract; preserve readiness/enrichment budgets, exact attribution and failure propagation.
+
+**Resolution:** The numerical epoch was not invalid. The approved epoch contract
+explicitly permits stable0; the native error's0denotes Unknown validation state.
+The short preparations retain only kernel frames and no checked Java definition.
+Pre-attachment allocation warmup cannot prime this later capture pipeline.
+Using the existing post-attachment preparation10000 within its existing bounds
+produces the first checked Java route at sequence123, still at epoch0;9877of10000
+preparation records and all32measured operations are checked/correct with zero
+missing/wrong operations. Both real owners and the attached client retire cleanly.
+No provider, fixture, timeout, buffer, default or epoch validation was changed.
+See [native diagnosis and artifacts](../../../plans/2026-10-17-hotspot-benchmark-ownership-evidence.md#readiness-diagnosis-follow-on).
 
 ---
 <!-- id: issue-20261016-233030-441-investigate-epoch-zero-full-benchmark-readiness-re  file: issue-20261016-233030-441-investigate-epoch-zero-full-benchmark-readiness-re.md -->

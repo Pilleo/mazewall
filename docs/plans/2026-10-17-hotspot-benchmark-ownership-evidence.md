@@ -112,3 +112,44 @@ recursive active/resolved totals checked (`run-0dc3cd4c4124`).
 
 Scoped changes are prepared for the operator-requested local integration. No
 remote publication or wider runtime/lifetime/completeness promotion is inferred.
+
+## Readiness diagnosis follow-on
+
+The ownership continuation integrates by fast-forward toaf23d12d; exact tree
+comparison passes (`run-26c8b259cd52`). Subsequent read-only diagnosis resolves the
+separate readiness investigation without changing native behavior or fixture
+calibration defaults.
+
+The approved [epoch design](2026-10-01-agentless-hotspot-epoch-design.md#2-versioned-capture-evidence)
+explicitly permits stable epoch0. `ResolveStructured` refuses a definition whose
+identity/validation is Unknown, returning HotSpotEpochUnknown; the error's0is that
+state, not a prohibition on the captured numerical epoch. Both retained short
+preparations contain only kernel/kernel/kernel frames (or one missing reference),
+so they cannot prove any checked Java route. Pre-attachment allocation warmup
+does not establish readiness in a collector attached afterward.
+
+One isolated existing-option check keeps warmup32 and changes only the existing
+post-attachment preparation to10000, within its10000operation bound. It passes
+full mode (`run-cb104199079e`, artifacts
+`experiments/hotspot-agentless/build/benchmark.1acc47ae/full-0/`):
+
+- First checked preparation sequence123, still at epoch0;9877checked Java
+  preparation records,121unavailable and2missing references (`run-5cc94066e33b`).
+- All32measured operations succeed and are observed with32correct application
+  segments,0unavailable,0wrong and0missing operations. Observed throughput798.40
+  ops/s is a single paced measurement, not a comparison/threshold.
+- readiness-before-measurement.json records ready=true, route0 and checked epoch0.
+  This proves native stable0support and distinguishes it from cold Unknown validation.
+- Target/collector exit normally; cleanup records2actual receipts,1joined client,
+  resources_retired=true, no failures and no pending owners. Publication follows
+  that proof. Terminal accounting is complete while collection_loss_complete=false
+  and definition/buffer/auxiliary completeness stay partial.
+- Recorded platform is7.2.10-x64v3-xanmod1, pinned Temurin image119a3d18,
+  gadget3ae6007b, patch618c3d67, experimental helper
+  SHA8b60b952a7a177b1a9420d5e23f3a2866e1b1d0bc40d2bfc30473b01e43cef32.
+
+The cold failures remain retained and valid negative controls. The longer
+preparation is one explicit diagnostic, not a guaranteed readiness duration or a
+new default. No epoch/readiness/enrichment condition, timeout, buffer, provider,
+fixture or runtime whitelist is changed. The investigation is archived on this
+evidence; final canonical counts are137active (136open/1deferred),704resolved.

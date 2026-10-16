@@ -185,6 +185,13 @@ Readiness failure remains an error even when all resources are subsequently reti
 Explicit create/start requests are part of startup/readiness timing; the measured
 target workload window is unchanged.
 
+Full-mode attachment alone does not certify a checked Java route. A short explicit
+post-attachment preparation can conservatively fail while process/definition
+metadata is still cold. Stable epoch0is valid; Unknown validation is not. Keep the
+refusal and calibrate the existing `--post-attach-warmup` option within its bounds;
+the [native diagnosis](../../docs/plans/2026-10-17-hotspot-benchmark-ownership-evidence.md#readiness-diagnosis-follow-on)
+records one successful bounded preparation without changing defaults or deadlines.
+
 ```bash
 DOCKER_HOST=unix:///var/run/docker.sock make benchmark-fixture benchmark-report build
 COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock bash scripts/run-benchmark.sh \
