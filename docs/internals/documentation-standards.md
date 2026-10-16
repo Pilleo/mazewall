@@ -67,28 +67,17 @@ To maintain a clear relationship graph of how JVM code coordinates with native s
 
 ## 5. File Structure Inspection Tool
 
-To avoid reading hundreds of lines of code just to understand the API surface or method layout of a source file, the repository provides a lightweight outline/structure tool.
+Use the existing ADK source-evidence command to inspect a large or unfamiliar source file.
 
 ### Usage:
-Run the Kotlin script passing the path to any file:
+Run the wrapper with the file or class name:
 ```bash
-# Kotlin files: outlines classes, objects, functions, properties
-kotlin scripts/file_structure.main.kts enforcer/src/main/kotlin/io/mazewall/enforcer/ContainedExecutors.kt
-
-# Markdown: outlines heading hierarchy
-kotlin scripts/file_structure.main.kts docs/internals/designs/enforcer/containment-design.md
-
-# YAML/YML: outlines top-level and second-level keys
-kotlin scripts/file_structure.main.kts .github/workflows/ci.yml
-
-# XML: outlines top-level element tags
-kotlin scripts/file_structure.main.kts config/seccomp-profile.xml
-
-# JSON: outlines top-level keys
-kotlin scripts/file_structure.main.kts sbob.json
+./scripts/adkw slice enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt --json
+./scripts/adkw symbol-source enforcer/src/main/kotlin/io/mazewall/enforcer/api/ContainedExecutors.kt ContainedExecutors --json
 ```
 
-This returns a clean, hierarchical tree allowing both human developers and agents to immediately grasp the file's structure without reading its full contents.
+Honor the result's provenance: `PARTIAL` or `UNAVAILABLE` is not parser-verified evidence.
+Use direct reads for short, already-understood files and documentation.
 
 ---
 
@@ -117,4 +106,3 @@ internal fun installFilter(arch: Arch, prog: MemorySegment, useTsync: Boolean) {
     ...
 }
 ```
-

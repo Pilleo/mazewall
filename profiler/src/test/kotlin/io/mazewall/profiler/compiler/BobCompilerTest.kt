@@ -1,14 +1,24 @@
 package io.mazewall.profiler.compiler
-
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.ValueSource
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -42,7 +52,7 @@ class BobCompilerTest {
         val bob = BobCompiler.compile(events)
 
         // Transpile to Policy
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
 
         // Verify unrestricted syscalls
         // PURE_COMPUTE blocks CONNECT, OPEN, OPENAT. They should be unrestricted now.
@@ -56,12 +66,12 @@ class BobCompilerTest {
         assertTrue(policy.allowedFsWritePaths.any { it.value == "/tmp/new-dir" }, "Should contain write path")
 
         // Compile to DSL
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         println("Generated DSL:\n$dsl")
 
         val expectedDsl =
             """
-val policy = Policy.threadLocalBuilder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .unblock(
         Syscall.CONNECT,
@@ -81,7 +91,7 @@ val policy = Policy.threadLocalBuilder()
     @Test
     fun `test empty events returns unmodified base policy`() {
         val bob = BobCompiler.compile(emptyList())
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
 
         assertFalse(policy.isSyscallAllowed(Syscall.CONNECT))
         assertFalse(policy.isSyscallAllowed(Syscall.MKDIR))
@@ -89,10 +99,10 @@ val policy = Policy.threadLocalBuilder()
         assertTrue(policy.allowedFsReadPaths.isEmpty())
         assertTrue(policy.allowedFsWritePaths.isEmpty())
 
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         val expectedDsl =
             """
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .build()
             """.trimIndent()
@@ -112,10 +122,10 @@ val policy = Policy.builder()
         val bob = BobCompiler.compile(events)
 
         // Generate DSL - GETPID should not be listed as unrestricted since PURE_COMPUTE does not block it.
-        val dsl = bob.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val dsl = bob.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         val expectedDsl =
             """
-val policy = Policy.builder()
+val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE_UNSAFE)
     .build()
             """.trimIndent()
@@ -127,11 +137,13 @@ val policy = Policy.builder()
     fun `test OPENAT2 and AT variants categorization`() {
         val events =
             listOf(
-                TraceEvent(
-                    12345,
-                    "OPENAT2",
-                    longArrayOf(0, 0, 0x12345678, 0, 0, 0), // args[2] is a pointer
-                    listOf("/tmp/openat2-test.txt"),
+                TraceEvent.Open(
+                    tid = Tid(12345),
+                    syscallName = "OPENAT2",
+                    path = "/tmp/openat2-test.txt",
+                    flags = O_WRONLY,
+                    mode = 0,
+                    openFlagsEvidence = OpenFlagsEvidence.Complete(O_WRONLY),
                 ),
                 TraceEvent(
                     12345,
@@ -155,11 +167,37 @@ val policy = Policy.builder()
 
         val bob = BobCompiler.compile(events)
 
-        assertTrue(bob.opens.contains("/tmp/openat2-test.txt"), "OPENAT2 without flags is not a proven write")
+        assertTrue(bob.fsWritePaths.contains("/tmp/openat2-test.txt"), "OPENAT2 complete write evidence should be retained")
         assertTrue(bob.fsWritePaths.contains("/tmp/deleted-file.txt"), "UNLINKAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-subdir"), "MKDIRAT should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/old-name"), "RENAMEAT2 should be treated as write")
         assertTrue(bob.fsWritePaths.contains("/tmp/new-name"), "RENAMEAT2 target should be treated as write")
+    }
+
+    @Test
+    fun `direct compilation rejects missing and incomplete open flags evidence`() {
+        val correlation = ObservationCorrelation(7, Tid(8))
+        val observations = listOf(
+            ProfileObservation.Syscall(
+                correlation,
+                ObservationSource.STRACE,
+                "OPENAT2",
+                paths = listOf("/tmp/missing"),
+            ),
+            ProfileObservation.Syscall(
+                correlation,
+                ObservationSource.STRACE,
+                "OPENAT2",
+                paths = listOf("/tmp/incomplete"),
+                openFlagsEvidence = OpenFlagsEvidence.Incomplete(0, setOf("open_how.flags")),
+            ),
+        )
+
+        for (observation in observations) {
+            assertFailsWith<IllegalArgumentException>(observation.toString()) {
+                BobCompiler.compileObservations(listOf(observation))
+            }
+        }
     }
 
     @Test
@@ -233,14 +271,14 @@ val policy = Policy.builder()
         "OPEN, 2, true, false", // O_RDWR
         "OPEN, 64, true, false", // O_CREAT
         "OPEN, 512, true, false", // O_TRUNC
-        "OPEN, 16777216, false, false", // O_PATH (0x01000000)
+        "OPEN, 2097152, false, false", // Linux O_PATH (octal 010000000)
         // OPENAT variants (flags at arg index 2)
         "OPENAT, 0, false, true", // O_RDONLY
         "OPENAT, 1, true, false", // O_WRONLY
         "OPENAT, 2, true, false", // O_RDWR
         "OPENAT, 64, true, false", // O_CREAT
         "OPENAT, 512, true, false", // O_TRUNC
-        "OPENAT, 16777216, false, false", // O_PATH (0x01000000)
+        "OPENAT, 2097152, false, false", // Linux O_PATH (octal 010000000)
     )
     fun `test OPEN and OPENAT flags classification`(
         syscallName: String,
@@ -296,7 +334,7 @@ val policy = Policy.builder()
 
     @Test
     fun `test OPEN and OPENAT with O_PATH flag does not grant read or write permissions`() {
-        val oPath = 0x01000000L
+        val oPath = 0x00200000L
         val events = listOf(
             TraceEvent(
                 tidValue = 1,
@@ -326,7 +364,7 @@ val policy = Policy.builder()
         assertFalse(bob.fsWritePaths.contains("/secret/open-path"), "O_PATH observation must not be added to fsWritePaths")
         assertTrue(bob.opens.contains("/readable/path"), "O_RDONLY must be added to opens")
 
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
         assertFalse(policy.allowedFsReadPaths.any { it.value == "/secret/path" })
         assertFalse(policy.allowedFsReadPaths.any { it.value == "/secret/open-path" })
         assertTrue(policy.allowedFsReadPaths.any { it.value == "/readable/path" })
@@ -334,29 +372,34 @@ val policy = Policy.builder()
 
     @Test
     fun `test mutating io_uring operations are classified as fsWritePaths`() {
-        val corr = io.mazewall.profiler.ObservationCorrelation(tgid = 1, tid = io.mazewall.core.Tid(1))
+        val corr = io.mazewall.profiler.api
+            .ObservationCorrelation(
+                tgid = 1,
+                tid = io.mazewall.platform.lifecycle
+                .Tid(1),
+            )
         val observations = listOf(
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_WRITE",
                 paths = listOf("/tmp/mutated.txt"),
             ),
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_UNLINKAT",
                 paths = listOf("/tmp/deleted.txt"),
             ),
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_RENAMEAT",
                 paths = listOf("/tmp/renamed.txt"),
             ),
-            io.mazewall.profiler.ProfileObservation.IoUring(
+            io.mazewall.profiler.api.ProfileObservation.IoUring(
                 correlation = corr,
-                source = io.mazewall.profiler.ObservationSource.EBPF,
+                source = io.mazewall.profiler.api.ObservationSource.EBPF,
                 opcode = "IORING_OP_OPENAT",
                 paths = listOf("/tmp/opened.txt"),
             ),

@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": "0x4d5a2026",
+  "paired_unit": "fork",
+  "expected_forks": 15,
+  "declared_operations": 75000,
+  "rows": 106,
+  "complete_forks": 14,
+  "incomplete": [
+    {
+      "fork": 1,
+      "arm": "unexpected-arm",
+      "reason": "unexpected_arm"
+    }
+  ],
+  "incomplete_reasons": [
+    "unexpected_arm"
+  ],
+  "modes": {
+    "full-stream": {
+      "pairs": {
+        "baseline": 14,
+        "v1": 14,
+        "v2": 14,
+        "hybrid": 14
+      },
+      "complete_forks": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 14,
+          "median": 14.819349393192809,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 14,
+          "median": 14.296726190476189,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 14,
+          "median": 14.50412087912088,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 14,
+          "median": 75125000000,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 14,
+          "median": 74625000000,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 14,
+          "median": 75365000000,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 14,
+        "median": 1.0090430103552506,
+        "upper_95": null,
+        "status": "INCONCLUSIVE",
+        "reasons": [
+          "insufficient_pairs",
+          "invalid_run"
+        ]
+      }
+    },
+    "unique-edge": {
+      "pairs": {
+        "baseline": 14,
+        "v1": 14,
+        "v2": 14,
+        "hybrid": 14
+      },
+      "complete_forks": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 14,
+          "median": 14.448106636271529,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 14,
+          "median": 14.234637791286726,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 14,
+          "median": 14.364554076411066,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 14,
+          "median": 74515000000,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "v2": {
+          "pairs": 14,
+          "median": 73760000000,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        },
+        "hybrid": {
+          "pairs": 14,
+          "median": 74505000000,
+          "upper_95": null,
+          "status": "INCONCLUSIVE",
+          "reasons": [
+            "insufficient_pairs",
+            "invalid_run"
+          ]
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 14,
+        "median": 0.988207439994917,
+        "upper_95": null,
+        "status": "INCONCLUSIVE",
+        "reasons": [
+          "insufficient_pairs",
+          "invalid_run"
+        ]
+      }
+    }
+  },
+  "metrics_status": "INCONCLUSIVE",
+  "existing_gates_note": "diagnostic only; does not replace the combined CPU 1.25 or receipt-p99 gates",
+  "prior_adoption_decision": "REJECT_DEFAULT_PROMOTION",
+  "policy_eligibility": false
+}

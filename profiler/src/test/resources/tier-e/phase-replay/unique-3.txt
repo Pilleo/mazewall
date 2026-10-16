@@ -1,0 +1,37 @@
+UpdateCTestConfiguration  from :/workspace/profiler-native/build/DartConfiguration.tcl
+Test project /workspace/profiler-native/build
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 21
+    Start 21: agent_phase_comparable_unique
+
+21: Test command: /opt/java/openjdk/bin/java "-agentpath:/workspace/profiler-native/build/libmazewall_stack_agent.so=benchmark-phases,mode=unique-stack-syscall,definitions=/workspace/profiler-native/build/tier-e-comparable-unique.mzsd" "-cp" "/workspace/profiler-native/build/agent-test-classes" "AgentWorkload" "0" "platform" "100"
+21: Working Directory: /workspace/profiler-native/build
+21: Test timeout computed to be: 10000000
+21: agent-workload: workloadNs=53074927
+21: mazewall-stack-agent: native-binds=248 proxied-binds=4 stack-captures=514 stack-failures=0 scope-failures=0 definitions=written capture-yield=disabled capture-yield-dropped=0
+21: mazewall-stack-agent: capture-profile-binding=unix-open0 admitted=202 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=unix-openat0 admitted=0 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=unix-close0 admitted=0 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=unix-unlink0 admitted=1 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=file-read0 admitted=211 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=file-write0 admitted=100 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=file-close-int-fd admitted=0 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=socket-read0 admitted=0 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=socket-write0 admitted=0 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=net-socket0 admitted=0 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=net-connect0 admitted=0 excluded=0
+21: mazewall-stack-agent: capture-profile-binding=net-accept admitted=0 excluded=0
+21: tier-e-benchmark: stack_transport=dictionary get_stack_trace_ns=2256437 raw_key_ns=15686 raw_hash_ns=155018 raw_equality_ns=132954 generation_validation_ns=27111 guard_validation_ns=205948 canonical_cache_lock_wait_ns=25686 logical_metadata_ns=538149 phase_contract_version=2 canonical_cache_lookup_ns=852496 emission_mode=unique-stack-syscall marker_set_ns=18163 marker_clear_ns=60263 serialization_ns=654650 publication_bytes=35985 publication_latency_ns=1129939 publication_cpu_ns=881576 lock_wait_ns=784 peak_retained_bytes=58136 native_retained_bytes=80091 native_retention_exhaustions=0 publication_count=1 coalesced_publications=0 failed_publications=0 cache_hits=504 cache_misses=10 metadata_cache_hits=112 metadata_cache_misses=68 marker_admission_clear_ns=21813 marker_exact_set_ns=18163 marker_exit_clear_ns=19229 marker_admission_clear_count=514 marker_exact_set_count=514 marker_exit_clear_count=514
+1/1 Test #21: agent_phase_comparable_unique ....   Passed    0.09 sec
+
+The following tests passed:
+	agent_phase_comparable_unique
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.09 sec

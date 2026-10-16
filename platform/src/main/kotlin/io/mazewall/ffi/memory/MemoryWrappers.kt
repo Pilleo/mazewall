@@ -1,7 +1,7 @@
 package io.mazewall.ffi.memory
 
-import io.mazewall.core.threadLocal
 import io.mazewall.ffi.Layouts
+import io.mazewall.platform.lifecycle.threadLocal
 import java.lang.foreign.Arena
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.MemorySegment
@@ -16,7 +16,7 @@ private val JAVA_LONG_NATIVE = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrde
  * Type-safe wrapper for `struct sock_filter`.
  */
 @JvmInline
-public value class SockFilterSegment(
+internal value class SockFilterSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -58,7 +58,7 @@ public value class SockFilterSegment(
  * Type-safe wrapper for `struct sock_fprog`.
  */
 @JvmInline
-public value class SockFprogSegment(
+internal value class SockFprogSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -88,7 +88,7 @@ public value class SockFprogSegment(
  * Type-safe wrapper for `struct landlock_ruleset_attr`.
  */
 @JvmInline
-public value class LandlockRulesetAttrSegment(
+internal value class LandlockRulesetAttrSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -122,7 +122,7 @@ public value class LandlockRulesetAttrSegment(
  * Type-safe wrapper for `struct landlock_path_beneath_attr`.
  */
 @JvmInline
-public value class LandlockPathBeneathAttrSegment(
+internal value class LandlockPathBeneathAttrSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -150,7 +150,7 @@ public value class LandlockPathBeneathAttrSegment(
  * Type-safe wrapper for `struct pollfd`.
  */
 @JvmInline
-public value class PollFdSegment(
+internal value class PollFdSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -184,7 +184,7 @@ public value class PollFdSegment(
  * Type-safe wrapper for errno capture state.
  */
 @JvmInline
-public value class ErrnoSegment(
+internal value class ErrnoSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -192,13 +192,29 @@ public value class ErrnoSegment(
     public fun getErrno(): Int = segment.get(JAVA_INT_NATIVE, Layouts.ERRNO_OFFSET)
 
     public companion object {
-        private val threadLocalSegment by threadLocal { Arena.global().allocate(Layouts.ERRNO) }
+        private val carrierPool = ThreadLocal.withInitial {
+            if (Thread.currentThread().isVirtual) {
+                null
+            } else {
+                Arena.global().allocate(Layouts.ERRNO)
+            }
+        }
 
         /**
-         * Returns a thread-local [ErrnoSegment] used to capture native call errors.
-         * This avoids expensive [Arena.ofConfined] allocations in high-frequency loops.
+         * Runs [block] with native errno capture state whose lifetime cannot escape the call.
+         *
+         * Carrier threads reuse a process-lifetime global segment. Virtual threads receive a
+         * confined segment backed by a lexical arena because a confined segment cannot safely be
+         * pooled or transferred between virtual-thread executions.
          */
-        public fun getThreadLocal(): ErrnoSegment = ErrnoSegment(threadLocalSegment)
+        internal inline fun <T> withCapturedState(block: (ErrnoSegment) -> T): T {
+            if (!Thread.currentThread().isVirtual) {
+                return block(ErrnoSegment(checkNotNull(carrierPool.get())))
+            }
+            return NativeArena.ofConfined().use { arena ->
+                block(ErrnoSegment(arena.arena.allocate(Layouts.ERRNO)))
+            }
+        }
 
         context(arena: Arena) public fun allocate(): ErrnoSegment = ErrnoSegment(arena.allocate(Layouts.ERRNO))
     }
@@ -208,7 +224,7 @@ public value class ErrnoSegment(
  * Type-safe wrapper for `struct seccomp_notif_addfd`.
  */
 @JvmInline
-public value class SeccompNotifAddFdSegment(
+internal value class SeccompNotifAddFdSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -254,7 +270,7 @@ public value class SeccompNotifAddFdSegment(
  * Type-safe wrapper for `struct iovec`.
  */
 @JvmInline
-public value class IovecSegment(
+internal value class IovecSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -282,7 +298,7 @@ public value class IovecSegment(
  * Type-safe wrapper for `struct msghdr`.
  */
 @JvmInline
-public value class MsghdrSegment(
+internal value class MsghdrSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -338,7 +354,7 @@ public value class MsghdrSegment(
  * Type-safe wrapper for `struct cmsghdr`.
  */
 @JvmInline
-public value class CmsghdrSegment(
+internal value class CmsghdrSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -376,7 +392,7 @@ public value class CmsghdrSegment(
  * Type-safe wrapper for `struct sockaddr_un`.
  */
 @JvmInline
-public value class SockaddrUnSegment(
+internal value class SockaddrUnSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -398,7 +414,7 @@ public value class SockaddrUnSegment(
  * Type-safe wrapper for supervisor response packet (header + optional exec path).
  */
 @JvmInline
-public value class SupervisorResponseSegment(
+internal value class SupervisorResponseSegment(
     public val segment: MemorySegment,
 ) {
     public val managed: ManagedSegment get() = ConfinedSegment(segment)
@@ -450,63 +466,63 @@ public value class SupervisorResponseSegment(
     }
 }
 
-public fun MemorySegment.readByte(offset: Long): Byte = this.get(ValueLayout.JAVA_BYTE, offset)
+internal fun MemorySegment.readByte(offset: Long): Byte = this.get(ValueLayout.JAVA_BYTE, offset)
 
-public fun MemorySegment.writeByte(
+internal fun MemorySegment.writeByte(
     offset: Long,
     value: Byte,
 ) {
     this.set(ValueLayout.JAVA_BYTE, offset, value)
 }
 
-public fun MemorySegment.readShort(offset: Long): Short = this.get(JAVA_SHORT_NATIVE, offset)
+internal fun MemorySegment.readShort(offset: Long): Short = this.get(JAVA_SHORT_NATIVE, offset)
 
-public fun MemorySegment.writeShort(
+internal fun MemorySegment.writeShort(
     offset: Long,
     value: Short,
 ) {
     this.set(JAVA_SHORT_NATIVE, offset, value)
 }
 
-public fun MemorySegment.readInt(offset: Long): Int = this.get(JAVA_INT_NATIVE, offset)
+internal fun MemorySegment.readInt(offset: Long): Int = this.get(JAVA_INT_NATIVE, offset)
 
-public fun MemorySegment.writeInt(
+internal fun MemorySegment.writeInt(
     offset: Long,
     value: Int,
 ) {
     this.set(JAVA_INT_NATIVE, offset, value)
 }
 
-public fun MemorySegment.readIntUnaligned(offset: Long): Int = this.get(ValueLayout.JAVA_INT_UNALIGNED, offset)
+internal fun MemorySegment.readIntUnaligned(offset: Long): Int = this.get(ValueLayout.JAVA_INT_UNALIGNED, offset)
 
-public fun MemorySegment.writeIntUnaligned(
+internal fun MemorySegment.writeIntUnaligned(
     offset: Long,
     value: Int,
 ) {
     this.set(ValueLayout.JAVA_INT_UNALIGNED, offset, value)
 }
 
-public fun MemorySegment.readLong(offset: Long): Long = this.get(JAVA_LONG_NATIVE, offset)
+internal fun MemorySegment.readLong(offset: Long): Long = this.get(JAVA_LONG_NATIVE, offset)
 
-public fun MemorySegment.writeLong(
+internal fun MemorySegment.writeLong(
     offset: Long,
     value: Long,
 ) {
     this.set(JAVA_LONG_NATIVE, offset, value)
 }
 
-public fun MemorySegment.readLongUnaligned(offset: Long): Long = this.get(ValueLayout.JAVA_LONG_UNALIGNED, offset)
+internal fun MemorySegment.readLongUnaligned(offset: Long): Long = this.get(ValueLayout.JAVA_LONG_UNALIGNED, offset)
 
-public fun MemorySegment.writeLongUnaligned(
+internal fun MemorySegment.writeLongUnaligned(
     offset: Long,
     value: Long,
 ) {
     this.set(ValueLayout.JAVA_LONG_UNALIGNED, offset, value)
 }
 
-public fun MemorySegment.readAddress(offset: Long): MemorySegment = this.get(ValueLayout.ADDRESS, offset)
+internal fun MemorySegment.readAddress(offset: Long): MemorySegment = this.get(ValueLayout.ADDRESS, offset)
 
-public fun MemorySegment.writeAddress(
+internal fun MemorySegment.writeAddress(
     offset: Long,
     value: MemorySegment,
 ) {
@@ -518,35 +534,35 @@ private val JAVA_INT_BE_UNALIGNED = ValueLayout.JAVA_INT.withOrder(java.nio.Byte
 private val JAVA_LONG_BE = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN)
 private val JAVA_LONG_BE_UNALIGNED = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.BIG_ENDIAN).withByteAlignment(1)
 
-public fun MemorySegment.writeIntBigEndian(
+internal fun MemorySegment.writeIntBigEndian(
     offset: Long,
     value: Int,
 ) {
     this.set(JAVA_INT_BE, offset, value)
 }
 
-public fun MemorySegment.writeIntBigEndianUnaligned(
+internal fun MemorySegment.writeIntBigEndianUnaligned(
     offset: Long,
     value: Int,
 ) {
     this.set(JAVA_INT_BE_UNALIGNED, offset, value)
 }
 
-public fun MemorySegment.writeLongBigEndian(
+internal fun MemorySegment.writeLongBigEndian(
     offset: Long,
     value: Long,
 ) {
     this.set(JAVA_LONG_BE, offset, value)
 }
 
-public fun MemorySegment.writeLongBigEndianUnaligned(
+internal fun MemorySegment.writeLongBigEndianUnaligned(
     offset: Long,
     value: Long,
 ) {
     this.set(JAVA_LONG_BE_UNALIGNED, offset, value)
 }
 
-public fun getSystemStrerror(errno: Int): String? {
+internal fun getSystemStrerror(errno: Int): String? {
     val linker = java.lang.foreign.Linker
         .nativeLinker()
     val stdlib = linker.defaultLookup()

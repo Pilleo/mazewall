@@ -1,0 +1,179 @@
+# MazeWall external HotSpot collector assets
+
+This is the single canonical Go collector source tree. Kotlin evidence and local
+asset admission/readiness decisions are internal integration components behind the
+explicit public strategy. The approved [integration plan](../../docs/superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md)
+is complete; whole-session coverage remains incomplete.
+
+For versioned offline distribution, license/corresponding-source inventory,
+library/protocol pairing and the compiled installed example, see
+[operator guidance](../HOTSPOT_AGENTLESS.md#versioned-offline-distribution).
+`:profiler:distHotSpotAssets` packages existing verified local assets; prepared
+native source/cache and Go are required only for this optional packaging task.
+The versioned output destination must not already exist.
+
+The engine retains its historical `io.mazewall/experiments/hotspot-agentless`
+module namespace for Go `internal` compatibility. The experiment now carries an
+explicit physical source snapshot and local preparation/build tooling with recorded
+provenance; canonical runtime changes require deliberate snapshot updates.
+Ordinary Kotlin builds have no dependency on these Make
+targets or the Go/Docker toolchains.
+
+## Explicit build, verification and installation
+
+```bash
+# Go 1.26 and an explicitly configured rootful Docker builder are needed at build time.
+DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:buildHotSpotAssets
+./gradlew :profiler:verifyHotSpotAssets
+./gradlew :profiler:installHotSpotAssets -PhotSpotAssetsDirectory=/absolute/new/assets-directory
+```
+
+The equivalent Make commands are `make bundle`, `make verify-bundle`, and
+`make install DESTDIR=/absolute/new/assets-directory` in this directory.
+Installation verifies first, stages in an owned temporary sibling, then publishes
+to a new destination using Linux atomic no-replace rename. Existing destinations,
+including empty directories created during publication, are refused. Serialize installation
+with any other operator modifying that directory. To rebuild changed source into
+the fixed `build/assets` output, first move aside that owned generated bundle.
+
+The bundle contains `mw-hotspot-collector`, `manifest.json` and an isolated `oci/`
+layout containing exactly the pinned gadget's reachable descriptor/config/BPF
+blobs. It does not depend on the builder's personal `~/.ig` cache after export.
+The collector's native profiler BPF objects are embedded in its executable.
+The pinned Go image produces a static Linux-amd64 executable; the pinned Gadget
+builder builds the gadget. `SOURCE_DATE_EPOCH=1790985600` fixes OCI creation metadata,
+and `-trimpath -buildvcs=false` removes worktree paths/status from the executable.
+All dependency module sums, root replacements and zero-fuzz overlays are preserved.
+Release collector builds also use Go linker `-s -w`: ELF debug information and
+the external symbol table are omitted to reduce bytes hashed by interpreter
+admission. Go runtime/build metadata and embedded profiler BPF objects remain.
+Debugger-oriented builds can omit those flags explicitly; they are separate from
+the release artifact. Source/license archives remain complete. Verify real release
+artifacts with `go run ./cmd/mw-collector-tools footprint --baseline <baseline> --candidate <candidate>`.
+This verifies the actual prepared-source identity and generated native hashes,
+stripped/static ELF layout and embedded Go provenance.
+Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
+
+The current verified overlay identity is
+`618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c`.
+Moving the rebuild driver's pinned-image lookup from Python to Go changes its
+hashed source bytes. Older `e908…` bundles and recorded lifecycle projections keep
+their historical identity; current asset/protocol admission requires the rebuilt
+bundle. The generated native layouts and both architecture BPF objects remain
+byte-identical across this tooling-only transition.
+
+`manifest.json` locks collector version 2, production wire schema 2, capture ABI 2, Linux-amd64,
+upstream revisions and the verified overlay fingerprint. Every listed file has a
+SHA-256 checksum. Verification bounds the manifest to 64 KiB, 256 files and 512 MiB,
+rejects symbolic/traversing paths, missing/incomplete files, digest/size mismatches,
+unsupported versions and unlisted transitive OCI data. Kotlin admission also
+bounds JSON depth. The manifest is trusted distribution/operator input, **not a
+signature or protection against an operator replacing the manifest and files**.
+The operator owns the directory and must keep it stable during validation/use.
+
+Asset maintenance uses the existing Go owner:
+
+```bash
+go run ./cmd/mw-collector-tools pack --collector build/mw-hotspot-collector \
+  --store "$HOME/.ig/oci-store" --image "$(cat build/gadget-image.ref)" --output /absolute/new/bundle
+go run ./cmd/mw-collector-tools verify --bundle /absolute/existing/bundle
+go run ./cmd/mw-collector-tools install --bundle /absolute/existing/bundle --output /absolute/new/install
+go run ./cmd/mw-collector-tools release --bundle /absolute/existing/bundle \
+  --output /absolute/new/release.tar.gz --library-version 0.1.0-SNAPSHOT
+```
+
+The optional Gradle tasks declare compilation of this tool from its sources and
+pins. Verify/install do not construct native assets; distribution uses existing
+verified prepared source. Root and adjacent archive checksums cover every release
+file, selected-module notices and reproducible corresponding-source archives.
+
+## Offline local loader
+
+The actual Gadget API is `WithOrasReadonlyTarget`, backed by an ORAS local OCI
+store. Use the full `ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@sha256:...`
+reference: Gadget normalizes bare names before resolving. The image name is a
+local lookup key and does not cause network access. `internal/capture/store.go` adapts the full image reference to a digest-only
+local resolution and rejects a different reference. Fetching stays within that
+store. Missing data fails; there is no registry fallback, compilation or automatic
+privilege escalation in the capture path.
+
+An explicitly privileged external launch against an ordinary target uses:
+
+```bash
+/absolute/assets/mw-hotspot-collector --capture --pid HOST_PID \
+  --store /absolute/assets/oci --image ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@sha256:DIGEST_FROM_MANIFEST \
+  --protocol-version=2 --hotspot-identity=safepoint-epoch --drain-full --duration 60s
+```
+
+Select the launch authority yourself. This command cannot change an existing
+JVM's startup settings. The initial strict profile admits the pinned Temurin25
+interpreter/SerialGC runtime only. Keep the target alive through final enrichment
+and drain. Stdout is JSONL; stderr is separate. Physical finalization does not
+prove whole-session loss completeness or produce an enforcement policy.
+
+## Production readiness and control (schema 2)
+
+Select `--protocol-version=2` explicitly. It requires the strict runtime/owned
+full-drain scope and verified enrichment bounds. Schema 1 remains the separately
+selected experimental/replay contract; it is not production readiness.
+
+`session_started` describes the requested PID/profile. `collector_ready` follows
+Gadget's successful OCI/ebpf Start (native readers/maps/link established), strict
+runtime discovery and a fresh target generation/pidfd/exec/fatal check. It carries
+host PID, start ticks, BOOTTIME clock/sample, exact JVM build/hash and provider pins.
+It does not wait for a useful Java stack; cold events may still be unavailable.
+Events from already-running target threads may precede ready. A failed startup
+does not emit ready. `collector_error` preserves diagnostics and native errno when
+available; an unjoined/blocked event writer cannot be safely used to append an error,
+so failed EOF/exit must also be handled. Summary/EOF alone never prove completion.
+
+SIGTERM and SIGINT both request the existing checked graceful drain. To bind a
+supervised child to its parent's pipe lifetime, also pass `--control-stdin`: keep
+stdin open through finalization, write exactly `stop\n` once to request drain,
+and close it on parent loss. EOF or malformed input aborts the independent owned
+native/enrichment lifetime. The bounded poll worker joins without closing borrowed
+stdin. Pipe lifetime guarantees apply when that option is configured; signal-only
+launches do not acquire a parent-death guarantee.
+
+Internal Kotlin `HotSpotSessionMachine` makes pure exhaustive state/effect decisions.
+Startup is bounded to 10 seconds, strict session lifetime to 60 seconds, and stop
+to at most two remaining seconds. One finish owner is retained through duplicate
+finish/close. Completion requires a verified healthy native summary, stdout EOF,
+stderr join and zero process exit; failures preserve causes and pending ownership.
+Internal JVM process/pipe supervision is implemented in milestone 4. Milestone 5
+exposes the [explicit public strategy/results/session](../HOTSPOT_AGENTLESS.md).
+
+## Owned Kotlin adapter (internal)
+
+`HotSpotBackend` verifies explicitly configured assets, reads the target birth
+generation through a testable identity trait, and launches through the existing
+`ProcessLauncher` with separate stdout/stderr. It selects schema 2 and parent stdin
+control automatically for that supervised child. Operator argv prefixes are
+immutable argument vectors; there is no shell interpolation or automatic sudo.
+The helper, rather than the parent's UID/capability probe, admits actual privileges
+and runtime. A configured wrapper must preserve stdin/EOF and wait for the actual
+collector, including aborts; detached/untracked descendants are outside that launch
+contract. Native success was verified with an explicit cached-image Docker wrapper.
+
+The parent owns asynchronous launch, stdout/stderr readers, process wait, finite
+timer, stop/abort and retirement tasks. Snapshots retain immutable paired evidence,
+separate pending occurrence/retention accounting, bounded stderr (64 KiB) and
+pending ownership. Retention limits continue accounting while dropping retained
+payloads. Stdout is bounded schema-2 JSONL; stderr is always drained even after its
+retention limit. Stops write exactly stop newline once and keep stdin open until
+child exit. Every worker must actually join and owned pipes must close successfully
+before resources-joined completion is admitted. A blocked launcher/reader/closer
+or failed close stays owned, exposes partial failure evidence and can be retried
+through the retained owner. Failed sessions do not become successful after cleanup.
+
+The internal ownership session supplies snapshot/finish/close. The additive public
+facade wraps it with immutable evidence and compatible result descriptors; AUTO,
+USER_NOTIF and recorded-EBPF behavior remain unchanged.
+
+## Verification
+
+`make unit` runs canonical race tests and local graph packaging/install controls.
+The [experiment harness](../../experiments/hotspot-agentless/README.md) runs the
+upstream race/native finalization/live attribution controls against this engine.
+Promotion does not broaden runtime, syscall, virtual-thread or loss guarantees.
+Release licensing/distribution and public API acceptance remain integration gates.

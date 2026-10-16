@@ -1,18 +1,28 @@
-package io.mazewall.profiler
+package io.mazewall.profiler.api
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.LinuxNative
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.asFd
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.NativeFileSystem
+import io.mazewall.platform.native.NativeMemory
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.compiler.BobCompiler
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.testing.awaitCondition
+import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
@@ -20,6 +30,54 @@ import kotlin.test.assertTrue
 
 @NeedsFreshJvm
 class ProfilerIntegrationTest : BaseIntegrationTest() {
+    @Test
+    fun `actual native CONNECT survives helper and daemon frames as an endpoint`() {
+        assertNativeConnect(false)
+    }
+
+    @Test
+    fun `first process-wide network profile completes in a cold owned JVM`() {
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedMethod(javaClass.name, "processWideNetworkBody")
+    }
+
+    @Suppress("unused")
+    fun processWideNetworkBody() = assertNativeConnect(true)
+
+    private fun assertNativeConnect(processWide: Boolean) {
+        val loopback = java.net.InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1))
+        java.net.ServerSocket(0, 1, loopback).use { server ->
+            server.soTimeout = 15_000
+            val accepted = java.util.concurrent.CompletableFuture<Int>()
+            val peer = Thread {
+                try {
+                    server.accept().use { accepted.complete(it.getInputStream().read()) }
+                } catch (failure: Exception) {
+                    accepted.completeExceptionally(failure)
+                }
+            }
+            peer.start()
+            try {
+                val result = Profiler.profile(processWide = processWide, captureStackTraces = false) {
+                    java.net.Socket().use { socket ->
+                        socket.connect(java.net.InetSocketAddress(loopback, server.localPort), 5_000)
+                        socket.getOutputStream().write(42)
+                    }
+                }
+                assertEquals(42, accepted.get(15, TimeUnit.SECONDS))
+                assertTrue(
+                    result.behavior.connects.contains(NetworkEndpoint("127.0.0.1", server.localPort)),
+                    "Actual destination must survive both native evidence boundaries: ${result.behavior.connects}",
+                )
+                assertTrue(result.coverage.complete, "Observed native network work must drain with decoded destinations: ${result.coverage.warnings}")
+            } finally {
+                server.close()
+                peer.join(15_000)
+                kotlin.test.assertFalse(peer.isAlive)
+            }
+        }
+    }
+
     companion object {
         @org.junit.jupiter.api.AfterAll
         @JvmStatic
@@ -32,9 +90,8 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         wrapped: Profiler.ProfilerExecutorWrapper,
         expectedCountAtLeast: Int,
     ) {
-        val start = System.currentTimeMillis()
-        while (wrapped.recentLogs.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
-            Thread.sleep(10)
+        awaitCondition(description = "profiler recorded at least $expectedCountAtLeast events") {
+            wrapped.recentLogs.size >= expectedCountAtLeast
         }
     }
 
@@ -42,9 +99,40 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         wrapped: Profiler.ProfilerExecutorWrapper,
         expectedCountAtLeast: Int,
     ) {
-        val start = System.currentTimeMillis()
-        while (wrapped.recentStackProfiles.size < expectedCountAtLeast && System.currentTimeMillis() - start < 3000) {
-            Thread.sleep(10)
+        awaitCondition(description = "profiler recorded at least $expectedCountAtLeast stack profiles") {
+            wrapped.recentStackProfiles.size >= expectedCountAtLeast
+        }
+    }
+
+    @Test
+    fun `retired native producer retains a complete stream before explicit session close`() {
+        val closed = CountDownLatch(1)
+        val actual = LinuxNative.snapshot()
+        val native = object : NativeEngine by actual {
+            override val fileSystem = object : NativeFileSystem by actual.fileSystem {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                    actual.fileSystem.close(fd).also { closed.countDown() }
+            }
+        }
+        val runtime = ProfilerRuntime.default().copy(native = native)
+        val service = ProfilerService(runtime)
+        val raw = Executors.newSingleThreadExecutor()
+        val wrapped = service.wrap(raw, false, Policy.PURE_COMPUTE_UNSAFE)
+        try {
+            assertTrue(wrapped.submit(Callable { File("/etc/hostname").readText() }).get(15, TimeUnit.SECONDS).isNotBlank())
+            raw.shutdown()
+            assertTrue(raw.awaitTermination(5, TimeUnit.SECONDS), "The actual traced worker must end")
+            assertTrue(closed.await(5, TimeUnit.SECONDS), "Observe the actual listener retiring before explicit close")
+            wrapped.shutdown()
+            val snapshot = wrapped.snapshot()
+            assertTrue(snapshot.behavior.opens.contains("/etc/hostname"))
+            assertTrue(snapshot.coverage.complete, "A retired producer must retain complete native evidence: ${snapshot.coverage.warnings}")
+        } finally {
+            raw.shutdownNow()
+            assertTrue(raw.awaitTermination(5, TimeUnit.SECONDS))
+            wrapped.shutdown()
+            service.shutdown()
+            runtime.daemonManager().stop()
         }
     }
 
@@ -70,6 +158,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
             "Should capture file open syscall. Observed: ${bob.syscalls}",
         )
         assertTrue(bob.opens.contains("/etc/hostname"), "Should contain opened path /etc/hostname")
+        assertTrue(result.coverage.complete, "A completed native file observation must drain: ${result.coverage.warnings}")
 
         // Assert that the stackProfile contains the syscall event and its stack trace has our test class name!
         assertTrue(bob.stackProfile.isNotEmpty(), "Stack profile should not be empty")
@@ -115,8 +204,8 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         val bob = result.behavior
 
         // Let's compile!
-        val compiledPolicy = result.toPolicy(Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
-        val dsl = result.toDsl("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE, allowIncomplete = true)
+        val compiledPolicy = result.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE)
+        val dsl = result.toDslAllowingIncomplete("Policy.PURE_COMPUTE_UNSAFE", Policy.PURE_COMPUTE_UNSAFE)
         println("Profiler compiled DSL:\n$dsl")
 
         // The compiled policy should have the open variant unblocked!
@@ -132,14 +221,14 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
         // The compiled policy should allow reading from /etc/hostname
         assertTrue(
             compiledPolicy.allowedFsReadPaths.contains(
-                io.mazewall.core.SandboxedPath
+                io.mazewall.platform.lifecycle.SandboxedPath
                 .of("/etc/hostname"),
             ),
             "Should contain read-path for /etc/hostname",
         )
 
         // Verify DSL has the correct builder and allowFsRead
-        assertTrue(dsl.contains("Policy.threadLocalBuilder()"))
+        assertTrue(dsl.contains("WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)"))
         assertTrue(dsl.contains("allowFsRead(\"/etc/hostname\")"))
     }
 
@@ -156,7 +245,7 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                     future.get(5, TimeUnit.SECONDS)
                 }
             assertTrue(ex.cause is IllegalStateException)
-            assertTrue(ex.cause?.message?.contains("virtual threads") == true)
+            assertTrue(ex.cause?.message?.contains("virtual thread") == true)
         } finally {
             vExecutor.shutdownNow()
         }
@@ -197,17 +286,21 @@ class ProfilerIntegrationTest : BaseIntegrationTest() {
                         java.lang.foreign.Arena.ofConfined().use { arena ->
                             val pathSeg = arena.allocateFrom(absolutePath)
                             val openRes =
-                            LinuxNative.fileSystem.open(ConfinedSegment(pathSeg), io.mazewall.core.OpenFlags(0))
+                            LinuxNative.fileSystem.open(
+                                ConfinedSegment(pathSeg),
+                                io.mazewall.platform.lifecycle
+                                .OpenFlags(0),
+                            )
 
                             if (openRes is LinuxNative.SyscallResult.Success) {
-                                val fd = openRes.asFd()
+                                val fd = openRes.getFdOrThrow("open profiler integration fixture")
                                 val fchmodNr = Syscall.FCHMOD.numberFor(Arch.current()).toLong()
                                 if (fchmodNr >= 0) {
 LinuxNative.raw.syscall(
     fchmodNr,
-    io.mazewall.core.NativeArg
+    io.mazewall.platform.syscall.NativeArg
         .FdArg(fd),
-    io.mazewall.core.NativeArg
+    io.mazewall.platform.syscall.NativeArg
         .IntArg(0x1FF),
 )
                                 }
@@ -308,7 +401,9 @@ LinuxNative.raw.syscall(
             tasks.forEach { it.get(5, TimeUnit.SECONDS) }
 
             awaitLogs(wrapped, 1)
-            Thread.sleep(200) // Allow any other concurrent events to be processed asynchronously
+            wrapped.shutdown()
+            assertTrue(wrapped.awaitTermination(5, TimeUnit.SECONDS), "profiled tasks terminated")
+            Profiler.shutdown() // Session close drains the listener before inspecting deduplication.
             val bob = wrapped.compileBillOfBehavior()
             // The number of OPEN/OPENAT events in recentLogs for /etc/hostname should be low
             // due to deduplication, even if triggered from different threads.
@@ -325,6 +420,7 @@ LinuxNative.raw.syscall(
         val pool = Executors.newSingleThreadExecutor()
         val wrapped = Profiler.wrap(pool, false, Policy.PURE_COMPUTE_UNSAFE)
         val latch = java.util.concurrent.CountDownLatch(1)
+        val releaseWork = java.util.concurrent.CountDownLatch(1)
         val finished =
             java.util.concurrent.atomic
                 .AtomicBoolean(false)
@@ -333,15 +429,19 @@ LinuxNative.raw.syscall(
             wrapped.submit(
                 Callable {
                     latch.countDown()
-                    Thread.sleep(1000) // Simulate long-running syscall or operation
+                    releaseWork.awaitOrFail("pending profiler task released after shutdown")
                     val text = File("/etc/hostname").readText()
                     finished.set(true)
                     text
                 },
             )
 
-        latch.await()
-        wrapped.shutdown() // Should not kill daemon immediately
+        try {
+            latch.awaitOrFail("profiled task started before shutdown")
+            wrapped.shutdown() // Should not kill daemon immediately
+        } finally {
+            releaseWork.countDown()
+        }
 
         val result = future.get(5, TimeUnit.SECONDS)
         assertTrue(result.isNotEmpty())
@@ -380,27 +480,31 @@ LinuxNative.raw.syscall(
 
     @Test
     fun `test profiler captures untracked background thread syscalls with sentinel stack trace`() {
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedMethod(javaClass.name, "untrackedDescendantBody")
+    }
+
+    @Suppress("unused")
+    fun untrackedDescendantBody() {
         val targetFile = File("/etc/hostname")
         assertTrue(targetFile.exists())
 
-        val result = try {
-            Profiler.profile(processWide = true, captureStackTraces = true) {
-                val thread = Thread {
-                    targetFile.readText()
+        val result = Profiler.profile(processWide = true, captureStackTraces = true) {
+            val read = java.util.concurrent.CompletableFuture<String>()
+            val thread = Thread {
+                try {
+                    read.complete(targetFile.readText())
+                } catch (failure: Throwable) {
+                    read.completeExceptionally(failure)
                 }
-                thread.start()
-                thread.join()
             }
-        } catch (e: IllegalStateException) {
-            // TSYNC can return a positive sibling tid (divergent filter / strict mode)
-            // instead of -1/EACCES. Fail-closed; do not treat that tid as success.
-            assertTrue(
-                e.message?.contains("EACCES") == true ||
-                    e.message?.contains("offending sibling tid") == true ||
-                    e.message?.contains("TSYNC") == true,
-                "unexpected process-wide failure: ${e.message}",
-            )
-            return
+            thread.start()
+            try {
+                assertTrue(read.get(5, TimeUnit.SECONDS).isNotBlank(), "Actual descendant I/O must succeed")
+            } finally {
+                thread.join(5_000)
+                kotlin.test.assertFalse(thread.isAlive, "The actual descendant must physically retire")
+            }
         }
 
         val bob = result.behavior

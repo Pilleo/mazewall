@@ -10,8 +10,8 @@ target_modules:
 - :profiler
 component: profiler
 effort: large
-paperclip_issue_id: "94169387-dad4-4560-9d74-e521ca3951bf"
-paperclip_identifier: "MAZ-1111"
+paperclip_issue_id: "13db7a55-3e68-4134-9ea7-280d93f144b6"
+paperclip_identifier: "MAZ-1409"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Refactor Profiler Daemon to use Coroutines (Structured Concurrency)

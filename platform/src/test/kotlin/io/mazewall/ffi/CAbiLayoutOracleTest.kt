@@ -1,5 +1,13 @@
 package io.mazewall.ffi
 
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -45,6 +53,7 @@ class CAbiLayoutOracleTest {
 
     private fun expectedLayouts(): Map<String, Long> =
         mapOf(
+        "flag.O_PATH" to NativeConstants.O_PATH.toLong(),
         "size.sock_filter" to Layouts.SOCK_FILTER_SIZE,
         "offset.sock_filter.code" to Layouts.SOCK_FILTER_CODE_OFFSET,
         "offset.sock_filter.jt" to Layouts.SOCK_FILTER_JT_OFFSET,

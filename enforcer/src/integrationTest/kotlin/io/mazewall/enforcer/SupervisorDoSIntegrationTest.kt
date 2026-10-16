@@ -1,11 +1,21 @@
 package io.mazewall.enforcer
 
-import io.mazewall.LinuxNative
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
 import io.mazewall.ffi.networking.SupervisorSocketUtils
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.testing.awaitCondition
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertTrue
@@ -21,18 +31,20 @@ class SupervisorDoSIntegrationTest {
         val socketPath = context.socketPath
 
         val baselineThreads = getThreadCount(pid)
+        val baselineDescriptors = getDescriptorCount(pid)
         System.err.println("Baseline threads for supervisor ($pid): $baselineThreads")
 
-        val connections = mutableListOf<Int>()
+        val connections = mutableListOf<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
         val numConnections = 250 // More than MAX_CONNECTIONS (200)
         try {
             for (i in 1..numConnections) {
-                val fd = SupervisorSocketUtils.connectWithRetry(socketPath)
+                val fd = SupervisorSocketUtils.connectDescriptorWithRetry(socketPath)
                 connections.add(fd)
             }
 
-            // Give it a moment to spawn threads
-            Thread.sleep(1000)
+            awaitCondition(description = "supervisor accepted its 200-connection capacity") {
+                getDescriptorCount(pid) >= baselineDescriptors + 200
+            }
 
             val currentThreads = getThreadCount(pid)
             System.err.println("Threads after $numConnections connections: $currentThreads")
@@ -46,7 +58,7 @@ class SupervisorDoSIntegrationTest {
             )
         } finally {
             connections.forEach {
-                LinuxNative.fileSystem.close(FileDescriptor.replace<FileDescriptorRole.UnixSocket>(it))
+                LinuxNative.fileSystem.close(it)
             }
             SupervisorDaemonManager.getInstance().stop()
         }
@@ -58,4 +70,6 @@ class SupervisorDoSIntegrationTest {
         val line = statusFile.readLines().find { it.startsWith("Threads:") } ?: return -1
         return line.substringAfter("Threads:").trim().toInt()
     }
+
+    private fun getDescriptorCount(pid: Long): Int = File("/proc/$pid/fd").list()?.size ?: -1
 }

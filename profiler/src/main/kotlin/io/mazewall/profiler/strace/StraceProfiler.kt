@@ -1,7 +1,7 @@
 package io.mazewall.profiler.strace
 
-import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.TraceableWorkload
+import io.mazewall.profiler.api.BillOfBehavior
+import io.mazewall.profiler.api.TraceableWorkload
 import java.io.File
 
 /**
@@ -24,15 +24,15 @@ import java.io.File
     message = "Use MazewallProfiler.open().use { it.profile { workload() } }. Descendant strace is not operator API.",
     replaceWith = ReplaceWith(
         "MazewallProfiler.open().use { it.profile { /* workload */ } }",
-        "io.mazewall.profiler.MazewallProfiler",
+        "io.mazewall.profiler.api.MazewallProfiler",
     ),
 )
-object StraceProfiler {
+internal object StraceProfiler {
     @Deprecated(
         message = "Use MazewallProfiler.profile { } for application work",
         replaceWith = ReplaceWith(
             "MazewallProfiler.open().use { it.profile { /* workload */ } }",
-            "io.mazewall.profiler.MazewallProfiler",
+            "io.mazewall.profiler.api.MazewallProfiler",
         ),
     )
     fun <T : TraceableWorkload> profile(workloadClass: Class<T>): BillOfBehavior {

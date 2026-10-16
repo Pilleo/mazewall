@@ -1,14 +1,22 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.core.Arch
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
 import io.mazewall.platform.seccomp.SupervisedKind
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
 import org.junit.jupiter.params.provider.MethodSource
+import org.junit.jupiter.params.provider.ValueSource
 import java.nio.file.Path
 import java.util.stream.Stream
 
@@ -44,34 +52,39 @@ internal class SupervisorNotificationMachineTest {
     }
 
     @Test
-    fun `custom supervised nr routes to AskJvm on fast path`() {
+    fun `custom supervised nr is denied before asking the JVM`() {
         val route = SupervisorNotificationMachine.evaluateFastPath(
-            SupervisorNotificationMachine.classify(io.mazewall.core.SyscallNumber(999_999), arch),
+            SupervisorNotificationMachine.classify(
+                io.mazewall.platform.lifecycle
+                .SyscallNumber(999_999),
+                    arch,
+            ),
             resolvedPath = null,
             rawPath = null,
         )
-        assertEquals(SupervisorRoute.AskJvm, route)
+        assertEquals(NativeConstants.EPERM, (route as SupervisorRoute.Abort).errno)
     }
 
     @Test
-    fun `open of a bypass path continues without asking the jvm`() {
+    fun `open of a bypass path injects the snapshot without resuming tracee pointers`() {
         val javaHome = Path.of(System.getProperty("java.home")).resolve("release")
         val route = SupervisorNotificationMachine.evaluateFastPath(
             SupervisedKind.Open,
             resolvedPath = javaHome,
             rawPath = javaHome.toString(),
         )
-        assertEquals(SupervisorRoute.Continue, route)
+        assertEquals(SupervisorRoute.InjectFd, route)
     }
 
-    @Test
-    fun `unresolved class file falls back to continue`() {
+    @ParameterizedTest
+    @ValueSource(strings = ["Foo.class", "../../secret.jar", "/tmp/attacker/META-INF/secret", "<YAMA_ERROR>.class", "/etc/shadow"])
+    fun `unresolved open path cannot acquire authority from a classloading suffix`(path: String) {
         val route = SupervisorNotificationMachine.evaluateFastPath(
             SupervisedKind.Open,
             resolvedPath = null,
-            rawPath = "Foo.class",
+            rawPath = path,
         )
-        assertEquals(SupervisorRoute.Continue, route)
+        assertEquals(NativeConstants.EPERM, (route as SupervisorRoute.Abort).errno)
     }
 
     @ParameterizedTest(name = "kind={0} verdict={1} -> {2}")
@@ -80,20 +93,20 @@ internal class SupervisorNotificationMachineTest {
         "Open,    Allow,    InjectFd",
         "Open,    InjectFd, InjectFd",
         "Accept,  Deny,     Abort",
-        "Accept,  Allow,    InjectFd",
-        "Accept,  InjectFd, InjectFd",
+        "Accept,  Allow,    Continue",
+        "Accept,  InjectFd, Continue",
         "Connect, Deny,     Abort",
         "Connect, Allow,    InjectFd",
         "Connect, InjectFd, InjectFd",
         "Exec,    Deny,     Abort",
         "Exec,    Allow,    SecureExec",
-        "Exec,    InjectFd, InjectFd",
+        "Exec,    InjectFd, Unsupported",
         "Spawn,   Deny,     Abort",
         "Spawn,   Allow,    Continue",
-        "Spawn,   InjectFd, InjectFd",
+        "Spawn,   InjectFd, Unsupported",
         "Unknown, Deny,     Abort",
-        "Unknown, Allow,    Continue",
-        "Unknown, InjectFd, InjectFd",
+        "Unknown, Allow,    Unsupported",
+        "Unknown, InjectFd, Unsupported",
     )
     fun `test evaluateJvm routing table`(
         kindName: String,
@@ -114,6 +127,10 @@ internal class SupervisorNotificationMachineTest {
             else -> JvmVerdict.Deny(NativeConstants.EPERM)
         }
         val route = SupervisorNotificationMachine.evaluateJvm(kind, verdict)
+        if (expectedRouteType == "Unsupported") {
+            assertEquals(NativeConstants.EPERM, (route as SupervisorRoute.Abort).errno)
+            return
+        }
         val expectedRoute = when (expectedRouteType) {
             "Continue" -> SupervisorRoute.Continue
             "SecureExec" -> SupervisorRoute.SecureExec
@@ -127,6 +144,11 @@ internal class SupervisorNotificationMachineTest {
     @Test
     fun `unknown jvm decision code is deny EPERM`() {
         assertEquals(JvmVerdict.Deny(NativeConstants.EPERM), SupervisorNotificationMachine.parseJvmVerdict(99, 0))
+    }
+
+    @Test
+    fun `unknown jvm decision is represented before fail closed conversion`() {
+        assertEquals(JvmVerdictParse.Unknown(99), SupervisorNotificationMachine.decodeJvmVerdict(99, 0))
     }
 
     @ParameterizedTest(name = "{0} round-trips wire format")

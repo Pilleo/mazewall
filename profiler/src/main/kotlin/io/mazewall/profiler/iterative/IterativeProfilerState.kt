@@ -1,7 +1,7 @@
 package io.mazewall.profiler.iterative
 
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.Uncompiled
 
 /**
  * States representing the lifecycle of the IterativeProfiler learning loop.

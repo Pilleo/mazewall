@@ -12,9 +12,9 @@ class PathModulesTest {
             "platform",
             "enforcer",
             "profiler",
-            "portal",
-            "portal-codegen",
-            "portal-worker",
+            "portals/runtime",
+            "portals/codegen",
+            "portals/worker",
             "demos/cli-demo",
             "demos/vulnerable-web-app",
             "demos/agent-sandbox-demo",
@@ -35,9 +35,9 @@ class PathModulesTest {
 
     @Test
     fun `identity owns Gradle path and component`() {
-        val portal = requireNotNull(PathModules.identityFor("portal/src/main/kotlin/Portal.kt"))
+        val portal = requireNotNull(PathModules.identityFor("portals/runtime/src/main/kotlin/Portal.kt"))
 
-        assertEquals(":portal", portal.gradlePath)
+        assertEquals(":portals:runtime", portal.gradlePath)
         assertEquals("docs", portal.component)
     }
 }

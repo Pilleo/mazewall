@@ -1,12 +1,12 @@
 package io.mazewall.platform.seccomp
 
-import io.mazewall.MazewallInternal
-import io.mazewall.core.Arch
-import io.mazewall.core.SyscallNumber
+import io.mazewall.platform.lifecycle.MazewallInternal
+import io.mazewall.platform.lifecycle.SyscallNumber
+import io.mazewall.platform.syscall.Arch
 
 /** USER_NOTIF kinds shared by supervisor policy and profiler noise filtering. */
 @MazewallInternal
-public sealed interface SupervisedKind {
+internal sealed interface SupervisedKind {
     public data object Open : SupervisedKind
 
     public data object Connect : SupervisedKind

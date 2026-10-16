@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "status": "INCOMPLETE",
+  "policy_eligibility": false,
+  "source_revision": "005086b9f44e1419adf5ffc7fb33ed4ce8cb1af3",
+  "source_digest": "fca8801de88ce2bd89ddfb9559876d9072864681c761741478bc9a8833fc7306",
+  "kernel": "7.0.0-34-generic",
+  "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+  "original_agent_sha256": "ff1e640c079de05ba407eab963cfb8939553e7f49390e60fdb20645faa3f790a",
+  "diagnostic_agent_sha256": "9dafc1495eb42e7c554637b748087fcb7cc42e286d69fa8165776565aa923e76",
+  "planned_samples": 36,
+  "executed_samples": 1,
+  "failure_stage": "sample-01 parser after successful JVM",
+  "failure_reason": "Missing or duplicate timing diagnostic row: mazewall-stack-agent",
+  "sample_01_sha256": "a28856c78e837a791aaf83cd6b92ec025e240acf017ef158eb873bba966e3c3c",
+  "raw_archive_sha256": "cc95af67abf06a1754632853a22be6191178bb1f7faa95ccc54a11f1f3393570",
+  "run_id": "tier-e-timing-f2620dc9-6905-450b-bf26-d7f266748ab6",
+  "runner_retained": true,
+  "volume_retained": true
+}

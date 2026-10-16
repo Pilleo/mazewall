@@ -8,7 +8,7 @@ import java.lang.foreign.StructLayout
  * to ensure they match target ABI expectations.
  */
 
-object LayoutValidator {
+internal object LayoutValidator {
     fun validate() {
         validateLayout(Layouts.SOCK_FILTER, expectedSize = 8, expectedAlignment = 4) {
             assertOffset("code", 0)

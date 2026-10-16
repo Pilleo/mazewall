@@ -14,15 +14,15 @@ import java.util.logging.Logger
  *
  * Default sink remains java.util.logging; wire this SPI into Micrometer/OTel as needed.
  */
-object MazewallEvents {
+public object MazewallEvents {
     private val logger = Logger.getLogger(MazewallEvents::class.java.name)
 
     /** Base type for all emitted events. */
-    sealed interface Event {
-        val timestampMillis: Long
+    public sealed interface Event {
+        public val timestampMillis: Long
     }
 
-    data class DaemonExited(
+    public data class DaemonExited(
         val pid: Long,
         val exitCode: Int,
         val lastLogLines: List<String>,
@@ -30,28 +30,28 @@ object MazewallEvents {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class FallbackEngaged(
+    public data class FallbackEngaged(
         val behaviorName: String,
         val reason: String,
     ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class LandlockApplied(
+    public data class LandlockApplied(
         val processWide: Boolean,
         val abiVersion: Int,
     ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class CetOutcome(
+    public data class CetOutcome(
         val armed: Boolean,
         val detail: String,
     ) : Event {
         override val timestampMillis: Long = System.currentTimeMillis()
     }
 
-    data class SelfVerificationResult(
+    public data class SelfVerificationResult(
         val passed: Boolean,
         val detail: String,
     ) : Event {
@@ -64,26 +64,26 @@ object MazewallEvents {
      * propagate.
      */
     @Volatile
-    var failOnListenerError: Boolean = false
+    public var failOnListenerError: Boolean = false
 
     private val listeners = CopyOnWriteArrayList<DiagnosticEventListener>()
 
     /** Registers a listener. No-op if already registered. */
-    fun register(listener: DiagnosticEventListener) {
+    public fun register(listener: DiagnosticEventListener) {
         listeners.addIfAbsent(listener)
     }
 
-    fun unregister(listener: DiagnosticEventListener) {
+    public fun unregister(listener: DiagnosticEventListener) {
         listeners.remove(listener)
     }
 
-    fun registeredCount(): Int = listeners.size
+    public fun registeredCount(): Int = listeners.size
 
     /**
      * Emits [event] to every listener. Listener exceptions are isolated unless
      * [failOnListenerError] was enabled by the operator (test seam). Errors always propagate.
      */
-    fun emit(event: Event) {
+    public fun emit(event: Event) {
         for (listener in listeners) {
             try {
                 listener.onEvent(event)
@@ -95,10 +95,10 @@ object MazewallEvents {
     }
 
     /** Test seam. */
-    fun clear() = listeners.clear()
+    public fun clear(): Unit = listeners.clear()
 }
 
 /** Functional SAM for Kotlin/Java listeners. */
-fun interface DiagnosticEventListener {
-    fun onEvent(event: MazewallEvents.Event)
+public fun interface DiagnosticEventListener {
+    public fun onEvent(event: MazewallEvents.Event)
 }

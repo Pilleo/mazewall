@@ -48,7 +48,7 @@ Ensure compliance with the global fallback policies defined in [Root AGENTS.md](
 
 ### 5. BPF Compiler & Argument Safety
 - **Multi-Instruction Argument Inspection:** When modifying `BpfFilter.kt`, preserve the multi-instruction argument-inspection sequences for `mmap`/`mprotect`, `clone`, and `prctl`. Do not replace them with simple `BPF_JEQ` checks against the syscall numbers; doing so deletes crucial protection context.
-- **Sock Filter Field Layouts:** Use `ValueLayout.JAVA_INT` (4 bytes) for 32-bit `sock_filter` fields (`code`, `jt`, `jf`, `k`). Specifying a `JAVA_LONG` corrupts BPF filter streams silently.
+- **Sock Filter Field Layouts:** Linux `sock_filter` is exactly 8 bytes: `code` is a 16-bit unsigned short, `jt` and `jf` are 8-bit unsigned bytes, and only `k` is a 32-bit unsigned integer. Widening or treating every field as `JAVA_INT` corrupts the instruction stream.
 - **Mutex Flags:** `SECCOMP_FILTER_FLAG_NEW_LISTENER` (used by profiler) and `SECCOMP_FILTER_FLAG_TSYNC` (used by enforcer) are mutually exclusive. Never combine them.
 
 ### 6. FFM API Patterns & Safety

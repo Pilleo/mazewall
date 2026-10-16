@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_joiner_copy_elision_validation",
+  "run_date": "2026-09-19",
+  "change": "Transfer a detached ready-observation bucket through a read-only view instead of copying it with toList().",
+  "correctness": {
+    "focused_test": "io.mazewall.profiler.internal.attribution.AttributionCollectorTest",
+    "focused_test_result": "PASS",
+    "rootful_workload": "syscall_dense",
+    "rootful_forks": 5,
+    "tier_e_workload_correctness": "PASS for every profiled fork",
+    "tier_e_whole_session_evidence": "COMPLETE for every profiled fork",
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "observed_ring_loss": 0,
+    "policy_eligibility": false
+  },
+  "performance_assessment": {
+    "status": "INCONCLUSIVE",
+    "reason": "The benchmark-only ready-transfer control supplied five in-run pairs for each dictionary mode. Both median deltas favor read-only transfer, but both exact bootstrap intervals include zero, so this result does not establish a measurable speedup.",
+    "copy_minus_read_only_ns_per_fork": {
+      "dictionary_full_stream": {
+        "samples": [15101571, -3405524, 19791587, 32919961, 2359407],
+        "median": 15101571,
+        "exact_bootstrap_95_ci": [-3405524, 32919961]
+      },
+      "dictionary_unique_edge": {
+        "samples": [-4016556, -1802956, 29310877, 26545695, 9843139],
+        "median": 9843139,
+        "exact_bootstrap_95_ci": [-4016556, 29310877]
+      }
+    },
+    "required_next_evidence": "Profile a larger ring-drain or collector-join reduction with the same complete paired control before making another performance acceptance claim."
+  },
+  "raw_artifact": {
+    "path": "build/tier-e-ready-transfer-paired-20260919/results.jsonl",
+    "sha256": "7a4b4e321107e3f2b0d3c5570d9949f4b05875847c4b196c312bfe6baa4e2565"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_perf_tracepoint_sampling_loss",
+  "generated_at": "2026-09-21T00:55:49Z",
+  "source_revision": "267f701709e33f8bd34f3c10ee7ec2c7bb8e21d3",
+  "source_fingerprint": "54b8bc92017347956d35772a608e24756dc9c218bfb8d9dd0c8b14d6a9ca3217",
+  "environment": {
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "perf_event_max_sample_rate": 25750,
+    "rootful": true
+  },
+  "decision": {
+    "sustained_capacity": "incomplete",
+    "policy_eligibility": false,
+    "reason": "CPU-global perf tracepoint sampling can lose target syscalls before BPF TGID filtering"
+  },
+  "observations": [
+    {
+      "artifact": "/tmp/tier-e-sustained-capacity-fast-master-20260921",
+      "rate_per_second": 1000,
+      "duration_seconds": 10,
+      "result": "complete_pilot_only"
+    },
+    {
+      "artifact": "/tmp/tier-e-sustained-capacity-fast-master-20260921",
+      "rate_per_second": 2000,
+      "duration_seconds": 10,
+      "result": "incomplete",
+      "missing_operations": 19,
+      "strace_proved_missing_openat_descriptors": [5955, 5956, 5957, 5958, 5959, 5960, 5961, 5962, 5963, 5964, 5965, 5966, 7692, 7693, 7694, 7695]
+    },
+    {
+      "artifact": "/tmp/tier-e-sustained-500-audit-20260921",
+      "rate_per_second": 500,
+      "duration_seconds": 60,
+      "expected_operations": 30600,
+      "collector_matched_operations": 30597,
+      "raw_sys_enter_audit_observed_operations": 30597,
+      "raw_sys_enter_audit_missing_descriptors": [17315, 17316, 17317],
+      "openat2_operations": 0,
+      "result": "incomplete"
+    }
+  ],
+  "verdict_dimensions": {
+    "capture_domain_validity": "incomplete",
+    "transport_completeness": "not_implicated",
+    "attribution_coverage": "incomplete",
+    "dictionary_integrity": "not_implicated",
+    "lifecycle_validity": "not_implicated",
+    "runtime_overhead": "not_measured"
+  }
+}

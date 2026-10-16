@@ -1,11 +1,19 @@
-package io.mazewall.profiler
-
-import io.mazewall.Policy
-import io.mazewall.core.Syscall
-import io.mazewall.core.Tid
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.PathResolutionFailure
+import io.mazewall.profiler.api.SyscallEvent
+import io.mazewall.profiler.api.SyscallEventState
+import io.mazewall.profiler.api.TraceEvent
 import io.mazewall.profiler.compiler.BobCompiler
 import io.mazewall.profiler.compiler.StraceLogParser
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -14,6 +22,185 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ProfilerSessionApiTest {
+    @Test
+    fun `public incomplete refusal recommends retaining diagnostics without an unavailable override`() {
+        MazewallProfiler.open(ProfileOptions(strategy = ProfileStrategy.USER_NOTIF)).use { profiler ->
+            val result = profiler.snapshot()
+            val failure = assertFailsWith<IncompleteProfileException> { result.toDedicatedWorkerPolicies() }
+            assertFalse(failure.message.orEmpty().contains("allowIncomplete"))
+            assertTrue(failure.message.orEmpty().contains("toProfileDocumentJson"))
+            assertEquals(result.coverage, failure.coverage)
+        }
+    }
+
+    @Test
+    fun `recorded eBPF augmentation retains path failures in the final result and snapshot`(
+        @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
+    ) {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "Yama denied")
+        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(
+            Tid(7),
+            "OPEN",
+            listOf(0L, 0L),
+            PathResolution.Failed(listOf(failure)),
+        )
+        val observations = listOf(ProfileObservation.fromSyscallEvent(event))
+        val raw = ProfilingResult("observed", BillOfBehavior(), emptyMap(), pathCoverage(observations), observations)
+        val log = directory.resolve("recorded.log")
+        java.nio.file.Files
+            .writeString(log, "kind=uring tid=1 opcode=IORING_OP_OPENAT path=/tmp/sidecar\n")
+        MazewallProfiler.open(ProfileOptions(ProfileStrategy.USER_NOTIF, captureStacks = false, ebpfEventLog = log)).use { profiler ->
+            // Exercise the real final-result augmentation without installing a USER_NOTIF filter.
+            val attach = MazewallProfiler::class.java.getDeclaredMethod("attachCoverage", ProfilingResult::class.java)
+            attach.isAccessible = true
+            val result = attach.invoke(profiler, raw) as ProfilingResult<*>
+            assertEquals("observed", result.value)
+            assertTrue(result.behavior.opens.contains("/tmp/sidecar"))
+            assertTrue(result.coverage.warnings.any { it.contains("recorded eBPF") })
+            assertFalse(result.coverage.complete)
+            assertEquals(listOf(failure), result.coverage.pathFailures)
+            assertEquals(listOf(failure), profiler.snapshot().coverage.pathFailures)
+            assertEquals(result.coverage, profiler.snapshot().coverage)
+        }
+    }
+
+    @Test
+    fun `mutation audit augmentation retains path failures in the final public result`() {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.DirFdUnresolved, "dirfd=9")
+        val observation = ProfileObservation.fromSyscallEvent(
+            SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPENAT", emptyList(), PathResolution.Failed(listOf(failure))),
+        )
+        val raw = ProfilingResult("observed", BillOfBehavior(), emptyMap(), pathCoverage(listOf(observation)), listOf(observation))
+        val result = raw.withCoverageAugmentation(recordedLog = false, untrappedMutations = listOf("truncate(76)"))
+        assertEquals("observed", result.value)
+        assertEquals(listOf(observation), result.observations)
+        assertTrue(result.coverage.warnings.any { it.contains("truncate(76)") })
+        assertFalse(result.coverage.complete)
+        assertEquals(listOf(failure), result.coverage.pathFailures)
+    }
+
+    @Test
+    fun `policy rejection warning augmentation preserves the original typed path failures`() {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.Truncated, "no NUL")
+        val observation = ProfileObservation.fromSyscallEvent(
+            SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), PathResolution.Failed(listOf(failure))),
+        )
+        val coverage = pathCoverage(listOf(observation))
+        val behaviors = listOf(
+            BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 80))),
+            BillOfBehavior(execs = setOf("/bin/tool")),
+            BillOfBehavior(ioUringOps = setOf("IORING_OP_SENDMSG")),
+        )
+        val rejected = behaviors.map { behavior ->
+            assertFailsWith<IncompleteProfileException> { ProfilingResult(Unit, behavior, emptyMap(), coverage).toPolicy() }.coverage
+        }
+        assertEquals(List(3) { listOf(failure) }, rejected.map { it.pathFailures })
+    }
+
+    @Test
+    fun `DSL rejection retains supplied diagnostics even when caller overrides completeness`() {
+        val failure = PathResolutionFailure(0, PathResolutionFailure.Reason.Missing, "missing operand")
+        val observation = ProfileObservation.fromSyscallEvent(
+            SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", emptyList(), PathResolution.Failed(listOf(failure))),
+        )
+        val original = pathCoverage(listOf(observation))
+        val coverage = original.copy(integrity = original.integrity.copy(complete = true))
+        val behaviors = listOf(
+            BillOfBehavior(connects = setOf(NetworkEndpoint("127.0.0.1", 80))),
+            BillOfBehavior(execs = setOf("/bin/tool")),
+            BillOfBehavior(ioUringOps = setOf("IORING_OP_SENDMSG")),
+        )
+        val rejected = behaviors.map { behavior ->
+            assertFailsWith<IncompleteProfileException> { ProfilingResult(Unit, behavior, emptyMap(), coverage).toDsl() }.coverage
+        }
+        assertEquals(List(3) { listOf(failure) }, rejected.map { it.pathFailures })
+    }
+
+    @Test
+    fun `coverage retains immutable diagnostics when merging prior evidence`() {
+        val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "TID 7 Yama EPERM")
+        val missing = PathResolutionFailure(1, PathResolutionFailure.Reason.Missing, "null operand")
+
+        fun coverage(failure: PathResolutionFailure): ProfilingCoverage {
+            val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(
+                Tid(7),
+                "RENAME",
+                emptyList(),
+                PathResolution.Failed(listOf(failure)),
+            )
+            return pathCoverage(listOf(ProfileObservation.fromSyscallEvent(event)))
+        }
+        val merged = coverage(missing).retainStricterPathResolution(coverage(denied))
+        assertEquals(listOf(missing, denied), merged.pathFailures)
+        assertEquals(merged.pathFailures, merged.copy(strategyReason = "copied").pathFailures)
+        assertFailsWith<UnsupportedOperationException> { (merged.pathFailures as MutableList).clear() }
+        assertFailsWith<UnsupportedOperationException> { (merged.warnings as MutableList).clear() }
+    }
+
+    @Test
+    fun `typed path failures survive heap events observations and coverage`() {
+        val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "TID 7 Yama EPERM")
+        val missing = PathResolutionFailure(1, PathResolutionFailure.Reason.Missing, "null operand")
+        val truncated = PathResolutionFailure(0, PathResolutionFailure.Reason.Truncated, "no NUL in 16 bytes")
+        val cases = listOf(
+            PathResolution.NotApplicable to PathResolutionQuality.NONE,
+            PathResolution.Resolved(listOf("/tmp/a")) to PathResolutionQuality.RESOLVED,
+            PathResolution.Partial(listOf("/tmp/a"), listOf(missing)) to PathResolutionQuality.FAILED,
+            PathResolution.Failed(listOf(denied)) to PathResolutionQuality.FAILED,
+            PathResolution.Failed(listOf(truncated)) to PathResolutionQuality.TRUNCATED,
+            PathResolution.Failed(listOf(truncated, missing)) to PathResolutionQuality.MIXED,
+        )
+        for ((resolution, quality) in cases) {
+            val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "RENAME", emptyList(), resolution)
+            val observation = ProfileObservation.fromSyscallEvent(event)
+            assertEquals(resolution, observation.pathResolution)
+            assertEquals(resolution.paths, observation.paths)
+            val coverage = pathCoverage(listOf(observation))
+            assertEquals(quality, coverage.pathResolution)
+            assertEquals(resolution.failures, coverage.pathFailures)
+            assertEquals(resolution.failures.isEmpty(), coverage.complete)
+            assertEquals(resolution.failures, coverage.copy(strategyReason = "copied").pathFailures)
+        }
+    }
+
+    @Test
+    fun `typed resolution is authoritative even for a long complete path`() {
+        val resolution = PathResolution.Resolved(listOf("/" + "a".repeat(4096)))
+        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "OPEN", listOf(0L, 0L), resolution)
+        val coverage = pathCoverage(listOf(ProfileObservation.fromSyscallEvent(event)))
+        assertEquals(PathResolutionQuality.RESOLVED, coverage.pathResolution)
+        assertTrue(coverage.complete)
+    }
+
+    @Test
+    fun `path evidence snapshots caller lists and survives trace projection and observation copies`() {
+        val paths = mutableListOf("/tmp/a")
+        val failures = mutableListOf(PathResolutionFailure(1, PathResolutionFailure.Reason.DirFdUnresolved, "dirfd=9"))
+        val resolution = PathResolution.Partial(paths, failures)
+        val event = SyscallEvent.fromResolution<SyscallEventState.Resolved>(Tid(7), "RENAME", emptyList(), resolution)
+        val trace = TraceEvent.fromSyscallEvent(event)
+        val observation = assertIs<ProfileObservation.Syscall>(ProfileObservation.fromTraceEvent(trace))
+        paths.clear()
+        failures.clear()
+        assertEquals(listOf("/tmp/a"), observation.paths)
+        assertEquals(listOf(1), observation.pathResolution.failures.map { it.operandIndex })
+        assertEquals(resolution, observation.copy(contextId = 99L).pathResolution)
+        assertFailsWith<UnsupportedOperationException> { (resolution.paths as MutableList).clear() }
+        assertFailsWith<UnsupportedOperationException> { (resolution.failures as MutableList).clear() }
+    }
+
+    private fun pathCoverage(observations: List<ProfileObservation>): ProfilingCoverage =
+        ProfilingCoverage.infer(
+        strategy = ProfileStrategy.USER_NOTIF,
+        strategyReason = "typed evidence",
+        processWide = false,
+        observations = observations,
+        stacks = StackAttribution.SKIPPED,
+        droppedEvents = 0,
+        drainComplete = true,
+        environment = ProfileEnvironment("test", EbpfLoad.Denied("test")),
+    )
+
     @Test
     fun `bob compiler is the only path from strace lines and trace events`() {
         val traceEvents = listOf(
@@ -309,7 +496,7 @@ class ProfilerSessionApiTest {
         assertFailsWith<IncompleteProfileException> {
             bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, coverage = coverage)
         }
-        val policy = bob.toPolicy(Policy.PURE_COMPUTE_UNSAFE, coverage = coverage, allowIncomplete = true)
+        val policy = bob.toPolicyAllowingIncomplete(Policy.PURE_COMPUTE_UNSAFE, coverage = coverage)
         assertTrue(policy.isSyscallAllowed(Syscall.IO_URING_ENTER))
     }
 
@@ -321,6 +508,7 @@ class ProfilerSessionApiTest {
                 ObservationSource.USER_NOTIF,
                 "OPENAT",
                 paths = listOf("/tmp/x"),
+                openFlags = 0,
             ),
         )
         val coverage = ProfilingCoverage.infer(

@@ -1,21 +1,41 @@
 package io.mazewall.profiler.collector
 
-import io.mazewall.profiler.IoUringVisibility
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.ProfileObservation
+import io.mazewall.profiler.api.IoUringVisibility
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.ProfileObservation
 
 /** Drain of one collector. Sessions merge drains before [io.mazewall.profiler.compiler.BobCompiler]. */
-public data class CollectorDrain(
-    val observations: List<ProfileObservation>,
-    val droppedEvents: Int = 0,
-    val drainComplete: Boolean = true,
-    val ioUring: IoUringVisibility = IoUringVisibility.UNSEEN,
-)
+internal class CollectorDrain(
+    observations: List<ProfileObservation>,
+    public val droppedEvents: Int = 0,
+    public val drainComplete: Boolean = true,
+    public val ioUring: IoUringVisibility = IoUringVisibility.UNSEEN,
+) {
+    public val observations: List<ProfileObservation> = java.util.List.copyOf(observations)
+
+    public fun copy(
+        observations: List<ProfileObservation> = this.observations,
+        droppedEvents: Int = this.droppedEvents,
+        drainComplete: Boolean = this.drainComplete,
+        ioUring: IoUringVisibility = this.ioUring,
+    ): CollectorDrain = CollectorDrain(observations, droppedEvents, drainComplete, ioUring)
+
+    override fun equals(other: Any?): Boolean =
+        other is CollectorDrain &&
+            observations == other.observations &&
+            droppedEvents == other.droppedEvents &&
+            drainComplete == other.drainComplete &&
+        ioUring == other.ioUring
+
+    override fun hashCode(): Int = listOf(observations, droppedEvents, drainComplete, ioUring).hashCode()
+}
 
 /**
  * Strategy-neutral collector. Implementations must not compile policies themselves.
  */
-public interface ProfileCollector : AutoCloseable {
+internal interface ProfileCollector : AutoCloseable {
     public val source: ObservationSource
 
     public fun start()
@@ -26,9 +46,9 @@ public interface ProfileCollector : AutoCloseable {
 }
 
 /** Merge collector drains. Later sources win on identical correlation+payload; dropped counts add. */
-public object ObservationMerger {
+internal object ObservationMerger {
     public fun merge(drains: List<CollectorDrain>): CollectorDrain {
-        val seen = LinkedHashSet<String>()
+        val seen = LinkedHashSet<ObservationKey>()
         val observations = mutableListOf<ProfileObservation>()
         var dropped = 0
         var drainComplete = true
@@ -47,16 +67,22 @@ public object ObservationMerger {
         return CollectorDrain(observations, dropped, drainComplete, ioUring)
     }
 
-    private fun keyOf(obs: ProfileObservation): String {
-        val corr = "${obs.correlation.tgid}:${obs.correlation.tid.value}:${obs.correlation.ktimeNs}"
-        return when (obs) {
+    private data class ObservationKey(
+        val correlation: ObservationCorrelation,
+        val payload: List<Any?>,
+        val pathResolution: PathResolution,
+    )
+
+    private fun keyOf(obs: ProfileObservation): ObservationKey {
+        val payload = when (obs) {
             is ProfileObservation.Syscall ->
-                "$corr|syscall|${obs.name}|${obs.paths}|${obs.openFlags}"
+                listOf("syscall", obs.name, obs.paths, obs.openFlags, obs.openFlagsEvidence)
             is ProfileObservation.IoUring ->
-                "$corr|uring|${obs.opcode}|${obs.paths}"
+                listOf("uring", obs.opcode, obs.paths)
             is ProfileObservation.Connect ->
-                "$corr|connect|${obs.endpoint}"
+                listOf("connect", obs.endpoint)
         }
+        return ObservationKey(obs.correlation, payload, obs.pathResolution)
     }
 
     private fun rank(

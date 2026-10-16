@@ -22,13 +22,19 @@ Run the containerized integration suite on a host with Podman:
 ./scripts/run_tests.sh
 ```
 
-Run the vulnerable-application demonstration:
+Run the vulnerable-application demonstration with the existing entry point:
 
 ```bash
 ./scripts/run_vulnerable_app_demo.sh
 ```
 
-The expected result is that permitted workload operations complete and the demonstration's configured-forbidden operations are denied by the kernel. Preserve the command output, test reports, policy used, and the exact attack input.
+That is the standard workflow. It must follow profile-first order: identity-checked image build, empty project volume, profile and unprotected readiness, benign profile workload, orderly profile stop, validated complete generation, then protected start. Protected start before that validation is a failed run, not a containment result. Details and the optional `MAZEWALL_DEMO_MODE=isolated` path are in [the demo guide](../demos/vulnerable-web-app/README.md).
+
+The standard matrix is admin control, upload control, zip-slip effect versus denial, project-network SSRF, and SQL disclosure as a known application-level limit. A successful known-limit row still discloses data; it is not an OS-boundary block. Inferred permission failure is not authenticated denial. A missing route, HTTP error, timeout, or ineffective payload is not kernel protection.
+
+Evidence for one run is `demos/output/<run-id>/`: phase timestamps, service logs, inspect JSON, copied profile components, both scenario JSON files, `report.md`, and `status`. Keep the script stdout as well; the Gradle build log is not copied into that directory. Verified retirement prints `retired mazewall-web-<run-id>`. `cleanup-error` means disappearance was not confirmed.
+
+Docker 29.9.0 and Compose 5.6.0 are installed here. Podman is absent, and the selected Docker endpoint `/run/user/1000/podman/podman.sock` is missing, so this document does not claim a live container acceptance. The genuine complete profile→enforcement JVM case is also blocked: collector[1] drain did not complete, and collector[2] CONNECT was observed without a parsed destination. Narrower prepared-policy and publication/refusal JUnit proofs remain, and they do not need Compose.
 
 ## Interpret the Result
 

@@ -5,7 +5,7 @@ package io.mazewall.profiler.tierE.daemon
  * tracing ABI to an identifiable binary without libelf on the Kotlin side.
  * Accepts the full file image; returns lowercase hex or null when absent.
  */
-public object ElfBuildIdExtractor {
+internal object ElfBuildIdExtractor {
     private val MAGIC = byteArrayOf(0x7F, 0x45, 0x4C, 0x46) // \x7fELF
     private const val EI_CLASS = 4
     private const val ELFCLASS64 = 2

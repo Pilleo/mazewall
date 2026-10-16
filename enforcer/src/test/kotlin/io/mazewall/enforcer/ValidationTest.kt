@@ -1,8 +1,15 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Platform
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test

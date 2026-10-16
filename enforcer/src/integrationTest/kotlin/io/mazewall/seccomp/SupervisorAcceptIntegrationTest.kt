@@ -1,118 +1,116 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.enforcer.supervisor.ScopingHandler
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ScopingHandler
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.internal.supervisor.SupervisorDescriptorResult
+import io.mazewall.enforcer.internal.supervisor.SupervisorOwnedFd
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.readByte
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.platform.syscall.Syscall
+import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
-import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.Executors
-import kotlin.test.assertEquals
-import kotlin.test.assertTrue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 @NeedsFreshJvm
 class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
     companion object {
-        @org.junit.jupiter.api.AfterAll
-        @JvmStatic
+        @org.junit.jupiter.api.AfterAll @JvmStatic
         fun tearDownAll() {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+            io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
                 .stop()
         }
     }
 
-    @Test
-    @EnabledIfLinuxAndSupported
-    fun `test supervised accept accepts connection and populates peer address`() {
-        val serverSocket = ServerSocket(0)
-        val port = serverSocket.localPort
+    @Test @EnabledIfLinuxAndSupported
+    fun `supervised addressless accept is denied when no identity-bound authority is available`() = exercise(peerMemory = false)
 
-        val allowedCalls = mutableListOf<String>()
-        val deniedCalls = mutableListOf<String>()
+    @Test @EnabledIfLinuxAndSupported
+    fun `supervised peer address output is denied when no identity-bound authority is available`() = exercise(peerMemory = true)
 
+    private fun exercise(peerMemory: Boolean) {
+        val authorized = AtomicInteger()
         val scopingPolicy = object : StacktraceScopingPolicy {
             override val handlers = mapOf<Syscall, ScopingHandler>(
-                Syscall.ACCEPT to { tid, args, stack -> authorize(stack) },
-                Syscall.ACCEPT4 to { tid, args, stack -> authorize(stack) },
+                Syscall.ACCEPT to { _, _, stack -> authorize(stack) },
+                Syscall.ACCEPT4 to { _, _, stack -> authorize(stack) },
             )
 
-            private fun authorize(stack: List<StackTraceElement>): Boolean {
-                val isLegit = stack.any { it.className.contains("LegitContext") }
-                if (isLegit) {
-                    allowedCalls.add("accept")
-                } else {
-                    deniedCalls.add("accept")
-                }
-                return isLegit
-            }
+            private fun authorize(stack: List<StackTraceElement>): Boolean = stack.any { it.className.contains("LegitContext") }.also { if (it) authorized.incrementAndGet() }
         }
-
-        // We block socket actions in the thread filter, forcing them to be supervised
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .allowJvmClasspath()
             .block(Syscall.ACCEPT, Syscall.ACCEPT4)
             .build()
-
-        val rawExecutor = Executors.newSingleThreadExecutor()
-        val containedExecutor = ContainedExecutors.wrap(rawExecutor, policy, scopingPolicy)
-
+        val raw = Executors.newSingleThreadExecutor()
         try {
-            val acceptFuture = containedExecutor.submit<String> {
-                System.err.println("[TEST-TRACEE] Lambda started. Creating LegitContext...")
+            listeningSocket().use { listener ->
+                Socket("127.0.0.1", port(listener)).use { client ->
+                    val future = raw.submit<LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>> {
+                        ContainedExecutors.installOnCurrentThread(policy, scopingPolicy).use { receipt ->
+                        receipt.requireInstalled()
 
-                class LegitContext(
-                    val ss: ServerSocket,
-                ) {
-                    fun run(): String {
-                        System.err.println("[TEST-TRACEE] LegitContext.run() started. Calling ss.accept()...")
-                        val client = ss.accept()
-                        System.err.println("[TEST-TRACEE] ss.accept() returned socket: $client")
-                        client.use {
-                            val input = client.getInputStream().read()
-                            client.getOutputStream().write(42)
-                            client.getOutputStream().flush()
-                            return client.remoteSocketAddress.toString()
+                        class LegitContext {
+                            fun run() =
+                                NativeArena.ofConfined().use { arena ->
+                                val address = if (peerMemory) arena.allocate(128L) else ManagedSegment.NULL
+                                val length = if (peerMemory) arena.allocate(4L).also { it.writeInt(0, 128) } else ManagedSegment.NULL
+                                LinuxNative.networking.accept4(listener.handle, address, length, 524288)
+                            }
+                        }
+                        LegitContext().run()
                         }
                     }
+                    val result = future.get(20, TimeUnit.SECONDS)
+                    val denied = assertInstanceOf(SupervisorDescriptorResult.Denied::class.java, SupervisorDescriptorResult.from(result, LinuxNative))
+                    assertEquals(1, denied.errno)
+                    assertTrue(authorized.get() > 0, "JVM policy must authorize the request before helper execution")
                 }
-                LegitContext(serverSocket).run()
             }
-
-            // Connect client from host thread
-            Socket("127.0.0.1", port).use { clientSocket ->
-                clientSocket.getOutputStream().write(24)
-                clientSocket.getOutputStream().flush()
-                val response = clientSocket.getInputStream().read()
-                assertEquals(42, response)
-            }
-
-            val peerAddressStr = acceptFuture.get()
-            assertTrue(peerAddressStr.isNotEmpty(), "Peer address should be populated")
-            assertTrue(allowedCalls.isNotEmpty(), "Legit accept should be allowed by scoping policy")
-            assertTrue(deniedCalls.isEmpty(), "No evil accepts should have occurred")
         } finally {
-            serverSocket.close()
-            rawExecutor.shutdown()
-            System.err.println("--- DAEMON LOGS ---")
-            try {
-                val logFile = java.io.File("/tmp/supervisor_daemon.log")
-                if (logFile.exists()) {
-                    System.err.println(logFile.readText())
-                } else {
-                    System.err.println("Daemon log file does not exist")
-                }
-            } catch (e: Exception) {
-                System.err.println("Failed to read daemon log file: ${e.message}")
-            }
-            System.err.println("-------------------")
+            raw.shutdown()
+            assertTrue(raw.awaitTermination(10, TimeUnit.SECONDS))
         }
+    }
+
+    private fun listeningSocket(): SupervisorOwnedFd {
+        val listener = assertInstanceOf(SupervisorDescriptorResult.Opened::class.java, SupervisorDescriptorResult.from(LinuxNative.networking.socket(2, 1 or 524288, 0), LinuxNative)).descriptor
+        NativeArena.ofConfined().use { arena ->
+            val address = arena.allocate(16L)
+            ManagedSegment.copy(byteArrayOf(2, 0, 0, 0, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0), 0, address, 0, 16)
+            LinuxNative.networking.bind(listener.handle, address, 16).getOrThrow("bind")
+            LinuxNative.networking.listen(listener.handle, 1).getOrThrow("listen")
+        }
+        return listener
+    }
+
+    private fun port(listener: SupervisorOwnedFd): Int =
+        NativeArena.ofConfined().use { arena ->
+        val address = arena.allocate(16L)
+        val length = arena.allocate(4L).also { it.writeInt(0, 16) }
+        LinuxNative.raw.syscall(Arch.current().getsockname.toLong(), NativeArg.FdArg(listener.handle), NativeArg.MemoryArg(address), NativeArg.MemoryArg(length)).getOrThrow("getsockname")
+        ((address.readByte(2).toInt() and 255) shl 8) or (address.readByte(3).toInt() and 255)
     }
 }

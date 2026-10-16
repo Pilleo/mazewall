@@ -1,15 +1,19 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.Tid
-import io.mazewall.core.close
-import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.profiler.Profiler
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.api.profilerCleanupOutcome
+import io.mazewall.profiler.api.throwIfIncomplete
+import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -17,7 +21,6 @@ import kotlinx.coroutines.runBlocking
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.InputStream
-import java.lang.foreign.Arena
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,14 +39,33 @@ internal class ProfilerTraceListener(
     private val accumulatedLogs: MutableList<TraceEvent>,
     private val stackTracesMap: MutableMap<TraceEvent, MutableList<Array<StackTraceElement>>>?,
     private val pathCache: MutableMap<String, Long>,
+    private val threadFor: (Tid) -> Thread?,
+    private val native: NativeEngine,
 ) : AutoCloseable {
     private val logger = Logger.getLogger(ProfilerTraceListener::class.java.name)
     private val closed = AtomicBoolean(false)
 
     // Thread-safe idempotent close guard to prevent native double-close.
     private val socketClosed = AtomicBoolean(false)
+    private val socketCloseLock = Any()
+
+    @Volatile
+    private var socketCleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
+
+    @Volatile
+    private var threadCleanupOutcome: SeccompCleanupOutcome = SeccompCleanupOutcome.Complete
+
+    val cleanupOutcome: SeccompCleanupOutcome
+        get() = when (val threads = threadCleanupOutcome) {
+            SeccompCleanupOutcome.Complete -> socketCleanupOutcome
+            is SeccompCleanupOutcome.Incomplete -> profilerCleanupOutcome(listOf(socketCleanupOutcome, threads), retryableOwnership())
+        }
     private var workerThread: Thread? = null
     private var collectorThread: Thread? = null
+
+    private enum class CollectionOutcome { COLLECTING, DRAINED, FAILED }
+
+    @Volatile private var collectionOutcome = CollectionOutcome.COLLECTING
 
     /**
      * Closes the underlying socket file descriptor exactly once in a thread-safe and idempotent manner.
@@ -57,16 +79,41 @@ internal class ProfilerTraceListener(
      * the underlying native close system call) is executed at most once, eliminating native double-close
      * vulnerabilities and preventing file descriptor recycling corruption inside the JVM.
      */
+    @Suppress("TooGenericExceptionCaught") // Persist pre-dispatch native dependency failures for the session owner.
     private fun closeSocketOnce() {
-        if (socketClosed.compareAndSet(false, true)) {
+        synchronized(socketCloseLock) {
+            if (socketClosed.get()) return
             try {
-                logger.fine("Executing idempotent socketFd.close() for fd=${socketFd.value}")
-                socketFd.close()
-            } catch (ignored: Exception) {
-                // Ignore any close exceptions
+                val result = native.fileSystem.close(socketFd)
+                // A returned native error may already have released the integer. Never retry it.
+                socketClosed.set(true)
+                socketCleanupOutcome = when (result) {
+                    is LinuxNative.SyscallResult.Success -> SeccompCleanupOutcome.Complete
+                    is LinuxNative.SyscallResult.Error -> SeccompCleanupOutcome.Incomplete(
+                        listOf(IllegalStateException("close(fd=${socketFd.value}) failed: errno=${result.errno}")),
+                        emptyList(),
+                    )
+                }
+            } catch (failure: Exception) {
+                recordCloseFailure(failure)
+            } catch (failure: Error) {
+                recordCloseFailure(IllegalStateException("Profiler listener socket cleanup aborted", failure))
+                throw failure
             }
         }
     }
+
+    private fun recordCloseFailure(failure: Exception) {
+        // Native engines retire the generation before dispatch. An exception alone cannot
+        // prove retryability, and a retired token must never be adopted or closed again.
+        if (!socketFd.isLiveForIo()) socketClosed.set(true)
+        socketCleanupOutcome = SeccompCleanupOutcome.Incomplete(listOf(failure), retryableOwnership())
+    }
+
+    fun retryableOwnership(): List<FileDescriptor<*, FdState.Open, FdOwnership.Owned>> =
+        synchronized(socketCloseLock) {
+            if (socketClosed.get() || !socketFd.isLiveForIo()) emptyList() else listOf(socketFd)
+        }
 
     internal val eventQueue = TraceEventQueue()
     val eventChannel = eventQueue.channel
@@ -80,13 +127,17 @@ internal class ProfilerTraceListener(
     var state: TraceListenerState = TraceListenerState.Disconnected
         private set
 
-    /** True only after EOF that follows a locally initiated pass-through/shutdown. */
+    /** True only after a complete terminal record and physical reader/collector retirement. */
     @Volatile
     var drainComplete: Boolean = false
         private set
 
     @Volatile
     var droppedEvents: Int = 0
+        private set
+
+    @Volatile
+    internal var ackWriteFailure: TraceCommandWriteResult? = null
         private set
 
     private val gracefulDrainRequested = java.util.concurrent.atomic
@@ -109,7 +160,7 @@ internal class ProfilerTraceListener(
 
         val arena = io.mazewall.ffi.memory.NativeArena
             .ofShared()
-        val inputStream = NativeSocketInputStream(socketFd, arena)
+        val inputStream = NativeSocketInputStream(socketFd, arena, native.memory)
 
         val thread = Thread {
             try {
@@ -122,7 +173,6 @@ internal class ProfilerTraceListener(
                     closeSocketOnce()
                 }
                 arena.close()
-                inputStream.close()
                 workerTerminatedLatch.countDown()
             }
         }.apply {
@@ -148,9 +198,12 @@ internal class ProfilerTraceListener(
                         onEventCollected?.invoke(event)
                     }
                 }
+                collectionOutcome = CollectionOutcome.DRAINED
             } catch (expectedCollectorFailure: Exception) {
+                collectionOutcome = CollectionOutcome.FAILED
                 logger.log(java.util.logging.Level.SEVERE, "ProfilerTraceListener collector thread crashed", expectedCollectorFailure)
             } finally {
+                if (collectionOutcome == CollectionOutcome.COLLECTING) collectionOutcome = CollectionOutcome.FAILED
                 collectorTerminatedLatch.countDown()
             }
         }.apply {
@@ -171,40 +224,31 @@ internal class ProfilerTraceListener(
      * still writing the last event (sendTraceEvent → write → EPIPE → event lost).
      */
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
+        closeWithResult().throwIfIncomplete("Profiler trace listener cleanup failed")
+    }
+
+    @Synchronized
+    fun closeWithResult(): SeccompCleanupOutcome {
+        val requestDrain = closed.compareAndSet(false, true)
+        if (!requestDrain && workerThread == null && collectorThread == null) {
+            closeSocketOnce()
+            return cleanupOutcome
+        }
 
         logger.fine("Closing ProfilerTraceListener for fd=${socketFd.value}")
-        gracefulDrainRequested.set(true)
+        if (requestDrain) gracefulDrainRequested.set(true)
 
         try {
             // Step 1: Signal the daemon to finish up. The daemon receives this byte,
             // enters pass-through mode for this session, and closes its side of the socket.
             // This triggers EOF on our read side without shutting down the global daemon.
-            try {
-                sendCommand(PASS_THROUGH_COMMAND_BYTE)
-            } catch (expectedTransportCloseFailure: Exception) {
-                logger.fine("Failed to send PASS_THROUGH_COMMAND_BYTE: ${expectedTransportCloseFailure.message}")
-            }
+            if (requestDrain) logCommandWrite(sendCommand(PASS_THROUGH_COMMAND_BYTE))
 
             var workerJoined = false
             var collectorJoined = false
 
-            // Step 2: Wait for the listener thread to drain remaining events and see EOF.
-            // The thread exits via EOFException once the daemon closes its socket end.
-            workerThread?.let {
-                try {
-                    it.join(JOIN_TIMEOUT_MS)
-                    if (it.isAlive) {
-                        logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
-                        it.interrupt()
-                        it.join(INTERRUPT_JOIN_TIMEOUT_MS)
-                    } else {
-                        workerJoined = true
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
+            // Step 2: Join the reader after its terminal record and then the consuming collector.
+            workerThread?.let { workerJoined = joinWorkerForDrain(it) }
 
             collectorThread?.let {
                 try {
@@ -220,19 +264,29 @@ internal class ProfilerTraceListener(
                 }
             }
 
-            if (gracefulDrainRequested.get() && workerJoined && collectorJoined) {
-                drainComplete = true
-            } else {
-                drainComplete = false
-                if (!collectorJoined) {
-                    droppedEvents += 1
-                }
+            drainComplete = workerJoined &&
+                collectorJoined &&
+                collectionOutcome == CollectionOutcome.DRAINED &&
+                droppedEvents == 0 &&
+                state is TraceListenerState.Drained
+            if (!collectorJoined) {
+                droppedEvents += 1
             }
         } finally {
-            // Step 3: Close the socket FD only after draining in an idempotent way.
+            // Step 3: Retire the descriptor once and retain unfinished thread owners.
             closeSocketOnce()
-            workerThread = null
-            collectorThread = null
+            retainUnfinishedThreads()
+        }
+        return cleanupOutcome
+    }
+
+    private fun retainUnfinishedThreads() {
+        if (workerThread?.isAlive == false) workerThread = null
+        if (collectorThread?.isAlive == false) collectorThread = null
+        threadCleanupOutcome = if (workerThread != null || collectorThread != null) {
+            SeccompCleanupOutcome.Incomplete(listOf(IllegalStateException("Profiler reader or collector is still physically alive")), emptyList())
+        } else {
+            SeccompCleanupOutcome.Complete
         }
     }
 
@@ -242,76 +296,39 @@ internal class ProfilerTraceListener(
      * for all notifications until the tracee process fully exits.
      * The daemon will close its end of the socket, which sends EOF to our listener thread.
      */
-    fun passThrough() {
-        if (!closed.compareAndSet(false, true)) return
+    fun passThrough() = close()
 
-        logger.fine("Entering Pass-Through mode for ProfilerTraceListener fd=${socketFd.value}")
-        gracefulDrainRequested.set(true)
-
+    private fun joinWorkerForDrain(worker: Thread): Boolean =
         try {
-            sendCommand(PASS_THROUGH_COMMAND_BYTE)
-
-            var workerJoined = false
-            var collectorJoined = false
-
-            workerThread?.let {
-                try {
-                    it.join(JOIN_TIMEOUT_MS)
-                    if (it.isAlive) {
-                        logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
-                        it.interrupt()
-                    } else {
-                        workerJoined = true
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
-
-            collectorThread?.let {
-                try {
-                    it.join(JOIN_TIMEOUT_MS)
-                    if (it.isAlive) {
-                        logger.warning("Trace collector thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms during passThrough")
-                        it.interrupt()
-                    } else {
-                        collectorJoined = true
-                    }
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                }
-            }
-
-            if (gracefulDrainRequested.get() && workerJoined && collectorJoined) {
-                drainComplete = true
+            worker.join(JOIN_TIMEOUT_MS)
+            if (worker.isAlive) {
+                logger.warning("Trace listener thread for fd=${socketFd.value} did not terminate within $JOIN_TIMEOUT_MS ms")
+                worker.interrupt()
+                worker.join(INTERRUPT_JOIN_TIMEOUT_MS)
+                false
             } else {
-                drainComplete = false
-                if (!collectorJoined) {
-                    droppedEvents += 1
-                }
+                true
             }
-        } finally {
-            // Gracefully close the socket once using the idempotent close guard.
-            closeSocketOnce()
-            workerThread = null
-            collectorThread = null
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        }
+
+    private fun sendCommand(commandByte: Byte): TraceCommandWriteResult {
+        try {
+            val res = ProfilerNativeCommandWriter.writeByte(native.memory, socketFd, commandByte)
+            return TraceCommandWriteResult.from(res)
+        } catch (expectedCommandFailure: Exception) {
+            return TraceCommandWriteResult.Threw(expectedCommandFailure)
         }
     }
 
-    private fun sendCommand(commandByte: Byte) {
-        try {
-            Arena.ofConfined().use { arena ->
-                val buf = arena.allocate(1)
-                buf.set(java.lang.foreign.ValueLayout.JAVA_BYTE, 0L, commandByte)
-                val res = LinuxNative.memory.write(socketFd, ConfinedSegment(buf), 1)
-                if (res is LinuxNative.SyscallResult.Error) {
-                    System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write failed with errno: ${res.errno}")
-                } else {
-                    System.err.println("[TRACE-LISTENER-DEBUG] sendCommand write succeeded")
-                }
-            }
-        } catch (expectedCommandFailure: Exception) {
-            System.err.println("[TRACE-LISTENER-DEBUG] sendCommand threw exception: ${expectedCommandFailure.message}")
+    private fun logCommandWrite(result: TraceCommandWriteResult) {
+        when (result) {
+            TraceCommandWriteResult.Written -> Unit
+            is TraceCommandWriteResult.NativeFailure -> logger.fine("Failed to send pass-through command: errno=${result.errno}")
+            is TraceCommandWriteResult.ShortWrite -> logger.fine("Failed to send pass-through command: bytes=${result.bytes}")
+            is TraceCommandWriteResult.Threw -> logger.fine("Failed to send pass-through command: ${result.cause.javaClass.simpleName}")
         }
     }
 
@@ -323,39 +340,24 @@ internal class ProfilerTraceListener(
         try {
             try {
                 // Read handshake ACK from the daemon confirming the listener FD was received.
-                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HandshakeReceived)
                 val handshakeAck = dis.readByte()
                 if (handshakeAck != PROTOCOL_ACK_BYTE) {
-                    logger.warning("Invalid handshake ACK from daemon: $handshakeAck")
+                    advanceListener(TraceListenerEvent.HandshakeRejected)
+                    logger.warning("Invalid handshake ACK from daemon: $handshakeAck; rejecting trace stream")
+                    return
                 }
-                // No config bytes are sent. The daemon uses fire-and-forget delivery;
-                // no bypassedTids or captureStackTraces negotiation is required.
+                advanceListener(TraceListenerEvent.HandshakeReceived)
+                // No config bytes are sent; event delivery uses the fixed per-frame ACK protocol.
             } finally {
                 readyLatch.countDown()
             }
 
-            System.err.println("[TRACE-LISTENER-DEBUG] Loop started, ready to read events")
-            while (!closed.get()) {
-                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.AwaitEvent)
-                val event = try {
-                    readNextEvent(dis)
-                } catch (_: java.io.EOFException) {
-                    System.err.println("[TRACE-LISTENER-DEBUG] EOFException, closing loop")
-                    break
-                } catch (expectedCloseIoFailure: java.io.IOException) {
-                    if (closed.get()) {
-                        logger.log(
-                            java.util.logging.Level.FINE,
-                            "Trace listener loop interrupted by close",
-                            expectedCloseIoFailure,
-                        )
-                        break
-                    }
-                    throw expectedCloseIoFailure
-                }
+            while (true) {
+                advanceListener(TraceListenerEvent.AwaitEvent)
+                val decoded = readEventOrStop(dis) ?: break
 
-                state = TraceListenerMachine.evaluate(state, TraceListenerEvent.EventRead(event))
-                processEvent(event)
+                advanceListener(TraceListenerEvent.EventRead(decoded.event))
+                processEvent(decoded.event, decoded.diagnosticRecord)
             }
         } catch (e: java.io.IOException) {
             logger.log(java.util.logging.Level.WARNING, "Trace listener error", e)
@@ -365,76 +367,152 @@ internal class ProfilerTraceListener(
         }
     }
 
-    private fun readNextEvent(dis: DataInputStream): TraceEvent {
-        System.err.println("[TRACE-LISTENER-DEBUG] Awaiting/reading next event...")
+    private fun readEventOrStop(dis: DataInputStream): DecodedTraceEvent? =
+        try {
+            readNextEvent(dis)
+        } catch (_: java.io.EOFException) {
+            null
+        } catch (expectedCloseIoFailure: java.io.IOException) {
+            if (closed.get() && state !is TraceListenerState.ProtocolViolation) {
+                logger.log(java.util.logging.Level.FINE, "Trace listener loop interrupted by close", expectedCloseIoFailure)
+                null
+            } else {
+                throw expectedCloseIoFailure
+            }
+        }
+
+    private fun readNextEvent(dis: DataInputStream): DecodedTraceEvent? {
         val tidValue = dis.readInt()
-        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.HeaderRead(tidValue))
-
-        val syscallNameLen = dis.readInt()
-        state = TraceListenerMachine.evaluate(state, TraceListenerEvent.SyscallRead(tidValue, syscallNameLen))
-
-        val syscallNameBytes = ByteArray(syscallNameLen)
-        dis.readFully(syscallNameBytes)
-        val syscallName = String(syscallNameBytes, Charsets.UTF_8)
-
-        val argsCount = dis.readInt()
-        state = TraceListenerMachine.evaluate(
-            state,
-            TraceListenerEvent.ArgumentsRead(tidValue, syscallName, argsCount),
-        )
-
-        val args = LongArray(argsCount)
-        for (i in 0 until argsCount) {
-            args[i] = dis.readLong()
+        if (tidValue == TraceStreamEndWire.MARKER) {
+            readTerminal(dis)
+            return null
         }
-
-        val pathsCount = dis.readInt()
-        val paths = mutableListOf<String>()
-        repeat(pathsCount) {
-            val pathLen = dis.readInt()
-            val pathBytes = ByteArray(pathLen)
-            dis.readFully(pathBytes)
-            paths.add(String(pathBytes, Charsets.UTF_8))
+        advanceListener(TraceListenerEvent.HeaderRead(tidValue))
+        val decoded = TraceEventDecoder.decodeBody(dis, tidValue)
+        if (decoded is TraceEventDecodeResult.ProtocolViolation) {
+            // A complete TID header identifies an outstanding notification. Settle it before
+            // rejecting the frame, just as processEvent settles accepted events in its finally.
+            droppedEvents += 1
+            sendAck()
+            throw java.io.IOException(decoded.reason)
         }
-
-        System.err.println("[TRACE-LISTENER-DEBUG] Read event header: tid=$tidValue, syscall=$syscallName, paths=$paths")
+        decoded as TraceEventDecodeResult.Event
+        val diagnosticRecord = BenchmarkRawSyscallDiagnostics.record(tidValue, decoded.event.syscallName, decoded.rawArguments)
+        advanceListener(TraceListenerEvent.SyscallRead(tidValue, decoded.syscallNameLength))
+        advanceListener(TraceListenerEvent.ArgumentsRead(tidValue, decoded.event.syscallName, decoded.argumentCount))
         // NOTE: This protocol is strictly synchronous. The daemon suspends the tracee thread
         // in kernel space using seccomp and awaits an ACK from this listener thread. While the
         // tracee thread is suspended in the kernel, we can safely and reliably capture its JVM
         // stack trace (via captureStackTrace) without the thread moving past the active syscall frame.
         // Once the stack trace is captured, we send the ACK to unblock the tracee.
-        return TraceEvent(tidValue = tidValue, syscallName = syscallName, args = args, paths = paths, stackTrace = null)
+        return DecodedTraceEvent(decoded.event, diagnosticRecord)
     }
 
-    private fun processEvent(event: TraceEvent) {
+    private fun readTerminal(dis: DataInputStream) {
+        val reason = try {
+            TraceStreamEndWire.read(dis)
+        } catch (_: java.io.IOException) {
+            advanceListener(TraceListenerEvent.ProtocolRejected("Truncated trace terminal record"))
+            return
+        } catch (_: IllegalArgumentException) {
+            advanceListener(TraceListenerEvent.ProtocolRejected("Invalid trace terminal record"))
+            return
+        }
+        advanceListener(TraceListenerEvent.DrainConfirmed(reason, gracefulDrainRequested.get()))
+    }
+
+    private fun advanceListener(event: TraceListenerEvent) {
+        val next = TraceListenerMachine.evaluate(state, event)
+        state = next
+        if (next is TraceListenerState.ProtocolViolation) {
+            // Retirement may already be draining. Preserve lost evidence before propagating so
+            // close cannot mistake joined threads for a complete event stream.
+            droppedEvents += 1
+            drainComplete = false
+            throw TraceListenerProtocolException(next.reason)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Preserve fatal identity while settling the independent ACK obligation.
+    private fun processEvent(
+        event: TraceEvent,
+        diagnosticRecord: BenchmarkRawSyscallDiagnostics.Record?,
+    ) {
+         var primary: Throwable? = null
          try {
-             processAndQueueEvent(event)
-         } finally {
-             sendAck()
-         }
+             processAndQueueEvent(event, diagnosticRecord)
+        } catch (failure: Throwable) {
+            primary = failure
+        }
+        try {
+            sendAck()
+            BenchmarkRawSyscallDiagnostics.activeCapture()?.listenerAcknowledged(diagnosticRecord)
+        } catch (ackFailure: Throwable) {
+            val processingFailure = primary
+            if (processingFailure == null) throw ackFailure
+            if (processingFailure !== ackFailure) processingFailure.addSuppressed(ackFailure)
+        }
+        primary?.let { throw it }
     }
 
-    private fun processAndQueueEvent(event: TraceEvent) {
-         System.err.println("[TRACE-LISTENER-DEBUG] processEvent: tid=${event.tid.value}, syscall=${event.syscallName}")
-         if (event.paths.isNotEmpty() && isDuplicate(event)) {
-             System.err.println("[TRACE-LISTENER-DEBUG] duplicate event, skipping")
+    private fun processAndQueueEvent(
+        event: TraceEvent,
+        diagnosticRecord: BenchmarkRawSyscallDiagnostics.Record?,
+    ) {
+         val resolution = event.pathResolution
+         if (
+             BenchmarkRawSyscallDiagnostics.activeCapture() == null &&
+             resolution is PathResolution.Resolved &&
+             isDuplicate(event.syscallName, resolution)
+         ) {
              return
          }
 
+         val stackStarted = System.nanoTime()
          event.jvmStackTrace = captureStackTrace(event)
+         val stackCaptureNanos = System.nanoTime() - stackStarted
+         val queueStarted = System.nanoTime()
          eventQueue.offer(event)
+         BenchmarkRawSyscallDiagnostics.activeCapture()?.listenerProcessed(
+             diagnosticRecord,
+             stackCaptureNanos,
+             System.nanoTime() - queueStarted,
+         )
     }
 
     private fun sendAck() {
-        sendCommand(PROTOCOL_ACK_BYTE)
+        val result = sendCommand(PROTOCOL_ACK_BYTE)
+        val failure = when (result) {
+            TraceCommandWriteResult.Written -> return
+            is TraceCommandWriteResult.NativeFailure -> java.io.IOException("Profiler ACK failed: errno=${result.errno}")
+            is TraceCommandWriteResult.ShortWrite -> java.io.IOException("Profiler ACK incomplete: bytes=${result.bytes}")
+            is TraceCommandWriteResult.Threw -> java.io.IOException("Profiler ACK write threw", result.cause)
+        }
+        ackWriteFailure = result
+        droppedEvents += 1
+        drainComplete = false
+        // The daemon is still waiting for this ACK. Closing immediately exposes failure even if
+        // another complete frame is buffered locally; no subsequent frame may be processed.
+        closeSocketOnce()
+        val cleanup = cleanupOutcome
+        if (cleanup is SeccompCleanupOutcome.Incomplete) cleanup.failures.forEach(failure::addSuppressed)
+        throw failure
     }
 
-    private fun isDuplicate(event: TraceEvent): Boolean {
-        val cacheKey = "${event.syscallName}:${event.paths.sorted().joinToString(",")}"
+    private fun isDuplicate(
+        syscallName: String,
+        resolution: PathResolution.Resolved,
+    ): Boolean {
+        // Keep the compatibility string cache, but encode typed paths in operand order with
+        // lengths: delimiters inside a path cannot alias another operand tuple.
+        val cacheKey = buildString {
+            append("resolved:").append(syscallName.length).append(':').append(syscallName)
+            for (path in resolution.paths) append(':').append(path.length).append(':').append(path)
+        }
         val now = System.currentTimeMillis()
         val lastSeen = pathCache[cacheKey] ?: 0L
         return if (now - lastSeen < DEDUPLICATION_WINDOW_MS) {
-            logger.fine("[PROFILER] Deduplicated duplicate event for $cacheKey")
+            logger.fine("Deduplicated profiler event")
             true
         } else {
             pathCache[cacheKey] = now
@@ -444,11 +522,40 @@ internal class ProfilerTraceListener(
 
     private fun captureStackTrace(event: TraceEvent): Array<StackTraceElement>? {
         if (stackTracesMap == null || event.tid.value == 0) return null
-        val threadToProfile = Profiler.threadRegistry[event.tid]
+        val threadToProfile = threadFor(event.tid)
         return if (threadToProfile != null) {
             threadToProfile.stackTrace
         } else {
             arrayOf(StackTraceElement("<untracked_descendant_thread>", "run", null, -1))
         }
+    }
+}
+
+private data class DecodedTraceEvent(
+    val event: TraceEvent,
+    val diagnosticRecord: BenchmarkRawSyscallDiagnostics.Record?,
+)
+
+internal sealed interface TraceCommandWriteResult {
+    data object Written : TraceCommandWriteResult
+
+    data class NativeFailure(
+        val errno: Int,
+    ) : TraceCommandWriteResult
+
+    data class Threw(
+        val cause: Exception,
+    ) : TraceCommandWriteResult
+
+    data class ShortWrite(
+        val bytes: Long,
+    ) : TraceCommandWriteResult
+
+    companion object {
+        fun from(result: LinuxNative.SyscallResult<Long, *>): TraceCommandWriteResult =
+            when (result) {
+                is LinuxNative.SyscallResult.Success -> if (result.value == 1L) Written else ShortWrite(result.value)
+                is LinuxNative.SyscallResult.Error -> NativeFailure(result.errno)
+            }
     }
 }

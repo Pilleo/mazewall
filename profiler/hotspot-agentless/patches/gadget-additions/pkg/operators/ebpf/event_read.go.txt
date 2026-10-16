@@ -1,0 +1,18 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import "github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+
+func (t *Tracer) processEventRead(gadgetCtx operators.GadgetContext, sample []byte, lost uint64) error {
+	if lost > 0 {
+		t.ds.ReportLostData(lost)
+	}
+	// Ring reads pair a real sample with an independently polled loss count.
+	// Perf loss-only records contain no payload. Report loss without discarding
+	// the former or manufacturing an all-zero event for the latter.
+	if len(sample) == 0 {
+		return nil
+	}
+	return t.processEvent(gadgetCtx, sample)
+}

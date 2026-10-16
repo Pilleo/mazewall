@@ -1,0 +1,27 @@
+@startuml user_notif_liveness
+hide empty description
+title Reactor-owned USER_NOTIF deadline
+[*] --> Idle
+Idle --> Pending : notification received / absolute deadline = now + 30s
+Pending --> Pending : bounded poll -> Await\nidle / readiness / interrupted observation
+Pending --> Claimed : Ready before deadline / CAS claim
+Pending --> Expired : deadline reached / CAS claim
+Claimed --> Idle : Sent / release work
+Claimed --> Terminal : NotificationGone / Failed / throwing effect
+Expired --> Terminal : one EPERM attempt\nSent / NotificationGone / Failed / throw
+Pending --> Terminal : close / sole denial claim + cancellation
+Terminal --> Terminal : late completion / dispose only
+Terminal --> [*] : release session buffers + owned endpoints
+note right of Pending
+  Helpers own blocking preparation.
+  Reactor polls earliest deadline.
+  Deadline checked before and after poll.
+  No callback has reply authority.
+end note
+note right of Claimed
+  Failed/gone outcomes consume the lease.
+  No second reply or fallback denial.
+  Normal EINTR retries <= 8 attempts.
+  Timeout denial has one attempt.
+end note
+@enduml

@@ -3,7 +3,7 @@
 [![CI](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml/badge.svg)](https://github.com/Pilleo/mazewall/actions/workflows/ci.yml)
 [![JitPack](https://jitpack.io/v/Pilleo/mazewall.svg)](https://jitpack.io/#Pilleo/mazewall)
 
-**Linux kernel-enforced syscall and filesystem restrictions for selected JVM worker threads.**
+**Linux kernel-enforced syscall and filesystem restrictions for process and thread self restriction from inside an app.**
 
 > [!NOTE]
 > **Pre-Alpha.** Core enforcement and profiling work end-to-end. API is unstable and known issues are actively tracked. If you're evaluating this for your stack or want to contribute, [open a discussion](https://github.com/Pilleo/mazewall/discussions).
@@ -58,7 +58,7 @@ Docker container (one policy for all):
 
 ### After mazewall: kernel-enforced per-thread contracts
 
-mazewall wraps any standard `ExecutorService` and installs a **kernel-enforced syscall filter** for those threads only, tailored to exactly what that code path actually needs:
+mazewall owns dedicated platform workers and installs the required **kernel-enforced syscall and filesystem restrictions** before admitting synchronous work:
 
 ```
 HTTP Thread Pool      → default permissions (unchanged)
@@ -71,18 +71,53 @@ If trusted parsing code attempts a configured-forbidden syscall, the kernel deni
 
 The filter is applied via Linux `prctl`/`seccomp` — the same mechanism Docker uses, applied from inside the JVM, **without root privileges or native C dependencies**. A thread cannot remove an installed Seccomp filter; this monotonicity does not constrain unrestricted sibling threads.
 
+<!-- consumer: readme-owned -->
 ```kotlin
-val safe = ContainedExecutors.wrap(
-    Executors.newSingleThreadExecutor(),
-    Policy.NO_EXEC_HOTSPOT                // blocks execve/memfd; JIT may still mmap PROT_EXEC
+import io.mazewall.enforcer.api.Mazewall
+import io.mazewall.enforcer.api.ProcessPolicies
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.InProcessDomain
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+import java.time.Duration
+import java.util.concurrent.Callable
+
+// Trusted platform-thread bootstrap, before application pools start.
+// This application needs no later child processes, including Portal workers.
+fun bootstrapOwnedRuntime(): ManagedRuntime = ManagedRuntime.open(
+    RuntimeProfile.HOTSPOT_JIT,
+    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
+    Duration.ofSeconds(10), // preparation deadline
+    Duration.ofSeconds(10), // bounded close deadline
 )
 
-safe.submit { vulnerableLogger.log(maliciousInput) }
-// The kernel intercepts execve() → EPERM.
-// No shell is spawned. Throws ContainmentViolationException.
+fun prepareOwnedDomain(runtime: ManagedRuntime): InProcessDomain = runtime.prepare(
+    WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(),
+    DomainLimits(workers = 4, maxAdmissions = 64),
+)
+
+fun ownedExample(
+    runtime: ManagedRuntime,
+    domain: InProcessDomain,
+    workload: Callable<Int>,
+): Int = Mazewall.callContained(runtime, domain, workload)
 ```
 
-That's the whole API for most use cases.
+The application lifecycle owner stores the bootstrapped runtime before preparation,
+retains the domain, and passes both into subsequent calls with a materialized
+synchronous `Callable`. Evaluation never closes them. Admission
+counts queued and running work; overload rejects without caller-runs fallback. The
+example capacities are configuration, not measured defaults. A caller timeout does
+not end execution: retain the invocation handle through `executionEnd()`, request
+cooperative cancellation, and use bounded `drain(timeout)`. `close()` reports incomplete
+retirement rather than removing filters. Process restrictions are permanent.
+Bounded shutdown belongs to that application owner: report `DrainReport.Incomplete`
+or `IncompleteDrainException` and retain the same runtime for a later drain retry.
+Interrupted evaluation or exceptional delivery does not establish physical end.
+Hosts that launch or replace Portal workers need an explicit launch-compatible process
+baseline; the no-process-creation example forbids those launches. See
+[owned lifecycle guidance](enforcer/README.md#owned-synchronous-workers).
 
 ---
 
@@ -92,20 +127,25 @@ The biggest concern people raise: *"How do I know which syscalls my code actuall
 
 The `:profiler` module observes your workload during a test run and **generates a policy candidate from the behavior it sees**:
 
+<!-- consumer: readme-profile -->
 ```kotlin
-val result = Profiler.profile {
-    myXmlParser.parse(untrustedInput)   // run it under observation
-}
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.profiler.api.MazewallProfiler
 
-// toDsl() throws if exec/connect destinations were observed but cannot be enforced.
-// Pass allowIncomplete=true if you cannot enforce all destinations (e.g., dynamic exec).
-println(result.behavior.toDsl(allowIncomplete = true))
-// Output:
-// Policy.builder()
-//     .base(Policy.NO_NETWORK)
-//     .allowFsRead("/app/schemas")
-//     .allowJvmClasspath()
-//     .build()
+fun discoverCandidate(workload: () -> Unit) {
+    MazewallProfiler.open().use { session ->
+        val result = session.profile { workload() }
+        val base = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+            .base(Policy.PURE_COMPUTE_UNSAFE)
+            .forRuntime(RuntimeProfile.HOTSPOT_JIT)
+            .build()
+        println(result.toProfileDocumentJson()) // behavior AND measured coverage
+        println(result.toDsl(basePolicyName = "profileBase", base = base))
+        // Incomplete coverage throws; it is not authorization to enforce.
+    }
+}
 ```
 
 Treat generated output as a policy candidate: validate it against representative normal and failure workloads before enforcing it. Profiling cannot observe every future execution path, dependency upgrade, or deployment environment.
@@ -146,10 +186,13 @@ mazewall operates in two tiers. Think of it as the difference between the buildi
 | Tier | API | Scope | Purpose |
 |---|---|---|---|
 | **Tier 1** | `ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)` | Entire JVM | Global backstop — no exec/memfd; HotSpot JIT may still create executable mappings |
-| **Tier 2** | `ContainedExecutors.wrap(executor, policy)` | One thread pool | Surgical restriction — stops data-plane attacks (SSRF, XXE, path traversal) on specific pools |
+| **Tier 2** | `ManagedRuntime.prepare` + `Mazewall.callContained` | Owned platform workers | Required installation before synchronous body entry; finite admission and owned retirement |
 
 > [!IMPORTANT]
 > **Stack Tier 1 first.** Tier 2 alone does not fully isolate malicious code that can use standard Java concurrency APIs (`CompletableFuture`, virtual threads) to escape to unrestricted sibling threads. See [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the complete threat model.
+> Choose the baseline explicitly at trusted bootstrap. A Portal host must retain the
+> child-launch permissions it needs; do not install the diagram's no-process-creation
+> baseline and expect later worker startup or replacement to succeed.
 
 ---
 
@@ -192,6 +235,10 @@ Policies are composable via a builder — see [GETTING_STARTED.md](GETTING_START
 
 ## Where to Go Next
 
+For a logical, executable feature tour, open the [JUnit showcase tests](demos/README.md)
+and follow the [presenter guide](docs/presentation/PRESENTER_GUIDE.md). Each example
+has real assertions, a short outcome trace and its own native/resource lifetime.
+
 ### Build verification
 
 Use `./gradlew unitCheck` for host-safe tests and coverage, `./gradlew kernelCheck` for privileged kernel integration tests, and `./gradlew build` for the full merge gate. Normal verification is read-only; run `./gradlew format`, `./gradlew updateDiagrams`, or `./gradlew installGitHooks` only when those explicit maintenance actions are intended. Dependency changes require a reviewed `./gradlew dependencies --write-locks --write-verification-metadata sha256` update.
@@ -215,6 +262,9 @@ Use `./gradlew unitCheck` for host-safe tests and coverage, `./gradlew kernelChe
 | `:enforcer` | Core runtime — zero dependencies beyond Kotlin stdlib | Experimental; evaluate only with an explicit threat-model and supported-platform review |
 | `:profiler` | Developer tool — profiles a workload and generates a minimal policy | Experimental policy discovery; generated policies require validation |
 | `:demos:cli-demo` | Interactive CLI exploits showcase | 🚫 Demo only |
+| `:demos:agent-sandbox-demo` | Custom supervised tool compartments and offline JUnit controls | Experimental demo |
+| `:demos:koog-contained-tool` | Generated bounded process-Portal tool | Optional Koog demo |
+| `demos/spring-boot-sandbox` | Finished-JAR singleton, JDBC and owned execution | Standalone published consumer |
 | `:demos:vulnerable-web-app` | Spring Boot CVE demo (Log4Shell, SSRF, XXE…) | 🚫 Demo only |
 
 ---
@@ -229,7 +279,6 @@ Background reading on the kernel mechanics and threat model:
 
 | Part | Title | Focus |
 |---|---|---|
-| **0** | [Your Threads Are All Equally Trusted — Should They Be?](docs/presentation/article0-developer-primer.md) | Process-wide vs thread-scoped sandbox basics |
 | **1** | [Do You Really Know What Your App Is Doing at Runtime?](docs/presentation/article1-threat-model.md) | Seccomp, Landlock, SBoB concepts |
 | **2** | [Let Your Code Build Its Own Sandbox](docs/presentation/article2-profiler.md) | Dynamic profiling, USER_NOTIF daemon |
 | **3** | [Thread-Scoped JVM Containment: The Mechanics](docs/presentation/article3-enforcement.md) | FFM bridge, GC safepoints, Loom VT |

@@ -3,16 +3,14 @@ package demo
 import java.util.concurrent.Executors
 
 object UnsafeRunner {
-    fun run(payload: String) {
+    fun run(payload: String) = runAction { VulnerableLogger.log(payload) }
+
+    internal fun runAction(action: () -> String) {
         val executor = Executors.newSingleThreadExecutor()
-        try {
-            val future =
-                executor.submit<String> {
-                    VulnerableLogger.log(payload)
-                }
-            future.get() // wait for completion
-        } finally {
-            executor.shutdown()
+        OwnedActionRunner.run(executor) {
+            executor.submit<String> {
+                action()
+            }
         }
     }
 }

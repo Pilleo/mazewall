@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_known_join_paired_rejection",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-known-join-20260919/results.jsonl",
+  "artifact_sha256": "6525aa1eab2031a3fc9784665ec70eb9911b46f08b526c7d06ef9db1d671e202",
+  "benchmark_log_sha256": "52f643f6789fd98abaeeab24f8c032ab0e0661e74d83ce78d6a23c4b2459026a",
+  "environment": {
+    "execution": "rootful Docker with pinned distinct physical CPUs",
+    "scope": "tier-e-known-join",
+    "workload": "syscall_dense oracle",
+    "marker_transport": "AUTO; validated USDT selected",
+    "ring_decode": "direct",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "correctness": {
+    "baseline_outputs": 5,
+    "queued_outputs": 5,
+    "direct_known_outputs": 5,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "excluded_pairs": 0,
+    "policy_eligibility": false
+  },
+  "median_allocation_bytes_per_ready_record": {
+    "queued_control": { "collector_resolution": 234.99, "aggregate_collector_join": 592.70 },
+    "direct_known": { "collector_resolution": 258.97, "aggregate_collector_join": 614.08 }
+  },
+  "paired_workload_effect_ns": {
+    "direct_known_minus_queued_median": -36477,
+    "ci_95_low": -298031,
+    "ci_95_high": 11301,
+    "pairs": 5
+  },
+  "decision": "Rejected. Direct known-definition joining preserves exact evidence but increases allocation by 23.98 bytes per ready record in collector resolution and 21.38 bytes at the aggregate join boundary. Its workload interval includes zero. The queued join remains the production default.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "incomplete"
+  }
+}

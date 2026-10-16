@@ -1,7 +1,7 @@
 ---
 title: "MAZ-18 Backlog Review - Open Questions Identification"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 component: "backlog-review"
 target_modules:
@@ -19,8 +19,8 @@ paperclip_identifier: MAZ-18
 
 # Backlog Review: Open Questions That Cannot Be Answered by Current Docs or Code
 
-**Generated:** 2026-08-29  
-**Reviewed by:** Vibe ACP Developer (d159bcf4-4a01-4fd8-9007-bad4aababfeb)  
+**Generated:** 2026-08-29
+**Reviewed by:** Vibe ACP Developer (d159bcf4-4a01-4fd8-9007-bad4aababfeb)
 **Source:** Issue MAZ-18 - "please review backlog open issues and see what open questions do you have that cannot be answered by current docs or code"
 
 ## Executive Summary
@@ -42,7 +42,7 @@ This review identifies **6 backlog issues with open questions** that require ope
 ## Open Questions Requiring Operator Input
 
 ### 1. MAZ-765: Rootless Podman Docker Socket BPF Ceiling
-**File:** `docs/internals/backlog/testing/issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md`  
+**File:** `docs/internals/backlog/testing/issue-20260825-090500-rootless-podman-docker-socket-bpf-ceiling.md`
 **Severity:** LOW | **Priority:** medium | **Component:** ebpf-prototype
 
 **Cannot be answered by docs/code because:** Requires operator preference decision on development workflow
@@ -61,7 +61,7 @@ This review identifies **6 backlog issues with open questions** that require ope
 ---
 
 ### 2. MAZ-709: WP-01 MazewallContext API (In-Memory Context Management)
-**File:** `docs/internals/backlog/implementation/issue-20260825-023931-tier-e-wp-01-mazewall-context-api.md`  
+**File:** `docs/internals/backlog/implementation/issue-20260825-023931-tier-e-wp-01-mazewall-context-api.md`
 **Severity:** ENHANCEMENT | **Priority:** high | **Component:** platform
 
 **Cannot be answered by docs/code because:** Requires design decision on API evolution path
@@ -80,7 +80,7 @@ This review identifies **6 backlog issues with open questions** that require ope
 ---
 
 ### 3. MAZ-706: SBoB Policy Artifacts Workflow - CI Admission
-**File:** `docs/internals/backlog/implementation/issue-20260823-171954-sbob-policy-artifacts-ci-admission.md`  
+**File:** `issue-20260823-171954-sbob-policy-artifacts-ci-admission.md`
 **Severity:** ENHANCEMENT | **Priority:** medium | **Component:** enforcer, profiler, orchestrator
 
 **Cannot be answered by docs/code because:** Requires organizational trust model and security policy decisions
@@ -98,7 +98,7 @@ This review identifies **6 backlog issues with open questions** that require ope
 ---
 
 ### 4. MAZ-714: WP-13 Sampling Enrichment Policy
-**File:** `docs/internals/backlog/implementation/issue-20260825-023943-tier-e-wp-13-sampling-enrichment.md`  
+**File:** `docs/internals/backlog/implementation/issue-20260825-023943-tier-e-wp-13-sampling-enrichment.md`
 **Severity:** ENHANCEMENT | **Priority:** medium | **Component:** profiler
 
 **Cannot be answered by docs/code because:** Requires tuning decision based on performance characteristics
@@ -113,7 +113,7 @@ This review identifies **6 backlog issues with open questions** that require ope
 ---
 
 ### 5. MAZ-716: WP-15 Kubescape Node-Agent Integration PoC
-**File:** `docs/internals/backlog/implementation/issue-20260825-023945-tier-e-wp-15-kubescape-poc.md`  
+**File:** `docs/internals/backlog/implementation/issue-20260825-023945-tier-e-wp-15-kubescape-poc.md`
 **Severity:** ENHANCEMENT | **Priority:** low | **Component:** profiler
 
 **Cannot be answered by docs/code because:** Requires community/upstream coordination decision
@@ -128,7 +128,7 @@ This review identifies **6 backlog issues with open questions** that require ope
 ---
 
 ### 6. MAZ-712: WP-11 Limited Java Agent for Automatic Boundary Scopes
-**File:** `docs/internals/backlog/implementation/issue-20260825-023941-tier-e-wp-11-java-agent.md`  
+**File:** `docs/internals/backlog/implementation/issue-20260825-023941-tier-e-wp-11-java-agent.md`
 **Severity:** ENHANCEMENT | **Priority:** medium | **Component:** profiler
 
 **Cannot be answered by docs/code because:** Requires dependency approval decision
@@ -178,15 +178,22 @@ However, they remain flagged because they indicate areas where future decisions 
 
 3. **MAZ-712 (Java Agent Dependencies) - MEDIUM PRIORITY:** Dependency approval needed. The hard process rules already state "New external dependencies require explicit operator approval per PR" — this is a known process question.
 
+## Resolution
+
+This historical review is resolved as a snapshot. Its actionable questions are tracked by the
+current backlog records, and its Tier E references have been superseded by the resolved Tier E
+correctness, transport, and evidence records. New operator decisions should be filed as focused
+issues rather than reopening this historical inventory.
+
 The remaining questions (MAZ-709, MAZ-714, MAZ-716) can have temporary answers or workarounds and should not block overall progress.
 
 ---
 
 ## Files Reviewed
 
-Total backlog files scanned: 45+  
-Open issues with open_questions flag: 9  
-Issues requiring operator input: 6  
+Total backlog files scanned: 45+
+Open issues with open_questions flag: 9
+Issues requiring operator input: 6
 Issues with answerable questions: 3
 
 ---

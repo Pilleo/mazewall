@@ -1,11 +1,18 @@
 package io.mazewall.profiler.compiler
-
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicyBuilder
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import io.mazewall.seccomp.BpfSimulator
 import io.mazewall.seccomp.SyscallProbeMatrix
 import org.junit.jupiter.api.Test
@@ -25,8 +32,8 @@ class ProfilerFilterVerdictMappingTest {
     @Test
     fun `profiling mode maps errno decisions to USER_NOTIF for structural probes`() {
         // NOTE: do not allow READ here — nr==0 is also the structural nr-zero-edge probe.
-        val policy = Policy
-            .threadLocalBuilder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ERRNO())
             .allow(Syscall.GETPID)
             .build()
@@ -49,8 +56,8 @@ class ProfilerFilterVerdictMappingTest {
 
     @Test
     fun `profiling mode force-allows ioctl for the tracer`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ERRNO())
             .block(Syscall.CONNECT)
             .build()

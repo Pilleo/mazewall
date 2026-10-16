@@ -1,65 +1,25 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.ffi.NativeConstants
-import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.networking.SupervisorSocketUtils
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.NativeEngine
 
 internal object ProfilerSocket {
-    fun connectWithRetry(
+    fun connectDescriptorWithRetry(
         socketPath: String,
+        native: NativeEngine,
         maxRetries: Int = 500,
         delayMs: Long = 10L,
-    ): Int {
-        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-            val sockaddrUn = SupervisorSocketUtils.setupSockAddrUn(arena, socketPath)
-
-            var lastErrno = 0
-
-            for (retryAttempt in 0 until maxRetries) {
-                val fdRes =
-                LinuxNative.networking.socket(
-                    SupervisorSocketUtils.AF_UNIX,
-                    SupervisorSocketUtils.SOCK_STREAM or NativeConstants.SOCK_CLOEXEC,
-                    0,
-                )
-
-                val fdVal = when (fdRes) {
-                    is LinuxNative.SyscallResult.Success -> fdRes.value.toInt()
-                    is LinuxNative.SyscallResult.Error -> {
-                        lastErrno = fdRes.errno
-                        Thread.sleep(delayMs)
-                        continue
-                    }
-                }
-                val fd = FileDescriptor.adopt(fdVal, FileDescriptorRole.UnixSocket)
-                val connRes =
-                LinuxNative.networking.connect(
-                    fd,
-                    ConfinedSegment(sockaddrUn.segment),
-                    SupervisorSocketUtils.SOCKADDR_UN_SIZE,
-                )
-
-                if (connRes is LinuxNative.SyscallResult.Success) {
-                    return fdVal
-                }
-                lastErrno = (connRes as LinuxNative.SyscallResult.Error).errno
-                LinuxNative.fileSystem.close(fd)
-
-                Thread.sleep(delayMs)
-            }
-            throw IllegalStateException(
-                "Failed to connect to socket at $socketPath after $maxRetries retries. Last errno=$lastErrno",
-            )
-        }
-    }
+    ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = SupervisorSocketUtils.connectDescriptorWithRetry(socketPath, native, maxRetries, delayMs)
 
     fun sendDescriptor(
         socketFd: Int,
         fdToSend: Int,
+        native: NativeEngine,
     ): Boolean {
-        return SupervisorSocketUtils.sendDescriptor(socketFd, fdToSend)
+        return SupervisorSocketUtils.sendDescriptor(socketFd, fdToSend, native.networking)
     }
 }

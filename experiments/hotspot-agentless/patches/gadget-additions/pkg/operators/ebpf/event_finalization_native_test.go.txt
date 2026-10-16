@@ -1,0 +1,85 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"math"
+	"testing"
+
+	"github.com/cilium/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"golang.org/x/sys/unix"
+)
+
+func eventFinalizationScopeFixture() *ebpfInstance {
+	return &ebpfInstance{collectionSpec: &ebpf.CollectionSpec{Programs: map[string]*ebpf.ProgramSpec{"capture_openat": {Name: "capture_openat", Type: ebpf.Kprobe, SectionName: "kprobe/__x64_sys_openat"}}, Maps: map[string]*ebpf.MapSpec{"events": {Type: ebpf.RingBuf}, "events_lost_samples": {Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 8, MaxEntries: 1}}}, tracers: map[string]*Tracer{"openat": {mapName: "events"}}}
+}
+func TestEventFinalizationRejectsUnsupportedWriterScope(t *testing.T) {
+	for _, kind := range []string{"supported", "extra_program", "other_probe", "perf_transport", "extra_tracer", "ustack", "otel", "raw_attachment", "iterator", "missing_counter", "wrong_counter_layout"} {
+		t.Run(kind, func(t *testing.T) {
+			i := eventFinalizationScopeFixture()
+			ustack, otel := false, false
+			switch kind {
+			case "extra_program":
+				i.collectionSpec.Programs["other"] = &ebpf.ProgramSpec{Type: ebpf.Kprobe}
+			case "other_probe":
+				i.collectionSpec.Programs["capture_openat"].SectionName = "kprobe/__x64_sys_close"
+			case "perf_transport":
+				i.collectionSpec.Maps["events"].Type = ebpf.PerfEventArray
+			case "extra_tracer":
+				i.tracers["extra"] = &Tracer{}
+			case "ustack":
+				ustack = true
+			case "otel":
+				otel = true
+			case "raw_attachment":
+				i.rawDetachers = []func() error{func() error { return nil }}
+			case "iterator":
+				i.iterators = map[string]*Iterator{"extra": {}}
+			case "missing_counter":
+				delete(i.collectionSpec.Maps, "events_lost_samples")
+			case "wrong_counter_layout":
+				i.collectionSpec.Maps["events_lost_samples"].ValueSize = 4
+			}
+			err := validateEventFinalizationScope(i, ustack, otel)
+			if (kind == "supported") != (err == nil) {
+				t.Fatal("wrong scope admission", kind, err)
+			}
+		})
+	}
+}
+func TestEventFinalizationReserveFailureSumRejectsOverflow(t *testing.T) {
+	if got, err := sumEventReserveFailures([]uint64{3, 4, 0}); err != nil || got != 7 {
+		t.Fatal(got, err)
+	}
+	if _, err := sumEventReserveFailures([]uint64{math.MaxUint64, 1}); err == nil {
+		t.Fatal("native counter sum overflow certified")
+	}
+}
+
+func TestStrictFullFinalizationRequiresBothOwnedStackHelpers(t *testing.T) {
+	for _, row := range []struct{ u, o, full, want bool }{{true, true, true, true}, {false, false, true, false}, {true, false, true, false}, {false, true, true, false}, {true, true, false, false}, {false, false, false, true}} {
+		err := validateEventFinalizationProfile(eventFinalizationScopeFixture(), row.u, row.o, row.full)
+		if (err == nil) != row.want {
+			t.Fatal("wrong full-profile admission", row, err)
+		}
+	}
+}
+func TestStrictFullFinalizationHookRunsBeforeResourceRetirement(t *testing.T) {
+	r := newEventDrainReader()
+	close(r.done)
+	called := false
+	i := &ebpfInstance{tracers: map[string]*Tracer{"openat": {eventDrain: r}}, eventStopOptions: &operators.EventFinalizationOptions{StrictFull: true, AfterReadout: func(ctx context.Context) error {
+		called = true
+		if ctx.Err() != nil {
+			t.Fatal("stop budget replaced")
+		}
+		return unix.EPERM
+	}}}
+	err := (nativeEventStopBackend{instance: i}).Join(context.Background())
+	if !called || !errors.Is(err, unix.EPERM) {
+		t.Fatal("definition hook skipped or downgraded", called, err)
+	}
+}

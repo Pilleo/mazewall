@@ -1,21 +1,29 @@
 package io.mazewall.enforcer.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.RealPlatformProvider
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
 class ContainedExecutorWrapperStateTest {
@@ -30,23 +38,30 @@ class ContainedExecutorWrapperStateTest {
 
     @Test
     fun `successful two tasks same policy same worker - depth does not increase`() {
-        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        System.setProperty("io.mazewall.fallback", "FAIL")
 
-        val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
+        val mockPlatform = object : io.mazewall.enforcer.api.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL - seccomp not available in container
+                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL is the expected bogus-mode sanity result
         }
         Platform.setProvider(mockPlatform)
 
         val mockEngine = MockNativeEngine()
+        mockEngine.process.onPrctl = { command ->
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()
@@ -58,12 +73,9 @@ class ContainedExecutorWrapperStateTest {
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
         val delegate = Executors.newSingleThreadExecutor()
         val wrapper = ContainedExecutorWrapper(delegate, policy.definition)
-
-        // Capture depth before first task
-        val initialDepth = ContainmentStateRegistry.threadState.filterDepth
 
         // First task
         val future1 = wrapper.submit(Runnable {})
@@ -94,6 +106,7 @@ class ContainedExecutorWrapperStateTest {
             "Filter depth should not increase between successful tasks on the same worker thread. " +
                 "After task 1: $depthAfterTask1, after task 2: $depthAfterTask2",
         )
+        assertTrue(depthAfterTask1 > 0, "A successful-install fixture must record an applied filter")
 
         delegate.shutdown()
         delegate.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
@@ -101,27 +114,34 @@ class ContainedExecutorWrapperStateTest {
 
     @Test
     fun `successful install is not rewound`() {
-        System.setProperty("io.mazewall.fallback", "WARN_AND_BYPASS")
+        System.setProperty("io.mazewall.fallback", "FAIL")
 
-        val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
+        val mockPlatform = object : io.mazewall.enforcer.api.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL - seccomp not available in container
+                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL is the expected bogus-mode sanity result
         }
         Platform.setProvider(mockPlatform)
 
         val mockEngine = MockNativeEngine()
+        mockEngine.process.onPrctl = { command ->
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
             LinuxNative.SyscallResult.Success(0L)
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
         val delegate = Executors.newSingleThreadExecutor()
         val wrapper = ContainedExecutorWrapper(delegate, policy.definition)
 
@@ -129,33 +149,39 @@ class ContainedExecutorWrapperStateTest {
         val future = wrapper.submit(Runnable {})
         future.get()
 
-        // With WARN_AND_BYPASS fallback, the install is bypassed (installed=false) but receipt is not null
-        // This means the catch block does NOT restore threadState (since receipt != null)
-        // The filter is not actually installed, so threadState may be empty or have other state
-        // The key invariant: threadState was NOT restored to initialState by the wrapper
+        val retainedDepth = delegate.submit(Callable { ContainmentStateRegistry.threadState.filterDepth }).get(5, java.util.concurrent.TimeUnit.SECONDS)
+        assertTrue(retainedDepth > 0, "Task completion must retain irreversible installation state")
 
         delegate.shutdown()
         delegate.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
     }
 
     @Test
-    fun `failed install before receipt still rewinds`() {
-        val mockPlatform = object : io.mazewall.PlatformProvider by RealPlatformProvider {
+    fun `failed install prevents target entry and publishes no applied filter`() {
+        val mockPlatform = object : io.mazewall.enforcer.api.PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
-                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL - seccomp not available in container
+                LinuxNative.SyscallResult.Error(22, -1L) // EINVAL is the expected bogus-mode sanity result
         }
         Platform.setProvider(mockPlatform)
 
         val mockEngine = MockNativeEngine()
-        // Mock seccomp syscall to fail with EINVAL (22)
+        // Thread-scoped installation uses prctl; reject before the publication callback.
+        mockEngine.process.onPrctl = { command ->
+            if (command is PrctlCommand.SetSeccomp) LinuxNative.SyscallResult.Error(22, -1L) else LinuxNative.SyscallResult.Success(0L)
+        }
+        // Also reject the raw syscall route used by process-wide installation.
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()
@@ -168,31 +194,21 @@ class ContainedExecutorWrapperStateTest {
         LinuxNative.setEngine(mockEngine)
 
         // Policy WITHOUT Landlock paths so Landlock is not applied
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
         val delegate = Executors.newSingleThreadExecutor()
         val wrapper = ContainedExecutorWrapper(delegate, policy.definition)
 
-        // Set initial empty state
-        ContainmentStateRegistry.threadState = ContainerState()
-        val initialState = ContainmentStateRegistry.threadState
-
-        // Submit a task that will fail during install
-        val future = wrapper.submit(Runnable {})
-
+        val calls = java.util.concurrent.atomic
+            .AtomicInteger()
         try {
-            future.get()
-        } catch (e: Exception) {
-            // Expected to throw
+            val future = wrapper.submit(Callable { calls.incrementAndGet() })
+            kotlin.test.assertFailsWith<java.util.concurrent.ExecutionException> { future.get(5, java.util.concurrent.TimeUnit.SECONDS) }
+            assertEquals(0, calls.get())
+            val workerState = delegate.submit(Callable { ContainmentStateRegistry.threadState }).get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertEquals(0, workerState.filterDepth, "Pre-apply failure must not publish an installed filter")
+        } finally {
+            delegate.shutdown()
+            check(delegate.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS))
         }
-
-        // After failed install (receipt == null), threadState should be restored to initial
-        assertEquals(
-            initialState,
-            ContainmentStateRegistry.threadState,
-            "Thread state should be restored to initial state after failed install",
-        )
-
-        delegate.shutdown()
-        delegate.awaitTermination(1, java.util.concurrent.TimeUnit.SECONDS)
     }
 }

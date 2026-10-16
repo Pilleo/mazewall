@@ -1,17 +1,17 @@
 package io.mazewall.sbob
 
-import io.mazewall.BillOfBehaviorDto
-import io.mazewall.PolicyBuilder
-import io.mazewall.PolicyDefinition
-import io.mazewall.PolicyScope
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BillOfBehaviorDto
+import io.mazewall.enforcer.api.PolicyBuilder
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 
 /**
  * Transforms a DTO and normalized paths into a Mazewall [PolicyDefinition].

@@ -1,3 +1,9 @@
+---
+document_type: execution_plan
+title: "Security Suppression Reduction Implementation Plan"
+base_revision: 991eff53
+---
+
 # Security Suppression Reduction Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

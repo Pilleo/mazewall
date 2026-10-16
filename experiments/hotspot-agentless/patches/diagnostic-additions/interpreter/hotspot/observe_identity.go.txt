@@ -1,0 +1,12 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import "go.opentelemetry.io/ebpf-profiler/libpf"
+
+// ObserveFullIdentity is only installed in the explicit diagnostic build. It
+// samples current metadata after capture, without decoding or changing caches.
+func (d *hotspotInstance) ObserveFullIdentity(frame libpf.EbpfFrame) (uint64, error) {
+	ptr, err := d.readInterpretedConstMethod(libpf.Address(frame.Variable(0)))
+	return uint64(ptr + d.rm.Bias), err
+}

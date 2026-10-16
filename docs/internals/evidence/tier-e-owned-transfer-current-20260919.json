@@ -1,0 +1,64 @@
+{
+  "title": "Tier E primitive owned-record transfer validation",
+  "date": "2026-09-19",
+  "status": "COMPLETE",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 41,
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "image_id": "sha256:2958324e6b0df3c3ebb41095b98697e5b7a44ee4d7676c68d22af9b1dbf13a86",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "scope": "tier-e-ring-decode",
+    "workload": "syscall_dense",
+    "forks_per_arm": 5,
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "operations_per_batch": 100,
+    "results_sha256": "692cad14bd3d14c5747d5cf2fe7c2669591debae0e1a8b8b613d8b9db84967b0",
+    "benchmark_log_sha256": "ef1e053331b2368849b10627d7402c98baca9b674476d9aeeea5928012454ebf"
+  },
+  "change": {
+    "description": "Direct ring decoding owns one LongArray and transfers it once into SyscallAttribution; no mapped ring view or ByteArray is retained.",
+    "default_changed": false,
+    "legacy_control_retained": true
+  },
+  "correctness": {
+    "tier_e_arms": 8,
+    "forks_per_tier_e_arm": 5,
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE",
+    "missing_operations": 0,
+    "wrong_operations": 0,
+    "observed_ring_loss": 0,
+    "policy_eligibility": false,
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS"
+  },
+  "paired_ring_drain_effect_ns_per_3900_ready_records": {
+    "dictionary_full_stream": {
+      "legacy_minus_direct_samples": [113316602, 12861530, 12103103, 298749, 45598033],
+      "median": 12861530
+    },
+    "dictionary_unique_edge": {
+      "legacy_minus_direct_samples": [65865382, 11431294, 37272779, 2086333, 18393127],
+      "median": 18393127
+    },
+    "inline_full_stream": {
+      "legacy_minus_direct_samples": [91046485, 88700814, 39084200, -61273449, 42525808],
+      "median": 42525808
+    },
+    "inline_unique_edge": {
+      "legacy_minus_direct_samples": [55961595, 19050262, 64016277, 23523016, 19890252],
+      "median": 23523016
+    }
+  },
+  "whole_workload_result": {
+    "status": "INCONCLUSIVE",
+    "reason": "All four paired bootstrap 95% intervals for legacy-minus-direct workload time include zero. The phase reduction is established, but this host/workload does not yet prove an end-to-end application-speed improvement."
+  },
+  "conclusion": "Primitive ownership transfer is correctness-preserving and materially reduces measured ring-drain phase work. Keep legacy decoding as the production default until direct-path subphase accounting and a supported end-to-end paired improvement justify a default change."
+}

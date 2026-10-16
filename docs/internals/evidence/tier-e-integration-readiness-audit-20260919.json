@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_broader_integration_readiness_audit",
+  "run_date": "2026-09-19",
+  "decision": "not_ready_for_broader_integration",
+  "policy_eligibility": false,
+  "criteria": {
+    "correctness_dimensions": {
+      "status": "PASS",
+      "evidence": "docs/internals/evidence/tier-e-production-marker-selection-current-20260919.json",
+      "details": "All enabled rootful arms passed capture-domain validity, transport completeness, attribution coverage, dictionary integrity, and lifecycle validity."
+    },
+    "auto_matches_validated_usdt": {
+      "status": "PASS",
+      "evidence": "docs/internals/evidence/tier-e-production-marker-selection-current-20260919.json",
+      "details": "AUTO selected USDT and retained PASS/COMPLETE exact workload evidence in five rootful forks, matching explicit USDT."
+    },
+    "uprobe_fallback": {
+      "status": "PASS",
+      "evidence": "docs/internals/evidence/tier-e-production-marker-selection-current-20260919.json",
+      "details": "Explicit uprobe retained PASS/COMPLETE exact workload evidence in five rootful forks."
+    },
+    "paired_overhead_intervals": {
+      "status": "PASS",
+      "evidence": "docs/internals/evidence/tier-e-clean-overhead-and-ring-control-20260919.json",
+      "details": "Five-pair dictionary/full-stream and dictionary/unique-edge workload intervals exclude zero on the measured rootful host."
+    },
+    "long_session_retention": {
+      "status": "PASS",
+      "evidence": "docs/internals/evidence/tier-e-dictionary-publication-current-20260919.json",
+      "details": "Twenty stack-diverse Tier E forks completed with zero retention exhaustions; peak Kotlin/native retained state was 1414226/1453043 bytes under the 67108864-byte limit."
+    },
+    "optimization_evidence_equivalence": {
+      "status": "PASS",
+      "evidence": "docs/internals/evidence/tier-e-ring-decode-current-20260919.json; docs/internals/evidence/tier-e-collector-append-current-20260919.json; docs/internals/evidence/tier-e-component-allocation-current-20260919.json; docs/internals/evidence/tier-e-ring-argument-view-current-20260919.json; docs/internals/evidence/tier-e-task-identity-current-20260919.json",
+      "details": "Direct and legacy decoder arms completed with zero missing, wrong, or lost workload operations. Both five-fork collector controls completed all 20 outputs with identical PASS/COMPLETE workload evidence; the latter uses a cached allocation counter and publishes a component-level allocation breakdown. The eager-versus-lazy compatibility-view and per-event-versus-consecutive-task-identity controls both retained complete evidence and accepted the production allocation reductions."
+    },
+    "remaining_overhead_attribution": {
+      "status": "UNVERIFIED",
+      "evidence": "docs/internals/evidence/tier-e-jit-map-overhead-attribution-20260919.json; docs/internals/evidence/tier-e-component-allocation-current-20260919.json; docs/internals/evidence/tier-e-external-allocation-20260919.json; docs/internals/evidence/tier-e-capture-profile-control-20260919.json; docs/internals/evidence/tier-e-ring-decode-control-20260919.json; docs/internals/evidence/tier-e-ring-argument-list-control-20260919.json",
+      "details": "Prior PASS withdrawn: 21 maps cover the coordinator and direct collector children, not all nested workload JVMs. Whole-process sample counts include startup, compilation and shutdown; similar means do not prove equivalence or identify polling as the residual cost. The capture-domain comparison establishes a component of overhead, not exclusive attribution."
+    }
+  },
+  "next_required_action": "Propagate diagnostic options through all JVM launches, verify per-PID map coverage, correlate perf with measured windows, then run the approved five-fork comparisons before selecting an optimization."
+}

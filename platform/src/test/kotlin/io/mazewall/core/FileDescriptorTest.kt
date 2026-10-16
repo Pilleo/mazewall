@@ -1,8 +1,18 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
-import io.mazewall.LinuxNative
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.native.map
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
@@ -29,7 +39,8 @@ class FileDescriptorTest {
         private fun <T> withArena(block: NativeArena.() -> T): T = NativeArena.ofConfined().use(block)
 
         @JvmStatic
-        fun descriptorRoles(): Stream<Arguments> =
+        @JvmName("descriptorRoles")
+        internal fun descriptorRoles(): Stream<Arguments> =
             Stream.of(
                 Arguments.of("generic", FileDescriptorRole.Generic),
                 Arguments.of("unix socket", FileDescriptorRole.UnixSocket),
@@ -38,22 +49,25 @@ class FileDescriptorTest {
                 Arguments.of("seccomp notification", FileDescriptorRole.SeccompNotif),
                 Arguments.of("pid", FileDescriptorRole.Pid),
                 Arguments.of("granted", FileDescriptorRole.Granted),
+                Arguments.of("bpf", FileDescriptorRole.Bpf),
             )
     }
 
     @Test
-    fun `adopt produces an ownership-typed descriptor`() =
+    fun `adopt produces an ownership-typed descriptor`(): Unit =
         withArena {
             val owned: FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned> =
-                FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
+                TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Generic)
 
             owned.close()
         }
 
     @Test
-    fun `kernel liveness audit distinguishes an open descriptor from a closed descriptor`() =
+    fun `kernel liveness audit distinguishes an open descriptor from a closed descriptor`(): Unit =
         withArena {
-            val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
+            val fd = TestFileDescriptors
+                .adopt(realFd(), FileDescriptorRole.Generic)
 
             assertTrue(FdEpoch.verifyKernelLiveness(fd.value))
             fd.close()
@@ -61,9 +75,10 @@ class FileDescriptorTest {
         }
 
     @Test
-    fun `audit rejects an epoch-live descriptor the kernel has already closed`() =
+    fun `audit rejects an epoch-live descriptor the kernel has already closed`(): Unit =
         withArena {
-            val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
+            val fd = TestFileDescriptors
+                .adopt(realFd(), FileDescriptorRole.Generic)
             val previousAuditSetting = System.getProperty("mazewall.fd.audit")
             try {
                 System.setProperty("mazewall.fd.audit", "true")
@@ -80,9 +95,22 @@ class FileDescriptorTest {
         }
 
     @Test
-    fun `test FileDescriptor creation and close`() =
+    fun `audit ownership is qualified by descriptor generation`(): Unit =
         withArena {
-        val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
+            val fd = TestFileDescriptors
+                .adopt(realFd(), FileDescriptorRole.Generic)
+
+            assertTrue(FdEpoch.isOwnedThroughEpoch(fd.value, fd.generation))
+            assertFalse(FdEpoch.isOwnedThroughEpoch(fd.value, fd.generation + 1))
+
+            fd.close()
+        }
+
+    @Test
+    fun `test FileDescriptor creation and close`(): Unit =
+        withArena {
+        val fd = TestFileDescriptors
+            .adopt(realFd(), FileDescriptorRole.Generic)
         val value = fd.value
         assertEquals(value, fd.value)
 
@@ -109,13 +137,15 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `test file descriptor basic properties`() =
+    fun `test file descriptor basic properties`(): Unit =
         withArena {
         val shared = realFd()
-        val fd1 = FileDescriptor.adopt(shared, FileDescriptorRole.Generic)
+        val fd1 = TestFileDescriptors
+            .adopt(shared, FileDescriptorRole.Generic)
         val fd2 = FileDescriptor.generic(shared)
         val other = realFd()
-        val fd3 = FileDescriptor.adopt(other, FileDescriptorRole.Generic)
+        val fd3 = TestFileDescriptors
+            .adopt(other, FileDescriptorRole.Generic)
 
         assertEquals(fd1, fd2)
         assertNotEquals(fd1, fd3)
@@ -128,17 +158,19 @@ class FileDescriptorTest {
 
     @Test
     fun `test invalid negative FileDescriptor creation allowed by unsafe`() {
-        val fd = FileDescriptor.replace<FileDescriptorRole.Generic>(-1)
+        val fd = TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(-1)
         assertTrue(fd.isInvalid)
         fd.close() // should return immediately
         assertTrue(fd.toString().contains("fd(-1, closed/invalid)"))
     }
 
     @Test
-    fun `open descriptors can be passed as NativeArg FdArg`() =
+    fun `open descriptors can be passed as NativeArg FdArg`(): Unit =
         withArena {
         val intFd = realFd()
-        val fd = FileDescriptor.adopt(intFd, FileDescriptorRole.Generic)
+        val fd = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Generic)
         val arg = NativeArg.FdArg(fd)
         assertEquals(intFd.toLong(), arg.asLong)
         // NativeArg.FdArg(fd.close()) does not compile: FdArg requires FdState.Open.
@@ -146,10 +178,11 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `test use extension function`() =
+    fun `test use extension function`(): Unit =
         withArena {
         val intFd = realFd()
-        val fd = FileDescriptor.adopt(intFd, FileDescriptorRole.Generic)
+        val fd = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Generic)
         val result = fd.use { openFd ->
             assertEquals(intFd, openFd.value)
             "some-result"
@@ -158,15 +191,52 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `reclaiming the same integer after close is a new generation`() =
+    fun `use retains the block failure when close also fails`(): Unit =
+        withArena {
+            val fd = TestFileDescriptors.adopt(realFd(), FileDescriptorRole.Generic)
+            val real = LinuxNative.snapshot()
+            val fileSystem = object : NativeFileSystem by real.fileSystem {
+                override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    throw IllegalStateException("injected close failure")
+                }
+            }
+            LinuxNative.setEngine(
+                object : NativeEngine by real {
+                    override val fileSystem = fileSystem
+                },
+            )
+            try {
+                val failure = org.junit.jupiter.api.assertThrows<RuntimeException> {
+                    fd.use { throw RuntimeException("block failed") }
+                }
+                assertEquals("block failed", failure.message)
+                assertTrue(failure.suppressed.any { it.message == "injected close failure" })
+            } finally {
+                LinuxNative.resetToDefault()
+            }
+        }
+
+    @Test
+    fun `asAutoCloseable closes the owned descriptor`() {
+        withArena {
+            val fd = TestFileDescriptors.adopt(realFd(), FileDescriptorRole.Generic)
+            fd.asAutoCloseable().use { }
+            assertFalse(fd.isLiveForIo())
+        }
+    }
+
+    @Test
+    fun `reclaiming the same integer after close is a new generation`(): Unit =
         withArena {
         // Close the lowest-open first; the next open reclaims the same integer.
         val firstInt = realFd()
-        val leftover = FileDescriptor.adopt(firstInt, FileDescriptorRole.Generic)
+        val leftover = TestFileDescriptors
+            .adopt(firstInt, FileDescriptorRole.Generic)
         leftover.close()
 
         val reusedInt = realFd()
-        val reused = FileDescriptor.adopt(reusedInt, FileDescriptorRole.Generic)
+        val reused = TestFileDescriptors
+            .adopt(reusedInt, FileDescriptorRole.Generic)
 
         assertTrue(reused.isValid)
         assertTrue(reused.isLiveForIo())
@@ -177,10 +247,11 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `concurrent aliases of a live fd share generation`() =
+    fun `concurrent aliases of a live fd share generation`(): Unit =
         withArena {
         val shared = realFd()
-        val a = FileDescriptor.adopt(shared, FileDescriptorRole.Generic)
+        val a = TestFileDescriptors
+            .adopt(shared, FileDescriptorRole.Generic)
         val b = FileDescriptor.generic(shared)
         assertEquals(a, b)
         assertTrue(a.isLiveForIo())
@@ -189,13 +260,17 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `role factories mint Open tokens of the declared role`() =
+    fun `role factories mint Open tokens of the declared role`(): Unit =
         withArena {
         val fds = (1..4).map { realFd() }
-        val sock = FileDescriptor.adopt(fds[0], FileDescriptorRole.UnixSocket)
-        val ruleset = FileDescriptor.adopt(fds[1], FileDescriptorRole.Ruleset)
-        val opath = FileDescriptor.adopt(fds[2], FileDescriptorRole.OPath)
-        val notif = FileDescriptor.adopt(fds[3], FileDescriptorRole.SeccompNotif)
+        val sock = TestFileDescriptors
+            .adopt(fds[0], FileDescriptorRole.UnixSocket)
+        val ruleset = TestFileDescriptors
+            .adopt(fds[1], FileDescriptorRole.Ruleset)
+        val opath = TestFileDescriptors
+            .adopt(fds[2], FileDescriptorRole.OPath)
+        val notif = TestFileDescriptors
+            .adopt(fds[3], FileDescriptorRole.SeccompNotif)
         assertTrue(sock.isLiveForIo())
         assertTrue(ruleset.isLiveForIo())
         assertTrue(opath.isLiveForIo())
@@ -230,33 +305,37 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `leftover dirfd and mmap backing fail closed`() =
+    fun `leftover dirfd and mmap backing fail closed`(): Unit =
         withArena {
         val dirInt = realFd()
-        val dir = FileDescriptor.adopt(dirInt, FileDescriptorRole.OPath)
+        val dir = TestFileDescriptors
+            .adopt(dirInt, FileDescriptorRole.OPath)
         dir.close()
         assertNotNull(dir.ebadfUnlessDirfd())
         assertNotNull(dir.ebadfUnlessMmapBacking())
 
         val liveInt = realFd()
-        val live = FileDescriptor.adopt(liveInt, FileDescriptorRole.OPath)
+        val live = TestFileDescriptors
+            .adopt(liveInt, FileDescriptorRole.OPath)
         assertNull(live.ebadfUnlessDirfd())
         assertNull(live.ebadfUnlessMmapBacking())
         live.close()
     }
 
     @Test
-    fun `dup claims a new generation independent of the source`() =
+    fun `dup claims a new generation independent of the source`(): Unit =
         withArena {
         val sourceInt = realFd()
-        val source = FileDescriptor.adopt(sourceInt, FileDescriptorRole.Generic)
+        val source = TestFileDescriptors
+            .adopt(sourceInt, FileDescriptorRole.Generic)
         val dupResult = LinuxNative.SyscallResult
             .Success<Long, LinuxNative.SyscallHandledState.Unhandled>(
             sourceInt.toLong(),
         ).claimDupIfNeeded(io.mazewall.ffi.NativeConstants.F_DUPFD)
         assertTrue(dupResult is LinuxNative.SyscallResult.Success)
         val dupInt = (dupResult as LinuxNative.SyscallResult.Success<Long, *>).value.toInt()
-        val dup = FileDescriptor.adopt(dupInt, FileDescriptorRole.Generic)
+        val dup = TestFileDescriptors
+            .adopt(dupInt, FileDescriptorRole.Generic)
         assertTrue(dup.isLiveForIo())
         source.close()
         assertTrue(dup.isLiveForIo())
@@ -265,12 +344,14 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `replace retires leftover generation then claims the integer`() =
+    fun `replace retires leftover generation then claims the integer`(): Unit =
         withArena {
         val intFd = realFd()
-        val leftover = FileDescriptor.adopt(intFd, FileDescriptorRole.Generic)
+        val leftover = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Generic)
         leftover.close()
-        val replaced = FileDescriptor.replace<FileDescriptorRole.Generic>(intFd)
+        val replaced = TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(intFd)
         assertTrue(replaced.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         assertNotEquals(leftover, replaced)
@@ -278,24 +359,28 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `SCM_RIGHTS adopt after close is a new generation`() =
+    fun `SCM_RIGHTS adopt after close is a new generation`(): Unit =
         withArena {
         val intFd = realFd()
-        val leftover = FileDescriptor.adopt(intFd, FileDescriptorRole.SeccompNotif)
+        val leftover = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.SeccompNotif)
         leftover.close()
-        val received = FileDescriptor.adopt(intFd, FileDescriptorRole.SeccompNotif)
+        val received = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.SeccompNotif)
         assertTrue(received.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         received.close()
     }
 
     @Test
-    fun `granted SCM_RIGHTS adopt is not a seccomp listener role`() =
+    fun `granted SCM_RIGHTS adopt is not a seccomp listener role`(): Unit =
         withArena {
         val intFd = realFd()
-        val leftover = FileDescriptor.adopt(intFd, FileDescriptorRole.Granted)
+        val leftover = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Granted)
         leftover.close()
-        val received = FileDescriptor.adopt(intFd, FileDescriptorRole.Granted)
+        val received = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Granted)
         assertEquals(FileDescriptorRole.Granted, received.role)
         assertTrue(received.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
@@ -303,14 +388,15 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `adopt of a still-live integer advances generation`() =
+    fun `adopt of a still-live integer advances generation`(): Unit =
         withArena {
         val liveInt = realFd()
         val leftover = FileDescriptor.generic(liveInt)
         assertTrue(leftover.isLiveForIo())
         val leftoverGeneration = leftover.generation
 
-        val adopted = FileDescriptor.adopt(liveInt, FileDescriptorRole.Generic)
+        val adopted = TestFileDescriptors
+            .adopt(liveInt, FileDescriptorRole.Generic)
         assertTrue(adopted.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         assertNotEquals(leftoverGeneration, adopted.generation)
@@ -318,7 +404,8 @@ class FileDescriptorTest {
 
         val secondInt = realFd()
         val replacedLeftover = FileDescriptor.generic(secondInt)
-        val replaced = FileDescriptor.replace<FileDescriptorRole.Generic>(secondInt)
+        val replaced = TestFileDescriptors
+            .replace<FileDescriptorRole.Generic>(secondInt)
         assertTrue(replaced.isLiveForIo())
         assertFalse(replacedLeftover.isLiveForIo())
         assertNotEquals(replacedLeftover, replaced)
@@ -328,20 +415,23 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `poll does not reject reused raw fd integers without typed token`() =
+    fun `poll does not reject reused raw fd integers without typed token`(): Unit =
         withArena {
         val intFd = realFd()
-        val fd = FileDescriptor.adopt(intFd, FileDescriptorRole.Generic)
+        val fd = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Generic)
         fd.close()
         // Raw pollfds are not rejected based solely on historical integer retirement
         assertTrue(FdEpoch.isRetired(intFd))
     }
 
     @Test
-    fun `unsafe on retired fd stays dead`() =
+    @Suppress("DEPRECATION_ERROR")
+    fun `unsafe on retired fd stays dead`(): Unit =
         withArena {
         val intFd = realFd()
-        val fd = FileDescriptor.adopt(intFd, FileDescriptorRole.Generic)
+        val fd = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Generic)
         fd.close()
         // unsafe on a retired fd should NOT revive it
         val unsafeFd = FileDescriptor.unsafe<FileDescriptorRole.Generic>(intFd)
@@ -350,10 +440,11 @@ class FileDescriptorTest {
     }
 
     @Test
-    fun `same integer double close does not revive`() =
+    fun `same integer double close does not revive`(): Unit =
         withArena {
         val intFd = realFd()
-        val fd1 = FileDescriptor.adopt(intFd, FileDescriptorRole.Generic)
+        val fd1 = TestFileDescriptors
+            .adopt(intFd, FileDescriptorRole.Generic)
         val closed1 = fd1.close()
         assertFalse(fd1.isValid)
         assertFalse(closed1.isValid)
@@ -362,7 +453,8 @@ class FileDescriptorTest {
         // creating a new token must be a new generation.
         val reopened = realFd()
         if (reopened == intFd) {
-            val fd2 = FileDescriptor.adopt(reopened, FileDescriptorRole.Generic)
+            val fd2 = TestFileDescriptors
+                .adopt(reopened, FileDescriptorRole.Generic)
             assertTrue(fd2.isValid)
             assertNotEquals(fd1, fd2)
 
@@ -388,18 +480,35 @@ class FileDescriptorTest {
 
     @ParameterizedTest(name = "{0} factory preserves role across close")
     @MethodSource("descriptorRoles")
-    fun `verify role factory and lifecycle transition`(
+    internal fun `verify role factory and lifecycle transition`(
         roleName: String,
         expectedRole: FileDescriptorRole,
     ) = withArena {
             val fd = when (expectedRole) {
-                FileDescriptorRole.Generic -> FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
-                FileDescriptorRole.UnixSocket -> FileDescriptor.adopt(realFd(), FileDescriptorRole.UnixSocket)
-                FileDescriptorRole.Ruleset -> FileDescriptor.adopt(realFd(), FileDescriptorRole.Ruleset)
-                FileDescriptorRole.OPath -> FileDescriptor.adopt(realFd(), FileDescriptorRole.OPath)
-                FileDescriptorRole.SeccompNotif -> FileDescriptor.adopt(realFd(), FileDescriptorRole.SeccompNotif)
-                FileDescriptorRole.Pid -> FileDescriptor.adopt(realFd(), FileDescriptorRole.Pid)
-                FileDescriptorRole.Granted -> FileDescriptor.adopt(realFd(), FileDescriptorRole.Granted)
+                FileDescriptorRole.Generic ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Generic)
+                FileDescriptorRole.UnixSocket ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.UnixSocket)
+                FileDescriptorRole.Ruleset ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Ruleset)
+                FileDescriptorRole.OPath ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.OPath)
+                FileDescriptorRole.SeccompNotif ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.SeccompNotif)
+                FileDescriptorRole.Pid ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Pid)
+                FileDescriptorRole.Granted ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Granted)
+                FileDescriptorRole.Bpf ->
+                    TestFileDescriptors
+                    .adopt(realFd(), FileDescriptorRole.Bpf)
             }
             assertTrue(fd.isValid, roleName)
             assertFalse(fd.isInvalid, roleName)
@@ -410,5 +519,36 @@ class FileDescriptorTest {
             assertFalse(closed.isValid, roleName)
             assertTrue(closed.isClosedType(), roleName)
             assertEquals(expectedRole, closed.role, roleName)
+        }
+
+    @Test
+    fun `creating and discarding Unowned file descriptors does not leak entries in FdEpoch table`(): Unit =
+        withArena {
+            val intFd = realFd()
+            // Clear realFd's active generation from table so intFd is in retired state
+            val liveGen = FdEpoch.borrowLiveGeneration(intFd)
+            if (liveGen != 0L) {
+                FdEpoch.retire(intFd, liveGen)
+            }
+
+            val unowned = FileDescriptor.generic(intFd)
+            assertFalse(FdEpoch.isLive(intFd, unowned.generation))
+            assertTrue(FdEpoch.isRetired(intFd))
+            assertEquals(0L, unowned.generation)
+
+            val roleUnowned = FileDescriptor.unixSocket(intFd)
+            assertEquals(0L, roleUnowned.generation)
+            assertTrue(FdEpoch.isRetired(intFd))
+        }
+
+    @Test
+    fun `map preserves descriptor receipts on success`(): Unit =
+        withArena {
+            val res = openPath("/dev/null", OpenFlags.RDONLY)
+            assertTrue(res is LinuxNative.SyscallResult.Success)
+            val mapped = res.map { it }
+            val fd = mapped.getFdOrThrow("mapped getFd")
+            assertTrue(fd.isValid)
+            fd.close()
         }
 }

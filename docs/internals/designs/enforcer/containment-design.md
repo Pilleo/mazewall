@@ -108,8 +108,11 @@ BPF_RET(DENY)
 > **`JSET` semantics:** `jt=0, jf=1` — if `(ACC & 0x04) != 0` (PROT_EXEC IS set): jt=0, execute `RET_DENY` immediately; else: jf=1, skip over `RET_DENY`.
 
 This blocks only `mmap` / `mprotect` calls where the caller requests executable memory.
-The JVM's own JIT and GC `mmap`/`mprotect` calls do not use `PROT_EXEC` in the way
-that shellcode injection does — they are whitelisted by this check automatically.
+HotSpot executable CodeHeap growth also requests `PROT_EXEC`; this check does not
+distinguish JVM-generated code from shellcode or automatically whitelist it.
+An explicit `HOTSPOT_JIT` profile permits executable mappings; a strict
+`NATIVE_IMAGE` profile does not. JVM coordination-syscall allowances do not make
+the latter profile safe for arbitrary HotSpot work.
 
 ### 3b. `clone` — allow only `CLONE_THREAD`
 
@@ -203,6 +206,16 @@ os::commit_memory(addr, size, 1) failed; error='Operation not permitted' (errno=
 # JVM crashes fatally.
 ```
 
+**Thread-local limitation:** A strict no-executable-mapping profile can also crash
+HotSpot when installed only on a worker. Late JNI native-nmethod generation can
+occur synchronously on that contained thread and require executable CodeHeap
+growth. The retained relative-file read failure involved a late `size0` JNI
+wrapper and a 64 KiB non-profiled executable heap expansion denied with `EPERM`.
+Class loading or one successful warm read does not prove that all late native
+nmethods are ready. Select the runtime profile explicitly for the substrate:
+strict profiles remain fail-closed, without automatic detection or fallback.
+Permitting executable mappings does not itself permit `execve` or `execveat`.
+
 **Correct pattern when blocking network but NOT JIT:**
 ```kotlin
 // WRONG — kills the JIT compiler process-wide:
@@ -263,7 +276,7 @@ Seccomp filters are monotonic: once a syscall is blocked on a thread, it cannot 
 unblocked. The kernel accumulates filters in a linked list; each new filter is evaluated
 in order, and the most-restrictive result wins. `ContainedExecutors` stacks filters
 incrementally to allow multiple `installOnCurrentThread` calls (e.g. from nested
-executor wrapping or the profiler) without wasting filter slots.
+internal experimental dispatch or the profiler) without wasting filter slots.
 
 ### How deduplication works
 
@@ -331,9 +344,106 @@ syscalls fail before Landlock can activate.
 1. `applyLandlockIfNecessary(processWide, policy)`  ← first
 2. `installSeccompFilter(...)`                      ← second
 
-Wrapper wrap methods only call `installOnCurrentThread`, which reaches `installInternal`.
+Owned preparation and the internal experimental dispatcher wrapper reach
+`installInternal` through `installOnCurrentThread`. Public borrowed wrappers and
+executor factories are retired; explicit required installation remains supported.
+
+Dedicated child processes use the internal `installOnDedicatedProcess` entry. It accepts
+filesystem policies only with Landlock TSYNC support, rejects fallback, and delegates to
+the same process-wide installation transaction. It therefore records successful irreversible
+stages before returning or throwing and preserves the ordering above. Portal workers require
+this permanent baseline before dispatcher construction or readiness publication.
 
 Do not change this order.
+
+Installation fallback is captured once by `InstallationAttempt` before capability
+probes/native stages. Platform rejection, CET failure handling, Landlock ABI/right
+validation and errno classification, and receipt construction use that selection.
+Standalone `LandlockSession` construction captures its own selection. Failed/bypassed
+receipts preserve the original failure or unsupported-feature reason and the newly
+applied Seccomp/Landlock progress snapshot. `requireInstalled()` rethrows a recorded
+failure; successful inherited coverage can therefore have an empty attempt delta.
+Receipt/progress/failure classes are preloaded before restrictive class-read rules
+can make diagnostic allocation fail. This does not broaden the compiled policy.
+
+`LandlockSession` captures its backend and structured kernel capabilities at
+construction. `LandlockRuleset` retains the selected native owner; path operations,
+add-rule/restrict calls, and owned descriptor cleanup use it explicitly. Applied
+ABI diagnostics consume the captured capability value rather than probing again
+after restriction. `Rejected`/`ProbeFailed` capabilities preserve errno/cause and
+cannot be collapsed into ABI-zero unsupported bypass. Standalone legacy helpers
+still select their own context; application-owned unified capture is subsequent
+runtime work.
+
+Supervised installation and cached task registration receive the attempt's selected
+native backend explicitly. Reusing a shared daemon authorizes the calling thread
+through that backend; daemon startup resources and retirement retain the manager's
+lifecycle owner. The explicit installer captures notification support before native
+callbacks. This preserves authority across Landlock-to-USER_NOTIF installation and
+does not imply unified application-owned capability/runtime or daemon-lifecycle
+capture. Registration leases remain receipt-owned and close after task execution.
+
+The shared daemon manager now captures its lifecycle native owner at construction;
+default socket transport is bound to that owner for acquisition, transfer and
+retirement. Caller authorization remains a separate explicit selection when reusing
+the daemon. Standalone socket entry retains live behavior through the same transport
+implementation. Application-scoped shared-daemon lifetime is managed-runtime work.
+
+Optional post-install self-verification also receives the attempt's selected backend
+and enablement decision, captured before native stages. Default real/mock engine
+classification belongs to the immutable native snapshot; explicit property opt-in/out
+is read once per attempt. Liveness, denied-only and union-aware probes cannot switch
+backends during execution. Standalone verifier entry selects its own snapshot and
+gate before probing. Every enabled verification executes the bounded probe plan for
+the current installation; identical instructions are not reusable installation
+evidence across workers, native backends or merged filter trees. Stacked verification
+requires merged state and cannot silently skip enabled checks. Compilation caches
+remain independent of installation evidence.
+
+Each installation attempt also retains a `CapturedPlatform`. Production capability
+probes are bound to the selected native owner through the shared real-provider
+implementation; support, Linux validation, Landlock, CET and USER_NOTIF decisions
+retain the selected provider. Plain Seccomp privilege validation and TSYNC checks
+receive the same selection. This does not consume the global provider-generation
+cache as proof for an independently selected native backend. Standalone diagnostic
+entry points remain live; application-owned prepared-context lifetime is subsequent
+managed-runtime work.
+
+`InstallationEnvironment` retains native backend, captured platform, fallback and
+self-verification selection independently of mutable per-attempt progress. Dedicated
+process preflight and installation share this environment, so capability callbacks
+cannot replace the required FAIL selection between the two stages. The internal
+worker entry accepts explicit environment reuse for owned prepared runtimes; ordinary
+manual entries select a fresh environment. No ambient native override is involved.
+
+JVM runtime-read closure admits exact classpath artifact files; their parent
+directories are not implicitly granted. Actual class/resource directory entries
+remain directory grants, and file rules omit directory-only read rights. Explicit
+`allowJvmClasspath()` policy construction retains the same granularity. Required
+runtime path-open or add-rule failures reject installation, retaining the errno in
+failure evidence. Owned `ManagedRuntime` preparation now pins genuine descriptors and
+builds a shared immutable ruleset before worker setup, rejecting missing grants rather
+than silently widening future output to its parent. The additive actual-operation
+resource owner validates selected ordinary-JAR bytes and generation; its packaging,
+alias and physical-content limits are specified in
+[prepared-resources-design.md](prepared-resources-design.md).
+
+`ContainmentRegistryEffect.InstallationFailed` records terminal failure independently
+of policy coverage and Seccomp engine-state rank. The interpreter retains the first
+failure without rewinding applied stages. Registry merges carry thread/process
+quarantine, and precomputed coordinator publications preserve an already-recorded
+failure. Ordinary and dedicated-process installation entry reject quarantined scopes;
+operator bypass or repaired probes cannot silently make a failed carrier reusable.
+
+CET locking is a current-thread, verify-and-lock step before Landlock/Seccomp.
+`ARCH_SHSTK_STATUS` uses Linux UAPI `0x5005` (not unlock `0x5004`) and only reports
+enabled bits. Confirmation requires pre-enabled SHSTK, native LOCK success zero,
+and enabled-status verification; late ENABLE is not used. `CetLocked` publishes
+thread/backend-bound proof through the same effect interpreter. Quarantine and proof
+survive later publication, and process merges never promote another thread's proof.
+Requests for process-wide CET coverage fail before native installation. The
+[CET guide](../../intel-cet-jvm-sandbox-integration.md) records exact runtime and
+acceptance prerequisites.
 
 ### Per-thread application (THREAD_LANDLOCK_APPLIED_*)
 
@@ -346,16 +456,18 @@ classpath reads and cause `NoClassDefFoundError` at unpredictable points during 
 ### ABI version negotiation
 
 Landlock `Landlock.kt` negotiates the highest ABI version the running kernel supports
-via `landlock_create_ruleset(size=0, flags=LANDLOCK_CREATE_RULESET_VERSION)`. Using
-a feature flag from a newer ABI than the kernel supports **silently drops those rules**
-without returning an error. Always document the minimum ABI version required when
-adding new Landlock access-right flags.
+via `landlock_create_ruleset(size=0, flags=LANDLOCK_CREATE_RULESET_VERSION)`. Requesting
+unknown access bits can be rejected with `EINVAL`; userspace masking a required right
+out for an older ABI is also insufficient protection. Required recipes explicitly
+reject unavailable support. Strict prepared read-only/read-write recipes require ABI
+3+ for truncation coverage, including `open(O_TRUNC)`. Always document and enforce
+the minimum ABI version when adding required access rights.
 
 ### JVM classpath whitelist (`allowJvmClasspath()`)
 
 If Landlock is active and a restricted thread triggers lazy classloading of a class
 whose `.jar` file is not in the allowed read paths, the kernel returns `EACCES` and
-the JVM throws `NoClassDefFoundError`. `Policy.Builder.allowJvmClasspath()` reads
+the JVM throws `NoClassDefFoundError`. `WorkerPolicyBuilder.allowJvmClasspath()` reads
 `java.home` and `java.class.path` at policy-build time to prevent this.
 
 Always call `allowJvmClasspath()` when writing tests that activate Landlock on a
@@ -388,7 +500,187 @@ Linux 7.0 (ABI 8) introduces `LANDLOCK_RESTRICT_SELF_TSYNC` which synchronizes t
 
 ---
 
+## 5a. Owned synchronous runtime generations
+
+`ManagedRuntime.open` runs explicit process-baseline installation on a trusted platform
+manager using one retained `InstallationEnvironment`. Baseline mapping-floor/runtime
+mismatch and bootstrap from narrower/failed worker scopes are rejected. The manager
+uses a bounded queue, and only that manager may construct domain workers. New workers
+do not inherit another domain through an automatic executor replacement path.
+
+Each fixed JDK executor generation requires every worker receipt before publishing
+readiness. Receipt registration is retained through physical retirement. Definitions
+use the same immutable snapshot/compiler pipeline. `DomainLimits` bounds worker count
+and admitted logical work; AbortPolicy never redirects protected work to callers.
+Generation readiness/drain/failure/retirement decisions have a pure lifecycle evaluator.
+An early installation failure may stop executor prestart before all requested
+workers exist. Startup accounting excludes those uncreated workers while keeping
+the generation failed and preserving its original cause. Physically created
+workers still require retirement and receipt cleanup before release.
+
+Invocation result delivery and physical `ExecutionEnd` are separate minimal-stage
+views. Queued cancellation removes the never-started body and releases admission;
+running cancellation interrupts cooperatively and holds admission until body/cleanup
+ends. Worker association is synchronized against late cancellation. Failed generations
+stop admission; live failed work cannot be concealed by new capacity. Drain checks
+actual thread retirement and receipt cleanup, not only executor counts or completed
+result futures. Incomplete bounded close remains explicit and non-admitting.
+
+Canonical synchronous entry is `Mazewall.callContained(runtime, domain, Callable)`.
+The pure closed transition guard dispatches from an unbound host, permits inline
+execution only in the exact active domain, and rejects different/unknown scopes.
+Logical invocation context is installed only around the body and restored in finally;
+it never overrides native authority or copies arbitrary caller ThreadLocals. Read-only
+evidence retains library-observed nested containment and transition failure, including
+when business code catches it. Normal caught business exceptions do not manufacture
+containment evidence. Unobserved/swallowed kernel errors are not detectable through
+this metadata, and uncertain permission provenance remains uncertain.
+
+### Independently owned helpers and late callbacks (R1/A12)
+
+An independent JDK executor is outside the owned worker's Landlock domain only
+when its actual execution thread has that placement. Merely constructing an executor
+does not start its threads: lazy creation from a restricted body can inherit that
+body's irreversible native restrictions. Acquire and prestart intentional independent
+helpers during trusted bootstrap, before entering the protected body. They still retain
+the permanent Tier 1 process baseline; "outside worker Landlock" does not mean
+unconditionally unrestricted, protected by that worker, or a production escape fix.
+
+[OwnedIndependentHelperNativeTest](../../../../enforcer/src/integrationTest/kotlin/io/mazewall/enforcer/api/execution/OwnedIndependentHelperNativeTest.kt)
+uses the public owned runtime and a separately
+acquired, actually prestarted JDK helper. The installed body offloads a successful
+read, then fails its own read of the same file. The genuine NIO `AccessDeniedException`
+is retained as the default classifier's cause, with `INFERRED_PERMISSION_FAILURE`
+and no invented syscall/errno attribution. Required worker installation and actual
+same-file behavior establish placement without authenticating JDK exception provenance.
+
+Only after observing the invocation's physical `ExecutionEnd` does the fixture attach
+`handleAsync` with that explicit helper executor. A latch holds the actual callback
+while owned drain completes and the actual worker thread is dead. The callback then
+reads the same file successfully. Its result and finally are not helper retirement:
+the separate helper owner shuts down, awaits termination and joins its acquired
+physical thread. Invocation delivery/primary failure/end identity remain unchanged.
+No sleep, common pool or future-done flag establishes these lifecycle boundaries.
+In applications, intentional asynchronous work needs its own explicit containment
+and lifetime owner; attaching a callback never extends the synchronous body contract.
+
+### Explicit custom supervised preparation
+
+`runtime.prepare(policy, limits, scopingPolicy)` copies the selected handler map once
+on the trusted invoking caller, outside lifecycle locks and before manager dispatch.
+The exact callback references and immutable syscall membership are retained for all
+workers of that generation, using the existing captured `InstallationEnvironment`
+and installer. Callback state itself is trusted application code, not deeply frozen.
+Existing preparation signatures keep default scoping and transfer no caller metadata.
+Capture failures preserve original ordinary/fatal identity; required worker startup
+failures publish no domain and enter no body. Receipt/session ownership lasts through
+physical worker retirement, with the existing bounded incomplete-drain reporting.
+
+Custom supervision requires explicit `Supervision.prepareSupervisor()` during trusted
+bootstrap **before** `ManagedRuntime.open` installs its permanent process baseline.
+The agent demo preserves its launch-compatible PTRACE/MOUNT/UNSHARE/CHROOT baseline,
+custom public-address CONNECT callback and exact authorized-analysis VFORK/FORK
+callbacks. It deliberately permits CLONE/CLONE3/EXECVE/EXECVEAT in those worker
+policies; an additional no-process baseline would destroy the approved analysis tool.
+Synchronous HTTP connect executes on the owned web worker; unrelated helper executors
+are not covered merely by being created there.
+
+The agent's synchronous HTTP path returns normal/error bodies and respects supported
+response Content-Type charsets with UTF-8 fallback. One monotonic two-second timer
+covers connection and response-header acquisition, then ends before buffered body
+consumption; a per-read inactivity timeout is not an equivalent contract. The deadline
+observer only requests disconnect and is joined before actual body end, with no HTTP
+execution fallback. Tool closing rejects new admission and captures cancellation under
+a short monitor. Submission/resource waits and execution/drain occur outside it;
+publication crossing the snapshot requests cancellation itself, while the existing
+owned invocation retains physical end and admission until body/cleanup completion.
+
+The demo requires VFORK selected before JDK ProcessImpl initialization. Actual JDK25
+FORK-mode testing bypassed those exact spawn callbacks (glibc fork can use the allowed
+CLONE route; the fixture is not a syscall trace); the demo rejects
+an explicitly incompatible launch setting before tool construction. A changed system
+property cannot prove or change an already initialized ProcessImpl mechanism. The
+existing application startup argument and trusted early bootstrap remain required.
+Native fixtures prove the custom callbacks actually allow/deny acquired connections,
+approved shell work and denied web-stack spawn, and retain cause/fatal identity and
+physical retirement. This experimental mechanism is not a complete ACE boundary.
+
+### Explicit declared invocation metadata (C8)
+
+Existing `submit(domain, Callable)` and `Mazewall.callContained(runtime, domain, Callable)`
+transfer no caller metadata. An application can explicitly call
+`runtime.captureInvocation(domain, InvocationContextBridge, Callable)` **on the current
+invoking caller, before admission**, then pass the decorated Callable to either existing
+entry point. Capture runs immediately, outside lifecycle locks, without manager dispatch.
+The returned Callable requires the exact registered domain and an active owned invocation;
+it cannot install context on a caller or unrelated executor. Same-domain synchronous nesting
+uses the existing inline transition and the outer admission, not another permit.
+
+`InvocationContextBridge.capture(): InvocationContextSnapshot` is a trusted application
+seam. The final snapshot takes `Map<String, String>` and a JDK
+`Function<Map<String, String>, AutoCloseable>` installer. It defensively copies declared
+string values with `Map.copyOf`; mutation of the caller's input cannot change admitted
+metadata, and the installer receives an unmodifiable map. Application-specific installers
+read invocation values from that map, use stable configured collaborators, change only
+declared context, and return an exact prior-context restoration. The callback itself is
+trusted code, not a deep-immutable closure or a new authorization capability. No automatic
+ThreadLocal scan, request/connection/transaction transfer or framework dependency is added.
+
+The existing `OwnedInvocation` boundary applies the snapshot on the actual owned worker
+and restores in finally. Nested restoration returns to the exact outer context, rather than clearing it.
+Queued cancellation never applies the snapshot. Running cancellation can deliver to the
+caller before restoration ends; restoration still holds physical `ExecutionEnd` and admission.
+Application failure (including a missing restoration token) or restoration failure records
+observed failure and quarantines the entire generation using its existing retirement owner:
+unproved context is never reused. A caught nested context failure cannot make the outer result
+successful. A captured body fatal likewise retires after restoration even if outer code catches
+it. Cleanup ordering retains the original primary and suppresses cleanup; a later cleanup
+`Error` promotes over a nonfatal primary, but never replaces an existing fatal primary.
+Ordinary body failure with successful restoration retains healthy worker reuse and existing
+containment classification/cause identity.
+Generation failure does not pre-publish the originating worker's raw body failure: that
+invocation still performs canonical caller classification and publishes its matching end
+outcome. Other admitted work retains existing generation-failure/cancellation handling.
+
+For example, a trusted Java application with its own `ThreadLocal<Map<String, String>> labels`
+can supply the bridge without changing the Callable API:
+
+```java
+InvocationContextBridge bridge = () -> new InvocationContextSnapshot(labels.get(), metadata -> {
+    var previous = labels.get();
+    labels.set(metadata);
+    return () -> { if (previous == null) labels.remove(); else labels.set(previous); };
+});
+Callable<String> captured = runtime.captureInvocation(domain, bridge, () -> labels.get().get("request"));
+String result = Mazewall.callContained(runtime, domain, captured);
+```
+
+The public bridge, snapshot constructor and runtime capture method exist for this Java/Kotlin
+application interop; snapshot execution and failure ownership remain internal. Strings are
+declared metadata, not Spring `Authentication`. The existing optional Spring
+`InvocationContextBridge` and supported `DelegatingSecurityContextCallable` keep their separate
+context-reference qualification and published API: Security capture occurs once per invocation,
+not again through this bridge. Trusted callers must not mutate captured Security context or
+Authentication objects. Actual Spring Security/H2 controls verify that caller transaction
+resources are excluded and actual worker transactions remain on their own advisor chain.
+
+This API covers synchronous materialized bodies. Completion observers and arbitrary
+helper/lazy work do not inherit coverage merely from a future. Current nested dispatch
+is rejected; canonical synchronous nesting uses the exact inline/reject contract above.
+Thread-scoped containment shares memory and descriptors and is not a complete ACE
+boundary. Portal ownership and immutable artifact-generation binding retain their
+separate required gates.
+
 ## 6. `PureJavaBpfEngine` Installation Sequence
+
+One immutable native-engine view owns the plain installation sequence. BPF packing,
+`no_new_privs`, raw seccomp, prctl compatibility fallback, EINTR retries, and mode
+verification receive the same `NativeEngine` explicitly. The enclosing installation
+attempt supplies its captured backend to both CET and this pipeline. Standalone
+engine entry captures its own view once. No scoped ambient engine override or
+mutable singleton provider setter is used. Native I/O still crosses trait methods;
+the architecture rules recognize `snapshot()` as trait selection and independently
+ban mutable trait lookups inside the plain engine/state pipeline.
 
 For reference: the exact steps performed by `PureJavaBpfEngine.installInternal()`:
 
@@ -412,15 +704,37 @@ For reference: the exact steps performed by `PureJavaBpfEngine.installInternal()
 
 ## 7. FFM Struct Layouts
 
-All off-heap structs are allocated via `Arena.ofConfined()` to ensure automatic
-deallocation at the end of the scope. Key layouts:
+Supervisor and profiler daemon startup share the platform `ChildStartupTransaction` resource
+mechanism, not a lifecycle reducer. Endpoint, process, output pump, and shutdown hook remain
+provisional until readiness commits a `ChildProcessResources` owner. Failed authorization
+(`PR_SET_PTRACER`, including `EPERM`/`EACCES`), launch, hook registration, readiness, or
+interruption triggers rollback. Cleanup attempts all owned releases, bounds child reaping
+and pump joining, and uses the same launcher that created the endpoint. A supervisor is not
+published as running before readiness; an unexpected exit after publication retains the
+supervisor's fail-closed halt policy. Intentional retirement first removes the running state
+so pump EOF cannot be mistaken for an unexpected exit. Output observation does not take the
+manager lock while cleanup joins the pump.
+Failed retirement remains owned and retryable before another daemon can be spawned, including
+provisional startup rollback. `stop()` retries that provisional owner even when no running context
+was published. Fatal cleanup errors outrank ordinary startup failures, retaining earlier failures
+as suppressed evidence; every independent release is attempted. Completed resource releases are
+not repeated. See the [startup migration guide](../api/daemon-startup-migration.md).
+
+Transient off-heap structs use `Arena.ofConfined()` for automatic deallocation.
+The daemon's reusable notification and response buffers use process-lifetime shared
+`SegmentPool.owned(...)` pools. Each session holds generation-specific `SegmentLease`
+objects and closes those leases during cleanup; it never returns a raw native address
+or closes a global pool. Partial session-buffer acquisition returns any acquired lease
+and closes the session's confined ACK arena. See the
+[SegmentPool migration guide](../api/segment-pool-migration.md) for pool ownership and
+the limits of the checked segment accessor. Key layouts:
 
 ### `sock_filter` (8 bytes)
 ```
-offset 0: code  (short / JAVA_SHORT, 2 bytes)
-offset 2: jt    (byte  / JAVA_BYTE,  1 byte)
-offset 3: jf    (byte  / JAVA_BYTE,  1 byte)
-offset 4: k     (int   / JAVA_INT,   4 bytes)   ← MUST be JAVA_INT, not JAVA_LONG
+offset 0: code  (unsigned short / JAVA_SHORT, 2 bytes)
+offset 2: jt    (unsigned byte  / JAVA_BYTE,  1 byte)
+offset 3: jf    (unsigned byte  / JAVA_BYTE,  1 byte)
+offset 4: k     (unsigned int   / JAVA_INT,   4 bytes)   ← MUST be JAVA_INT, not JAVA_LONG
 ```
 
 ### `sock_fprog` (16 bytes on x86_64)
@@ -511,17 +825,204 @@ Rather than relying on JVM-specific configuration arguments (like `-Djdk.lang.Pr
 2. **Parent Stack Trace Capture on Spawn Entry:**
    When the parent JVM thread ($T_{parent}$) calls `vfork`, `fork`, or a process-spawning `clone`:
    - The seccomp filter traps the entry.
-   - The JVM validation listener captures the stack trace of $T_{parent}$ and registers $T_{parent}$'s TID in a global `PendingSpawnRegistry` with its authorized stack trace before allowing the syscall to continue.
+   - The JVM validation listener captures the stack trace of $T_{parent}$ and runs the spawn policy callback. Only an approved spawn with a nonempty stack may register authorization before the syscall continues.
+   - Each `SupervisorRuntimeContext` owns a `SpawnAuthorizationStore`. The key is the parent's process ID (TGID) plus `/proc/<pid>/stat` start-time ticks, so reuse of a PID does not reuse authorization. Unavailable TGID or process identity rejects the spawn; there is no TID-only fallback.
 
 3. **State-Based Propagation on Child `execve`:**
    When the child process ($PID_{child}$) calls `execve`/`execveat` to run the target binary:
    - The seccomp filter intercepts `execve`.
    - The supervisor daemon reads `PPID` from `/proc/$PID_{child}/stat` to verify it is a descendant of the JVM.
-   - Because the parent thread is suspended by the kernel in `vfork` or `clone(CLONE_VFORK)` until the child calls `execve` or exits, the spawning parent thread is guaranteed to be in the `PendingSpawnRegistry`.
-   - The JVM validation listener queries the registry to retrieve the parent thread's authorized stack trace and validates the execution context.
-   - Once the child execs, the parent thread returns and is removed from the `PendingSpawnRegistry`.
+   - For an exec with no live JVM stack, the JVM validation listener resolves the parent's current process identity and atomically consumes authorization from its own session. Missing, expired, consumed, closed, or unresolvable authorization denies exec, even when no policy callback is installed.
+   - Authorization lasts at most the existing ten-second monotonic TTL and is valid at its exact boundary. Each registration permits one consume, including when the subsequent exec policy rejects it. The last task lease clears pending authority without closing the reusable store. Listener termination and installation-owner retirement close it permanently.
+   - Stack containers and frames are copied at registration and when constructing or reading a successful result.
 
-This ensures process spawning validation is 100% secure, JVM-independent, and free of thread-creation deadlocks.
+The store holds one outstanding authorization per parent process identity. It does not bind a registration to a particular future child, and concurrent spawns from the same process can replace one another. Multiple exec attempts (including helper-to-target exec or PATH retries) need separately validated authority; they cannot replay one spawn entry. This experimental stack propagation does not replace the process-wide Tier 1 baseline, child ancestry checks, or the secure-exec path's existing fail-closed rewrite requirements. Thread-scoped containment remains an incomplete ACE boundary.
+
+### Supervisor session and reply ownership
+
+Supervisor/profiler installation uses one 30-second monotonic handshake budget,
+covering the install notification, listener readiness and caller proceed waits.
+`mazewall.supervisor.installTimeoutMillis` may lower this budget to 1–30000 ms;
+invalid values fail before installation. Interruptions do not renew the deadline
+and the caller's interrupt status is restored. A reducer retains the last completed
+stage (prepared, filter applied, descriptor transferred, ready) when setup fails;
+a late successful kernel installation cannot erase a previous failure or its
+irreversible application. The permanent supervisor lifetime rejects later task
+registrations after listener failure, including failure observed during startup.
+Applied-stage publication is complete only after its callback returns or throws.
+Timeout cleanup joins any in-flight publication and observes the same callback
+failure without invoking it twice. This callback must be short and nonblocking;
+its completion is required even after the handshake budget expires.
+
+Default installation IPC creates a private CLOEXEC socket with nonblocking connect,
+then restores its stream flags for the existing listener. SCM_RIGHTS sends use
+MSG_DONTWAIT and deadline-bounded writable polling, with at most eight send attempts.
+Permission failures are terminal. Supervisor and profiler production installers use
+this shared transport; injected connect/send callbacks are fault-injection seams
+and cannot provide the production deadline guarantee when they block arbitrarily.
+The local seccomp listener has one atomic owner: the failing caller may reclaim it
+until the coordinator claims it for send, after which only the coordinator closes
+it. A late connection is closed before callback transfer. Socket ownership passes
+to the listener callback on entry, including startup failure. Invalid supervisor
+acknowledgments publish failed listener health before releasing readiness, and
+cleanup failure cannot suppress that health notification. Neither a setup timeout
+nor listener closure removes an installed kernel filter. Notification admission
+and helper isolation are separate processing stages described below and in the
+[cross-module liveness contract](../core/notification-liveness-contract.md).
+
+The shared `SeccompSessionHandler` accepts one notification at a time and owns its
+30-second monotonic deadline. `SeccompNotifHandler.beginNotification` returns
+reactor-confined `NotificationWork`; every poll yields `Await` or a terminal reply
+effect. Idle and interrupted reactor polls also advance pending work. Supervisor
+helper completions are observed by the reactor; their completion callbacks have
+resource-disposal authority only. A single CAS lease admits either the completed
+reply or the deadline's one EPERM send attempt. ENOENT, hard native failure, and a
+throwing terminal effect consume that lease permanently and terminate the session.
+Normal SEND/RECV interruption retries have an eight-attempt ceiling; timeout denial
+does not retry. Native notification/reply layouts and private control frames are
+unchanged.
+
+Before preparation, a daemon-owned admission ledger permits at most 128 admitted
+notifications total and eight per TID, shared across all listener sessions. Each
+notification owns an idempotent counted lease, released on completion, failure,
+timeout, or listener teardown. Admission rejection bypasses argument inspection
+and JVM validation and makes one EAGAIN terminal send attempt, including under
+EINTR. Helper-queue EAGAIN replies also use one attempt. These limits count work
+received by the reactor; they do not limit notifications still queued in the
+kernel or impose a traps-per-second rate limit.
+
+`ControlSocketExchange` moves a frame through partial nonblocking writes and reads,
+using the same notification deadline throughout. It changes status flags only on
+the daemon-owned private control endpoint, never on an imported tracee socket.
+EAGAIN yields; EINTR has a finite per-exchange budget. Secure-exec rewrite exchange
+is advanced before the terminal reply is admitted. No timer thread, watchdog, or
+blocking JVM worker is introduced by this protocol.
+
+The production daemon now uses an authority-helper conversation for every
+notification. Tracee argument reads, proc inspection, cwd capture, descriptor
+import, path resolution, open execution and secure-exec target/NUL preparation
+run in an independently terminable helper process. The reactor admits the job,
+polls immutable bounded snapshots, advances the JVM control exchange and owns
+all reply ioctls. It checks ID_VALID after preparation, before releasing a JVM
+decision, and before accepting a result. A late or invalid result can only be
+disposed. The older synchronous coordinator and direct executors remain fixture
+seams; the daemon factory explicitly selects authority-helper work.
+
+The helper pins `/proc/<tid>` and the corresponding pidfd, rechecks the pinned
+task after pidfd acquisition, and uses proc-relative handles thereafter. Memory
+reads use read-only positional access through an opened `mem` capability, so
+task exit cannot redirect a read to a recycled numeric PID. Memory ranges
+are checked against readable mapping coverage before and after each memory read;
+pathnames are read in page-sized chunks and stop at the first NUL. Non-readable
+or unmapped arguments fail with EFAULT. `/proc/mem` reads and the mapping checks
+are not atomic against concurrent tracee mmap/mprotect operations; this remains
+a bounded argument snapshot, not a guarantee of atomic memory capture. Directory capabilities
+are retained through authorization and execution. Relative opens use the tracee's
+captured cwd or imported dirfd, including after rename. Absolute opens use its root
+through a distinct typed capability key, never a numeric tracee-dirfd sentinel.
+Relative operations reject negative dirfds other than AT_FDCWD with EBADF before
+capability lookup. Absolute opens ignore the supplied dirfd as the kernel does,
+with openat2 RESOLVE_IN_ROOT; the existing absolute-path RESOLVE_BENEATH rejection
+and open_how values remain enforced. Canonical bypass roots are captured from the
+daemon before notification processing; the helper's classpath cannot widen them.
+The existing filesystem symlink/rename races and thread-containment limitations
+still apply; this is not a claim of race-free policy path resolution.
+
+Accept with a non-null peer-address output (including a null length pointer) has an explicit limitation:
+Linux process_vm_writev accepts only a numeric PID, whereas `/proc/task/mem`
+writes can force access through read-only mappings and change accept's EFAULT
+semantics. The helper returns typed
+`UnsupportedTraceeAuthority.AcceptPeerMemory`; the sole reply interpreter logs
+the limitation and denies with EPERM before accepting or importing a socket.
+Address-less accept is supported. No numeric-PID write or forced-write fallback
+is performed. Restoring this route requires a separately verified memory-write
+capability ([backlog](../../backlog/issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md)).
+
+The notification deadline no longer waits for these tracee filesystem/memory
+operations on the reactor. As with any JVM service, scheduling and native-kernel
+progress are external assumptions: SIGKILL cannot immediately reap a process
+stuck in uninterruptible kernel sleep. Failed bounded reaping keeps the slot
+unavailable, reports failure, and never permits replacement or a second reply.
+This does not claim universally bounded kernel resource reclamation or complete
+accept peer-memory functionality.
+
+`SupervisorSessionHandler` coordinates `SupervisorSessionMachine` transitions, bounded argument inspection, the JVM verdict exchange, route effects, and session teardown. `JvmVerdictExchange` owns the existing fixed-size control frame and returns a sealed verdict, timeout, malformed-frame, or transport-failure outcome. It rejects mismatched notification IDs and invalid path lengths/UTF-8, and closes the control connection on an unusable response.
+
+An unusable exchange remains terminal even if closing its connection fails. Its typed outcome retains the cleanup exception alongside the primary failure; the session records both and refuses subsequent notifications. Preparation-only recovery cannot reinterpret an execution or exchange failure as successfully handled work.
+
+Open, socket, and secure-exec route executors return `SupervisorReplyEffect` values. They cannot send a kernel reply. The single `SupervisorReplyInterpreter` owns CONTINUE, ERROR, value replies, atomic ADDFD-with-SEND, and secure-exec terminal operations. A notification reaches `Replied` only after confirmed native success. A failed native reply or post-reply cleanup terminates the session; it never triggers a second reply.
+
+`SupervisorSessionHandler` reaches those route executors only through one
+`SupervisorRouteDispatcher`. The dispatcher owns route preparation, authority and socket
+helpers, executor lifecycle, and terminal-effect mapping. Route helpers are implementation
+details of `io.mazewall.enforcer.internal.supervisor`; other packages may depend only on the
+supervisor protocol/facade types and cannot execute a route directly.
+
+Enforcement compilation rejects a default `ACT_NOTIFY` action and explicitly supervised syscall numbers without a known supervisor route. Profiling is exempt because it observes rather than authorizes operations. Unknown supervisor kinds deny before JVM validation and cannot gain authority from an allow or FD-injection verdict. An FD-injection verdict is accepted only for open, connect, and accept routes.
+
+Open fast-path authorization requires a resolved path and a copied pathname. Unresolved names deny with EPERM regardless of `.class`, `.jar`, or `META-INF/` spelling. Resolved JVM bypass paths use the open executor and atomic FD injection, never CONTINUE; other resolved paths require JVM validation. This removes tracee-memory pointer resumption without claiming race-free filesystem resolution: the existing open executor and filesystem preparation limitations above still apply. Ordinary CONTINUE is confined to the audited spawn category after JVM authorization; fork/vfork and clone authorization depend on parent identity and register flags, not clone's stack/TID pointer contents. Secure exec retains its separate, experimental rewrite protocol and documented limitations.
+
+Supervised `connect` imports the original socket with `pidfd_getfd` inside the authority helper and connects that same open-file description. It returns the terminal value zero, not a replacement FD. Socket type, binding, options, and status flags therefore remain attached to the original tracee descriptor. Supported address-less `accept`/`accept4` create a new descriptor and retain atomic ADDFD-with-SEND, including requested CLOEXEC behavior. Native `EINPROGRESS`, `EAGAIN`, permission errors, and timeout errno are returned unchanged; neither route changes shared file status flags or retries by creating another socket.
+
+The supervisor JVM owns one bounded `SocketHelperPool`, with four reusable independently terminable helper JVM slots and at most 64 queued operations. Internal settings `mazewall.supervisor.socketHelpers` (1–32) and `mazewall.supervisor.socketQueue` (1–4096) are validated before executor creation. Production prewarms all slots with ordinary counted jobs before announcing daemon readiness, under one five-second startup budget; failure prevents readiness and runs normal pool cleanup. Fixtures can retain lazy startup. Slots execute one operation at a time, retain clean children, and replenish failed/cancelled children only after reaping. Queue saturation releases request ownership and returns `EAGAIN`. Private mode-0700 UNIX endpoints carry owned CLOEXEC SCM_RIGHTS descriptors. Standalone socket-operation frames carry copied socket addresses (at most 128 bytes), accept flags, errno, and peer-address snapshots; no confined arena crosses the process boundary. Authority frames additionally carry the immutable notification registers so only the child performs tracee-memory reads.
+
+The retained standalone-operation protocol also carries capability-relative opens. A request
+contains a copied relative UTF-8 pathname (0–4095 bytes, rejecting NUL, malformed
+UTF-8 and absolute names), the three 64-bit open_how fields, and an owned
+SCM_RIGHTS directory duplicate. The helper executes openat2 against that
+capability and transfers an owned result descriptor; the reactor alone can
+inject it. Existing open flags/mode and openat2 RESOLVE_BENEATH composition
+remain unchanged. Empty pathnames reach the kernel for normal errno validation.
+Import permission errors deny without fallback. Cancellation,
+late-result disposal and capacity accounting use the notification's existing
+helper session, shared with its socket routes. Direct executors and this earlier
+operation-stage seam remain available to fixtures; production preparation and
+execution instead use the complete authority conversation below.
+
+The authority protocol is a separate two-phase operation in the same bounded
+pool: copied notification identity/registers and captured bypass roots produce a
+prepared snapshot; only the reactor then releases its fast-path or JVM-authorized
+decision. Proc/pidfd/memory/directory handles remain owned by the child for that
+conversation. The authenticated parent supplies the notification identity; an
+ID_VALID check binds the prepared authority to the outstanding notification before
+execution. Kernel Yama allows descendants of the registered PR_SET_PTRACER daemon;
+the broker does not change ptrace policy. EPERM/EACCES remain terminal. Both ends
+verify SO_PEERCRED against the expected direct parent/child before exchanging
+authority. Private pipe frames echo the notification ID, cap pathnames at 4095
+UTF-8 bytes, socket addresses at 128 bytes, and bypass roots at 1024 entries.
+Status reads are capped at 64 KiB and maps at 4 MiB. Oversized/malformed input
+fails closed. Only successful result descriptors cross SCM_RIGHTS, with the
+sender closing its owner after transfer and the receiver taking one CLOEXEC owner.
+The child never receives a seccomp listener or terminal-reply capability.
+
+Each reactor notification owns a helper request session under its listener owner.
+Notification timeout or listener teardown removes queued work, retires active
+helpers, and disposes late accepted descriptors. Cancellation returns without
+waiting for helper startup or process reaping; bounded cleanup workers terminate
+children independently of the reactor. It does not interrupt JVM operation
+threads. Helper slots remain unavailable until the old child has been reaped,
+including cancellation during factory startup. Explicit session/pool joins use
+one aggregate ten-second cleanup deadline rather than a fresh wait for each job;
+failed helper release remains retryable and cleanup failure is reported.
+The reactor retains all reply authority and a closed notification can only dispose
+a late result. The compatibility fixture entrypoint retains its reply gate.
+The existing kernel response format is unchanged. Child startup and reap each
+have a five-second bound. Cleanup tracks successful reap, channel closure and
+endpoint deletion independently, without repeating completed releases.
+Cancellation does not undo a connect already completed by the kernel or change
+the original open-file description's flags.
+
+Before opening IPC, a helper verifies its expected direct parent and registers an independent JDK ProcessHandle exit monitor. Owner death (including SIGKILL) halts the helper on the monitor thread, releasing imported descriptors even while the operation thread is blocked in native accept/connect. A parent that died before registration fails the direct-parent check; death during registration completes the exit notification. This private helper mechanism adds no FFM layouts or downcalls.
+
+Descriptor ownership also covers setup before a reply can be interpreted. The imported listening socket's cleanup scope encloses accept-buffer allocation and initialization. A completed route effect is held by a single-use `SupervisorReplyHandoff` while the handler creates its reply arena and response buffer. If setup fails, the handoff disposes any unconsumed AddFd or opened secure-exec descriptor before terminal failure accounting. Transfer goes directly to the sole reply interpreter and retires the handoff; neither a failed disposal nor a post-transfer failure can close the same descriptor again. The original setup failure stays primary, with cleanup failures retained as suppressed evidence.
+
+A fatal supervisor worker failure completes its future exceptionally after resource cleanup, allowing the session owner to process `ReplyFailed` and shut down without a policy-denial reply. The worker then rethrows the original fatal failure; it is not converted to ordinary denial or successful handling. A child crash or malformed private reply produces `EIO` and retires that helper; the child has no kernel-reply authority. Fatal prerequisite-close failures also release any already acquired successor descriptor before propagation.
+
+Reply interpretation and its post-reply cleanup are also terminal failure boundaries. A failure after confirmed ADDFD-with-SEND cannot enter pre-reply denial recovery. A fatal failure on the calling thread is rethrown with its original identity outside the future callback. For a pending async completion, the callback first terminates the session and finishes cleanup, then explicitly delivers the original fatal failure to the replying worker's uncaught-exception handler before that worker exits. This explicit delivery is necessary because `CompletableFuture` captures callback throws; no exceptional dependent completion is left unobserved. Shutdown or uncaught-handler failures remain attached to the primary failure as suppressed evidence.
+
+The process boundary is also the authorization boundary: `SupervisorInstaller`'s JVM validation listener registers and consumes its session's spawn authorization. The sidecar routes carry the resulting JVM decision alongside their request context; neither argument preparation nor a route executor mirrors, consumes again, or independently grants that authority. Duplicating the store across processes would risk replay or incorrectly deny a legitimately consumed authorization.
+
+The native `O_PATH` flag is verified against the host C headers as `0x00200000`; secure-exec, Landlock and profiler classification share this platform value ([resolved issue](../../backlog/resolved/issue-20260909-074606-812-correct-o-path-native-flag-value-against-linux-hea.md)). One secure-exec limitation remains explicitly tracked: `pidfd_getfd` plus local close does not remove an injected descriptor from the tracee's FD table ([backlog](../../backlog/issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md)). Failed rewrite remains denied, but the injected remote descriptor can remain until tracee teardown. No remote-close protocol is introduced.
 
 ---
 
@@ -535,11 +1036,48 @@ The following table clarifies which effects in mazewall are reversible and which
 |---|---|---|
 | Seccomp filter | No (thread/process lifetime) | `ContainerState.filterDepth` / actions — never clear after apply |
 | Landlock domain | No (nest inward only) | `landlockPolicy` — never rewind after apply |
-| Supervisor session / USER_NOTIF listener | Session closeable; filter stays | Closing session does **not** uninstall; later NOTIFY may get ENOSYS |
+| Supervisor task session | Reference-counted registration lease | Closing a lease preserves outer leases and the installed runtime |
+| Supervisor installation / USER_NOTIF listener | Platform-thread lifetime | An explicit owner joins the installing thread, then requests reactor-owned socket/arena cleanup |
 | `InstallationReceipt` | Diagnostic only | `installed` is independent of `landlockApplied` |
 | `sanitizeThreadState` | Forbidden | Throws |
 
+Process-wide Seccomp planning reads only `processState`; a restriction on the calling
+thread cannot satisfy a policy requested for every peer thread. Thread planning uses
+the combined state. Each successful native stage publishes immediately: Landlock
+at successful `restrict_self`, before outcome allocation, ruleset/arena cleanup, or
+diagnostic emission; Seccomp before verification or supervisor readiness can
+fail. The supervised coordinator uses a precomputed publication closure targeting
+the installing thread's holder; it never publishes to its own ThreadLocal.
+No wrapper or failure handler restores a previous policy snapshot.
+
+`PartialInstallationException.progress` records this attempt's successful irreversible
+stages, not a difference against shared process state that another installation may
+change. Fatal errors retain their identity and carry
+the same typed progress as suppressed diagnostic evidence. Partial failure does not
+authorize execution; normal fail-closed propagation remains the default.
+
+Repeated and nested supervised tasks acquire idempotent registration leases in the
+same installation runtime. They do not create a compatibility runtime or retire the
+validation listener. A different scoping-policy object is rejected on an already
+supervised platform thread: use a new thread for a different authorization contract.
+If native filter installation succeeds but connection or descriptor transfer fails,
+the installation retains irreversible metadata and a failed owner record. Its runtime
+is closed; every subsequent contained task on that thread is rejected before policy
+planning, even when the next policy does not request supervision. Operator fallback
+cannot convert a permanently failed listener into a usable installation.
+Raw executor ownership stays with the caller; a dedicated daemon lifetime observer
+joins each installing platform thread, without finalizer/cleaner inference. Retirement
+requests stop, and the listener completes socket and arena cleanup in its own reactor.
+
+Migration: callers that manually invoked `SupervisorInstaller.registerThread` or
+`unregisterThread` must scope the `InstallationReceipt` itself with `use`; closing
+the receipt releases only its private registration lease. It never closes an
+installation listener or reverses containment. Wrapped executors manage receipts.
+The old hidden `Unit`-returning `install*` overloads no longer exist: every installation call
+returns that receipt, so Kotlin callers use `installOnCurrentThread(...).use { receipt -> ... }`
+where a supervisor may be involved and Java callers use try-with-resources.
+
 **Related issues:**
-- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](docs/internals/backlog/performance/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
-- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](docs/internals/backlog/performance/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
-- [issue-20260821-113003-report-already-active-landlock](docs/internals/backlog/code_health/issue-20260821-113003-report-already-active-landlock.md)
+- WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](../../backlog/resolved/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
+- WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](../../backlog/resolved/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
+- [issue-20260821-113003-report-already-active-landlock](../../backlog/resolved/issue-20260821-113003-report-already-active-landlock.md)

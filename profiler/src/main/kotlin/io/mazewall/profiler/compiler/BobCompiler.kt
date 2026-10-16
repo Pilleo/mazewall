@@ -1,24 +1,25 @@
 package io.mazewall.profiler.compiler
 
-import io.mazewall.core.Syscall
-import io.mazewall.profiler.BillOfBehavior
-import io.mazewall.profiler.FsEffect
-import io.mazewall.profiler.NetworkEndpoint
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.UringOp
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.BillOfBehavior
+import io.mazewall.profiler.api.FsEffect
+import io.mazewall.profiler.api.NetworkEndpoint
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.api.UringOp
 import java.util.*
 
 /**
  * BobCompiler parses semantic trace events produced by the Profiler session
  * and aggregates them into a [BillOfBehavior].
  */
-object BobCompiler {
+internal object BobCompiler {
     private const val O_WRONLY = 1L
     private const val O_RDWR = 2L
     private const val O_CREAT = 64L
     private const val O_TRUNC = 512L
-    private const val O_PATH = 0x01000000L
 
     /**
      * Parses the given semantic trace events and returns a [BillOfBehavior].
@@ -71,27 +72,57 @@ object BobCompiler {
         val name = obs.name.uppercase(Locale.US)
         Syscall.tryParse(name)?.let { syscalls.add(it) }
 
-        when {
-            name == "EXECVE" || name == "EXECVEAT" -> execs.addAll(obs.paths)
-            name == "OPEN" || name == "OPENAT" || name == "OPENAT2" -> {
-                val flags = obs.openFlags ?: 0L
-                if ((flags and O_PATH) != 0L) {
-                    // O_PATH descriptor only, does not grant file read or write access
-                } else if (isOpenWrite(flags)) {
-                    fsWritePaths.addAll(obs.paths)
-                } else {
-                    opens.addAll(obs.paths)
-                }
-            }
-            isFileSystemMutation(name) -> fsWritePaths.addAll(obs.paths)
-            name == "SOCKET" || name == "CONNECT" || name == "MMAP" -> { }
-            else -> opens.addAll(obs.paths)
+        when (classify(name)) {
+            SyscallEffect.Exec -> execs.addAll(obs.paths)
+            SyscallEffect.Open -> applyOpen(obs, opens, fsWritePaths)
+            SyscallEffect.FileSystemMutation -> fsWritePaths.addAll(obs.paths)
+            SyscallEffect.NoPathEffect -> Unit
+            SyscallEffect.Read -> opens.addAll(obs.paths)
         }
     }
 
-    private fun isFileSystemMutation(syscallName: String): Boolean =
-        syscallName in
-            setOf(
+    private fun applyOpen(
+        obs: ProfileObservation.Syscall,
+        opens: MutableSet<String>,
+        fsWritePaths: MutableSet<String>,
+    ) {
+        val name = obs.name.uppercase(Locale.US)
+        when (val evidence = obs.openFlagsEvidence) {
+            is OpenFlagsEvidence.Complete -> applyCompleteOpen(obs.paths, evidence.value, opens, fsWritePaths)
+            is OpenFlagsEvidence.Incomplete ->
+                throw IllegalArgumentException(
+                    "$name requires complete open flags evidence; unresolved: ${evidence.unknownSymbols.joinToString(",")}",
+                )
+            null -> throw IllegalArgumentException("$name requires open flags evidence")
+        }
+    }
+
+    private fun applyCompleteOpen(
+        paths: List<String>,
+        flags: Long,
+        opens: MutableSet<String>,
+        fsWritePaths: MutableSet<String>,
+    ) {
+        when {
+            (flags and NativeConstants.O_PATH.toLong()) != 0L -> Unit
+            isOpenWrite(flags) -> fsWritePaths.addAll(paths)
+            else -> opens.addAll(paths)
+        }
+    }
+
+    private fun classify(name: String): SyscallEffect =
+        when (name) {
+        "EXECVE", "EXECVEAT" -> SyscallEffect.Exec
+        "OPEN", "OPENAT", "OPENAT2" -> SyscallEffect.Open
+        "SOCKET", "CONNECT", "MMAP" -> SyscallEffect.NoPathEffect
+        in FILE_SYSTEM_MUTATIONS -> SyscallEffect.FileSystemMutation
+        else -> SyscallEffect.Read
+    }
+
+    private enum class SyscallEffect { Exec, Open, FileSystemMutation, NoPathEffect, Read }
+
+    private val FILE_SYSTEM_MUTATIONS: Set<String> =
+        setOf(
                 "MKDIR",
                 "MKDIRAT",
                 "RMDIR",
@@ -115,7 +146,7 @@ object BobCompiler {
                 "UTIME",
                 "UTIMES",
                 "UTIMENSAT",
-            )
+        )
 
     private fun isOpenWrite(flags: Long): Boolean {
         val accessMode = flags and 3L

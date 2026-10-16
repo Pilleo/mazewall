@@ -6,9 +6,12 @@ services:
             dockerfile: infra/dev/Containerfile
         volumes:
             - ../..:/workspace
-            - ${GRADLE_USER_HOME:-~/.gradle}:/root/.gradle
+            - ${MAZEWALL_CONTAINER_CACHE_DIR:?Set a caller-owned container cache directory}:/container-gradle-home
+        userns_mode: keep-id
+        user: "${MAZEWALL_UID:?Set MAZEWALL_UID to id -u}:${MAZEWALL_GID:?Set MAZEWALL_GID to id -g}"
         environment:
-            - GRADLE_USER_HOME=/root/.gradle
+            - GRADLE_USER_HOME=/container-gradle-home
+            - HOME=/tmp
             - GITHUB_ACTOR
             - GITHUB_TOKEN
         # Use a custom seccomp profile via annotation to whitelist filter stacking.

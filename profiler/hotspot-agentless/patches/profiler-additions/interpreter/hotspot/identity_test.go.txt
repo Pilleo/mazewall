@@ -1,0 +1,138 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	"io"
+	"syscall"
+	"testing"
+)
+
+type identityReader func([]byte, int64) (int, error)
+
+func (r identityReader) ReadAt(p []byte, off int64) (int, error) { return r(p, off) }
+
+func interpretedIdentityFrame(check uint32) libpf.EbpfFrame {
+	f := libpf.NewEbpfFrame(libpf.HotSpotFrame, 0, 3, 0)
+	f[1] = 0x100
+	f[2] = uint64(support.FrameHotspotInterpreter)<<60 | uint64(check)
+	return f
+}
+
+func TestInterpretedMethodRejectsReusedAddress(t *testing.T) {
+	ii, _ := qualityInstance(t)
+	mem := make([]byte, 1024)
+	binary.LittleEndian.PutUint64(mem[0x100:], 0x280)
+	ii.rm.ReaderAt = bytes.NewReader(mem)
+	var frames libpf.Frames
+	// Cache contains the old method, while the captured ConstMethod check is
+	// for a different incarnation at the same method address.
+	err := ii.Symbolize(interpretedIdentityFrame(0x200>>3), &frames, libpf.FrameMapping{})
+	if err == nil || len(frames) != 0 {
+		t.Fatalf("stale method attributed: frames=%+v err=%v", frames, err)
+	}
+}
+
+func TestInterpretedMethodPropagatesCheckedReadFailures(t *testing.T) {
+	for _, failure := range []error{syscall.EPERM, syscall.EACCES, syscall.EIO} {
+		ii, _ := qualityInstance(t)
+		ii.rm.ReaderAt = identityReader(func([]byte, int64) (int, error) { return 0, failure })
+		var frames libpf.Frames
+		err := ii.Symbolize(interpretedIdentityFrame(64), &frames, libpf.FrameMapping{})
+		if !errors.Is(err, failure) || len(frames) != 0 {
+			t.Fatalf("read failure became cached attribution: %v", err)
+		}
+	}
+}
+
+func TestInterpretedMethodChecksCacheAndRechecksLivePointer(t *testing.T) {
+	ii, m := qualityInstance(t)
+	if got, err := ii.getInterpretedMethod(0x100, 64); err != nil || got != m {
+		t.Fatalf("matching cached identity rejected: %v", err)
+	}
+	mem := make([]byte, 1024)
+	binary.LittleEndian.PutUint64(mem[0x100:], 0x280)
+	ii.rm.ReaderAt = bytes.NewReader(mem)
+	got, err := ii.getInterpretedMethod(0x100, 0x280>>3)
+	if err != nil || got == m || got.constMethodAddr != 0x280 {
+		t.Fatalf("new captured identity got old cache: got=%+v err=%v", got, err)
+	}
+	for _, changed := range []libpf.Address{0x300, 0} {
+		ii, _ := qualityInstance(t)
+		reads := 0
+		ii.rm.ReaderAt = identityReader(func(p []byte, off int64) (int, error) {
+			reads++
+			ptr := uint64(0x200)
+			if reads > 1 {
+				ptr = uint64(changed)
+			}
+			binary.LittleEndian.PutUint64(p, ptr)
+			return len(p), nil
+		})
+		if _, err := ii.getInterpretedMethod(0x100, 64); err == nil {
+			t.Fatal("replacement during lookup accepted")
+		}
+		if _, ok := ii.addrToMethod.Get(0x100); ok {
+			t.Fatal("unvalidated cache entry retained after race")
+		}
+	}
+}
+
+func TestInterpretedMethodZeroTokenAndTruncatedCheck(t *testing.T) {
+	ii, m := qualityInstance(t)
+	ptr := libpf.Address(1 << 35)
+	m.constMethodAddr = ptr
+	ii.rm.ReaderAt = identityReader(func(p []byte, _ int64) (int, error) {
+		binary.LittleEndian.PutUint64(p, uint64(ptr))
+		return len(p), nil
+	})
+	if got, err := ii.getInterpretedMethod(0x100, 0); err != nil || got != m {
+		t.Fatal("valid zero token treated as no check", err)
+	}
+	if _, err := ii.getInterpretedMethod(0x100, 1); err == nil {
+		t.Fatal("zero-cookie pointer accepted wrong nonzero cookie")
+	}
+}
+
+func TestInterpretedMethodRejectsNullOverflowAndEndReadFailure(t *testing.T) {
+	ii, _ := qualityInstance(t)
+	ii.rm.ReaderAt = bytes.NewReader(make([]byte, 1024))
+	if _, err := ii.getInterpretedMethod(0x100, 0); err == nil {
+		t.Fatal("null pointer accepted as zero cookie")
+	}
+	ii.d.Get().vmStructs.Method.ConstMethod = 8
+	if _, err := ii.getInterpretedMethod(libpf.Address(^uint64(0)-3), 0); err == nil {
+		t.Fatal("pointer arithmetic overflow accepted")
+	}
+	ii, _ = qualityInstance(t)
+	reads := 0
+	ii.rm.ReaderAt = identityReader(func(p []byte, _ int64) (int, error) {
+		reads++
+		if reads > 1 {
+			return 0, syscall.EACCES
+		}
+		binary.LittleEndian.PutUint64(p, 0x200)
+		return len(p), nil
+	})
+	if _, err := ii.getInterpretedMethod(0x100, 64); !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("end-read permission failure downgraded: %v", err)
+	}
+}
+
+func TestInterpretedMethodHonorsRemoteBiasAndRejectsShortRead(t *testing.T) {
+	ii, m := qualityInstance(t)
+	ii.rm.Bias = 0x1000
+	ii.rm.ReaderAt = identityReader(func(p []byte, _ int64) (int, error) { binary.LittleEndian.PutUint64(p, 0x1200); return len(p), nil })
+	if got, err := ii.getInterpretedMethod(0x100, 0x1200>>3); err != nil || got != m {
+		t.Fatalf("unrelocated cache identity lost: %v", err)
+	}
+	ii.rm.ReaderAt = identityReader(func(p []byte, _ int64) (int, error) { p[0] = 0x80; return 1, nil })
+	if _, err := ii.getInterpretedMethod(0x100, 0); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("short read became identity: %v", err)
+	}
+}

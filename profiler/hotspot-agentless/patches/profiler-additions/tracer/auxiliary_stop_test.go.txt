@@ -1,0 +1,18 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"testing"
+)
+
+func TestDefinitionAuxiliaryStopRequiresOwnedInitializedScope(t *testing.T) {
+	stopper, ok := any(&Tracer{}).(interface{ StopAuxiliary(context.Context) error })
+	if !ok {
+		t.Fatal("tracer has no checked auxiliary cancellation/join boundary")
+	}
+	if err := stopper.StopAuxiliary(context.Background()); err == nil {
+		t.Fatal("unowned auxiliary scope certified as stopped")
+	}
+}

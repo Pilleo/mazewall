@@ -1,10 +1,11 @@
 @startuml Enforcer Class Diagram
 !pragma useIntermediatePackages false
 !theme spacelab
-set separator none
 hide empty members
 
-class "AllowListSpec" as io.mazewall.AllowListSpec {
+class "ContainmentViolationException" as io.mazewall.enforcer.ContainmentViolationException {
+}
+class "AllowListSpec" as io.mazewall.enforcer.api.AllowListSpec {
   +PolicyMode getMode()
   +AllowListSpec allow(Syscall[])
   +AllowListSpec denyProcessCreation()
@@ -12,7 +13,7 @@ class "AllowListSpec" as io.mazewall.AllowListSpec {
   +AllowListSpec advanced(Function1<? super Builder<ProcessWideSafe>, Unit>)
   +Policy<ProcessWideSafe, Uncompiled> build()
 }
-class "BillOfBehaviorDto" as io.mazewall.BillOfBehaviorDto {
+class "BillOfBehaviorDto" as io.mazewall.enforcer.api.BillOfBehaviorDto {
   + {static}Companion Companion
   __
   +Set<String> getOpens()
@@ -23,28 +24,66 @@ class "BillOfBehaviorDto" as io.mazewall.BillOfBehaviorDto {
   +Set<String> getIoUringOps()
   +List<StackProfileEntryDto> getStackProfile()
 }
-class "BpfFilter" as io.mazewall.BpfFilter {
-  + {static}BpfFilter INSTANCE
-  + {static}int SECCOMP_DATA_NR_OFFSET
-  + {static}int SECCOMP_DATA_ARCH_OFFSET
-  __
-  +BpfProgram<Verified> build(Arch, PolicyDefinition<?>, boolean)
-  +SyscallInspectionPipeline getSyscallInspectionPipeline()
-  +Set<Integer> getJvmCriticalNrs(Arch)
-  +void emitInspections(BpfBuilder<? extends Active>, List<SyscallInspection>, boolean, Set<Integer>)
-}
-class "BpfNativeCache" as io.mazewall.BpfNativeCache {
-  + {static}BpfNativeCache INSTANCE
-  __
-  +ManagedSegment getOrCompute(List<? extends BpfInstruction>)
-  +void clear()
-}
-class "CompiledSandbox" as io.mazewall.CompiledSandbox<S extends PolicyScope> {
+class "CompiledSandbox" as io.mazewall.enforcer.api.CompiledSandbox<S extends PolicyScope> {
   +PolicyDefinition<S> getDefinition()
   +BpfProgram<Verified> getProgram()
   +List<BpfInstruction> getCompiledFilters()
 }
-class "DenyListSpec" as io.mazewall.DenyListSpec {
+interface "ContainedExecutor" as io.mazewall.enforcer.api.ContainedExecutor<S extends PolicyScope> {
+  + {abstract}Policy<S, Uncompiled> getPolicy()
+}
+class "ContainedExecutorView" as io.mazewall.enforcer.api.ContainedExecutorView<S extends PolicyScope> {
+  +Policy<S, Uncompiled> getPolicy()
+  +void shutdown()
+  +List<Runnable> shutdownNow()
+  +boolean isShutdown()
+  +boolean isTerminated()
+  +boolean awaitTermination(long, TimeUnit)
+  +Future<T> submit(Callable<T>)
+  +Future<T> submit(Runnable, T)
+  +Future<?> submit(Runnable)
+  +List<Future<T>> invokeAll(Collection<? extends Callable<T>>)
+  +List<Future<T>> invokeAll(Collection<? extends Callable<T>>, long, TimeUnit)
+  +T invokeAny(Collection<? extends Callable<T>>)
+  +T invokeAny(Collection<? extends Callable<T>>, long, TimeUnit)
+  +void execute(Runnable)
+}
+class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
+  + {static}ContainedExecutors INSTANCE
+  __
+  +InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
+  +InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+  +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>)
+  +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
+  +InstallationAssessment assessOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
+  +InstallationAssessment assessOnCurrentThread(Policy<?, ? extends Uncompiled>)
+  +InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
+  +InstallationReceipt installOnDedicatedProcess(Policy<?, ? extends Uncompiled>[])
+  +ContainedExecutor<ThreadLocalOnly> wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  +ContainedExecutor<S> wrapTyped(ExecutorService, Policy<? extends S, ? extends Uncompiled>)
+  +ExecutorService newSingleThreadExecutor(Policy<?, ? extends Uncompiled>)
+  +ExecutorService newFixedThreadPool(int, Policy<?, ? extends Uncompiled>)
+  +ExecutorService newCachedThreadPool(Policy<?, ? extends Uncompiled>)
+  +ContainedExecutor<ThreadLocalOnly> wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
+}
+enum "ContainmentViolationEvidence" as io.mazewall.enforcer.api.ContainmentViolationEvidence {
+  OBSERVED_POLICY_DENIAL
+  INFERRED_PERMISSION_FAILURE
+  UNKNOWN
+}
+class "ContainmentViolationException" as io.mazewall.enforcer.api.ContainmentViolationException {
+  __
+  +Integer getErrno()
+  +Integer getSyscallNr()
+  +ContainmentViolationEvidence getEvidence()
+}
+class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy {
+  ..
+  + {static}DefaultStacktraceScopingPolicy INSTANCE
+  __
+  +Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
+}
+class "DenyListSpec" as io.mazewall.enforcer.api.DenyListSpec {
   +PolicyMode getMode()
   +DenyListSpec denyProcessCreation()
   +DenyListSpec denyNetwork()
@@ -53,7 +92,7 @@ class "DenyListSpec" as io.mazewall.DenyListSpec {
   +DenyListSpec advanced(Function1<? super Builder<ProcessWideSafe>, Unit>)
   +Policy<PolicyScope, Uncompiled> build()
 }
-class "InstallationAssessment" as io.mazewall.InstallationAssessment {
+class "InstallationAssessment" as io.mazewall.enforcer.api.InstallationAssessment {
   +InstallationScope getScope()
   +boolean getInstallable()
   +FallbackBehavior getFallback()
@@ -70,33 +109,49 @@ class "InstallationAssessment" as io.mazewall.InstallationAssessment {
   +boolean getSeccompSupported()
   +InstallationAssessment requireInstallable()
 }
-class "InstallationAssessor" as io.mazewall.InstallationAssessor {
+class "InstallationAssessor" as io.mazewall.enforcer.api.InstallationAssessor {
   + {static}InstallationAssessor INSTANCE
   __
   +InstallationAssessment assess(PolicyDefinition<?>, boolean)
 }
-class "InstallationReceipt" as io.mazewall.InstallationReceipt {
+class "InstallationAttempt" as io.mazewall.enforcer.api.InstallationAttempt {
+  +boolean getLandlockApplied()
+  +void setLandlockApplied(boolean)
+  +boolean getSeccompApplied()
+  +void setSeccompApplied(boolean)
+  +InstallationProgress snapshot()
+}
+class "InstallationProgress" as io.mazewall.enforcer.api.InstallationProgress {
+  +boolean getProcessWide()
+  +boolean getLandlockApplied()
+  +boolean getSeccompApplied()
+}
+class "InstallationReceipt" as io.mazewall.enforcer.api.InstallationReceipt {
+  + {static}Companion Companion
+  __
   +boolean getProcessWide()
   +PolicyDefinition<?> getRequestedPolicy()
-  +AutoCloseable getSupervisorSession()
   +long getTimestampMillis()
   +boolean getInstalled()
   +FallbackBehavior getFallback()
   +boolean getLandlockApplied()
+  +void close()
   +InstallationReceipt requireInstalled()
   +boolean isInstalled()
   +boolean isProcessWide()
   +boolean isLandlockApplied()
+  +boolean getOwnsSupervisorLease()
+  +void releaseIfUnsupervised()
 }
-class "InstallationRejectedException" as io.mazewall.InstallationRejectedException {
+class "InstallationRejectedException" as io.mazewall.enforcer.api.InstallationRejectedException {
   +List<InstallationStage> getStages()
   +List<String> getReasons()
 }
-enum "InstallationScope" as io.mazewall.InstallationScope {
+enum "InstallationScope" as io.mazewall.enforcer.api.InstallationScope {
   PROCESS
   THREAD
 }
-enum "InstallationStage" as io.mazewall.InstallationStage {
+enum "InstallationStage" as io.mazewall.enforcer.api.InstallationStage {
   PLATFORM
   VIRTUAL_THREAD
   SECCOMP
@@ -105,7 +160,7 @@ enum "InstallationStage" as io.mazewall.InstallationStage {
   LANDLOCK
   INTEL_CET
 }
-class "JavaPolicyBuilder" as io.mazewall.JavaPolicyBuilder {
+class "JavaPolicyBuilder" as io.mazewall.enforcer.api.JavaPolicyBuilder {
   ..
   + {static}Companion Companion
   __
@@ -139,7 +194,9 @@ class "JavaPolicyBuilder" as io.mazewall.JavaPolicyBuilder {
   + {static}JavaPolicyBuilder create()
   + {static}JavaPolicyBuilder create(RuntimeProfile)
 }
-class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
+interface "KernelCapability" as io.mazewall.enforcer.api.KernelCapability<T> {
+}
+class "KernelFeatureMatrix" as io.mazewall.enforcer.api.KernelFeatureMatrix {
   + {static}Companion Companion
   __
   +boolean getSeccompSupported()
@@ -150,34 +207,13 @@ class "KernelFeatureMatrix" as io.mazewall.KernelFeatureMatrix {
   +boolean getLandlockTsyncSupported()
   +boolean getLandlockSupported()
 }
-class "LinuxNative" as io.mazewall.LinuxNative {
-  + {static}LinuxNative INSTANCE
+class "KernelFeatureSnapshot" as io.mazewall.enforcer.api.KernelFeatureSnapshot {
+  + {static}Companion Companion
   __
-  +Object getEngineIdentity()
-  +boolean isRealEngineActive()
-  +void setEngine(NativeEngine)
-  +void resetToDefault()
-  +NativeFileSystem getFileSystem()
-  +NativeNetworking getNetworking()
-  +NativeProcess getProcess()
-  +NativeMemory getMemory()
-  +RawSyscallOperations getRaw()
-  +boolean isDescriptorLive(int)
+  +KernelFeatureMatrix getMatrix()
+  +KernelCapability<Integer> getLandlockCapability()
 }
-class "LinuxNativeKt" as io.mazewall.LinuxNativeKt {
-  + {static}boolean isSuccess(SyscallResult)
-  + {static}boolean isFailure(SyscallResult)
-  + {static}SyscallResult map(SyscallResult, Function1<? super T, ? extends R>)
-  + {static}SyscallResult flatMap(SyscallResult, Function1<? super T, ? extends SyscallResult<? extends R, ? extends H>>)
-  + {static}SyscallResult onSuccess(SyscallResult, Function1<? super T, Unit>)
-  + {static}SyscallResult onFailure(SyscallResult, Function2<? super Integer, ? super Long, Unit>)
-  + {static}T recover(SyscallResult, Function2<? super Integer, ? super Long, ? extends T>)
-  + {static}long asLong(Success)
-  + {static}FileDescriptor<Generic, Open, Owned> asFd(Success)
-  + {static}int asInt(SyscallResult)
-  + {static}FileDescriptor<Generic, Open, Owned> getFdOrThrow(SyscallResult, String)
-}
-class "Mazewall" as io.mazewall.Mazewall {
+class "Mazewall" as io.mazewall.enforcer.api.Mazewall {
   + {static}Policy<ThreadLocalOnly, Uncompiled> PURE_COMPUTE
   + {static}Policy<ProcessWideSafe, Uncompiled> PURE_COMPUTE_UNSAFE
   + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC
@@ -210,63 +246,21 @@ class "Mazewall" as io.mazewall.Mazewall {
   + {static}T runContained(Policy<?, ?>, Callable<T>)
   + {static}T runContained(Policy<?, ?>, Supplier<T>)
   + {static}void runContained(Policy<?, ?>, Runnable)
-  + {static}ExecutorService wrapContainedExecutor(ExecutorService, Policy<?, ? extends Uncompiled>)
-  + {static}ExecutorService wrapExecutor(ExecutorService, Policy<?, ? extends Uncompiled>[])
-  + {static}ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  + {static}ContainedExecutor<ThreadLocalOnly> wrapContainedExecutor(ExecutorService, Policy<?, ? extends Uncompiled>)
+  + {static}ContainedExecutor<ThreadLocalOnly> wrapExecutor(ExecutorService, Policy<?, ? extends Uncompiled>[])
+  + {static}ContainedExecutor<ThreadLocalOnly> wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
   + {static}ExecutorService newContainedSingleThreadExecutor(Policy<?, ? extends Uncompiled>)
   + {static}ExecutorService newContainedFixedThreadPool(int, Policy<?, ? extends Uncompiled>)
   + {static}ExecutorService newContainedCachedThreadPool(Policy<?, ? extends Uncompiled>)
 }
-annotation "MazewallInternal" as io.mazewall.MazewallInternal {
+class "PartialInstallationException" as io.mazewall.enforcer.api.PartialInstallationException {
+  +InstallationProgress getProgress()
 }
-interface "NativeEngine" as io.mazewall.NativeEngine {
-  + {abstract}NativeFileSystem getFileSystem()
-  + {abstract}NativeNetworking getNetworking()
-  + {abstract}NativeProcess getProcess()
-  + {abstract}NativeMemory getMemory()
-  + {abstract}RawSyscallOperations getRaw()
-}
-interface "NativeFileSystem" as io.mazewall.NativeFileSystem {
-  +SyscallResult open(ManagedSegment, int)
-  + {abstract}SyscallResult open(ManagedSegment, int, int)
-  +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  + {abstract}SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int, int)
-  +SyscallResult openat2(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, long)
-  + {abstract}SyscallResult readlink(ManagedSegment, ManagedSegment, long)
-  + {abstract}SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long)
-  + {abstract}SyscallResult close(FileDescriptor<?, ? extends Open, Owned>)
-}
-interface "NativeMemory" as io.mazewall.NativeMemory {
-  + {abstract}SyscallResult processVmReadv(int, ManagedSegment, long, ManagedSegment, long, long)
-  + {abstract}SyscallResult processVmWritev(int, ManagedSegment, long, ManagedSegment, long, long)
-  + {abstract}SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
-  + {abstract}SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
-  + {abstract}ManagedSegment newSockFProg(NativeArena, List<? extends BpfInstruction>)
-}
-interface "NativeNetworking" as io.mazewall.NativeNetworking {
-  + {abstract}SyscallResult socketpair(int, int, int, ManagedSegment)
-  + {abstract}SyscallResult socket(int, int, int)
-  + {abstract}SyscallResult bind(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  + {abstract}SyscallResult listen(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int)
-  + {abstract}SyscallResult accept(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment)
-  + {abstract}SyscallResult accept4(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, int)
-  + {abstract}SyscallResult connect(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  + {abstract}SyscallResult sendmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  + {abstract}SyscallResult recvmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  + {abstract}SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long, int)
-}
-interface "NativeProcess" as io.mazewall.NativeProcess {
-  + {abstract}int gettid()
-  + {abstract}SyscallResult prctl(PrctlCommand)
-  + {abstract}SyscallResult pidfdOpen(int, int)
-  + {abstract}SyscallResult pidfdGetFd(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, int)
-  + {abstract}SyscallResult archPrctl(int, long)
-  + {abstract}SyscallResult archPrctl(int, ManagedSegment)
-}
-class "Platform" as io.mazewall.Platform {
+class "Platform" as io.mazewall.enforcer.api.Platform {
   + {static}Platform INSTANCE
   __
   + {static}KernelFeatureMatrix getFeatureMatrix()
+  +KernelFeatureSnapshot getFeatureSnapshot()
   + {static}void setProvider(PlatformProvider)
   + {static}void resetToDefault()
   + {static}boolean isLinux()
@@ -283,7 +277,7 @@ class "Platform" as io.mazewall.Platform {
   + {static}long queryIntelCetStatus()
   + {static}Diagnostics diagnose()
 }
-interface "PlatformProvider" as io.mazewall.PlatformProvider {
+interface "PlatformProvider" as io.mazewall.enforcer.api.PlatformProvider {
   + {abstract}String getOsName()
   + {abstract}String getOsVersion()
   + {abstract}String getOsArch()
@@ -293,12 +287,13 @@ interface "PlatformProvider" as io.mazewall.PlatformProvider {
   + {abstract}boolean isNoNewPrivsEnabled()
   + {abstract}YamaPtraceScope getYamaPtraceScope()
   + {abstract}int getLandlockAbiVersion()
+  +KernelCapability<Integer> getLandlockCapability()
   + {abstract}boolean probeSeccompTsync()
   + {abstract}boolean probeSeccompUserNotif()
   + {abstract}boolean probeCetSupported()
   + {abstract}boolean isContainer()
 }
-class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends PolicyState> {
+class "Policy" as io.mazewall.enforcer.api.Policy<S extends PolicyScope, State extends PolicyState> {
   + {static}Companion Companion
   + {static}Policy<ProcessWideSafe, Uncompiled> PURE_COMPUTE_UNSAFE
   + {static}Policy<ProcessWideSafe, Uncompiled> NO_EXEC
@@ -337,14 +332,14 @@ class "Policy" as io.mazewall.Policy<S extends PolicyScope, State extends Policy
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList(RuntimeProfile)
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList()
 }
-class "PolicyArgumentRules" as io.mazewall.PolicyArgumentRules {
+class "PolicyArgumentRules" as io.mazewall.enforcer.api.PolicyArgumentRules {
   + {static}Companion Companion
   __
   +boolean getAllowExecutableMappings()
   +boolean getInspectNonThreadClone()
   +boolean getInspectUnsafePrctl()
 }
-class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
+class "PolicyBuilder" as io.mazewall.enforcer.api.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> defaultAction(SeccompAction)
   +PolicyBuilder<S> addAction(SeccompAction, Syscall[])
   +PolicyBuilder<S> block(Syscall[])
@@ -365,14 +360,14 @@ class "PolicyBuilder" as io.mazewall.PolicyBuilder<S extends PolicyScope> {
   +PolicyBuilder<S> customViolationRegex(Regex)
   +PolicyDefinition<S> build()
 }
-class "PolicyCompilationCache" as io.mazewall.PolicyCompilationCache {
+class "PolicyCompilationCache" as io.mazewall.enforcer.api.PolicyCompilationCache {
   + {static}PolicyCompilationCache INSTANCE
   __
   +CompiledSandbox<S> getOrCompile(PolicyDefinition<? extends S>, Arch)
   +void clear()
   +int entryCount()
 }
-class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> {
+class "PolicyDefinition" as io.mazewall.enforcer.api.PolicyDefinition<S extends PolicyScope> {
   + {static}Companion Companion
   __
   +SeccompAction getDefaultAction()
@@ -391,17 +386,7 @@ class "PolicyDefinition" as io.mazewall.PolicyDefinition<S extends PolicyScope> 
   +boolean isSyscallAllowed(Syscall)
   +Map<Integer, SeccompAction> syscallActionNumbers(Arch)
 }
-class "PolicyDefinitionKt" as io.mazewall.PolicyDefinitionKt {
-  + {static}CompiledSandbox<S> compile(PolicyDefinition<? extends S>, Arch)
-}
-class "PolicyKt" as io.mazewall.PolicyKt {
-  + {static}Policy<S, Compiled> compile(Policy<? extends S, ? extends Uncompiled>, Arch)
-  + {static}Policy<ProcessWideSafe, Uncompiled> plusProcessWide(Policy<? extends ProcessWideSafe, ? extends Uncompiled>, Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
-  + {static}Policy<S, Uncompiled> restrictFurtherWith(Policy<? extends S, ? extends Uncompiled>, Policy<? extends S, ? extends Uncompiled>)
-  + {static}Policy<ThreadLocalOnly, Uncompiled> plusThreadLocal(Policy<? extends S, ? extends Uncompiled>, Policy<? extends ThreadLocalOnly, ? extends Uncompiled>)
-  + {static}InstallationReceipt install(Policy<? extends S, ? extends Uncompiled>)
-}
-class "PolicyLists" as io.mazewall.PolicyLists {
+class "PolicyLists" as io.mazewall.enforcer.api.PolicyLists {
   + {static}PolicyLists INSTANCE
   __
   + {static}Policy<PolicyScope, Uncompiled> denyList(RuntimeProfile, Function1<? super DenyListSpec, Unit>)
@@ -414,11 +399,11 @@ class "PolicyLists" as io.mazewall.PolicyLists {
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList(RuntimeProfile)
   + {static}Policy<ProcessWideSafe, Uncompiled> allowList()
 }
-enum "PolicyMode" as io.mazewall.PolicyMode {
+enum "PolicyMode" as io.mazewall.enforcer.api.PolicyMode {
   DENY_LIST
   ALLOW_LIST
 }
-class "PolicyPresets" as io.mazewall.PolicyPresets {
+class "PolicyPresets" as io.mazewall.enforcer.api.PolicyPresets {
   ..
   + {static}PolicyPresets INSTANCE
   + {static}PolicyDefinition<ProcessWideSafe> PURE_COMPUTE_UNSAFE
@@ -430,61 +415,46 @@ class "PolicyPresets" as io.mazewall.PolicyPresets {
   + {static}PolicyDefinition<ProcessWideSafe> DEFAULT_SAFE
   + {static}PolicyDefinition<ThreadLocalOnly> PURE_COMPUTE
 }
-interface "PolicyScope" as io.mazewall.PolicyScope {
+interface "PolicyScope" as io.mazewall.enforcer.api.PolicyScope {
 }
-interface "PolicyState" as io.mazewall.PolicyState {
+interface "PolicyState" as io.mazewall.enforcer.api.PolicyState {
 }
-class "ProcessPolicies" as io.mazewall.ProcessPolicies {
+class "ProcessPolicies" as io.mazewall.enforcer.api.ProcessPolicies {
   + {static}ProcessPolicies INSTANCE
   __
   + {static}Policy<ProcessWideSafe, Uncompiled> denyProcessCreation(RuntimeProfile)
   + {static}Policy<ProcessWideSafe, Uncompiled> denyNetwork(RuntimeProfile)
   + {static}Policy<ThreadLocalOnly, Uncompiled> workerFilesystem(RuntimeProfile)
 }
-interface "RawSyscallOperations" as io.mazewall.RawSyscallOperations {
-  + {abstract}SyscallResult syscall(long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
-  + {abstract}SyscallResult syscall4(long, NativeArg, NativeArg, NativeArg, NativeArg)
-  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, IoctlCommand<Req, Res>, Req)
-  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, ManagedSegment)
-  + {abstract}SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, long)
-  + {abstract}SyscallResult fcntl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, long)
-  + {abstract}SyscallResult poll(ManagedSegment, long, int)
-}
-class "RealPlatformProvider" as io.mazewall.RealPlatformProvider {
-  + {static}RealPlatformProvider INSTANCE
-  + {static}String yamaPath
-  __
-  +String getOsName()
-  +String getOsVersion()
-  +String getOsArch()
-  +boolean hasKernelSeccompSupport()
-  +SeccompMode getSeccompMode()
-  +SyscallResult checkSeccompSanity()
-  +boolean isNoNewPrivsEnabled()
-  +YamaPtraceScope getYamaPtraceScope()
-  +int getLandlockAbiVersion()
-  +boolean probeSeccompTsync()
-  +boolean probeSeccompUserNotif()
-  +boolean probeCetSupported()
-  +boolean isContainer()
-}
-enum "RuntimeProfile" as io.mazewall.RuntimeProfile {
+enum "RuntimeProfile" as io.mazewall.enforcer.api.RuntimeProfile {
   HOTSPOT_JIT
   NATIVE_IMAGE
   __
   +boolean getAllowsExecutableMappings()
 }
-class "SbobParser" as io.mazewall.SbobParser {
+class "SandboxDispatcher" as io.mazewall.enforcer.api.SandboxDispatcher {
   ..
+  + {static}SandboxDispatcher INSTANCE
+  + {static}int MAX_CACHED_POOLS
+  __
+  + {static}T execute(Policy<?, ?>, Callable<T>)
+  +T executeBlock(Policy<?, ?>, Function0<? extends T>)
+  +ExecutorService getOrCreateElasticPool(PolicyDefinition<?>)
+  +int entryCount()
+  +List<ExecutorService> cachedPoolsForTest()
+  + {static}void shutdownAll()
+  +void close()
+}
+class "SbobParser" as io.mazewall.enforcer.api.SbobParser {
   + {static}SbobParser INSTANCE
   __
   +Policy<ThreadLocalOnly, Uncompiled> parseToPolicy(Path, Policy<?, ? extends Uncompiled>, Path)
   +Policy<ThreadLocalOnly, Uncompiled> parseToPolicy(InputStream, Policy<?, ? extends Uncompiled>, Path)
   +Policy<ThreadLocalOnly, Uncompiled> parseJsonToPolicy(String, Policy<?, ? extends Uncompiled>, Path)
 }
-interface "SeccompMode" as io.mazewall.SeccompMode {
+interface "SeccompMode" as io.mazewall.enforcer.api.SeccompMode {
 }
-class "StackFrameDto" as io.mazewall.StackFrameDto {
+class "StackFrameDto" as io.mazewall.enforcer.api.StackFrameDto {
   + {static}Companion Companion
   __
   +String getClassLoader()
@@ -495,410 +465,29 @@ class "StackFrameDto" as io.mazewall.StackFrameDto {
   +String getFileName()
   +int getLineNumber()
 }
-class "StackProfileEntryDto" as io.mazewall.StackProfileEntryDto {
+class "StackProfileEntryDto" as io.mazewall.enforcer.api.StackProfileEntryDto {
   + {static}Companion Companion
   __
   +String getSyscall()
   +List<String> getPaths()
   +List<Long> getArgs()
   +List<StackFrameDto> getStackTrace()
+  +Long getOpenFlagsEvidenceValue()
+  +Set<String> getOpenFlagsUnknownSymbols()
 }
-class "UnsupportedKernelFeatureException" as io.mazewall.UnsupportedKernelFeatureException {
+interface "StacktraceScopingPolicy" as io.mazewall.enforcer.api.StacktraceScopingPolicy {
+  + {abstract}Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
 }
-class "UnsupportedPlatformException" as io.mazewall.UnsupportedPlatformException {
-}
-interface "YamaPtraceScope" as io.mazewall.YamaPtraceScope {
-}
-enum "AttributionKind" as io.mazewall.core.AttributionKind {
-  NONE
-  EXPLICIT_CONTEXT
-  AGENT_CONTEXT
-  USER_NOTIF_ORACLE
-}
-class "ChildStdoutPump" as io.mazewall.core.ChildStdoutPump {
+class "Supervision" as io.mazewall.enforcer.api.Supervision {
+  + {static}Supervision INSTANCE
   __
-  +CountDownLatch getReady()
-  +Thread getThread()
+  + {static}void prepareSupervisor()
 }
-class "CloneFlags" as io.mazewall.core.CloneFlags {
-  +long getValue()
-  + {static}String toString-impl(long)
-  + {static}int hashCode-impl(long)
-  + {static}boolean equals-impl(long, Object)
-  + {static}long constructor-impl(long)
-  + {static}boolean equals-impl0(long, long)
+class "UnsupportedKernelFeatureException" as io.mazewall.enforcer.api.UnsupportedKernelFeatureException {
 }
-class "ContextId" as io.mazewall.core.ContextId {
-  ..
-  + {static}Companion Companion
-  + {static}int WIRE_SIZE_BYTES
-  __
-  +int getValue()
-  + {static}boolean isUnknown-impl(int)
-  + {static}byte[] encode-impl(int)
-  + {static}void encodeInto-impl(int, byte[], int)
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
+class "UnsupportedPlatformException" as io.mazewall.enforcer.api.UnsupportedPlatformException {
 }
-class "Deadline" as io.mazewall.core.Deadline {
-  + {static}Companion Companion
-  __
-  +long getNanoTime()
-  + {static}int remainingMillis-impl(long, long)
-  + {static}boolean isExpired-impl(long, long)
-  + {static}String toString-impl(long)
-  + {static}int hashCode-impl(long)
-  + {static}boolean equals-impl(long, Object)
-  + {static}long constructor-impl(long)
-  + {static}boolean equals-impl0(long, long)
-}
-class "Errno" as io.mazewall.core.Errno {
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "ErrnoMapping" as io.mazewall.core.ErrnoMapping {
-  + {static}ErrnoMapping INSTANCE
-  __
-  +String getSymbolicName(int)
-}
-class "FdEpoch" as io.mazewall.core.FdEpoch {
-  + {static}FdEpoch INSTANCE
-  __
-  +long claimOpen(FileDescriptor<?, ?, ?>)
-  +long claimOpen(int)
-  +long adoptKernelReuse(int)
-  +void retire(int, long)
-  +boolean isLive(int, long)
-  +boolean isRetired(int)
-  +void forceRetire(int)
-  +void markOwned(int)
-  +boolean isOwnedThroughEpoch(int)
-  +boolean verifyKernelLiveness(int)
-  +boolean auditClose(int, long)
-}
-class "FdLifecycle" as io.mazewall.core.FdLifecycle {
-  +int getValue()
-  +NativeArena getArena()
-  +long getGeneration()
-  +FileDescriptorRole getRole()
-  +FdOwnership getOwnership()
-  +boolean getClosed()
-  +void setClosed(boolean)
-}
-interface "FdOwnership" as io.mazewall.core.FdOwnership {
-}
-interface "FdState" as io.mazewall.core.FdState {
-}
-class "FileDescriptor" as io.mazewall.core.FileDescriptor<R extends FileDescriptorRole, S extends FdState, O extends FdOwnership> {
-  + {static}Companion Companion
-  __
-  +int getValue()
-  +NativeArena getArena()
-  +long getGeneration()
-  +FileDescriptorRole getRole()
-  +FdOwnership getOwnership()
-  +boolean isValid()
-  +boolean isInvalid()
-  +boolean isLiveForIo()
-  +boolean isUsableAsDirfd()
-  +boolean isUsableAsMmapBacking()
-  +boolean isClosedType()
-  +void markClosed()
-  +void retireForClose()
-}
-class "FileDescriptorKt" as io.mazewall.core.FileDescriptorKt {
-  + {static}SyscallResult ebadfUnlessLive(FileDescriptor<?, ?, ? extends FdOwnership>)
-  + {static}SyscallResult ebadfUnlessDirfd(FileDescriptor<?, ?, ? extends FdOwnership>)
-  + {static}SyscallResult ebadfUnlessMmapBacking(FileDescriptor<?, ?, ? extends FdOwnership>)
-  + {static}SyscallResult ebadfUnlessLive(NativeArg)
-  + {static}SyscallResult ebadfUnlessLive(NativeArg[])
-  + {static}SyscallResult claimDupIfNeeded(SyscallResult, int)
-  + {static}FileDescriptor<R, Closed, Owned> close(FileDescriptor<? extends R, ? extends S, Owned>)
-  + {static}T use(FileDescriptor<? extends R, ? extends S, Owned>, Function1<? super FileDescriptor<? extends R, ? extends S, Owned>, ? extends T>)
-}
-interface "FileDescriptorRole" as io.mazewall.core.FileDescriptorRole {
-}
-interface "JavaAgentSelection" as io.mazewall.core.JavaAgentSelection {
-}
-class "JvmChildProcess" as io.mazewall.core.JvmChildProcess {
-  + {static}JvmChildProcess INSTANCE
-  __
-  +List<String> commandLine(JvmChildSpec)
-  +Process start(ProcessLauncher, JvmChildSpec, boolean)
-  +ChildStdoutPump startStdoutPump(Process, String, Function1<? super String, Unit>, String, Function0<Unit>)
-  +boolean awaitReady(ChildStdoutPump, long)
-  +void stripInheritedJvmOptions(Map<String, String>)
-  +List<String> selectedJavaAgents(JavaAgentSelection)
-}
-class "JvmChildSpec" as io.mazewall.core.JvmChildSpec {
-  +String getMainClass()
-  +List<String> getMainArgs()
-  +String getMaxHeap()
-  +List<String> getExtraJvmArgs()
-  +JavaAgentSelection getJavaAgents()
-  +boolean getEnableNativeAccess()
-  +boolean getDisableJvmci()
-  +String getClasspath()
-}
-class "MazewallContext" as io.mazewall.core.MazewallContext {
-  + {static}MazewallContext INSTANCE
-  __
-  +int current()
-  +T withContext(int, Function0<? extends T>)
-}
-class "MemoryAddress" as io.mazewall.core.MemoryAddress {
-  +long getValue()
-  + {static}long toLong-impl(long)
-  + {static}String toString-impl(long)
-  + {static}int hashCode-impl(long)
-  + {static}boolean equals-impl(long, Object)
-  + {static}long constructor-impl(long)
-  + {static}boolean equals-impl0(long, long)
-}
-class "MmapFlags" as io.mazewall.core.MmapFlags {
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "MmapProt" as io.mazewall.core.MmapProt {
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-interface "NativeArg" as io.mazewall.core.NativeArg {
-  + {abstract}long getAsLong()
-}
-class "NewFdFlags" as io.mazewall.core.NewFdFlags {
-  + {static}Companion Companion
-  __
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "OpenFlags" as io.mazewall.core.OpenFlags {
-  + {static}Companion Companion
-  __
-  +int getValue()
-  + {static}boolean has-impl(int, int)
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "Pid" as io.mazewall.core.Pid {
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-abstract class "PrctlCommand" as io.mazewall.core.PrctlCommand {
-  +int getOption()
-  + {abstract}NativeArg getArg2()
-  + {abstract}NativeArg getArg3()
-  + {abstract}NativeArg getArg4()
-  + {abstract}NativeArg getArg5()
-}
-class "PrivateUnixEndpoint" as io.mazewall.core.PrivateUnixEndpoint {
-  + {static}Companion Companion
-  + {static}int MAX_SUN_PATH_BYTES
-  __
-  +Path getDir()
-  +String getSocketFileName()
-  +String getPath()
-  +Path socketFile()
-  +void close()
-}
-interface "ProcessLauncher" as io.mazewall.core.ProcessLauncher {
-  + {abstract}Process startProcess(List<String>, boolean)
-  + {abstract}void addShutdownHook(Thread)
-  + {abstract}void removeShutdownHook(Thread)
-  + {abstract}Path createTempDirectory(String, FileAttribute<?>[])
-  + {abstract}Path createTempDirectory(Path, String, FileAttribute<?>[])
-  + {abstract}boolean deleteIfExists(Path)
-  + {abstract}boolean exists(Path)
-}
-class "RealProcessLauncher" as io.mazewall.core.RealProcessLauncher {
-  + {static}RealProcessLauncher INSTANCE
-  __
-  +Process startProcess(List<String>, boolean)
-  +void addShutdownHook(Thread)
-  +void removeShutdownHook(Thread)
-  +Path createTempDirectory(String, FileAttribute<?>[])
-  +Path createTempDirectory(Path, String, FileAttribute<?>[])
-  +boolean deleteIfExists(Path)
-  +boolean exists(Path)
-}
-class "RealSocketManager" as io.mazewall.core.RealSocketManager {
-  + {static}RealSocketManager INSTANCE
-  __
-  +FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
-  +FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  +FileDescriptor<UnixSocket, Open, Owned> connect(String)
-  +void close(FileDescriptor<?, ? extends Open, Owned>)
-  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
-  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
-  +boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
-}
-class "SandboxedPath" as io.mazewall.core.SandboxedPath {
-  + {static}Companion Companion
-  __
-  +String getValue()
-  + {static}String toString-impl(String)
-  + {static}int hashCode-impl(String)
-  + {static}boolean equals-impl(String, Object)
-  + {static}boolean equals-impl0(String, String)
-  + {static}String of(String, boolean)
-  + {static}String of(String)
-}
-class "SandboxedPathKt" as io.mazewall.core.SandboxedPathKt {
-  + {static}boolean isUnder(Path, Path)
-  + {static}boolean isUnder(String, String)
-  + {static}boolean coveredBy(Set<SandboxedPath>, Set<SandboxedPath>)
-  + {static}boolean coversAll(Set<SandboxedPath>, Set<SandboxedPath>)
-  + {static}boolean isUnderAny(String, Set<SandboxedPath>)
-  + {static}String resolveReal(String)
-}
-interface "SeccompAction" as io.mazewall.core.SeccompAction {
-  + {static}Companion Companion
-  __
-  + {abstract}int getPriority()
-  + {abstract}int getNativeCode()
-  +int restrictivenessRank()
-  +SeccompAction stricter(SeccompAction)
-  +int toKernelReturnCode()
-}
-class "SocketIo" as io.mazewall.core.SocketIo {
-  + {static}SocketIo INSTANCE
-  __
-  +SyscallResult writeFully(NativeMemory, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
-  +SyscallResult readFully(NativeMemory, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long, long, SocketPoll)
-}
-interface "SocketManager" as io.mazewall.core.SocketManager {
-  + {abstract}FileDescriptor<UnixSocket, Open, Owned> createUnixServer(String)
-  + {abstract}FileDescriptor<UnixSocket, Open, Owned> accept(FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  + {abstract}FileDescriptor<UnixSocket, Open, Owned> connect(String)
-  + {abstract}void close(FileDescriptor<?, ? extends Open, Owned>)
-  + {abstract}FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
-  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
-  + {abstract}boolean sendDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, FileDescriptor<?, ? extends Open, ? extends FdOwnership>)
-}
-interface "SocketPoll" as io.mazewall.core.SocketPoll {
-  + {abstract}SyscallResult poll(int)
-}
-class "SyscallNumber" as io.mazewall.core.SyscallNumber {
-  +int getNr()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "SyscallNumberResolver" as io.mazewall.core.SyscallNumberResolver {
-  + {static}SyscallNumberResolver INSTANCE
-  __
-  +int numberFor(Syscall, Arch)
-}
-class "ThreadLocalDelegate" as io.mazewall.core.ThreadLocalDelegate<T> {
-  +T getValue(Object, KProperty<?>)
-  +void setValue(Object, KProperty<?>, T)
-}
-class "ThreadLocalDelegateKt" as io.mazewall.core.ThreadLocalDelegateKt {
-  + {static}ThreadLocalDelegate<T> threadLocal(Function0<? extends T>)
-}
-class "Tid" as io.mazewall.core.Tid {
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "Uid" as io.mazewall.core.Uid {
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "ContainedExecutors" as io.mazewall.enforcer.ContainedExecutors {
-  + {static}ContainedExecutors INSTANCE
-  __
-  +void installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
-  +void installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
-  +void installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
-  +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
-  +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
-}
-class "ContainmentViolationException" as io.mazewall.enforcer.ContainmentViolationException {
-}
-class "SandboxDispatcher" as io.mazewall.enforcer.SandboxDispatcher {
-  + {static}SandboxDispatcher INSTANCE
-  __
-  + {static}T execute(Policy<?, ?>, Callable<T>)
-  +T executeBlock(Policy<?, ?>, Function0<? extends T>)
-  + {static}void shutdownAll()
-}
-class "ContainedExecutors" as io.mazewall.enforcer.api.ContainedExecutors {
-  + {static}ContainedExecutors INSTANCE
-  __
-  +InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>[])
-  +InstallationReceipt installOnCurrentThread(Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
-  +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>)
-  +InstallationReceipt installOnCurrentThread(PolicyDefinition<?>, StacktraceScopingPolicy)
-  +InstallationAssessment assessOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>)
-  +InstallationAssessment assessOnCurrentThread(Policy<?, ? extends Uncompiled>)
-  +InstallationReceipt installOnProcess(Policy<? extends ProcessWideSafe, ? extends Uncompiled>[])
-  +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>[])
-  +ExecutorService newSingleThreadExecutor(Policy<?, ? extends Uncompiled>)
-  +ExecutorService newFixedThreadPool(int, Policy<?, ? extends Uncompiled>)
-  +ExecutorService newCachedThreadPool(Policy<?, ? extends Uncompiled>)
-  +ExecutorService wrap(ExecutorService, Policy<?, ? extends Uncompiled>, StacktraceScopingPolicy)
-}
-enum "ContainmentViolationEvidence" as io.mazewall.enforcer.api.ContainmentViolationEvidence {
-  OBSERVED_POLICY_DENIAL
-  INFERRED_PERMISSION_FAILURE
-  UNKNOWN
-}
-class "ContainmentViolationException" as io.mazewall.enforcer.api.ContainmentViolationException {
-  __
-  +Integer getErrno()
-  +Integer getSyscallNr()
-  +ContainmentViolationEvidence getEvidence()
-}
-class "SandboxDispatcher" as io.mazewall.enforcer.api.SandboxDispatcher {
-  ..
-  + {static}SandboxDispatcher INSTANCE
-  + {static}int MAX_CACHED_POOLS
-  __
-  + {static}T execute(Policy<?, ?>, Callable<T>)
-  +T executeBlock(Policy<?, ?>, Function0<? extends T>)
-  +ExecutorService getOrCreateElasticPool(PolicyDefinition<?>)
-  +List<ExecutorService> cachedPoolsForTest()
-  + {static}void shutdownAll()
-}
-class "SandboxDispatcherCoroutinesKt" as io.mazewall.enforcer.api.SandboxDispatcherCoroutinesKt {
-  + {static}Object executeSuspend(SandboxDispatcher, Policy<?, ?>, Function1<? super Continuation<? super T>, ? extends Object>, Continuation<? super T>)
-  + {static}CoroutineDispatcher asDispatcher(Policy<?, ?>)
+interface "YamaPtraceScope" as io.mazewall.enforcer.api.YamaPtraceScope {
 }
 class "ContainmentDiagnostic" as io.mazewall.enforcer.diagnostics.ContainmentDiagnostic {
   +Throwable getCause()
@@ -934,11 +523,6 @@ class "MazewallEvents" as io.mazewall.enforcer.diagnostics.MazewallEvents {
   +void emit(Event)
   +void clear()
 }
-class "ValidationKt" as io.mazewall.enforcer.diagnostics.ValidationKt {
-  + {static}boolean isVirtualOrCarrierThread(Thread)
-  + {static}void validateNotVirtual()
-  + {static}void validateLinuxAndNotVirtual()
-}
 interface "ViolationMatcher" as io.mazewall.enforcer.diagnostics.ViolationMatcher {
   + {abstract}boolean matches(Throwable)
 }
@@ -972,6 +556,611 @@ class "ContainedExecutorWrapper" as io.mazewall.enforcer.internal.ContainedExecu
   +boolean isTerminated()
   +boolean awaitTermination(long, TimeUnit)
 }
+class "RealPlatformProvider" as io.mazewall.enforcer.internal.ffi.RealPlatformProvider {
+  + {static}RealPlatformProvider INSTANCE
+  + {static}String yamaPath
+  __
+  +String getOsName()
+  +String getOsVersion()
+  +String getOsArch()
+  +boolean hasKernelSeccompSupport()
+  +SeccompMode getSeccompMode()
+  +SyscallResult checkSeccompSanity()
+  +boolean isNoNewPrivsEnabled()
+  +YamaPtraceScope getYamaPtraceScope()
+  +KernelCapability<Integer> getLandlockCapability()
+  +int getLandlockAbiVersion()
+  +boolean probeSeccompTsync()
+  +boolean probeSeccompUserNotif()
+  +boolean probeCetSupported()
+  +boolean isContainer()
+}
+class "BpfFilter" as io.mazewall.enforcer.internal.seccomp.BpfFilter {
+  + {static}BpfFilter INSTANCE
+  + {static}int SECCOMP_DATA_NR_OFFSET
+  + {static}int SECCOMP_DATA_ARCH_OFFSET
+  __
+  +BpfProgram<Verified> build(Arch, PolicyDefinition<?>, boolean)
+  +SyscallInspectionPipeline getSyscallInspectionPipeline()
+  +Set<Integer> getJvmCriticalNrs(Arch)
+  +void emitInspections(BpfBuilder<? extends Active>, List<SyscallInspection>, boolean, Set<Integer>)
+}
+class "AcceptRequest" as io.mazewall.enforcer.internal.supervisor.AcceptRequest {
+  +int getTid()
+  +int getFd()
+  +long getAddress()
+  +long getAddressLength()
+  +int getFlags()
+  +AcceptRequest copy(int, int, long, long, int)
+}
+class "BypassPaths" as io.mazewall.enforcer.internal.supervisor.BypassPaths {
+  + {static}BypassPaths INSTANCE
+  __
+  +PathResolution resolveForPolicy(Path)
+  +Path toRealPathWithFallback(Path)
+  +List<Path> getSafeBypassPaths()
+  +boolean isBypassPath(Path)
+}
+interface "ExecRewritePlan" as io.mazewall.enforcer.internal.supervisor.ExecRewritePlan {
+}
+interface "FdInjectionResult" as io.mazewall.enforcer.internal.supervisor.FdInjectionResult {
+}
+interface "InjectTarget" as io.mazewall.enforcer.internal.supervisor.InjectTarget {
+}
+class "JVMValidationListener" as io.mazewall.enforcer.internal.supervisor.JVMValidationListener {
+  + {static}Companion Companion
+  __
+  +void start(CountDownLatch)
+  +void requestStop()
+}
+interface "JvmExchangeResult" as io.mazewall.enforcer.internal.supervisor.JvmExchangeResult {
+  +Exception getCleanupFailure()
+}
+class "JvmStackInspector" as io.mazewall.enforcer.internal.supervisor.JvmStackInspector {
+  + {static}JvmStackInspector INSTANCE
+  __
+  +ScopingValidationState inspect(int, List<? extends Object>, Thread)
+}
+interface "JvmVerdict" as io.mazewall.enforcer.internal.supervisor.JvmVerdict {
+  +int toWire()
+}
+class "JvmVerdictExchange" as io.mazewall.enforcer.internal.supervisor.JvmVerdictExchange {
+  + {static}long TIMEOUT_MILLIS
+  __
+  +ControlSocketExchange begin(NativeArena, JvmVerdictRequest, long)
+  +JvmExchangeResult decode(NativeArena, JvmVerdictRequest, byte[])
+  +boolean send(NativeArena, JvmVerdictRequest)
+  +JvmExchangeResult receive(NativeArena, JvmVerdictRequest)
+  +void close()
+}
+interface "JvmVerdictParse" as io.mazewall.enforcer.internal.supervisor.JvmVerdictParse {
+}
+class "JvmVerdictRequest" as io.mazewall.enforcer.internal.supervisor.JvmVerdictRequest {
+  +long getId()
+  +NotifHeader getHeader()
+  +String getPath()
+  +byte[] getSockaddrBytes()
+}
+class "NotifHeader" as io.mazewall.enforcer.internal.supervisor.NotifHeader {
+  +int getNr()
+  +int getTid()
+  +Arch getArch()
+  +int getAudit()
+  +int getPpid()
+  +long[] getArgs()
+  +NotifHeader copy(int, int, Arch, int, int, long[])
+}
+class "NotificationReader" as io.mazewall.enforcer.internal.supervisor.NotificationReader {
+  + {static}long SINGLE_POLL_FD
+  + {static}int IMMEDIATE_EINTR_RETRY_LIMIT
+  + {static}int YIELD_EINTR_RETRY_LIMIT
+  + {static}long EINTR_SLEEP_MILLIS
+  __
+  +AwaitResult awaitJvmResponse(FileDescriptor<UnixSocket, ? extends Open, Owned>, long, long)
+  +ReceiveOutcome recvNotification(FileDescriptor<SeccompNotif, ? extends Open, Owned>, ManagedSegment)
+}
+class "OpenHow" as io.mazewall.enforcer.internal.supervisor.OpenHow {
+  +int getFlags()
+  +long getMode()
+  +long getResolve()
+  +OpenHow copy(int, long, long)
+}
+class "OpenRouteExecutor" as io.mazewall.enforcer.internal.supervisor.OpenRouteExecutor {
+  +SupervisorReplyEffect execute(NativeArena, SupervisedOpen, int)
+}
+class "PoolOpenRouteExecutor" as io.mazewall.enforcer.internal.supervisor.PoolOpenRouteExecutor {
+  +CompletableFuture<SupervisorReplyEffect> execute(SupervisorOpenPlan, int)
+}
+class "PoolSocketRouteExecutor" as io.mazewall.enforcer.internal.supervisor.PoolSocketRouteExecutor {
+  +CompletableFuture<SupervisorReplyEffect> connect(int, int, byte[])
+  +CompletableFuture<SupervisorReplyEffect> accept(AcceptRequest)
+  +void close()
+  +void cancel()
+}
+class "PreparedSupervisorRoute" as io.mazewall.enforcer.internal.supervisor.PreparedSupervisorRoute {
+  +SupervisorRouteContext getContext()
+  +SupervisorRoute getRoute()
+}
+class "ProcFsInspector" as io.mazewall.enforcer.internal.supervisor.ProcFsInspector {
+  + {static}ProcFsInspector INSTANCE
+  __
+  +int getTgid(int)
+  +int getPpid(int)
+  +PidObservation readPpid(int)
+  +PidObservation parsePpid(String)
+}
+class "ProcProcessIdentityResolver" as io.mazewall.enforcer.internal.supervisor.ProcProcessIdentityResolver {
+  +ProcessIdentity resolve(int)
+}
+class "ProcessIdentity" as io.mazewall.enforcer.internal.supervisor.ProcessIdentity {
+  +int getPid()
+  +long getStartTimeTicks()
+  +ProcessIdentity copy(int, long)
+}
+interface "ProcessIdentityResolver" as io.mazewall.enforcer.internal.supervisor.ProcessIdentityResolver {
+  + {abstract}ProcessIdentity resolve(int)
+}
+interface "ReplyExecutionResult" as io.mazewall.enforcer.internal.supervisor.ReplyExecutionResult {
+}
+class "ResolvedFastPath" as io.mazewall.enforcer.internal.supervisor.ResolvedFastPath {
+  +Path getPath()
+  +String getDisplayPath()
+}
+interface "ScopingValidationState" as io.mazewall.enforcer.internal.supervisor.ScopingValidationState {
+}
+class "SecureExecRequest" as io.mazewall.enforcer.internal.supervisor.SecureExecRequest {
+  +int getTid()
+  +long getArgv()
+  +long getEnvp()
+  +long getExecveat()
+  +SecureExecRequest copy(int, long, long, long)
+}
+class "SecureExecRouteExecutor" as io.mazewall.enforcer.internal.supervisor.SecureExecRouteExecutor {
+  +SupervisorReplyEffect execute(NativeArena, SupervisorRouteContext, String)
+}
+class "SocketCleanup" as io.mazewall.enforcer.internal.supervisor.SocketCleanup {
+  + {static}Companion Companion
+  __
+  +Throwable getFailure()
+  +void attempt(Function0<Unit>)
+  +void rethrow()
+}
+interface "SocketHelper" as io.mazewall.enforcer.internal.supervisor.SocketHelper {
+  +SupervisorReplyEffect executeAuthority(TraceeAuthorityJob)
+  + {abstract}SocketHelperResult execute(SocketOperation, SupervisorOwnedFd)
+}
+class "SocketHelperLifetime" as io.mazewall.enforcer.internal.supervisor.SocketHelperLifetime {
+  +boolean getAccepting()
+  +void close()
+}
+class "SocketHelperMain" as io.mazewall.enforcer.internal.supervisor.SocketHelperMain {
+  + {static}SocketHelperMain INSTANCE
+  __
+  + {static}void main(String[])
+}
+class "SocketHelperOwner" as io.mazewall.enforcer.internal.supervisor.SocketHelperOwner {
+  + {static}SocketHelperOwner INSTANCE
+  __
+  +void watch(long)
+}
+class "SocketHelperPool" as io.mazewall.enforcer.internal.supervisor.SocketHelperPool {
+  + {static}Companion Companion
+  __
+  +Session session()
+  +void prewarm()
+  +void close()
+}
+class "SocketHelperProcess" as io.mazewall.enforcer.internal.supervisor.SocketHelperProcess {
+  + {static}Companion Companion
+  __
+  +SupervisorReplyEffect executeAuthority(TraceeAuthorityJob)
+  +SocketHelperResult execute(SocketOperation, SupervisorOwnedFd)
+  +void close()
+}
+class "SocketHelperProtocol" as io.mazewall.enforcer.internal.supervisor.SocketHelperProtocol {
+  + {static}SocketHelperProtocol INSTANCE
+  + {static}int MAX_ADDRESS_BYTES
+  + {static}int MAX_ERRNO
+  + {static}int MAX_PATH_BYTES
+  + {static}int OPENED_RESULT
+  __
+  +SocketHelperResult readResult(DataInputStream, Function0<SupervisorOwnedFd>)
+  +void writeOperation(DataOutputStream, SocketOperation)
+  +SocketOperation readOperation(DataInputStream, int)
+  +void writeBytes(DataOutputStream, byte[])
+  +byte[] readBytes(DataInputStream)
+}
+interface "SocketHelperRequest" as io.mazewall.enforcer.internal.supervisor.SocketHelperRequest {
+  + {abstract}SocketHelperResult execute(SocketHelper)
+  + {abstract}void cancel()
+}
+interface "SocketHelperResult" as io.mazewall.enforcer.internal.supervisor.SocketHelperResult {
+}
+class "SocketHelperSlot" as io.mazewall.enforcer.internal.supervisor.SocketHelperSlot {
+  +SupervisorReplyEffect executeAuthority(TraceeAuthorityJob)
+  +SocketHelperResult execute(SocketOperation, SupervisorOwnedFd)
+  +void close()
+}
+class "SocketJobOutcome" as io.mazewall.enforcer.internal.supervisor.SocketJobOutcome {
+  +SocketCleanup getCleanup()
+  +SocketHelperResult getOutput()
+  +void setOutput(SocketHelperResult)
+  +void dispose()
+  +void publish(CompletableFuture<SocketHelperResult>)
+}
+interface "SocketOperation" as io.mazewall.enforcer.internal.supervisor.SocketOperation {
+}
+class "SocketOperationExecutor" as io.mazewall.enforcer.internal.supervisor.SocketOperationExecutor {
+  +SocketHelperResult execute(NativeArena, SocketOperation, SupervisorOwnedFd)
+}
+interface "SpawnAuthorizationResult" as io.mazewall.enforcer.internal.supervisor.SpawnAuthorizationResult {
+}
+class "SpawnAuthorizationStore" as io.mazewall.enforcer.internal.supervisor.SpawnAuthorizationStore {
+  +SpawnRegistrationResult register(ProcessIdentity, List<StackTraceElement>, long)
+  +SpawnAuthorizationResult consume(ProcessIdentity, long)
+  +void clear()
+  +void close()
+}
+enum "SpawnRegistrationResult" as io.mazewall.enforcer.internal.supervisor.SpawnRegistrationResult {
+  REGISTERED
+  CLOSED
+  IDENTITY_UNAVAILABLE
+}
+enum "SpawnRejection" as io.mazewall.enforcer.internal.supervisor.SpawnRejection {
+  MISSING
+  EXPIRED
+  CLOSED
+  IDENTITY_UNAVAILABLE
+}
+interface "SupervisedOpen" as io.mazewall.enforcer.internal.supervisor.SupervisedOpen {
+  ..
+  + {static}Companion Companion
+  __
+  + {abstract}String getPath()
+  + {abstract}int getMode()
+}
+class "SupervisorAdmission" as io.mazewall.enforcer.internal.supervisor.SupervisorAdmission {
+  + {static}int MAX_TOTAL
+  + {static}int MAX_PER_TID
+  __
+  +AutoCloseable acquire(int)
+}
+class "SupervisorArgumentExtractor" as io.mazewall.enforcer.internal.supervisor.SupervisorArgumentExtractor {
+  + {static}SupervisorArgumentExtractor INSTANCE
+  __
+  +SyscallArguments extract(int, int, long[], Arch, Function2<? super Tid, ? super Long, String>, Function3<? super Tid, ? super Long, ? super Integer, byte[]>)
+}
+class "SupervisorContext" as io.mazewall.enforcer.internal.supervisor.SupervisorContext {
+  +String getSocketPath()
+  +Path getSocketDir()
+  +Process getDaemonProcess()
+  +Thread getShutdownHook()
+}
+class "SupervisorDaemon" as io.mazewall.enforcer.internal.supervisor.SupervisorDaemon {
+  + {static}SupervisorDaemon INSTANCE
+  + {static}String DAEMON_READY_SENTINEL
+  __
+  + {static}void main(String[])
+}
+class "SupervisorDaemonEngine" as io.mazewall.enforcer.internal.supervisor.SupervisorDaemonEngine {
+  + {static}Companion Companion
+  +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open, Owned>> clientSockets
+  __
+  +UnixListenDaemonState getState()
+  +void run(Function0<Unit>)
+  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
+  +SeccompConnection processConnectionStep(NativeArena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open, Owned>, ManagedSegment)
+  +void triggerGlobalShutdown(String)
+}
+class "SupervisorDaemonManager" as io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager {
+  + {static}Companion Companion
+  __
+  +Function1<Integer, Unit> getOnUnexpectedExit()
+  +void setOnUnexpectedExit(Function1<? super Integer, Unit>)
+  +ConcurrentLinkedQueue<String> getDaemonLogLines()
+  +SupervisorContext getOrSpawnSharedDaemon()
+  +void stop()
+  + {static}SupervisorDaemonManager getInstance()
+}
+interface "SupervisorDescriptorResult" as io.mazewall.enforcer.internal.supervisor.SupervisorDescriptorResult {
+  + {static}Companion Companion
+}
+class "SupervisorExecRewriteExchange" as io.mazewall.enforcer.internal.supervisor.SupervisorExecRewriteExchange {
+  + {static}long EMPTY_PATH_OFFSET
+  + {static}long ARGV_OFFSET
+  + {static}long ENVP_OFFSET
+  + {static}long EXECVEAT_OFFSET
+  + {static}long TID_OFFSET
+  + {static}long REWRITE_SIZE
+  + {static}long ACK_TIMEOUT_MILLIS
+  __
+  +ControlSocketExchange begin(NativeArena, SecureExecRequest, int, long, long)
+  +boolean request(NativeArena, SecureExecRequest, int, long)
+}
+class "SupervisorFastPath" as io.mazewall.enforcer.internal.supervisor.SupervisorFastPath {
+  + {static}SupervisorFastPath INSTANCE
+  __
+  +Path resolveAbsolutePath(int, int, String)
+}
+class "SupervisorFastPathResolution" as io.mazewall.enforcer.internal.supervisor.SupervisorFastPathResolution {
+  + {static}SupervisorFastPathResolution INSTANCE
+  __
+  +ResolvedFastPath resolve(int, SupervisedKind, SyscallArguments)
+}
+interface "SupervisorInjectionPlan" as io.mazewall.enforcer.internal.supervisor.SupervisorInjectionPlan {
+  + {static}Companion Companion
+}
+class "SupervisorInstallationLifetime" as io.mazewall.enforcer.internal.supervisor.SupervisorInstallationLifetime {
+  __
+  +SupervisorRuntimeContext getRuntime()
+  +StacktraceScopingPolicy getScopingPolicy()
+  +void requireReusable()
+  +void fail(Throwable)
+  +void attach(AutoCloseable)
+  +void start()
+  +void close()
+}
+class "SupervisorInstaller" as io.mazewall.enforcer.internal.supervisor.SupervisorInstaller {
+  + {static}SupervisorInstaller INSTANCE
+  __
+  +void requireReusableInstallations()
+  +SupervisorSession acquireTaskSession(StacktraceScopingPolicy)
+  +SupervisorSession acquireTaskSession(StacktraceScopingPolicy, NativeEngine)
+  +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy, Function0<Unit>)
+  +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy, Function0<Unit>, NativeEngine)
+}
+class "SupervisorJvmVerdictResolver" as io.mazewall.enforcer.internal.supervisor.SupervisorJvmVerdictResolver {
+  + {static}SupervisorJvmVerdictResolver INSTANCE
+  __
+  +SupervisorRoute route(long, int, Arch, long, int, int)
+}
+class "SupervisorNotificationMachine" as io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine {
+  + {static}SupervisorNotificationMachine INSTANCE
+  __
+  +SupervisedKind classify(int, Arch)
+  +JvmVerdictParse decodeJvmVerdict(int, int)
+  +JvmVerdict parseJvmVerdict(int, int)
+  +SupervisorRoute evaluateFastPath(SupervisedKind, Path, String)
+  +SupervisorRoute evaluateJvm(SupervisedKind, JvmVerdict)
+}
+class "SupervisorNotificationSession" as io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession {
+  +NotificationWork begin(SeccompNotification, ManagedSegment, long)
+  +void close()
+}
+class "SupervisorNotificationWork" as io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork {
+  +NotificationProgress poll(NativeArena)
+  +void close()
+}
+class "SupervisorOpenPlan" as io.mazewall.enforcer.internal.supervisor.SupervisorOpenPlan {
+  + {static}Companion Companion
+  __
+  +String getPath()
+  +long getFlags()
+  +long getMode()
+  +long getResolve()
+  +int getTraceeDirfd()
+  +boolean getUseCurrentWorkingDirectory()
+  +SupervisorOpenPlan copy(String, long, long, long, int, boolean)
+}
+class "SupervisorOwnedFd" as io.mazewall.enforcer.internal.supervisor.SupervisorOwnedFd {
+  +FileDescriptor<?, Open, Owned> getHandle()
+  +SupervisorDescriptorResult produce(Function0<? extends SupervisorDescriptorResult>)
+  +void close()
+}
+class "SupervisorPeerAddress" as io.mazewall.enforcer.internal.supervisor.SupervisorPeerAddress {
+}
+class "SupervisorReplyContext" as io.mazewall.enforcer.internal.supervisor.SupervisorReplyContext {
+  +long getId()
+  +ManagedSegment getResponse()
+}
+interface "SupervisorReplyEffect" as io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect {
+}
+class "SupervisorReplyHandoff" as io.mazewall.enforcer.internal.supervisor.SupervisorReplyHandoff {
+  +ReplyExecutionResult transferTo(NativeArena, SupervisorReplyInterpreter, SupervisorReplyContext)
+  +void close()
+}
+class "SupervisorReplyInterpreter" as io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter {
+  + {static}int MAX_IOCTL_ATTEMPTS
+  __
+  +boolean isNotificationValid(long)
+  +NotificationWork prepareSecureExec(NativeArena, SecureExecAndReply, SupervisorReplyContext, long)
+  +ReplyExecutionResult execute(NativeArena, SupervisorReplyEffect, SupervisorReplyContext)
+  +UserNotifReplyResult rejectOverload(SupervisorReplyContext)
+}
+interface "SupervisorRoute" as io.mazewall.enforcer.internal.supervisor.SupervisorRoute {
+}
+class "SupervisorRouteContext" as io.mazewall.enforcer.internal.supervisor.SupervisorRouteContext {
+  +JvmVerdictRequest getRequest()
+  +SyscallArguments getExtracted()
+  +ManagedSegment getResponse()
+}
+class "SupervisorRouteDispatcher" as io.mazewall.enforcer.internal.supervisor.SupervisorRouteDispatcher {
+  +CompletableFuture<SupervisorReplyEffect> execute(NativeArena, SupervisorRoute, SupervisorRouteContext, String)
+}
+class "SupervisorRouteExecutor" as io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor {
+  + {static}int ACCEPT_FLAGS_ARGUMENT
+  __
+  +CompletableFuture<SupervisorReplyEffect> inject(NativeArena, SupervisorRouteContext)
+  +SupervisorReplyEffect secureExec(NativeArena, SupervisorRouteContext, String)
+  +void close()
+  +void cancel()
+}
+class "SupervisorRoutePreparation" as io.mazewall.enforcer.internal.supervisor.SupervisorRoutePreparation {
+  + {static}int MAX_PATH_LENGTH
+  __
+  +PreparedSupervisorRoute prepare(NativeArena, SeccompNotification, ManagedSegment)
+}
+class "SupervisorRuntimeContext" as io.mazewall.enforcer.internal.supervisor.SupervisorRuntimeContext {
+  +void register(int, Thread)
+  +void unregister(int)
+  +Thread resolve(int)
+  +SpawnRegistrationResult registerSpawn(int, List<StackTraceElement>, long)
+  +SpawnAuthorizationResult consumeSpawn(int, long)
+  +void close()
+}
+class "SupervisorSession" as io.mazewall.enforcer.internal.supervisor.SupervisorSession {
+  +void close()
+}
+interface "SupervisorSessionEffect" as io.mazewall.enforcer.internal.supervisor.SupervisorSessionEffect {
+}
+interface "SupervisorSessionEvent" as io.mazewall.enforcer.internal.supervisor.SupervisorSessionEvent {
+}
+class "SupervisorSessionHandler" as io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler {
+  +NotificationWork beginNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open, Owned>, FileDescriptor<UnixSocket, ? extends Open, Owned>, long)
+  +boolean processNotification(ManagedSegment, ManagedSegment)
+  +boolean readAndHandleJvmResponse(NativeArena, SupervisorRouteContext, SupervisorSessionState)
+  +void close()
+  +LoopAction handleActiveListener(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment)
+}
+class "SupervisorSessionMachine" as io.mazewall.enforcer.internal.supervisor.SupervisorSessionMachine {
+  + {static}SupervisorSessionMachine INSTANCE
+  __
+  +SupervisorSessionTransition evaluate(SupervisorSessionState, SupervisorSessionEvent)
+}
+interface "SupervisorSessionState" as io.mazewall.enforcer.internal.supervisor.SupervisorSessionState {
+}
+class "SupervisorSessionTransition" as io.mazewall.enforcer.internal.supervisor.SupervisorSessionTransition {
+  +SupervisorSessionState getState()
+  +SupervisorSessionEffect getEffect()
+}
+class "SupervisorSocketHelpers" as io.mazewall.enforcer.internal.supervisor.SupervisorSocketHelpers {
+  + {static}SupervisorSocketHelpers INSTANCE
+  __
+  +SupervisorAdmission getAdmission()
+  +SocketHelperPool getPool()
+}
+interface "SupervisorSyscallResolution" as io.mazewall.enforcer.internal.supervisor.SupervisorSyscallResolution {
+}
+class "SupervisorSyscallResolver" as io.mazewall.enforcer.internal.supervisor.SupervisorSyscallResolver {
+  + {static}SupervisorSyscallResolver INSTANCE
+  __
+  +SupervisorSyscallResolution resolve(int, Arch)
+}
+interface "SupervisorValidationDecodeResult" as io.mazewall.enforcer.internal.supervisor.SupervisorValidationDecodeResult {
+}
+class "SupervisorValidationDecoder" as io.mazewall.enforcer.internal.supervisor.SupervisorValidationDecoder {
+  + {static}SupervisorValidationDecoder INSTANCE
+  __
+  +SupervisorValidationDecodeResult handshake(int)
+  +SupervisorValidationDecodeResult arguments(DataInputStream, int)
+}
+class "SyscallArguments" as io.mazewall.enforcer.internal.supervisor.SyscallArguments {
+  +String getPathStr()
+  +byte[] getSockaddrBytes()
+  +int getDirfd()
+  +OpenHow getOpenHow()
+  +SyscallArguments copy(String, byte[], int, OpenHow)
+}
+class "TraceeAuthorityDecision" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityDecision {
+  +SupervisorRoute getRoute()
+  +String getPath()
+}
+class "TraceeAuthorityDecisionMachine" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityDecisionMachine {
+  + {static}TraceeAuthorityDecisionMachine INSTANCE
+  __
+  +SupervisorRoute evaluate(SupervisorRoute, SupervisorRoute)
+}
+class "TraceeAuthorityExecution" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityExecution {
+  +TraceeAuthoritySnapshot prepare(NativeArena)
+  +SupervisorReplyEffect execute(NativeArena, TraceeAuthorityDecision)
+}
+class "TraceeAuthorityFailure" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityFailure {
+  +int getErrno()
+}
+class "TraceeAuthorityHelper" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityHelper {
+  + {static}TraceeAuthorityHelper INSTANCE
+  __
+  +void serve(DataInputStream, DataOutputStream, Function1<? super SupervisorOwnedFd, Unit>)
+}
+class "TraceeAuthorityJob" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityJob {
+  +long getDeadline()
+  +SeccompNotification getNotification()
+  +List<String> getBypassRoots()
+  +CompletableFuture<TraceeAuthoritySnapshot> getPrepared()
+  +CompletableFuture<TraceeAuthorityDecision> getDecision()
+  +void close()
+}
+class "TraceeAuthorityNotificationWork" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityNotificationWork {
+  +NotificationProgress poll(NativeArena)
+  +void close()
+}
+class "TraceeAuthorityProtocol" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityProtocol {
+  + {static}TraceeAuthorityProtocol INSTANCE
+  + {static}int OPERATION
+  __
+  +void writeRequest(DataOutputStream, SeccompNotification, List<String>)
+  +Pair<SeccompNotification, List<String>> readRequest(DataInputStream)
+  +void writeSnapshot(DataOutputStream, TraceeAuthoritySnapshot)
+  +TraceeAuthoritySnapshot readSnapshot(DataInputStream)
+  +void writeDecision(DataOutputStream, TraceeAuthorityDecision)
+  +TraceeAuthorityDecision readDecision(DataInputStream)
+  +void writeEffect(DataOutputStream, SupervisorReplyEffect, Function1<? super SupervisorOwnedFd, Unit>)
+  +SupervisorReplyEffect readEffect(DataInputStream, Function0<SupervisorOwnedFd>)
+  +void writePath(DataOutputStream, String)
+  +String readPath(DataInputStream)
+}
+class "TraceeAuthoritySnapshot" as io.mazewall.enforcer.internal.supervisor.TraceeAuthoritySnapshot {
+  +int getPpid()
+  +String getPath()
+  +String getResolvedPath()
+  +SupervisorRoute getRoute()
+  +byte[] getAddress()
+}
+class "TraceeAuthorityWorkFactory" as io.mazewall.enforcer.internal.supervisor.TraceeAuthorityWorkFactory {
+  +NotificationWork begin(SeccompNotification, ManagedSegment, long)
+}
+class "TraceeDescriptorImporter" as io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter {
+  +SupervisorDescriptorResult import(int, int)
+}
+class "TraceeDirFd" as io.mazewall.enforcer.internal.supervisor.TraceeDirFd {
+  + {static}Companion Companion
+  __
+  +int getValue()
+  + {static}String toString-impl(int)
+  + {static}int hashCode-impl(int)
+  + {static}boolean equals-impl(int, Object)
+  + {static}int constructor-impl(int)
+  + {static}boolean equals-impl0(int, int)
+}
+class "TraceeProcAuthority" as io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority {
+  + {static}Companion Companion
+  __
+  +TraceeTaskIdentity getTask()
+  +int getPpid()
+  +SupervisorOwnedFd directory(NativeArena, int, boolean)
+  +SupervisorOwnedFd import(int)
+  +byte[] read(NativeArena, long, int)
+  +String readPath(NativeArena, long)
+  +long readOnlyNul(NativeArena)
+  +void close()
+}
+class "TraceeReadOnlyNul" as io.mazewall.enforcer.internal.supervisor.TraceeReadOnlyNul {
+  + {static}TraceeReadOnlyNul INSTANCE
+  __
+  +Long find(NativeArena, int)
+}
+class "TraceeTaskIdentity" as io.mazewall.enforcer.internal.supervisor.TraceeTaskIdentity {
+  +int getTid()
+  +int getTgid()
+  +SupervisorOwnedFd import(int, NativeEngine)
+  +void close()
+}
+enum "UnsupportedTraceeAuthority" as io.mazewall.enforcer.internal.supervisor.UnsupportedTraceeAuthority {
+  AcceptPeerMemory
+}
+class "ValidationListenerPreload" as io.mazewall.enforcer.internal.supervisor.ValidationListenerPreload {
+  ..
+  + {static}ValidationListenerPreload INSTANCE
+  __
+  +List<String> getRequiredBinaryNames()
+  +void ensureLoaded()
+}
+class "ValidationLog" as io.mazewall.enforcer.internal.supervisor.ValidationLog {
+  + {static}ValidationLog INSTANCE
+  __
+  +ConcurrentLinkedQueue<String> getLogs()
+}
 class "ContainerState" as io.mazewall.enforcer.state.ContainerState {
   + {static}Companion Companion
   __
@@ -995,6 +1184,8 @@ interface "ContainmentRegistryEffect" as io.mazewall.enforcer.state.ContainmentR
 class "ContainmentRegistryEffectInterpreter" as io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter {
   + {static}ContainmentRegistryEffectInterpreter INSTANCE
   __
+  +Function0<Unit> prepare(LandlockApplied)
+  +Function0<Unit> prepare(SeccompInstalled)
   +void apply(ContainmentRegistryEffect)
 }
 class "ContainmentStateRegistry" as io.mazewall.enforcer.state.ContainmentStateRegistry {
@@ -1005,819 +1196,9 @@ class "ContainmentStateRegistry" as io.mazewall.enforcer.state.ContainmentStateR
   +void updateProcessState(Function1<? super ContainerState, ContainerState>)
   +ContainerState getThreadState()
   +void setThreadState(ContainerState)
+  +Function0<Unit> captureThreadPublication(ContainerState)
   +ContainerState resolveCurrentState()
   +Void sanitizeThreadState()
-}
-class "BypassPaths" as io.mazewall.enforcer.supervisor.BypassPaths {
-  + {static}BypassPaths INSTANCE
-  __
-  +PathResolution resolveForPolicy(Path)
-  +Path toRealPathWithFallback(Path)
-  +List<Path> getSafeBypassPaths()
-  +boolean isBypassPath(Path)
-}
-class "DefaultStacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy {
-  + {static}DefaultStacktraceScopingPolicy INSTANCE
-  __
-  +Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
-}
-interface "ExecRewritePlan" as io.mazewall.enforcer.supervisor.ExecRewritePlan {
-}
-interface "InjectTarget" as io.mazewall.enforcer.supervisor.InjectTarget {
-}
-class "JVMValidationListener" as io.mazewall.enforcer.supervisor.JVMValidationListener {
-  + {static}Companion Companion
-  __
-  +void start(CountDownLatch)
-}
-class "JvmStackInspector" as io.mazewall.enforcer.supervisor.JvmStackInspector {
-  + {static}JvmStackInspector INSTANCE
-  __
-  +ScopingValidationState inspect(int, List<? extends Object>, Thread)
-}
-interface "JvmVerdict" as io.mazewall.enforcer.supervisor.JvmVerdict {
-  +int toWire()
-}
-class "JvmVerdictRequest" as io.mazewall.enforcer.supervisor.JvmVerdictRequest {
-  +long getId()
-  +NotifHeader getHeader()
-  +String getPath()
-  +byte[] getSockaddrBytes()
-}
-class "NotifHeader" as io.mazewall.enforcer.supervisor.NotifHeader {
-  +int getNr()
-  +int getTid()
-  +Arch getArch()
-  +int getAudit()
-  +int getPpid()
-  +long[] getArgs()
-  +NotifHeader copy(int, int, Arch, int, int, long[])
-}
-class "NotificationReader" as io.mazewall.enforcer.supervisor.NotificationReader {
-  + {static}long SINGLE_POLL_FD
-  + {static}int IMMEDIATE_EINTR_RETRY_LIMIT
-  + {static}int YIELD_EINTR_RETRY_LIMIT
-  + {static}long EINTR_SLEEP_MILLIS
-  __
-  +AwaitResult awaitJvmResponse(FileDescriptor<UnixSocket, ? extends Open, Owned>, long, long)
-  +boolean recvNotification(FileDescriptor<SeccompNotif, ? extends Open, Owned>, ManagedSegment)
-}
-class "OpenHow" as io.mazewall.enforcer.supervisor.OpenHow {
-  +int getFlags()
-  +long getMode()
-  +long getResolve()
-  +OpenHow copy(int, long, long)
-}
-class "PendingSpawnRegistry" as io.mazewall.enforcer.supervisor.PendingSpawnRegistry {
-  + {static}PendingSpawnRegistry INSTANCE
-  __
-  +void register(int, List<StackTraceElement>, long)
-  +List<StackTraceElement> get(int, long)
-  +void remove(int)
-}
-class "ProcFsInspector" as io.mazewall.enforcer.supervisor.ProcFsInspector {
-  + {static}ProcFsInspector INSTANCE
-  __
-  +int getTgid(int)
-  +int getPpid(int)
-}
-class "ResolvedFastPath" as io.mazewall.enforcer.supervisor.ResolvedFastPath {
-  +Path getPath()
-  +String getDisplayPath()
-}
-interface "ScopingValidationState" as io.mazewall.enforcer.supervisor.ScopingValidationState {
-}
-interface "StacktraceScopingPolicy" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicy {
-  + {abstract}Map<Syscall, Function3<Tid, List<? extends Object>, List<StackTraceElement>, Boolean>> getHandlers()
-}
-class "StacktraceScopingPolicyKt" as io.mazewall.enforcer.supervisor.StacktraceScopingPolicyKt {
-}
-interface "SupervisedOpen" as io.mazewall.enforcer.supervisor.SupervisedOpen {
-  + {static}Companion Companion
-  __
-  + {abstract}String getPath()
-  + {abstract}int getMode()
-}
-class "SupervisorArgumentExtractor" as io.mazewall.enforcer.supervisor.SupervisorArgumentExtractor {
-  + {static}SupervisorArgumentExtractor INSTANCE
-  __
-  +SyscallArguments extract(int, int, long[], Arch, Function2<? super Tid, ? super Long, String>, Function3<? super Tid, ? super Long, ? super Integer, byte[]>)
-}
-class "SupervisorContext" as io.mazewall.enforcer.supervisor.SupervisorContext {
-  +String getSocketPath()
-  +Path getSocketDir()
-  +Process getDaemonProcess()
-  +Thread getShutdownHook()
-}
-class "SupervisorDaemon" as io.mazewall.enforcer.supervisor.SupervisorDaemon {
-  + {static}SupervisorDaemon INSTANCE
-  + {static}String DAEMON_READY_SENTINEL
-  __
-  + {static}void main(String[])
-}
-class "SupervisorDaemonEngine" as io.mazewall.enforcer.supervisor.SupervisorDaemonEngine {
-  + {static}Companion Companion
-  +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open, Owned>> clientSockets
-  __
-  +UnixListenDaemonState getState()
-  +void run(Function0<Unit>)
-  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  +SeccompConnection processConnectionStep(NativeArena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open, Owned>, ManagedSegment)
-  +void triggerGlobalShutdown(String)
-}
-class "SupervisorDaemonManager" as io.mazewall.enforcer.supervisor.SupervisorDaemonManager {
-  + {static}Companion Companion
-  __
-  +Function1<Integer, Unit> getOnUnexpectedExit()
-  +void setOnUnexpectedExit(Function1<? super Integer, Unit>)
-  +ConcurrentLinkedQueue<String> getDaemonLogLines()
-  +SupervisorContext getOrSpawnSharedDaemon()
-  +void stop()
-  + {static}SupervisorDaemonManager getInstance()
-}
-class "SupervisorFastPath" as io.mazewall.enforcer.supervisor.SupervisorFastPath {
-  + {static}SupervisorFastPath INSTANCE
-  __
-  +Path resolveAbsolutePath(int, int, String)
-}
-class "SupervisorFastPathResolution" as io.mazewall.enforcer.supervisor.SupervisorFastPathResolution {
-  + {static}SupervisorFastPathResolution INSTANCE
-  __
-  +ResolvedFastPath resolve(int, SupervisedKind, SyscallArguments)
-}
-class "SupervisorFdInjector" as io.mazewall.enforcer.supervisor.SupervisorFdInjector {
-  +boolean inject(NativeArena, long, FileDescriptor<?, ? extends Open, Owned>, int)
-}
-interface "SupervisorInjectionPlan" as io.mazewall.enforcer.supervisor.SupervisorInjectionPlan {
-  + {static}Companion Companion
-}
-class "SupervisorInstaller" as io.mazewall.enforcer.supervisor.SupervisorInstaller {
-  + {static}SupervisorInstaller INSTANCE
-  __
-  +ConcurrentHashMap<Tid, Thread> getThreadRegistry()
-  +void registerThread(int)
-  +void unregisterThread(int)
-  +SupervisorSession installSupervisedFilterForThread(PolicyDefinition<?>, StacktraceScopingPolicy, Function0<Unit>)
-}
-class "SupervisorJvmVerdictResolver" as io.mazewall.enforcer.supervisor.SupervisorJvmVerdictResolver {
-  + {static}SupervisorJvmVerdictResolver INSTANCE
-  __
-  +SupervisorRoute route(long, int, Arch, long, int, int)
-}
-class "SupervisorNotificationMachine" as io.mazewall.enforcer.supervisor.SupervisorNotificationMachine {
-  + {static}SupervisorNotificationMachine INSTANCE
-  __
-  +SupervisedKind classify(int, Arch)
-  +JvmVerdict parseJvmVerdict(int, int)
-  +SupervisorRoute evaluateFastPath(SupervisedKind, Path, String)
-  +SupervisorRoute evaluateJvm(SupervisedKind, JvmVerdict)
-  +boolean looksLikeClassloading(String)
-}
-class "SupervisorNotificationMachineKt" as io.mazewall.enforcer.supervisor.SupervisorNotificationMachineKt {
-  + {static}InjectTarget injectTarget(SupervisedKind)
-  + {static}ExecRewritePlan planExecRewrite(Arch, String, String)
-}
-class "SupervisorOpenPlan" as io.mazewall.enforcer.supervisor.SupervisorOpenPlan {
-  + {static}Companion Companion
-  __
-  +String getPath()
-  +long getFlags()
-  +long getMode()
-  +long getResolve()
-  +int getTraceeDirfd()
-  +boolean getUseCurrentWorkingDirectory()
-  +SupervisorOpenPlan copy(String, long, long, long, int, boolean)
-}
-interface "SupervisorResponseSender" as io.mazewall.enforcer.supervisor.SupervisorResponseSender {
-  + {abstract}void continueNotification(long, ManagedSegment)
-  + {abstract}void abortNotification(long, int, ManagedSegment)
-}
-class "SupervisorResponseWriter" as io.mazewall.enforcer.supervisor.SupervisorResponseWriter {
-  +void sendContinue(long, ManagedSegment)
-  +void sendSuccess(long, long, ManagedSegment)
-  +void sendError(long, int, ManagedSegment)
-}
-interface "SupervisorRoute" as io.mazewall.enforcer.supervisor.SupervisorRoute {
-}
-class "SupervisorRouteContext" as io.mazewall.enforcer.supervisor.SupervisorRouteContext {
-  +JvmVerdictRequest getRequest()
-  +SyscallArguments getExtracted()
-  +ManagedSegment getResponse()
-}
-class "SupervisorRouteDispatcher" as io.mazewall.enforcer.supervisor.SupervisorRouteDispatcher {
-  +boolean execute(NativeArena, SupervisorRoute, SupervisorRouteContext, String, SupervisorRouteExecutor)
-}
-interface "SupervisorRouteExecutor" as io.mazewall.enforcer.supervisor.SupervisorRouteExecutor {
-  + {abstract}boolean injectFd(NativeArena, SupervisorRouteContext)
-  + {abstract}boolean secureExec(NativeArena, SupervisorRouteContext, String)
-}
-class "SupervisorSession" as io.mazewall.enforcer.supervisor.SupervisorSession {
-  +void close()
-}
-interface "SupervisorSessionEffect" as io.mazewall.enforcer.supervisor.SupervisorSessionEffect {
-}
-interface "SupervisorSessionEvent" as io.mazewall.enforcer.supervisor.SupervisorSessionEvent {
-}
-class "SupervisorSessionHandler" as io.mazewall.enforcer.supervisor.SupervisorSessionHandler {
-  + {static}Companion Companion
-  __
-  +NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open, Owned>, FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  +LoopAction handleActiveListener(NativeArena, ManagedSegment, ManagedSegment, ManagedSegment)
-  +boolean processNotification(ManagedSegment, ManagedSegment)
-  +Path resolveBypassPath(Path)
-  +boolean sendRequestToJvm(NativeArena, JvmVerdictRequest)
-  +boolean readAndHandleJvmResponse(NativeArena, SupervisorRouteContext)
-  +boolean handleInjectFd(NativeArena, SupervisorRouteContext)
-  +int openFileInSupervisor(NativeArena, int, long[], String, Arch, int)
-  +int openFileInSupervisor(NativeArena, int, long[], String, Arch, int, OpenHow)
-  +int openFileInSupervisor(NativeArena, SupervisedOpen, int)
-  +int connectSocketInSupervisor(NativeArena, byte[])
-  +Function1<Integer, Integer> getTgidResolver()
-  +void setTgidResolver(Function1<? super Integer, Integer>)
-  +void handleAcceptAsync(long, int, long[], int, Arch)
-}
-class "SupervisorSessionHandlerKt" as io.mazewall.enforcer.supervisor.SupervisorSessionHandlerKt {
-}
-class "SupervisorSessionMachine" as io.mazewall.enforcer.supervisor.SupervisorSessionMachine {
-  + {static}SupervisorSessionMachine INSTANCE
-  __
-  +SupervisorSessionTransition evaluate(SupervisorSessionState, SupervisorSessionEvent)
-}
-interface "SupervisorSessionState" as io.mazewall.enforcer.supervisor.SupervisorSessionState {
-}
-class "SupervisorSessionTransition" as io.mazewall.enforcer.supervisor.SupervisorSessionTransition {
-  +SupervisorSessionState getState()
-  +SupervisorSessionEffect getEffect()
-}
-class "SupervisorTerminalRoutes" as io.mazewall.enforcer.supervisor.SupervisorTerminalRoutes {
-  +Boolean execute(SupervisorRoute, SupervisorRouteContext)
-  +boolean abort(SupervisorRouteContext, int)
-}
-class "SyscallArguments" as io.mazewall.enforcer.supervisor.SyscallArguments {
-  +String getPathStr()
-  +byte[] getSockaddrBytes()
-  +int getDirfd()
-  +OpenHow getOpenHow()
-  +SyscallArguments copy(String, byte[], int, OpenHow)
-}
-class "TraceeDirFd" as io.mazewall.enforcer.supervisor.TraceeDirFd {
-  + {static}Companion Companion
-  __
-  +int getValue()
-  + {static}String toString-impl(int)
-  + {static}int hashCode-impl(int)
-  + {static}boolean equals-impl(int, Object)
-  + {static}int constructor-impl(int)
-  + {static}boolean equals-impl0(int, int)
-}
-class "TraceeReadOnlyNul" as io.mazewall.enforcer.supervisor.TraceeReadOnlyNul {
-  + {static}TraceeReadOnlyNul INSTANCE
-  __
-  +Long find(NativeArena, int)
-}
-class "ValidationListenerPreload" as io.mazewall.enforcer.supervisor.ValidationListenerPreload {
-  + {static}ValidationListenerPreload INSTANCE
-  __
-  +List<String> getRequiredBinaryNames()
-  +void ensureLoaded()
-}
-class "ValidationLog" as io.mazewall.enforcer.supervisor.ValidationLog {
-  + {static}ValidationLog INSTANCE
-  __
-  +ConcurrentLinkedQueue<String> getLogs()
-}
-class "IoctlCommand" as io.mazewall.ffi.IoctlCommand<Req, Res> {
-  + {static}Companion Companion
-  __
-  +long getCode()
-}
-class "IoctlCommandKt" as io.mazewall.ffi.IoctlCommandKt {
-  + {static}ManagedSegment typed(ManagedSegment)
-}
-interface "IoctlPayload" as io.mazewall.ffi.IoctlPayload {
-}
-class "LayoutValidator" as io.mazewall.ffi.LayoutValidator {
-  + {static}LayoutValidator INSTANCE
-  __
-  +void validate()
-  +void validateLayout(StructLayout, long, long, Function1<? super LayoutValidationScope, Unit>)
-}
-class "TypedSegment" as io.mazewall.ffi.TypedSegment<P extends IoctlPayload> {
-  +ManagedSegment getSegment()
-  + {static}String toString-impl(ManagedSegment)
-  + {static}int hashCode-impl(ManagedSegment)
-  + {static}boolean equals-impl(ManagedSegment, Object)
-  + {static}ManagedSegment constructor-impl(ManagedSegment)
-  + {static}boolean equals-impl0(ManagedSegment, ManagedSegment)
-}
-class "RealNativeEngine" as io.mazewall.ffi.internal.RealNativeEngine {
-  + {static}RealNativeEngine INSTANCE
-  __
-  +NativeFileSystem getFileSystem()
-  +NativeNetworking getNetworking()
-  +NativeProcess getProcess()
-  +NativeMemory getMemory()
-  +RawSyscallOperations getRaw()
-  +SyscallResult syscall(long, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg, NativeArg)
-  +SyscallResult syscall4(long, NativeArg, NativeArg, NativeArg, NativeArg)
-  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, ManagedSegment)
-  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long, long)
-  +SyscallResult fcntl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, long)
-  +SyscallResult poll(ManagedSegment, long, int)
-  +SyscallResult ioctl(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, IoctlCommand<Req, Res>, Req)
-}
-class "RealNativeFileSystem" as io.mazewall.ffi.internal.RealNativeFileSystem {
-  + {static}RealNativeFileSystem INSTANCE
-  __
-  +SyscallResult open(ManagedSegment, int, int)
-  +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int, int)
-  +SyscallResult openat2(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, long)
-  +SyscallResult mmap(long, long, int, int, FileDescriptor<?, ? extends Open, ? extends FdOwnership>, long)
-  +SyscallResult close(FileDescriptor<?, ? extends Open, Owned>)
-  +SyscallResult readlink(ManagedSegment, ManagedSegment, long)
-  +SyscallResult open(ManagedSegment, int)
-  +SyscallResult openat(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-}
-class "RealNativeHelper" as io.mazewall.ffi.internal.RealNativeHelper {
-  + {static}RealNativeHelper INSTANCE
-  __
-  +SyscallResult result(long, int)
-  +long toLong(Object)
-  +MethodHandle downcall(String, FunctionDescriptor, Option[])
-}
-class "RealNativeMemory" as io.mazewall.ffi.internal.RealNativeMemory {
-  + {static}RealNativeMemory INSTANCE
-  __
-  +SyscallResult processVmReadv(int, ManagedSegment, long, ManagedSegment, long, long)
-  +SyscallResult processVmWritev(int, ManagedSegment, long, ManagedSegment, long, long)
-  +SyscallResult read(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
-  +SyscallResult write(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long)
-  +ManagedSegment newSockFProg(NativeArena, List<? extends BpfInstruction>)
-}
-class "RealNativeNetworking" as io.mazewall.ffi.internal.RealNativeNetworking {
-  + {static}RealNativeNetworking INSTANCE
-  __
-  +SyscallResult socketpair(int, int, int, ManagedSegment)
-  +SyscallResult accept4(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment, int)
-  +SyscallResult socket(int, int, int)
-  +SyscallResult bind(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  +SyscallResult listen(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int)
-  +SyscallResult accept(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, ManagedSegment)
-  +SyscallResult connect(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  +SyscallResult sendmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  +SyscallResult recvmsg(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, int)
-  +SyscallResult recv(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, ManagedSegment, long, int)
-}
-class "RealNativeProcess" as io.mazewall.ffi.internal.RealNativeProcess {
-  + {static}RealNativeProcess INSTANCE
-  __
-  +int gettid()
-  +SyscallResult prctl(PrctlCommand)
-  +SyscallResult pidfdOpen(int, int)
-  +SyscallResult pidfdGetFd(FileDescriptor<?, ? extends Open, ? extends FdOwnership>, int, int)
-  +SyscallResult archPrctl(int, long)
-  +SyscallResult archPrctl(int, ManagedSegment)
-}
-class "SyscallInvoker" as io.mazewall.ffi.internal.SyscallInvoker {
-  + {static}SyscallInvoker INSTANCE
-  __
-  +SyscallResult syscall(MethodHandle, long, long, long, long, long, long, long)
-  +SyscallResult ioctlAddr(MethodHandle, int, long, MemorySegment)
-  +SyscallResult ioctlLong(MethodHandle, int, long, long)
-  +SyscallResult fcntl(MethodHandle, int, int, long)
-  +SyscallResult poll(MethodHandle, MemorySegment, long, int)
-  +SyscallResult open(MethodHandle, MemorySegment, int, int)
-  +SyscallResult openat(MethodHandle, int, MemorySegment, int, int)
-  +SyscallResult mmap(MethodHandle, MemorySegment, long, int, int, int, long)
-  +SyscallResult close(MethodHandle, int)
-  +SyscallResult readlink(MethodHandle, MemorySegment, MemorySegment, long)
-  +SyscallResult socketpair(MethodHandle, int, int, int, MemorySegment)
-  +SyscallResult accept4(MethodHandle, int, MemorySegment, MemorySegment, int)
-  +SyscallResult socket(MethodHandle, int, int, int)
-  +SyscallResult bind(MethodHandle, int, MemorySegment, int)
-  +SyscallResult listen(MethodHandle, int, int)
-  +SyscallResult accept(MethodHandle, int, MemorySegment, MemorySegment)
-  +SyscallResult connect(MethodHandle, int, MemorySegment, int)
-  +SyscallResult sendmsg(MethodHandle, int, MemorySegment, int)
-  +SyscallResult recvmsg(MethodHandle, int, MemorySegment, int)
-  +SyscallResult recv(MethodHandle, int, MemorySegment, long, int)
-  +int gettid(MethodHandle)
-  +SyscallResult prctl(MethodHandle, int, long, long, long, long)
-  +SyscallResult pidfdOpen(MethodHandle, int, int)
-  +SyscallResult pidfdGetFd(MethodHandle, int, int, int)
-  +SyscallResult processVmReadv(MethodHandle, int, MemorySegment, long, MemorySegment, long, long)
-  +SyscallResult processVmWritev(MethodHandle, int, MemorySegment, long, MemorySegment, long, long)
-  +SyscallResult read(MethodHandle, int, MemorySegment, long)
-  +SyscallResult write(MethodHandle, int, MemorySegment, long)
-  +SyscallResult archPrctlLong(MethodHandle, int, long)
-  +SyscallResult archPrctlAddr(MethodHandle, int, MemorySegment)
-}
-class "CmsghdrSegment" as io.mazewall.ffi.memory.CmsghdrSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}long getCmsgLen-impl(MemorySegment)
-  + {static}void setCmsgLen-impl(MemorySegment, long)
-  + {static}int getCmsgLevel-impl(MemorySegment)
-  + {static}void setCmsgLevel-impl(MemorySegment, int)
-  + {static}int getCmsgType-impl(MemorySegment)
-  + {static}void setCmsgType-impl(MemorySegment, int)
-  + {static}int getDataFd-impl(MemorySegment)
-  + {static}void setDataFd-impl(MemorySegment, int)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "ConfinedSegment" as io.mazewall.ffi.memory.ConfinedSegment {
-  + {static}long address-impl(MemorySegment)
-  +long address()
-  + {static}long byteSize-impl(MemorySegment)
-  +long byteSize()
-  + {static}MemorySegment asSlice(MemorySegment, long, long)
-  +MemorySegment asSlice(long, long)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "ErrnoSegment" as io.mazewall.ffi.memory.ErrnoSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}int getErrno-impl(MemorySegment)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "IovecSegment" as io.mazewall.ffi.memory.IovecSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}MemorySegment getIovBase-impl(MemorySegment)
-  + {static}void setIovBase-impl(MemorySegment, MemorySegment)
-  + {static}long getIovLen-impl(MemorySegment)
-  + {static}void setIovLen-impl(MemorySegment, long)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "LandlockPathBeneathAttrSegment" as io.mazewall.ffi.memory.LandlockPathBeneathAttrSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}long getAllowedAccess-impl(MemorySegment)
-  + {static}void setAllowedAccess-impl(MemorySegment, long)
-  + {static}int getParentFd-impl(MemorySegment)
-  + {static}void setParentFd-impl(MemorySegment, int)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "LandlockRulesetAttrSegment" as io.mazewall.ffi.memory.LandlockRulesetAttrSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}long getHandledAccessFs-impl(MemorySegment)
-  + {static}void setHandledAccessFs-impl(MemorySegment, long)
-  + {static}long getHandledAccessNet-impl(MemorySegment)
-  + {static}void setHandledAccessNet-impl(MemorySegment, long)
-  + {static}long getScoped-impl(MemorySegment)
-  + {static}void setScoped-impl(MemorySegment, long)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-interface "ManagedSegment" as io.mazewall.ffi.memory.ManagedSegment {
-  + {static}Companion Companion
-  __
-  + {abstract}long address()
-  + {abstract}long byteSize()
-  + {abstract}ManagedSegment asSlice(long, long)
-}
-class "ManagedSegmentKt" as io.mazewall.ffi.memory.ManagedSegmentKt {
-  + {static}MemorySegment getNative(ManagedSegment)
-  + {static}byte readByte(ManagedSegment, long)
-  + {static}void writeByte(ManagedSegment, long, byte)
-  + {static}short readShort(ManagedSegment, long)
-  + {static}void writeShort(ManagedSegment, long, short)
-  + {static}int readInt(ManagedSegment, long)
-  + {static}void writeInt(ManagedSegment, long, int)
-  + {static}int readIntUnaligned(ManagedSegment, long)
-  + {static}void writeIntUnaligned(ManagedSegment, long, int)
-  + {static}long readLong(ManagedSegment, long)
-  + {static}void writeLong(ManagedSegment, long, long)
-  + {static}long readLongUnaligned(ManagedSegment, long)
-  + {static}void writeLongUnaligned(ManagedSegment, long, long)
-  + {static}void fill(ManagedSegment, byte)
-  + {static}Arena getUnwrap(NativeArena)
-  + {static}MemorySegment getUnwrap(ManagedSegment)
-  + {static}String readString(ManagedSegment, long)
-}
-class "MemoryWrappersKt" as io.mazewall.ffi.memory.MemoryWrappersKt {
-  + {static}byte readByte(MemorySegment, long)
-  + {static}void writeByte(MemorySegment, long, byte)
-  + {static}short readShort(MemorySegment, long)
-  + {static}void writeShort(MemorySegment, long, short)
-  + {static}int readInt(MemorySegment, long)
-  + {static}void writeInt(MemorySegment, long, int)
-  + {static}int readIntUnaligned(MemorySegment, long)
-  + {static}void writeIntUnaligned(MemorySegment, long, int)
-  + {static}long readLong(MemorySegment, long)
-  + {static}void writeLong(MemorySegment, long, long)
-  + {static}long readLongUnaligned(MemorySegment, long)
-  + {static}void writeLongUnaligned(MemorySegment, long, long)
-  + {static}MemorySegment readAddress(MemorySegment, long)
-  + {static}void writeAddress(MemorySegment, long, MemorySegment)
-  + {static}void writeIntBigEndian(MemorySegment, long, int)
-  + {static}void writeIntBigEndianUnaligned(MemorySegment, long, int)
-  + {static}void writeLongBigEndian(MemorySegment, long, long)
-  + {static}void writeLongBigEndianUnaligned(MemorySegment, long, long)
-  + {static}String getSystemStrerror(int)
-}
-class "MsghdrSegment" as io.mazewall.ffi.memory.MsghdrSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}MemorySegment getMsgName-impl(MemorySegment)
-  + {static}void setMsgName-impl(MemorySegment, MemorySegment)
-  + {static}int getMsgNamelen-impl(MemorySegment)
-  + {static}void setMsgNamelen-impl(MemorySegment, int)
-  + {static}MemorySegment getMsgIov-impl(MemorySegment)
-  + {static}void setMsgIov-impl(MemorySegment, MemorySegment)
-  + {static}long getMsgIovlen-impl(MemorySegment)
-  + {static}void setMsgIovlen-impl(MemorySegment, long)
-  + {static}MemorySegment getMsgControl-impl(MemorySegment)
-  + {static}void setMsgControl-impl(MemorySegment, MemorySegment)
-  + {static}long getMsgControllen-impl(MemorySegment)
-  + {static}void setMsgControllen-impl(MemorySegment, long)
-  + {static}int getMsgFlags-impl(MemorySegment)
-  + {static}void setMsgFlags-impl(MemorySegment, int)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "NativeArena" as io.mazewall.ffi.memory.NativeArena {
-  + {static}Companion Companion
-  __
-  +Arena getArena()
-  +boolean isShared()
-  +void close()
-  +boolean isAlive()
-  +ManagedSegment allocate(long)
-  +ManagedSegment allocate(MemoryLayout)
-  +ManagedSegment allocate(MemoryLayout, long)
-  +ManagedSegment allocateFrom(String)
-}
-class "NativeArenaKt" as io.mazewall.ffi.memory.NativeArenaKt {
-  + {static}SyscallResult openPath(NativeArena, String, int)
-  + {static}ManagedSegment allocateBpfProgram(NativeArena, List<? extends BpfInstruction>)
-}
-class "NativeScopeKt" as io.mazewall.ffi.memory.NativeScopeKt {
-  + {static}T nativeScope(Function1<? super NativeArena, ? extends T>)
-}
-class "PollFdSegment" as io.mazewall.ffi.memory.PollFdSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}int getFd-impl(MemorySegment)
-  + {static}void setFd-impl(MemorySegment, int)
-  + {static}short getEvents-impl(MemorySegment)
-  + {static}void setEvents-impl(MemorySegment, short)
-  + {static}short getRevents-impl(MemorySegment)
-  + {static}void setRevents-impl(MemorySegment, short)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "SeccompNotifAddFdSegment" as io.mazewall.ffi.memory.SeccompNotifAddFdSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}long getId-impl(MemorySegment)
-  + {static}void setId-impl(MemorySegment, long)
-  + {static}int getFlags-impl(MemorySegment)
-  + {static}void setFlags-impl(MemorySegment, int)
-  + {static}int getSrcfd-impl(MemorySegment)
-  + {static}void setSrcfd-impl(MemorySegment, int)
-  + {static}int getNewfd-impl(MemorySegment)
-  + {static}void setNewfd-impl(MemorySegment, int)
-  + {static}int getNewfdFlags-impl(MemorySegment)
-  + {static}void setNewfdFlags-impl(MemorySegment, int)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "SegmentPool" as io.mazewall.ffi.memory.SegmentPool {
-  + {static}Companion Companion
-  __
-  +long getByteSize()
-  +ManagedSegment rent()
-  +void release(ManagedSegment)
-}
-class "SharedSegment" as io.mazewall.ffi.memory.SharedSegment {
-  + {static}long address-impl(MemorySegment)
-  +long address()
-  + {static}long byteSize-impl(MemorySegment)
-  +long byteSize()
-  + {static}MemorySegment asSlice(MemorySegment, long, long)
-  +MemorySegment asSlice(long, long)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "SockFilterSegment" as io.mazewall.ffi.memory.SockFilterSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}short getCode-impl(MemorySegment)
-  + {static}void setCode-impl(MemorySegment, short)
-  + {static}byte getJt-impl(MemorySegment)
-  + {static}void setJt-impl(MemorySegment, byte)
-  + {static}byte getJf-impl(MemorySegment)
-  + {static}void setJf-impl(MemorySegment, byte)
-  + {static}int getK-impl(MemorySegment)
-  + {static}void setK-impl(MemorySegment, int)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "SockFprogSegment" as io.mazewall.ffi.memory.SockFprogSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}ManagedSegment getManagedFilter-impl(MemorySegment)
-  + {static}short getLen-impl(MemorySegment)
-  + {static}void setLen-impl(MemorySegment, short)
-  + {static}MemorySegment getFilter-impl(MemorySegment)
-  + {static}void setFilter-impl(MemorySegment, MemorySegment)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "SockaddrUnSegment" as io.mazewall.ffi.memory.SockaddrUnSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}short getSunFamily-impl(MemorySegment)
-  + {static}void setSunFamily-impl(MemorySegment, short)
-  + {static}MemorySegment getSunPath-impl(MemorySegment)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-class "SupervisorProcessMemoryReader" as io.mazewall.ffi.memory.SupervisorProcessMemoryReader {
-  + {static}SupervisorProcessMemoryReader INSTANCE
-  __
-  +String readString(NativeArena, int, long, int)
-  +byte[] readBytes(NativeArena, int, long, int)
-  +String resolveLink(NativeArena, int, String)
-}
-class "SupervisorProcessMemoryWriter" as io.mazewall.ffi.memory.SupervisorProcessMemoryWriter {
-  + {static}SupervisorProcessMemoryWriter INSTANCE
-  __
-  +boolean writeBytes(NativeArena, int, long, byte[])
-}
-class "SupervisorResponseSegment" as io.mazewall.ffi.memory.SupervisorResponseSegment {
-  + {static}Companion Companion
-  __
-  +MemorySegment getSegment()
-  + {static}ManagedSegment getManaged-impl(MemorySegment)
-  + {static}long getId-impl(MemorySegment)
-  + {static}void setId-impl(MemorySegment, long)
-  + {static}byte getDecision-impl(MemorySegment)
-  + {static}void setDecision-impl(MemorySegment, byte)
-  + {static}int getErrorNr-impl(MemorySegment)
-  + {static}void setErrorNr-impl(MemorySegment, int)
-  + {static}String getPath-impl(MemorySegment)
-  + {static}void setPath-impl(MemorySegment, String)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-interface "TraceeMemoryReader" as io.mazewall.ffi.memory.TraceeMemoryReader {
-  + {static}Real Real
-  __
-  + {abstract}String readString(NativeArena, int, long, int)
-  + {abstract}byte[] readBytes(NativeArena, int, long, int)
-  + {abstract}String resolveLink(NativeArena, int, String)
-}
-class "NativeDescriptorInputStream" as io.mazewall.ffi.networking.NativeDescriptorInputStream {
-  + {static}int BUFFER_SIZE
-  + {static}int BYTE_MASK
-  + {static}int EINTR
-  __
-  +int read()
-  +int read(byte[], int, int)
-  +void close()
-}
-class "NetworkOrderBuffer" as io.mazewall.ffi.networking.NetworkOrderBuffer {
-  +MemorySegment getSegment()
-  + {static}void writeInt-impl(MemorySegment, long, int)
-  + {static}void writeIntUnaligned-impl(MemorySegment, long, int)
-  + {static}void writeLong-impl(MemorySegment, long, long)
-  + {static}void writeLongUnaligned-impl(MemorySegment, long, long)
-  + {static}void writeByte-impl(MemorySegment, long, byte)
-  + {static}String toString-impl(MemorySegment)
-  + {static}int hashCode-impl(MemorySegment)
-  + {static}boolean equals-impl(MemorySegment, Object)
-  + {static}MemorySegment constructor-impl(MemorySegment)
-  + {static}boolean equals-impl0(MemorySegment, MemorySegment)
-}
-abstract class "SeccompConnection" as io.mazewall.ffi.networking.SeccompConnection {
-  + {abstract}FileDescriptor<UnixSocket, Open, Owned> getSocketFd()
-  +FileDescriptor<SeccompNotif, Open, Owned> getListenerFd()
-  +SocketManager getSocketManager()
-  +void setSocketManager(SocketManager)
-  +void close()
-  +void markSocketClosed()
-}
-interface "SeccompConnectionEffect" as io.mazewall.ffi.networking.SeccompConnectionEffect {
-}
-interface "SeccompConnectionEvent" as io.mazewall.ffi.networking.SeccompConnectionEvent {
-}
-class "SeccompConnectionMachine" as io.mazewall.ffi.networking.SeccompConnectionMachine {
-  + {static}SeccompConnectionMachine INSTANCE
-  __
-  +SeccompConnectionTransition evaluate(SeccompConnection, SeccompConnectionEvent)
-}
-class "SeccompConnectionTransition" as io.mazewall.ffi.networking.SeccompConnectionTransition {
-  +SeccompConnection getConnection()
-  +List<SeccompConnectionEffect> getEffects()
-}
-class "SupervisorSeccompNotifInstaller" as io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller {
-  + {static}SupervisorSeccompNotifInstaller INSTANCE
-  __
-  +void install(String, BpfProgram<Verified>, boolean, Function1<? super String, Integer>, Function2<? super Integer, ? super Integer, Boolean>, Function0<Unit>, Function2<? super Integer, ? super CountDownLatch, Unit>)
-}
-class "SupervisorSocketInputStream" as io.mazewall.ffi.networking.SupervisorSocketInputStream {
-}
-class "SupervisorSocketUtils" as io.mazewall.ffi.networking.SupervisorSocketUtils {
-  + {static}SupervisorSocketUtils INSTANCE
-  + {static}int AF_UNIX
-  + {static}int SOCK_STREAM
-  + {static}int BACKLOG_SIZE
-  + {static}int SOCKADDR_UN_SIZE
-  + {static}long CMSG_RIGHTS_LEN
-  + {static}long MSG_CONTROL_BUF_SIZE
-  + {static}int SOL_SOCKET
-  + {static}int SCM_RIGHTS
-  __
-  +MemorySegment setupSockAddrUn(NativeArena, String)
-  +int connectWithRetry(String, int, long)
-  +boolean sendDescriptor(int, int)
-  +FileDescriptor<SeccompNotif, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>)
-  +FileDescriptor<R, Open, Owned> recvDescriptor(FileDescriptor<UnixSocket, ? extends Open, ? extends FdOwnership>, R)
-}
-class "SupervisorValidationChannel" as io.mazewall.ffi.networking.SupervisorValidationChannel {
-  +InputStream getInputStream()
-  +void sendResponse(long, byte, int, String)
-  +void sendResponse(long, JvmVerdict, String)
-  +void sendExecRewriteAck(boolean)
-  +void close()
-}
-class "JvmVerdictRequestEncoder" as io.mazewall.ffi.supervisor.JvmVerdictRequestEncoder {
-  + {static}JvmVerdictRequestEncoder INSTANCE
-  __
-  +Encoded encode(NativeArena, long, int, int, int, int, long[], String, byte[])
 }
 class "Landlock" as io.mazewall.landlock.Landlock {
   + {static}Landlock INSTANCE
@@ -1845,7 +1226,7 @@ class "Landlock" as io.mazewall.landlock.Landlock {
   +boolean isSupported()
   +int getAbiVersion()
   +void applyRuleset(PolicyDefinition<?>, boolean)
-  +LandlockApplyResult tryApplyRuleset(PolicyDefinition<?>, boolean)
+  +LandlockApplyResult tryApplyRuleset(PolicyDefinition<?>, boolean, Function0<Unit>)
   +long getFullAccessMask(int)
   +long getFullNetAccessMask(int)
   +void handleUnsupportedLandlock()
@@ -1853,7 +1234,7 @@ class "Landlock" as io.mazewall.landlock.Landlock {
   +LandlockApplyResult handleUnsupportedLandlockOutcome()
   +void addJvmClasspathRules(NativeArena, LandlockRuleset<? extends Building>, long)
   +LandlockRuleset<Sealed> enforceRuleset(LandlockRuleset<? extends Building>, boolean)
-  +LandlockRestrictOutcome tryEnforceRuleset(LandlockRuleset<? extends Building>, boolean)
+  +LandlockRestrictOutcome tryEnforceRuleset(LandlockRuleset<? extends Building>, boolean, Function0<Unit>)
   +void applyUserRules(NativeArena, LandlockRuleset<? extends Building>, PolicyDefinition<?>, int, long)
   +long getAccessMask(int, PolicyDefinition<?>)
   +long getNetAccessMask(int, PolicyDefinition<?>)
@@ -1866,9 +1247,12 @@ interface "LandlockApplyResult" as io.mazewall.landlock.LandlockApplyResult {
   +void orThrow()
   +boolean isApplied()
 }
-class "LandlockApplyResultKt" as io.mazewall.landlock.LandlockApplyResultKt {
-  + {static}Throwable toFailure(LandlockApplyResult)
-  + {static}Throwable toException(Rejected)
+class "LandlockCapabilityProbe" as io.mazewall.landlock.LandlockCapabilityProbe {
+  + {static}LandlockCapabilityProbe INSTANCE
+  __
+  +Outcome classify(SyscallResult)
+  +KernelCapability<Integer> classifyCapability(SyscallResult)
+  +KernelCapability<Integer> probeCapability()
 }
 interface "LandlockFdOutcome" as io.mazewall.landlock.LandlockFdOutcome {
 }
@@ -1901,99 +1285,6 @@ class "LandlockSession" as io.mazewall.landlock.LandlockSession {
 interface "LandlockState" as io.mazewall.landlock.LandlockState {
 }
 interface "RulesetState" as io.mazewall.landlock.RulesetState {
-}
-interface "UnixListenDaemonEffect" as io.mazewall.platform.daemon.UnixListenDaemonEffect {
-}
-interface "UnixListenDaemonEvent" as io.mazewall.platform.daemon.UnixListenDaemonEvent {
-}
-class "UnixListenDaemonMachine" as io.mazewall.platform.daemon.UnixListenDaemonMachine {
-  + {static}UnixListenDaemonMachine INSTANCE
-  __
-  +UnixListenDaemonTransition evaluate(UnixListenDaemonState, UnixListenDaemonEvent)
-  +UnixListenDaemonTransition apply(AtomicReference<UnixListenDaemonState>, UnixListenDaemonEvent, Function1<? super List<? extends UnixListenDaemonEffect>, Unit>)
-}
-interface "UnixListenDaemonState" as io.mazewall.platform.daemon.UnixListenDaemonState {
-}
-class "UnixListenDaemonTransition" as io.mazewall.platform.daemon.UnixListenDaemonTransition {
-  +UnixListenDaemonState getState()
-  +List<UnixListenDaemonEffect> getEffects()
-}
-class "SeccompNotification" as io.mazewall.platform.seccomp.SeccompNotification {
-  +long getId()
-  +int getPid()
-  +int getArch()
-  +int getNr()
-  +long[] getArgs()
-}
-class "SeccompNotifications" as io.mazewall.platform.seccomp.SeccompNotifications {
-  + {static}SeccompNotifications INSTANCE
-  + {static}int ARG_COUNT
-  __
-  +SeccompNotification read(ManagedSegment)
-}
-interface "SupervisedKind" as io.mazewall.platform.seccomp.SupervisedKind {
-  + {static}Companion Companion
-}
-class "UserNotifReply" as io.mazewall.platform.seccomp.UserNotifReply {
-  + {static}UserNotifReply INSTANCE
-  __
-  +void encodeContinue(ManagedSegment, long)
-  +void encodeError(ManagedSegment, long, int)
-  +void encodeSuccess(ManagedSegment, long, long)
-  +SyscallResult send(RawSyscallOperations, FileDescriptor<SeccompNotif, ? extends Open, ? extends FdOwnership>, ManagedSegment)
-}
-abstract class "LoopAction" as io.mazewall.platform.seccomp.daemon.LoopAction {
-}
-enum "NotifResult" as io.mazewall.platform.seccomp.daemon.NotifResult {
-  HANDLED
-  TERMINATE
-  PASS_THROUGH
-}
-class "SeccompDaemonEngine" as io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine {
-  ..
-  + {static}Companion Companion
-  +CopyOnWriteArrayList<FileDescriptor<UnixSocket, Open, Owned>> clientSockets
-  __
-  +UnixListenDaemonState getState()
-  +void run()
-  +void triggerGlobalShutdown(String)
-  +UnixListenDaemonTransition applyEvent(UnixListenDaemonEvent)
-  +boolean isGlobalShutdown()
-  +void handleNewConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  +void handleConnection(FileDescriptor<UnixSocket, ? extends Open, Owned>)
-  +SeccompConnection processConnectionStep(NativeArena, SeccompConnection, FileDescriptor<UnixSocket, ? extends Open, Owned>, ManagedSegment)
-}
-class "SeccompDaemonMachine" as io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine {
-  + {static}SeccompDaemonMachine INSTANCE
-  __
-  +UnixListenDaemonTransition evaluate(UnixListenDaemonState, UnixListenDaemonEvent)
-}
-class "SeccompDaemonMachineKt" as io.mazewall.platform.seccomp.daemon.SeccompDaemonMachineKt {
-}
-interface "SeccompNotifHandler" as io.mazewall.platform.seccomp.daemon.SeccompNotifHandler {
-  + {abstract}NotifResult processNotification(NativeArena, ManagedSegment, ManagedSegment, FileDescriptor<SeccompNotif, ? extends Open, Owned>, FileDescriptor<UnixSocket, ? extends Open, Owned>)
-}
-class "SeccompSessionHandler" as io.mazewall.platform.seccomp.daemon.SeccompSessionHandler {
-  + {static}Companion Companion
-  __
-  +boolean isTerminated()
-  +void close()
-  +LoopAction handleActiveListener(NativeArena, ManagedSegment)
-}
-class "BobDeserializer" as io.mazewall.sbob.BobDeserializer {
-  + {static}BobDeserializer INSTANCE
-  __
-  +BillOfBehaviorDto deserialize(String)
-}
-class "PathNormalizer" as io.mazewall.sbob.PathNormalizer {
-  + {static}PathNormalizer INSTANCE
-  __
-  +Set<String> normalizeAndPrune(Set<String>, Path)
-}
-class "PolicyTransformer" as io.mazewall.sbob.PolicyTransformer {
-  + {static}PolicyTransformer INSTANCE
-  __
-  +PolicyDefinition<ThreadLocalOnly> transform(BillOfBehaviorDto, Set<String>, Set<String>, PolicyDefinition<?>)
 }
 interface "ArgCheck" as io.mazewall.seccomp.ArgCheck {
 }
@@ -2030,30 +1321,6 @@ class "BpfProgram" as io.mazewall.seccomp.BpfProgram<S extends BpfStatus> {
   + {static}BpfBuilder<Uninitialized> builder()
   + {static}BpfProgram<Unverified> dsl(Arch, Function<BpfBuilder<Active>, BpfBuilder<Terminated>>)
 }
-class "BpfProgramKt" as io.mazewall.seccomp.BpfProgramKt {
-  + {static}BpfBuilder<ArchVerified> checkArch(BpfBuilder<? extends Uninitialized>, Arch)
-  + {static}BpfBuilder<Active> loadSyscallNr(BpfBuilder<? extends ArchVerified>)
-  + {static}BpfBuilder<Terminated> allow(BpfBuilder<? extends Active>)
-  + {static}BpfBuilder<Terminated> deny(BpfBuilder<? extends Active>, int)
-  + {static}BpfBuilder<Terminated> killThread(BpfBuilder<? extends Active>)
-  + {static}BpfBuilder<Terminated> notifyUser(BpfBuilder<? extends Active>)
-  + {static}BpfBuilder<Active> expect(BpfBuilder<? extends Active>, int, Function1<? super BpfBuilder<? extends Active>, Unit>)
-  + {static}BpfBuilder<Active> expect(BpfBuilder<? extends Active>, int, Consumer<BpfBuilder<Active>>)
-  + {static}BpfBuilder<Active> expect(BpfBuilder<? extends Active>, Syscall, Arch, Function1<? super BpfBuilder<? extends Active>, Unit>)
-  + {static}BpfBuilder<Active> expect(BpfBuilder<? extends Active>, Syscall, Arch, Consumer<BpfBuilder<Active>>)
-  + {static}BpfBuilder<Active> loadAbsolute(BpfBuilder<? extends Active>, int)
-  + {static}BpfBuilder<Active> jumpIfEqual(BpfBuilder<? extends Active>, int, BpfLabel, BpfLabel)
-  + {static}BpfBuilder<Active> jumpIfSet(BpfBuilder<? extends Active>, int, BpfLabel, BpfLabel)
-  + {static}BpfBuilder<Active> jumpIfGreaterThan(BpfBuilder<? extends Active>, int, BpfLabel, BpfLabel)
-  + {static}BpfBuilder<Active> and(BpfBuilder<? extends Active>, int)
-  + {static}BpfBuilder<Active> jmp(BpfBuilder<? extends Active>, BpfLabel)
-  + {static}BpfBuilder<Active> jmpIfTrue(BpfBuilder<? extends Active>, BpfLabel)
-  + {static}BpfBuilder<Active> jmpIfFalse(BpfBuilder<? extends Active>, BpfLabel)
-  + {static}BpfBuilder<Terminated> ret(BpfBuilder<? extends Active>, int)
-  + {static}BpfBuilder<Active> mark(BpfBuilder<? extends Active>, BpfLabel)
-  + {static}BpfProgram<Unverified> build(BpfBuilder<? extends Terminated>)
-  + {static}BpfBuilder<Active> jumpUnconditional(BpfBuilder<? extends Active>, BpfLabel)
-}
 class "BpfSimulator" as io.mazewall.seccomp.BpfSimulator {
   + {static}BpfSimulator INSTANCE
   + {static}int SECCOMP_DATA_NR_OFFSET
@@ -2069,8 +1336,6 @@ class "BpfStaticVerifier" as io.mazewall.seccomp.BpfStaticVerifier {
   + {static}BpfStaticVerifier INSTANCE
   __
   +BpfProgram<Verified> verify(BpfProgram<Unverified>)
-}
-class "BpfStaticVerifierKt" as io.mazewall.seccomp.BpfStaticVerifierKt {
 }
 interface "BpfStatus" as io.mazewall.seccomp.BpfStatus {
 }
@@ -2109,11 +1374,11 @@ class "MmapExecInspector" as io.mazewall.seccomp.MmapExecInspector {
 class "PureJavaBpfEngine" as io.mazewall.seccomp.PureJavaBpfEngine {
   + {static}PureJavaBpfEngine INSTANCE
   __
-  +void clearCache()
   +EngineState getState()
   +boolean isSupported()
   +SeccompEngine<Loaded> install(CompiledSandbox<?>)
   +SeccompEngine<Loaded> installOnProcess(CompiledSandbox<?>)
+  +void installWithPublication(CompiledSandbox<?>, boolean, Function0<Unit>)
   +void setNoNewPrivs()
   +FilterApplied installFilter(Arch, ManagedSegment, boolean)
   +String tsyncFailureDetail(Integer, Long)
@@ -2171,69 +1436,45 @@ class "UnsafePrctlInspector" as io.mazewall.seccomp.UnsafePrctlInspector {
   +List<SyscallInspection> getInspections(Arch, InspectionContext)
   +void emitSpecial(BpfBuilder<? extends Active>, Arch, InspectionContext, Set<Integer>)
 }
-io.mazewall.AllowListSpec --> io.mazewall.PolicyMode
-io.mazewall.BillOfBehaviorDto --> io.mazewall.StackProfileEntryDto
-io.mazewall.BpfFilter --> io.mazewall.BpfFilter
-io.mazewall.BpfNativeCache --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.BpfNativeCache --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.BpfNativeCache --> io.mazewall.BpfNativeCache
-io.mazewall.CompiledSandbox --> io.mazewall.seccomp.BpfProgram
-io.mazewall.CompiledSandbox --> io.mazewall.PolicyDefinition
-io.mazewall.DenyListSpec --> io.mazewall.PolicyMode
-io.mazewall.InstallationAssessment --> io.mazewall.PolicyArgumentRules
-io.mazewall.InstallationAssessment --> io.mazewall.PolicyMode
-io.mazewall.InstallationAssessment --> io.mazewall.InstallationScope
-io.mazewall.InstallationAssessment --> io.mazewall.InstallationStage
-io.mazewall.InstallationAssessor --> io.mazewall.InstallationAssessor
-io.mazewall.InstallationReceipt --> io.mazewall.PolicyDefinition
-io.mazewall.InstallationRejectedException --> io.mazewall.InstallationStage
-io.mazewall.JavaPolicyBuilder --> io.mazewall.PolicyBuilder
-io.mazewall.LinuxNative .u.|> io.mazewall.NativeEngine
-io.mazewall.LinuxNative --> io.mazewall.NativeEngine
-io.mazewall.LinuxNative --> io.mazewall.LinuxNative
-io.mazewall.Mazewall --> io.mazewall.Policy
-io.mazewall.Platform --> io.mazewall.PlatformProvider
-io.mazewall.Platform --> io.mazewall.Platform
-io.mazewall.Platform --> io.mazewall.KernelFeatureMatrix
-io.mazewall.Policy --> io.mazewall.PolicyDefinition
-io.mazewall.Policy <--> io.mazewall.Policy
-io.mazewall.Policy --> io.mazewall.seccomp.BpfInstruction
-io.mazewall.PolicyBuilder --> io.mazewall.core.SandboxedPath
-io.mazewall.PolicyBuilder --> io.mazewall.core.SeccompAction
-io.mazewall.PolicyCompilationCache --> io.mazewall.PolicyCompilationCache
-io.mazewall.PolicyDefinition --> io.mazewall.core.SandboxedPath
-io.mazewall.PolicyDefinition --> io.mazewall.core.SeccompAction
-io.mazewall.PolicyLists --> io.mazewall.PolicyLists
-io.mazewall.PolicyPresets --> io.mazewall.PolicyDefinition
-io.mazewall.PolicyPresets --> io.mazewall.PolicyPresets
-io.mazewall.ProcessPolicies --> io.mazewall.ProcessPolicies
-io.mazewall.RealPlatformProvider .u.|> io.mazewall.PlatformProvider
-io.mazewall.RealPlatformProvider --> io.mazewall.RealPlatformProvider
-io.mazewall.SbobParser --> io.mazewall.SbobParser
-io.mazewall.StackProfileEntryDto --> io.mazewall.StackFrameDto
-io.mazewall.core.ErrnoMapping --> io.mazewall.core.ErrnoMapping
-io.mazewall.core.FdEpoch --> io.mazewall.core.FdEpoch
-io.mazewall.core.FdLifecycle --> io.mazewall.core.FdOwnership
-io.mazewall.core.FdLifecycle --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.core.FdLifecycle --> io.mazewall.core.FileDescriptorRole
-io.mazewall.core.FileDescriptor <--> io.mazewall.core.FileDescriptor
-io.mazewall.core.FileDescriptor --> io.mazewall.core.FdLifecycle
-io.mazewall.core.JvmChildProcess --> io.mazewall.core.JvmChildProcess
-io.mazewall.core.JvmChildSpec --> io.mazewall.core.JavaAgentSelection
-io.mazewall.core.MazewallContext --> io.mazewall.core.ContextId
-io.mazewall.core.MazewallContext --> io.mazewall.core.MazewallContext
-io.mazewall.core.RealProcessLauncher .u.|> io.mazewall.core.ProcessLauncher
-io.mazewall.core.RealProcessLauncher --> io.mazewall.core.RealProcessLauncher
-io.mazewall.core.RealSocketManager .u.|> io.mazewall.core.SocketManager
-io.mazewall.core.RealSocketManager --> io.mazewall.core.RealSocketManager
-io.mazewall.core.SocketIo --> io.mazewall.core.SocketIo
-io.mazewall.core.SyscallNumberResolver --> io.mazewall.core.SyscallNumberResolver
-io.mazewall.enforcer.ContainedExecutors --> io.mazewall.enforcer.ContainedExecutors
-io.mazewall.enforcer.SandboxDispatcher --> io.mazewall.enforcer.SandboxDispatcher
+io.mazewall.enforcer.api.AllowListSpec --> io.mazewall.enforcer.api.PolicyMode
+io.mazewall.enforcer.api.BillOfBehaviorDto --> io.mazewall.enforcer.api.StackProfileEntryDto
+io.mazewall.enforcer.api.CompiledSandbox --> io.mazewall.seccomp.BpfProgram
+io.mazewall.enforcer.api.CompiledSandbox --> io.mazewall.enforcer.api.PolicyDefinition
+io.mazewall.enforcer.api.ContainedExecutorView .u.|> io.mazewall.enforcer.api.ContainedExecutor
+io.mazewall.enforcer.api.ContainedExecutorView --> io.mazewall.enforcer.api.Policy
 io.mazewall.enforcer.api.ContainedExecutors --> io.mazewall.enforcer.api.ContainedExecutors
 io.mazewall.enforcer.api.ContainmentViolationException -u-|> io.mazewall.enforcer.ContainmentViolationException
 io.mazewall.enforcer.api.ContainmentViolationException --> io.mazewall.enforcer.api.ContainmentViolationEvidence
+io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.api.StacktraceScopingPolicy
+io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy
+io.mazewall.enforcer.api.DenyListSpec --> io.mazewall.enforcer.api.PolicyMode
+io.mazewall.enforcer.api.InstallationAssessment --> io.mazewall.enforcer.api.PolicyMode
+io.mazewall.enforcer.api.InstallationAssessment --> io.mazewall.enforcer.api.InstallationStage
+io.mazewall.enforcer.api.InstallationAssessment --> io.mazewall.enforcer.api.PolicyArgumentRules
+io.mazewall.enforcer.api.InstallationAssessment --> io.mazewall.enforcer.api.InstallationScope
+io.mazewall.enforcer.api.InstallationAssessor --> io.mazewall.enforcer.api.InstallationAssessor
+io.mazewall.enforcer.api.InstallationReceipt --> io.mazewall.enforcer.api.PolicyDefinition
+io.mazewall.enforcer.api.InstallationRejectedException --> io.mazewall.enforcer.api.InstallationStage
+io.mazewall.enforcer.api.JavaPolicyBuilder --> io.mazewall.enforcer.api.PolicyBuilder
+io.mazewall.enforcer.api.KernelFeatureSnapshot --> io.mazewall.enforcer.api.KernelCapability
+io.mazewall.enforcer.api.KernelFeatureSnapshot --> io.mazewall.enforcer.api.KernelFeatureMatrix
+io.mazewall.enforcer.api.Mazewall --> io.mazewall.enforcer.api.Policy
+io.mazewall.enforcer.api.PartialInstallationException --> io.mazewall.enforcer.api.InstallationProgress
+io.mazewall.enforcer.api.Platform --> io.mazewall.enforcer.api.KernelFeatureSnapshot
+io.mazewall.enforcer.api.Platform --> io.mazewall.enforcer.api.PlatformProvider
+io.mazewall.enforcer.api.Platform --> io.mazewall.enforcer.api.Platform
+io.mazewall.enforcer.api.Policy <--> io.mazewall.enforcer.api.Policy
+io.mazewall.enforcer.api.Policy --> io.mazewall.enforcer.api.PolicyDefinition
+io.mazewall.enforcer.api.Policy --> io.mazewall.seccomp.BpfInstruction
+io.mazewall.enforcer.api.PolicyCompilationCache --> io.mazewall.enforcer.api.PolicyCompilationCache
+io.mazewall.enforcer.api.PolicyLists --> io.mazewall.enforcer.api.PolicyLists
+io.mazewall.enforcer.api.PolicyPresets --> io.mazewall.enforcer.api.PolicyPresets
+io.mazewall.enforcer.api.PolicyPresets --> io.mazewall.enforcer.api.PolicyDefinition
+io.mazewall.enforcer.api.ProcessPolicies --> io.mazewall.enforcer.api.ProcessPolicies
 io.mazewall.enforcer.api.SandboxDispatcher --> io.mazewall.enforcer.api.SandboxDispatcher
+io.mazewall.enforcer.api.SbobParser --> io.mazewall.enforcer.api.SbobParser
+io.mazewall.enforcer.api.StackProfileEntryDto --> io.mazewall.enforcer.api.StackFrameDto
+io.mazewall.enforcer.api.Supervision --> io.mazewall.enforcer.api.Supervision
 io.mazewall.enforcer.diagnostics.ContainmentDiagnostic --> io.mazewall.enforcer.api.ContainmentViolationException
 io.mazewall.enforcer.diagnostics.ContainmentDiagnostic --> io.mazewall.enforcer.api.ContainmentViolationEvidence
 io.mazewall.enforcer.diagnostics.ContainmentViolationDetector --> io.mazewall.enforcer.diagnostics.ViolationMatcher
@@ -2242,139 +1483,124 @@ io.mazewall.enforcer.diagnostics.MazewallEvents --> io.mazewall.enforcer.diagnos
 io.mazewall.enforcer.diagnostics.MazewallEvents --> io.mazewall.enforcer.diagnostics.DiagnosticEventListener
 io.mazewall.enforcer.engine.FilterInstallationPlanner --> io.mazewall.enforcer.engine.FilterInstallationPlanner
 io.mazewall.enforcer.engine.JvmFloorPresets --> io.mazewall.enforcer.engine.JvmFloorPresets
-io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
-io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.PolicyDefinition
+io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.api.StacktraceScopingPolicy
+io.mazewall.enforcer.internal.ContainedExecutorWrapper --> io.mazewall.enforcer.api.PolicyDefinition
+io.mazewall.enforcer.internal.ffi.RealPlatformProvider .u.|> io.mazewall.enforcer.api.PlatformProvider
+io.mazewall.enforcer.internal.ffi.RealPlatformProvider --> io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+io.mazewall.enforcer.internal.seccomp.BpfFilter --> io.mazewall.enforcer.internal.seccomp.BpfFilter
+io.mazewall.enforcer.internal.supervisor.BypassPaths --> io.mazewall.enforcer.internal.supervisor.BypassPaths
+io.mazewall.enforcer.internal.supervisor.JVMValidationListener --> io.mazewall.enforcer.api.StacktraceScopingPolicy
+io.mazewall.enforcer.internal.supervisor.JVMValidationListener --> io.mazewall.enforcer.internal.supervisor.SupervisorRuntimeContext
+io.mazewall.enforcer.internal.supervisor.JvmStackInspector --> io.mazewall.enforcer.internal.supervisor.JvmStackInspector
+io.mazewall.enforcer.internal.supervisor.JvmVerdictRequest --> io.mazewall.enforcer.internal.supervisor.NotifHeader
+io.mazewall.enforcer.internal.supervisor.OpenRouteExecutor --> io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter
+io.mazewall.enforcer.internal.supervisor.PoolOpenRouteExecutor --> io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter
+io.mazewall.enforcer.internal.supervisor.PoolSocketRouteExecutor --> io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter
+io.mazewall.enforcer.internal.supervisor.PreparedSupervisorRoute --> io.mazewall.enforcer.internal.supervisor.SupervisorRouteContext
+io.mazewall.enforcer.internal.supervisor.PreparedSupervisorRoute --> io.mazewall.enforcer.internal.supervisor.SupervisorRoute
+io.mazewall.enforcer.internal.supervisor.ProcFsInspector --> io.mazewall.enforcer.internal.supervisor.ProcFsInspector
+io.mazewall.enforcer.internal.supervisor.ProcProcessIdentityResolver .u.|> io.mazewall.enforcer.internal.supervisor.ProcessIdentityResolver
+io.mazewall.enforcer.internal.supervisor.SocketHelperMain --> io.mazewall.enforcer.internal.supervisor.SocketHelperMain
+io.mazewall.enforcer.internal.supervisor.SocketHelperOwner --> io.mazewall.enforcer.internal.supervisor.SocketHelperOwner
+io.mazewall.enforcer.internal.supervisor.SocketHelperPool --> io.mazewall.enforcer.internal.supervisor.SocketHelper
+io.mazewall.enforcer.internal.supervisor.SocketHelperProcess .u.|> io.mazewall.enforcer.internal.supervisor.SocketHelper
+io.mazewall.enforcer.internal.supervisor.SocketHelperProcess --> io.mazewall.enforcer.internal.supervisor.SocketHelperLifetime
+io.mazewall.enforcer.internal.supervisor.SocketHelperProtocol --> io.mazewall.enforcer.internal.supervisor.SocketHelperProtocol
+io.mazewall.enforcer.internal.supervisor.SocketHelperSlot .u.|> io.mazewall.enforcer.internal.supervisor.SocketHelper
+io.mazewall.enforcer.internal.supervisor.SocketHelperSlot --> io.mazewall.enforcer.internal.supervisor.SocketHelper
+io.mazewall.enforcer.internal.supervisor.SocketJobOutcome --> io.mazewall.enforcer.internal.supervisor.SocketHelperResult
+io.mazewall.enforcer.internal.supervisor.SocketJobOutcome --> io.mazewall.enforcer.internal.supervisor.SocketCleanup
+io.mazewall.enforcer.internal.supervisor.SpawnAuthorizationStore --> io.mazewall.enforcer.internal.supervisor.ProcessIdentity
+io.mazewall.enforcer.internal.supervisor.SupervisorArgumentExtractor --> io.mazewall.enforcer.internal.supervisor.SupervisorArgumentExtractor
+io.mazewall.enforcer.internal.supervisor.SupervisorDaemon --> io.mazewall.enforcer.internal.supervisor.SupervisorDaemon
+io.mazewall.enforcer.internal.supervisor.SupervisorDaemonEngine --> io.mazewall.enforcer.internal.supervisor.SupervisorAdmission
+io.mazewall.enforcer.internal.supervisor.SupervisorDaemonEngine --> io.mazewall.enforcer.internal.supervisor.SocketHelperPool
+io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
+io.mazewall.enforcer.internal.supervisor.SupervisorFastPath --> io.mazewall.enforcer.internal.supervisor.SupervisorFastPath
+io.mazewall.enforcer.internal.supervisor.SupervisorFastPathResolution --> io.mazewall.enforcer.internal.supervisor.SupervisorFastPathResolution
+io.mazewall.enforcer.internal.supervisor.SupervisorInstallationLifetime --> io.mazewall.enforcer.api.StacktraceScopingPolicy
+io.mazewall.enforcer.internal.supervisor.SupervisorInstallationLifetime --> io.mazewall.enforcer.internal.supervisor.SupervisorRuntimeContext
+io.mazewall.enforcer.internal.supervisor.SupervisorInstaller --> io.mazewall.enforcer.internal.supervisor.SupervisorInstallationLifetime
+io.mazewall.enforcer.internal.supervisor.SupervisorInstaller --> io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+io.mazewall.enforcer.internal.supervisor.SupervisorJvmVerdictResolver --> io.mazewall.enforcer.internal.supervisor.SupervisorJvmVerdictResolver
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine --> io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession --> io.mazewall.enforcer.internal.supervisor.JvmVerdictExchange
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession --> io.mazewall.enforcer.internal.supervisor.SupervisorAdmission
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession --> io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession --> io.mazewall.enforcer.internal.supervisor.SocketHelperPool
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession --> io.mazewall.enforcer.internal.supervisor.SupervisorRoutePreparation
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork --> io.mazewall.enforcer.internal.supervisor.JvmVerdictExchange
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyHandoff
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork --> io.mazewall.enforcer.internal.supervisor.SupervisorRouteDispatcher
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork --> io.mazewall.enforcer.internal.supervisor.PreparedSupervisorRoute
+io.mazewall.enforcer.internal.supervisor.SupervisorNotificationWork --> io.mazewall.enforcer.internal.supervisor.SupervisorRoutePreparation
+io.mazewall.enforcer.internal.supervisor.SupervisorReplyHandoff --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect
+io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter --> io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter
+io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter --> io.mazewall.enforcer.internal.supervisor.SupervisorExecRewriteExchange
+io.mazewall.enforcer.internal.supervisor.SupervisorRouteContext --> io.mazewall.enforcer.internal.supervisor.JvmVerdictRequest
+io.mazewall.enforcer.internal.supervisor.SupervisorRouteContext --> io.mazewall.enforcer.internal.supervisor.SyscallArguments
+io.mazewall.enforcer.internal.supervisor.SupervisorRouteDispatcher --> io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor
+io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.internal.supervisor.PoolSocketRouteExecutor
+io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.internal.supervisor.SecureExecRouteExecutor
+io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.internal.supervisor.OpenRouteExecutor
+io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor --> io.mazewall.enforcer.internal.supervisor.PoolOpenRouteExecutor
+io.mazewall.enforcer.internal.supervisor.SupervisorRuntimeContext --> io.mazewall.enforcer.internal.supervisor.ProcessIdentityResolver
+io.mazewall.enforcer.internal.supervisor.SupervisorRuntimeContext --> io.mazewall.enforcer.internal.supervisor.SpawnAuthorizationStore
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.JvmVerdictExchange
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.SupervisorRouteDispatcher
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.NotificationReader
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.SupervisorNotificationSession
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.internal.supervisor.SupervisorRoutePreparation
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionMachine --> io.mazewall.enforcer.internal.supervisor.SupervisorSessionMachine
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionTransition --> io.mazewall.enforcer.internal.supervisor.SupervisorSessionState
+io.mazewall.enforcer.internal.supervisor.SupervisorSessionTransition --> io.mazewall.enforcer.internal.supervisor.SupervisorSessionEffect
+io.mazewall.enforcer.internal.supervisor.SupervisorSocketHelpers --> io.mazewall.enforcer.internal.supervisor.SupervisorAdmission
+io.mazewall.enforcer.internal.supervisor.SupervisorSocketHelpers --> io.mazewall.enforcer.internal.supervisor.SupervisorSocketHelpers
+io.mazewall.enforcer.internal.supervisor.SupervisorSyscallResolver --> io.mazewall.enforcer.internal.supervisor.SupervisorSyscallResolver
+io.mazewall.enforcer.internal.supervisor.SupervisorValidationDecoder --> io.mazewall.enforcer.internal.supervisor.SupervisorValidationDecoder
+io.mazewall.enforcer.internal.supervisor.SyscallArguments --> io.mazewall.enforcer.internal.supervisor.OpenHow
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityDecision --> io.mazewall.enforcer.internal.supervisor.SupervisorRoute
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityDecisionMachine --> io.mazewall.enforcer.internal.supervisor.TraceeAuthorityDecisionMachine
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityExecution --> io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityExecution --> io.mazewall.enforcer.internal.supervisor.SyscallArguments
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityHelper --> io.mazewall.enforcer.internal.supervisor.TraceeAuthorityHelper
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityJob --> io.mazewall.enforcer.internal.supervisor.TraceeAuthoritySnapshot
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityJob --> io.mazewall.enforcer.internal.supervisor.TraceeAuthorityDecision
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityNotificationWork --> io.mazewall.enforcer.internal.supervisor.JvmVerdictRequest
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityNotificationWork --> io.mazewall.enforcer.internal.supervisor.JvmVerdictExchange
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityNotificationWork --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityNotificationWork --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyHandoff
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityNotificationWork --> io.mazewall.enforcer.internal.supervisor.TraceeAuthorityJob
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityNotificationWork --> io.mazewall.enforcer.internal.supervisor.SocketHelperResult
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityProtocol --> io.mazewall.enforcer.internal.supervisor.TraceeAuthorityProtocol
+io.mazewall.enforcer.internal.supervisor.TraceeAuthoritySnapshot --> io.mazewall.enforcer.internal.supervisor.SupervisorRoute
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityWorkFactory --> io.mazewall.enforcer.internal.supervisor.JvmVerdictExchange
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityWorkFactory --> io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter
+io.mazewall.enforcer.internal.supervisor.TraceeAuthorityWorkFactory --> io.mazewall.enforcer.internal.supervisor.SocketHelperPool
+io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority --> io.mazewall.enforcer.internal.supervisor.SupervisorOwnedFd
+io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority --> io.mazewall.enforcer.internal.supervisor.TraceeTaskIdentity
+io.mazewall.enforcer.internal.supervisor.TraceeReadOnlyNul --> io.mazewall.enforcer.internal.supervisor.TraceeReadOnlyNul
+io.mazewall.enforcer.internal.supervisor.TraceeTaskIdentity --> io.mazewall.enforcer.internal.supervisor.SupervisorOwnedFd
+io.mazewall.enforcer.internal.supervisor.ValidationListenerPreload --> io.mazewall.enforcer.internal.supervisor.ValidationListenerPreload
+io.mazewall.enforcer.internal.supervisor.ValidationLog --> io.mazewall.enforcer.internal.supervisor.ValidationLog
 io.mazewall.enforcer.state.ContainerState --> io.mazewall.seccomp.SeccompInstallationState
-io.mazewall.enforcer.state.ContainerState --> io.mazewall.PolicyDefinition
-io.mazewall.enforcer.state.ContainerState --> io.mazewall.core.SeccompAction
+io.mazewall.enforcer.state.ContainerState --> io.mazewall.enforcer.api.PolicyDefinition
 io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter --> io.mazewall.enforcer.state.ContainmentRegistryEffectInterpreter
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainerState
-io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.core.ThreadLocalDelegate
 io.mazewall.enforcer.state.ContainmentStateRegistry --> io.mazewall.enforcer.state.ContainmentStateRegistry
-io.mazewall.enforcer.supervisor.BypassPaths --> io.mazewall.enforcer.supervisor.BypassPaths
-io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy .u.|> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
-io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy
-io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy --> io.mazewall.core.Tid
-io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.core.FileDescriptor
-io.mazewall.enforcer.supervisor.JVMValidationListener --> io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
-io.mazewall.enforcer.supervisor.JvmStackInspector --> io.mazewall.enforcer.supervisor.JvmStackInspector
-io.mazewall.enforcer.supervisor.JvmVerdictRequest --> io.mazewall.enforcer.supervisor.NotifHeader
-io.mazewall.enforcer.supervisor.NotificationReader --> io.mazewall.NativeEngine
-io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.enforcer.supervisor.PendingSpawnRegistry
-io.mazewall.enforcer.supervisor.PendingSpawnRegistry --> io.mazewall.core.Tid
-io.mazewall.enforcer.supervisor.ProcFsInspector --> io.mazewall.enforcer.supervisor.ProcFsInspector
-io.mazewall.enforcer.supervisor.SupervisorArgumentExtractor --> io.mazewall.enforcer.supervisor.SupervisorArgumentExtractor
-io.mazewall.enforcer.supervisor.SupervisorDaemon --> io.mazewall.enforcer.supervisor.SupervisorDaemon
-io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.NativeEngine
-io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.FileDescriptor
-io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.core.SocketManager
-io.mazewall.enforcer.supervisor.SupervisorDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
-io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.NativeEngine
-io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.SocketManager
-io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.core.ProcessLauncher
-io.mazewall.enforcer.supervisor.SupervisorDaemonManager --> io.mazewall.enforcer.supervisor.SupervisorDaemonManager
-io.mazewall.enforcer.supervisor.SupervisorFastPath --> io.mazewall.enforcer.supervisor.SupervisorFastPath
-io.mazewall.enforcer.supervisor.SupervisorFastPathResolution --> io.mazewall.enforcer.supervisor.SupervisorFastPathResolution
-io.mazewall.enforcer.supervisor.SupervisorFdInjector --> io.mazewall.NativeEngine
-io.mazewall.enforcer.supervisor.SupervisorFdInjector --> io.mazewall.core.FileDescriptor
-io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.enforcer.supervisor.SupervisorInstaller
-io.mazewall.enforcer.supervisor.SupervisorInstaller --> io.mazewall.core.Tid
-io.mazewall.enforcer.supervisor.SupervisorJvmVerdictResolver --> io.mazewall.enforcer.supervisor.SupervisorJvmVerdictResolver
-io.mazewall.enforcer.supervisor.SupervisorNotificationMachine --> io.mazewall.enforcer.supervisor.SupervisorNotificationMachine
-io.mazewall.enforcer.supervisor.SupervisorResponseWriter --> io.mazewall.NativeEngine
-io.mazewall.enforcer.supervisor.SupervisorResponseWriter --> io.mazewall.core.FileDescriptor
-io.mazewall.enforcer.supervisor.SupervisorRouteContext --> io.mazewall.enforcer.supervisor.JvmVerdictRequest
-io.mazewall.enforcer.supervisor.SupervisorRouteContext --> io.mazewall.enforcer.supervisor.SyscallArguments
-io.mazewall.enforcer.supervisor.SupervisorRouteContext --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.enforcer.supervisor.SupervisorRouteDispatcher --> io.mazewall.enforcer.supervisor.SupervisorTerminalRoutes
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler .u.|> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.SocketManager
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.core.FileDescriptor
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.SupervisorFdInjector
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.SupervisorTerminalRoutes
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.NativeEngine
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.SupervisorRouteDispatcher
-io.mazewall.enforcer.supervisor.SupervisorSessionHandler --> io.mazewall.enforcer.supervisor.NotificationReader
-io.mazewall.enforcer.supervisor.SupervisorSessionMachine --> io.mazewall.enforcer.supervisor.SupervisorSessionMachine
-io.mazewall.enforcer.supervisor.SupervisorSessionTransition --> io.mazewall.enforcer.supervisor.SupervisorSessionEffect
-io.mazewall.enforcer.supervisor.SupervisorSessionTransition --> io.mazewall.enforcer.supervisor.SupervisorSessionState
-io.mazewall.enforcer.supervisor.SupervisorTerminalRoutes --> io.mazewall.enforcer.supervisor.SupervisorResponseSender
-io.mazewall.enforcer.supervisor.SyscallArguments --> io.mazewall.enforcer.supervisor.OpenHow
-io.mazewall.enforcer.supervisor.TraceeReadOnlyNul --> io.mazewall.enforcer.supervisor.TraceeReadOnlyNul
-io.mazewall.enforcer.supervisor.ValidationListenerPreload --> io.mazewall.enforcer.supervisor.ValidationListenerPreload
-io.mazewall.enforcer.supervisor.ValidationLog --> io.mazewall.enforcer.supervisor.ValidationLog
-io.mazewall.ffi.IoctlCommand <--> io.mazewall.ffi.IoctlCommand
-io.mazewall.ffi.IoctlCommand --> io.mazewall.ffi.TypedSegment
-io.mazewall.ffi.LayoutValidator --> io.mazewall.ffi.LayoutValidator
-io.mazewall.ffi.TypedSegment --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.ffi.internal.RealNativeEngine .u.|> io.mazewall.NativeEngine
-io.mazewall.ffi.internal.RealNativeEngine .u.|> io.mazewall.RawSyscallOperations
-io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.NativeProcess
-io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.NativeNetworking
-io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.NativeMemory
-io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.NativeFileSystem
-io.mazewall.ffi.internal.RealNativeEngine --> io.mazewall.ffi.internal.RealNativeEngine
-io.mazewall.ffi.internal.RealNativeFileSystem .u.|> io.mazewall.NativeFileSystem
-io.mazewall.ffi.internal.RealNativeFileSystem --> io.mazewall.ffi.internal.RealNativeFileSystem
-io.mazewall.ffi.internal.RealNativeHelper --> io.mazewall.ffi.internal.RealNativeHelper
-io.mazewall.ffi.internal.RealNativeMemory .u.|> io.mazewall.NativeMemory
-io.mazewall.ffi.internal.RealNativeMemory --> io.mazewall.ffi.internal.RealNativeMemory
-io.mazewall.ffi.internal.RealNativeNetworking .u.|> io.mazewall.NativeNetworking
-io.mazewall.ffi.internal.RealNativeNetworking --> io.mazewall.ffi.internal.RealNativeNetworking
-io.mazewall.ffi.internal.RealNativeProcess .u.|> io.mazewall.NativeProcess
-io.mazewall.ffi.internal.RealNativeProcess --> io.mazewall.ffi.internal.RealNativeProcess
-io.mazewall.ffi.internal.SyscallInvoker --> io.mazewall.ffi.internal.SyscallInvoker
-io.mazewall.ffi.memory.ConfinedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.ffi.memory.ErrnoSegment --> io.mazewall.core.ThreadLocalDelegate
-io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.ffi.memory.SegmentPool <--> io.mazewall.ffi.memory.SegmentPool
-io.mazewall.ffi.memory.SegmentPool --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.ffi.memory.SharedSegment .u.|> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.ffi.memory.SupervisorProcessMemoryReader .u.|> io.mazewall.ffi.memory.TraceeMemoryReader
-io.mazewall.ffi.memory.SupervisorProcessMemoryReader --> io.mazewall.ffi.memory.SupervisorProcessMemoryReader
-io.mazewall.ffi.memory.SupervisorProcessMemoryWriter --> io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
-io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.core.FileDescriptor
-io.mazewall.ffi.networking.NativeDescriptorInputStream --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.ffi.networking.SeccompConnection --> io.mazewall.core.SocketManager
-io.mazewall.ffi.networking.SeccompConnectionMachine --> io.mazewall.ffi.networking.SeccompConnectionMachine
-io.mazewall.ffi.networking.SeccompConnectionTransition --> io.mazewall.ffi.networking.SeccompConnectionEffect
-io.mazewall.ffi.networking.SeccompConnectionTransition --> io.mazewall.ffi.networking.SeccompConnection
-io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller --> io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
-io.mazewall.ffi.networking.SupervisorSocketInputStream -u-|> io.mazewall.ffi.networking.NativeDescriptorInputStream
-io.mazewall.ffi.networking.SupervisorSocketUtils --> io.mazewall.ffi.networking.SupervisorSocketUtils
-io.mazewall.ffi.networking.SupervisorValidationChannel --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.ffi.networking.SupervisorValidationChannel --> io.mazewall.core.FileDescriptor
-io.mazewall.ffi.supervisor.JvmVerdictRequestEncoder --> io.mazewall.ffi.supervisor.JvmVerdictRequestEncoder
 io.mazewall.landlock.Landlock --> io.mazewall.landlock.Landlock
+io.mazewall.landlock.LandlockCapabilityProbe --> io.mazewall.landlock.LandlockCapabilityProbe
 io.mazewall.landlock.LandlockInstall --> io.mazewall.landlock.LandlockInstall
 io.mazewall.landlock.LandlockInstallTransition --> io.mazewall.landlock.LandlockState
 io.mazewall.landlock.LandlockInstallTransition --> io.mazewall.landlock.LandlockInstallEffect
-io.mazewall.landlock.LandlockRuleset --> io.mazewall.core.FileDescriptor
 io.mazewall.landlock.LandlockSession --> io.mazewall.landlock.LandlockState
-io.mazewall.landlock.LandlockSession --> io.mazewall.PolicyDefinition
-io.mazewall.platform.daemon.UnixListenDaemonMachine --> io.mazewall.platform.daemon.UnixListenDaemonMachine
-io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonState
-io.mazewall.platform.daemon.UnixListenDaemonTransition --> io.mazewall.platform.daemon.UnixListenDaemonEffect
-io.mazewall.platform.seccomp.SeccompNotifications --> io.mazewall.platform.seccomp.SeccompNotifications
-io.mazewall.platform.seccomp.UserNotifReply --> io.mazewall.platform.seccomp.UserNotifReply
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.SocketManager
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.core.FileDescriptor
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.daemon.UnixListenDaemonState
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.RawSyscallOperations
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.NativeEngine
-io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine --> io.mazewall.platform.seccomp.daemon.SeccompDaemonMachine
-io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.ffi.memory.NativeArena
-io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.SocketManager
-io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.core.FileDescriptor
-io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
-io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.NativeEngine
-io.mazewall.platform.seccomp.daemon.SeccompSessionHandler --> io.mazewall.ffi.memory.ManagedSegment
-io.mazewall.sbob.BobDeserializer --> io.mazewall.sbob.BobDeserializer
-io.mazewall.sbob.PathNormalizer --> io.mazewall.sbob.PathNormalizer
-io.mazewall.sbob.PolicyTransformer --> io.mazewall.sbob.PolicyTransformer
+io.mazewall.landlock.LandlockSession --> io.mazewall.enforcer.api.PolicyDefinition
 io.mazewall.seccomp.BpfBuilder --> io.mazewall.seccomp.BpfMacro
 io.mazewall.seccomp.BpfProgram --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.seccomp.BpfSimulator --> io.mazewall.seccomp.BpfSimulator
@@ -2382,7 +1608,6 @@ io.mazewall.seccomp.BpfStaticVerifier --> io.mazewall.seccomp.BpfStaticVerifier
 io.mazewall.seccomp.Clone3Inspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.DefaultSyscallInspectionPipeline .u.|> io.mazewall.seccomp.SyscallInspectionPipeline
 io.mazewall.seccomp.DefaultSyscallInspectionPipeline --> io.mazewall.seccomp.SyscallInspector
-io.mazewall.seccomp.InspectionContext --> io.mazewall.core.SeccompAction
 io.mazewall.seccomp.InstallSelfVerifier --> io.mazewall.seccomp.InstallSelfVerifier
 io.mazewall.seccomp.InstallSelfVerifier --> io.mazewall.seccomp.BpfInstruction
 io.mazewall.seccomp.MmapExecInspector .u.|> io.mazewall.seccomp.SyscallInspector
@@ -2390,7 +1615,6 @@ io.mazewall.seccomp.PureJavaBpfEngine .u.|> io.mazewall.seccomp.SeccompEngine
 io.mazewall.seccomp.PureJavaBpfEngine --> io.mazewall.seccomp.PureJavaBpfEngine
 io.mazewall.seccomp.SocketAddressFamilyInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.SyscallInspection --> io.mazewall.seccomp.ArgCheck
-io.mazewall.seccomp.SyscallInspection --> io.mazewall.core.SeccompAction
 io.mazewall.seccomp.SyscallProbeMatrix --> io.mazewall.seccomp.SyscallProbeMatrix
 io.mazewall.seccomp.ThreadCloneInspector .u.|> io.mazewall.seccomp.SyscallInspector
 io.mazewall.seccomp.UnsafePrctlInspector .u.|> io.mazewall.seccomp.SyscallInspector

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_fixed_input_ring_decoder_diagnostic",
+  "date": "2026-09-18",
+  "decision": "do_not_optimize_event_argument_representation_further",
+  "decision_reason": "The isolated decoder is nanosecond-scale, whereas the live rootful ring-drain phase is microsecond-scale. The remaining live drain cost is therefore not explained by pure record scalar reads, immutable event construction, or argument-list representation.",
+  "provenance": {
+    "source_state": "uncommitted working tree",
+    "jvm": "openjdk version 25.0.4 2026-07-21",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu": "0",
+    "warmups": 3,
+    "samples_per_variant_per_fork": 10,
+    "iterations_per_sample": 1000000,
+    "rotated_forks": 5
+  },
+  "integrity": {
+    "samples_per_variant": 50,
+    "variant_checksums_identical": true,
+    "checksum": -8021398883427559424,
+    "terminal_success": true,
+    "policy_eligibility": false
+  },
+  "median_ns_per_operation": {
+    "direct_fixed_input_decoder": 23.199569,
+    "scalar_reads_only": 2.010989,
+    "immutable_event_construction_only": 5.604718
+  },
+  "interpretation": {
+    "component_values_additive": false,
+    "why_not": "The variants have different JIT and escape-analysis shapes and are diagnostic controls, not a causal decomposition.",
+    "supported_conclusion": "Even the complete fixed-input direct decoder is below 24 ns/op, so it cannot explain the previously observed microsecond-scale live ring-drain phase.",
+    "next_target": "Measure mapped-ring polling, callback dispatch, and collector scheduling as whole operations; retain legacy byte decoding as the default until a paired live-path result supports changing it."
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "not_measured",
+    "policy_eligibility": false,
+    "capture_domain_validity": "not_applicable",
+    "transport_completeness": "not_applicable",
+    "attribution_coverage": "not_applicable",
+    "dictionary_integrity": "not_applicable",
+    "lifecycle_validity": "not_applicable",
+    "runtime_overhead": "complete"
+  },
+  "raw_artifact": {
+    "path": "build/tier-e-ring-decoder-microbenchmark-20260918-retry/results.jsonl",
+    "sha256": "458ee41064649b70ee3d61e2d7f08a9c00afe9ec1f02223dee48753672e7b1a4"
+  }
+}

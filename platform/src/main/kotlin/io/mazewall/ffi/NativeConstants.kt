@@ -3,9 +3,10 @@ package io.mazewall.ffi
 /**
  * Centralized registry for all Linux kernel constants and system call numbers.
  */
-object NativeConstants {
+internal object NativeConstants {
     // Poll events
     const val POLLIN: Short = 1
+    const val POLLOUT: Short = 4
     const val POLLERR: Short = 8
     const val POLLHUP: Short = 16
     const val POLLNVAL: Short = 32
@@ -33,7 +34,7 @@ object NativeConstants {
     const val ARCH_SHSTK_ENABLE = 0x5001
     const val ARCH_SHSTK_DISABLE = 0x5002
     const val ARCH_SHSTK_LOCK = 0x5003
-    const val ARCH_SHSTK_STATUS = 0x5004
+    const val ARCH_SHSTK_STATUS = 0x5005
     const val ARCH_SHSTK_SHSTK = 0x1L
 
     // prctl sub-options
@@ -69,6 +70,9 @@ object NativeConstants {
 
     // Errors
     const val EPERM = 1
+    const val ESRCH = 3
+    const val ENAMETOOLONG = 36
+    const val EOVERFLOW = 75
     const val ENOENT = 2
     const val EACCES = 13
     const val EINTR = 4
@@ -81,26 +85,38 @@ object NativeConstants {
     const val ENOSYS = 38
     const val EFAULT = 14
     const val ETIMEDOUT = 110
+    const val EAGAIN = 11
 
     // File options
-    const val O_PATH = 0x01000000
+    const val O_PATH = 0x00200000
+    const val MSG_CMSG_CLOEXEC = 0x40000000
+    const val MSG_CTRUNC = 0x08
+    const val MSG_TRUNC = 0x20
     const val O_CLOEXEC = 0x00080000
     const val O_NOFOLLOW = 0x00020000
     const val O_RDONLY = 0
     const val O_DIRECTORY = 0x00010000
 
+    /** pidfd_open(2): acquire a pidfd for the exact thread rather than its thread-group leader. */
+    const val PIDFD_THREAD = 0x80
+
     /** openat2(2) RESOLVE_BENEATH: path must stay under dirfd. */
     const val RESOLVE_BENEATH = 0x08L
+    const val RESOLVE_IN_ROOT = 0x10L
     const val EXDEV = 18
     const val AT_FDCWD = -100
     const val AT_EMPTY_PATH = 0x1000
+    const val AT_SYMLINK_NOFOLLOW = 0x100
     const val F_DUPFD = 0
     const val F_DUPFD_CLOEXEC = 1030
 
     // fcntl(2) commands
     const val F_GETFD = 1
     const val F_SETFD = 2
+    const val F_GETFL = 3
+    const val F_SETFL = 4
     const val FD_CLOEXEC = 1
+    const val O_NONBLOCK = 0x800L
 
     // ptrace(2) on x86_64 (fail closed on other arches)
     const val SYS_PTRACE_X86_64 = 101L

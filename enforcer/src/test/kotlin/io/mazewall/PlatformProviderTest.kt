@@ -1,5 +1,12 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
@@ -93,5 +100,31 @@ class PlatformProviderTest {
         assertEquals(5, matrix.landlockAbiVersion)
         assertTrue(matrix.landlockSupported)
         assertFalse(matrix.landlockTsyncSupported) // Needs ABI 8
+    }
+
+    @Test
+    fun `legacy provider receives typed Landlock capability by default`() {
+        val legacyProvider = MockPlatformProvider().apply { mockLandlockAbiVersion = 7 }
+
+        assertEquals(KernelCapability.Available(7), legacyProvider.getLandlockCapability())
+
+        legacyProvider.mockLandlockAbiVersion = 0
+        assertEquals(KernelCapability.Unsupported, legacyProvider.getLandlockCapability())
+    }
+
+    @Test
+    fun `assessment uses cached typed capability instead of reconstructing it from ABI zero`() {
+        val provider =
+            object : MockPlatformProvider() {
+                override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Rejected(io.mazewall.ffi.NativeConstants.EPERM)
+            }
+        Platform.setProvider(provider)
+
+        assertEquals(0, Platform.featureMatrix.landlockAbiVersion)
+
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
+        val assessment = InstallationAssessor.assess(policy.definition, processWide = false)
+
+        assertContains(assessment.blockingReasons, "landlock capability rejected with errno 1")
     }
 }

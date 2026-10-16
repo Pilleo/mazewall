@@ -1,0 +1,90 @@
+package io.mazewall.profiler.api
+
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.profiler.tierE.daemon.ElfSymbolOffset
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Path
+import java.util.concurrent.TimeUnit
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+@NeedsFreshJvm
+class TierEDaemonNativeWorkflowIntegrationTest {
+    @Test
+    fun `daemon controls an agent loaded workload through attach detach and shutdown`() {
+        val agent = (System.getProperty("tier.e.agent") ?: System.getenv("TIER_E_AGENT_LIBRARY"))?.let(Path::of)
+        val workloadClasspath = System.getProperty("tier.e.workloadClasspath")
+            ?: System.getenv("TIER_E_WORKLOAD_CLASSPATH")
+        assumeTrue(agent != null && workloadClasspath != null, "rootful Tier E fixture environment is required")
+        requireNotNull(agent)
+        requireNotNull(workloadClasspath)
+
+        val java = Path.of(System.getProperty("java.home"), "bin", "java").toString()
+        val definitionRoot = Files.createTempDirectory("tier-e-daemon-workflow")
+        val socketPath = definitionRoot.resolve("control.sock")
+        val daemon = ProcessBuilder(
+            java,
+            "-cp",
+            System.getProperty("java.class.path"),
+            "io.mazewall.profiler.tierE.daemon.TierEKotlinDaemonMain",
+        ).redirectErrorStream(true)
+            .also { process ->
+            process.environment()["TIER_E_DEFINITION_ROOT"] = definitionRoot.toString()
+            process.environment()["TIER_E_SOCKET"] = socketPath.toString()
+        }.start()
+        val transcript = StringBuilder()
+        val daemonReader = daemon.inputStream.bufferedReader()
+        val firstLine = daemonReader.readLine() ?: error("daemon exited before announcing a port")
+        transcript.appendLine(firstLine)
+        val announcedSocket = Regex("listening socket=(\\S+)")
+            .find(firstLine)
+            ?.groupValues
+            ?.get(1)
+            ?: error("daemon did not announce a UNIX socket: $firstLine")
+        assertEquals(socketPath.toString(), announcedSocket)
+
+        val markerOffset = ElfSymbolOffset.resolve(agent, "mazewall_stack_marker")
+        val workload = ProcessBuilder(
+            java,
+            "-agentpath:$agent=definitions=$definitionRoot/tier-e-%p-%s.mzse,live-definitions,session=4d5a,mode=full-stream",
+            "-cp",
+            workloadClasspath,
+            "AgentWorkload",
+            "0",
+            "platform",
+            "20",
+            socketPath.toString(),
+            agent.toString(),
+            markerOffset.toString(16),
+            "4d5a",
+        ).redirectErrorStream(true).start()
+
+        val definitionFile = definitionRoot.resolve("tier-e-${workload.pid()}-4d5a.mzse")
+        try {
+            val workloadOutput = workload.inputStream.bufferedReader().readText()
+            val workloadStatus = workload.waitFor()
+            transcript.append(workloadOutput)
+            Files.createDirectories(Path.of("build/tier-e-evidence"))
+            Files.writeString(Path.of("build/tier-e-evidence/tier-e-daemon-native-workflow.txt"), transcript)
+
+            assertEquals(0, workloadStatus, workloadOutput)
+            assertTrue(workloadOutput.contains("tier-e-workflow: OK attached"), workloadOutput)
+            assertTrue(workloadOutput.contains("tier-e-workflow: OK engine=active"), workloadOutput)
+            assertTrue(workloadOutput.contains("tier-e-workflow: detached"), workloadOutput)
+            assertTrue(workloadOutput.contains("tier-e-workflow: shutdown"), workloadOutput)
+            assertTrue(Regex("stack-captures=[1-9][0-9]*").containsMatchIn(workloadOutput), workloadOutput)
+            assertTrue(
+                Files.readAllBytes(definitionFile).let { it.size > 40 && it.copyOfRange(0, 4).contentEquals(byteArrayOf('M'.code.toByte(), 'Z'.code.toByte(), 'S'.code.toByte(), 'E'.code.toByte())) },
+            )
+        } finally {
+            if (workload.isAlive) workload.destroyForcibly()
+            if (daemon.isAlive) daemon.destroyForcibly()
+            daemon.waitFor(5, TimeUnit.SECONDS)
+            Files.deleteIfExists(definitionFile)
+            Files.deleteIfExists(socketPath)
+            Files.deleteIfExists(definitionRoot)
+        }
+    }
+}

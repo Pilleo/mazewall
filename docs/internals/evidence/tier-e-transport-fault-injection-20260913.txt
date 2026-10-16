@@ -1,0 +1,29 @@
+Tier E transport and replay fault-injection evidence
+Date: 2026-09-13
+Commit: bd8b3966
+
+Command:
+./gradlew :profiler:test --tests '*DictionaryBatchPublisherTest' --tests '*InvocationReplayMachineTest'
+
+Result:
+BUILD SUCCESSFUL
+
+DictionaryBatchPublisherTest scenarios:
+- retry keeps the exact batch and watermark unchanged until commit
+- termination records an abandoned prepared batch without committing it
+- terminal sink failure preserves definitions and marks transport incomplete
+- partial write followed by reconnect replays identical bytes before commit
+- daemon crash before commit leaves an explicit incomplete abandoned batch
+- retry preserves the same opaque batch identity
+- ambiguous delivery is terminal and cannot be retried
+
+InvocationReplayMachineTest scenarios:
+- detach and exec invalidation require validated re-entry before exact attribution
+- pid reuse with new process epoch evicts stale state and resets attribution
+- sequence gap invalidates state and never resurrects an older invocation
+- supported native callback unsupported syscall is causal uncertain
+- inner capture failure in reentrant scope does not leave stale exact attribution
+
+The focused run exited successfully. This artifact covers transactional
+transport, dictionary integrity, attribution, and lifecycle behavior; capture
+domain and runtime overhead remain covered by separate Tier E artifacts.

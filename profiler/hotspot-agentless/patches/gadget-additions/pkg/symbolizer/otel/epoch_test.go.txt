@@ -1,0 +1,52 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"errors"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"testing"
+)
+
+func epochTask(id, epoch uint64) symbolizer.Task {
+	return symbolizer.Task{Tgid: 123, PidNumbers: []symbolizer.PidNumbers{{Pid: 456}}, CorrelationID: id, HotSpotIdentity: libpf.HotSpotIdentity{Epoch: epoch, State: libpf.HotSpotEpochStable}}
+}
+func TestHotSpotEpochRejectedDefinitionKeepsCapturedIdentity(t *testing.T) {
+	o := fixtureResolver()
+	c := libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable}
+	v := libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable, Err: &libpf.HotSpotEpochError{State: libpf.HotSpotEpochChanged}}
+	if e := o.storeEpochTrace(42, nil, 123, 456, c, v); e != nil {
+		t.Fatal(e)
+	}
+	_, e := o.ResolveStructured(context.Background(), epochTask(42, 2))
+	var epochErr *libpf.HotSpotEpochError
+	if !errors.As(e, &epochErr) || epochErr.State != libpf.HotSpotEpochChanged || errors.Is(e, symbolizer.ErrStackIdentityMismatch) {
+		t.Fatal("semantic rejection became identity conflict", e)
+	}
+}
+func TestHotSpotEpochHistoricalSnapshotAndConflicts(t *testing.T) {
+	o := fixtureResolver()
+	frames := fixtureFrames()
+	checked := libpf.HotSpotValidation{State: libpf.HotSpotValidationChecked}
+	if e := o.storeEpochTrace(42, frames, 123, 456, epochTask(42, 2).HotSpotIdentity, checked); e != nil {
+		t.Fatal(e)
+	}
+	if e := o.storeEpochTrace(43, frames, 123, 456, epochTask(43, 4).HotSpotIdentity, checked); e != nil {
+		t.Fatal(e)
+	}
+	r, e := o.ResolveStructured(context.Background(), epochTask(42, 2))
+	if e != nil || r.HotSpotIdentity.Epoch != 2 || len(r.Frames) != len(frames) {
+		t.Fatal("historical snapshot lost", r, e)
+	}
+	if e = o.storeEpochTrace(42, frames, 123, 456, epochTask(42, 4).HotSpotIdentity, checked); !errors.Is(e, symbolizer.ErrStackIdentityMismatch) {
+		t.Fatal("conflict overwrote identity", e)
+	}
+	if _, e = o.ResolveStructured(context.Background(), epochTask(42, 2)); e != nil {
+		t.Fatal("conflict corrupted historical result", e)
+	}
+	if _, e = o.ResolveStructured(context.Background(), epochTask(42, 4)); !errors.Is(e, symbolizer.ErrStackIdentityMismatch) {
+		t.Fatal("wrong event epoch accepted", e)
+	}
+}

@@ -1,24 +1,40 @@
 package io.mazewall.profiler.internal
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeFileSystem
-import io.mazewall.MockNativeNetworking
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeFileSystem
+import io.mazewall.enforcer.api.MockNativeNetworking
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.networking.SupervisorSocketUtils
-import org.junit.jupiter.api.AfterEach
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.testAcquisition
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class ProfilerSocketTest {
-    @AfterEach
-    fun tearDown() {
-        LinuxNative.resetToDefault()
+    @Test
+    fun `socket operations require an explicit native engine`() {
+        val methods = ProfilerSocket::class.java.declaredMethods
+            .filterNot { it.name.endsWith("\$default") }
+
+        assertFalse(
+            methods.any { it.name == "connectDescriptorWithRetry" && it.parameterCount == 3 },
+            "connection setup must not snapshot the process-global native engine",
+        )
+        assertFalse(
+            methods.any { it.name == "sendDescriptor" && it.parameterCount == 2 },
+            "descriptor sending must not snapshot the process-global native engine",
+        )
     }
 
     @Test
@@ -33,7 +49,7 @@ class ProfilerSocketTest {
                 protocol: Int,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 socketTypeArg = type
-                return LinuxNative.SyscallResult.Success(99L)
+                return LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(99L).testAcquisition()
             }
 
             override fun connect(
@@ -47,10 +63,8 @@ class ProfilerSocketTest {
         }
 
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
-        LinuxNative.setEngine(mockEngine)
-
-        val fd = ProfilerSocket.connectWithRetry("/tmp/test_profiler.sock", maxRetries = 1)
-        assertEquals(99, fd)
+        val fd = ProfilerSocket.connectDescriptorWithRetry("/tmp/test_profiler.sock", mockEngine, maxRetries = 1)
+        assertEquals(99, fd.value)
         assertTrue(connectCalled)
 
         val expectedType = SupervisorSocketUtils.SOCK_STREAM or io.mazewall.ffi.NativeConstants.SOCK_CLOEXEC
@@ -72,9 +86,7 @@ class ProfilerSocketTest {
         }
 
         val mockEngine = object : MockNativeEngine(networking = mockNetworking) {}
-        LinuxNative.setEngine(mockEngine)
-
-        val success = ProfilerSocket.sendDescriptor(10, 11)
+        val success = ProfilerSocket.sendDescriptor(10, 11, mockEngine)
         assertTrue(success)
         assertTrue(sendmsgCalled)
     }

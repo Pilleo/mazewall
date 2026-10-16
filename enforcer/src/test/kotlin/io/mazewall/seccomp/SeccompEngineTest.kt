@@ -1,7 +1,15 @@
 package io.mazewall.seccomp
-import io.mazewall.CompiledSandbox
-import io.mazewall.Policy
-import io.mazewall.compile
+
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.CompiledSandbox
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.compile
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -22,8 +30,8 @@ class SeccompEngineTest {
                 get() = true
         }
 
-        val emptyPolicy = Policy.builder().build()
-        val arch = io.mazewall.core.Arch
+        val emptyPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
+        val arch = io.mazewall.platform.syscall.Arch
             .current()
         val compiledSandbox = emptyPolicy.definition.compile(arch)
 

@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "calibration_target": "met",
+  "bootstrap_resamples": 10000,
+  "paired_unit": "fork median of ten measured batches",
+  "modes": {
+    "baseline": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 109658348.5,
+      "paired_fork_median_ratio_to_baseline": 1,
+      "paired_bootstrap_95pct_ratio": [
+        1,
+        1
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "dictionary-full-stream": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 120544781,
+      "paired_fork_median_ratio_to_baseline": 1.0925124587190245,
+      "paired_bootstrap_95pct_ratio": [
+        1.0731976658164941,
+        1.1592548387446833
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "dictionary-unique-edge": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 120891243,
+      "paired_fork_median_ratio_to_baseline": 1.1007396233888298,
+      "paired_bootstrap_95pct_ratio": [
+        1.0875257024791294,
+        1.1480533328640241
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "inline-full-stream": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 119884260.5,
+      "paired_fork_median_ratio_to_baseline": 1.0916036611403674,
+      "paired_bootstrap_95pct_ratio": [
+        1.0647843367399301,
+        1.2397867889558734
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "inline-unique-edge": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 125523442.5,
+      "paired_fork_median_ratio_to_baseline": 1.14203662099308,
+      "paired_bootstrap_95pct_ratio": [
+        1.0825420307616576,
+        1.8433524129644
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "user-notif-no-stack": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 178314305.5,
+      "paired_fork_median_ratio_to_baseline": 1.5345949878318421,
+      "paired_bootstrap_95pct_ratio": [
+        1.5166701986891373,
+        3.4629715893432094
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    },
+    "user-notif-stack": {
+      "fork_count": 5,
+      "complete_batch_forks": 5,
+      "measured_batch_median_ns": 171382218.5,
+      "paired_fork_median_ratio_to_baseline": 1.5480198170239114,
+      "paired_bootstrap_95pct_ratio": [
+        1.483419507066375,
+        2.386259226708916
+      ],
+      "runtime_overhead_verdict": "UNVERIFIED"
+    }
+  },
+  "policy_eligibility": false
+}

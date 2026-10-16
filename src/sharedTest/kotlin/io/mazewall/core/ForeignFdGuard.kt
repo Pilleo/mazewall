@@ -1,11 +1,13 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
 import org.junit.jupiter.api.extension.AfterEachCallback
 import org.junit.jupiter.api.extension.BeforeEachCallback
 import org.junit.jupiter.api.extension.ExtensionContext
 import org.junit.jupiter.api.extension.ExtensionContext.Namespace
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 
 /**
  * Fails any test that closes a file descriptor which already existed before the
@@ -25,9 +27,13 @@ import java.nio.file.Path
  * Disable temporarily with -Dmazewall.fdguard=off (diagnostics only - never to
  * make a failing test pass).
  */
-class ForeignFdGuard :
-    BeforeEachCallback,
+class ForeignFdGuard internal constructor(
+    private val inspectionRoot: Path,
+    private val readLink: (Path) -> Path,
+) : BeforeEachCallback,
     AfterEachCallback {
+    constructor() : this(Path.of("/proc/self/fd"), Files::readSymbolicLink)
+
     override fun beforeEach(context: ExtensionContext) {
         if (isDisabled()) return
         context.getStore(NAMESPACE).put(FD_KEY, currentFds())
@@ -59,33 +65,33 @@ class ForeignFdGuard :
     )
 
     private fun currentFds(): Set<FdInfo> =
-        Files.list(Path.of("/proc/self/fd")).use { stream ->
+        Files
+            .list(inspectionRoot)
+            .use { stream ->
+            val inspectionDirectory = "/proc/${ProcessHandle.current().pid()}/fd"
             stream
                 .map { p ->
                     val id = p.fileName.toString().toInt()
-                    // An FD may close at any point while /proc/self/fd is being
-                    // enumerated. Re-read the target below so only entries that
-                    // remain stable for the full snapshot can be audited.
-                    FdInfo(id, targetFor(p))
-                }.toList()
-                // The directory stream owns an fd pointing at this directory. It is
-                // necessarily closed when the snapshot completes, so it is not a
-                // descriptor the test could have closed.
-                .filter { fd ->
-                    fd.target != UNREADABLE_TARGET &&
-                        fd.target != SELF_FD_DIRECTORY_TARGET &&
-                        targetFor(Path.of("/proc/self/fd", fd.id.toString())) == fd.target
-                }.toSet()
-        }
+                    descriptorTarget(p)?.let { target -> FdInfo(id, target) }
+                }.filter { it != null && it.target != inspectionDirectory }
+                .toList()
+                .filterNotNull()
+        }.filter { fd -> descriptorTarget(inspectionRoot.resolve(fd.id.toString())) == fd.target }
+            .toSet()
 
-    private fun targetFor(path: Path): String = runCatching { Files.readSymbolicLink(path).toString() }.getOrNull() ?: UNREADABLE_TARGET
+    private fun descriptorTarget(path: Path): String? =
+        try {
+            readLink(path).toString()
+        } catch (_: NoSuchFileException) {
+            // An entry race is acceptable only while the inspection root is still present.
+            Files.readAttributes(inspectionRoot, BasicFileAttributes::class.java)
+            null
+        }
 
     private fun isDisabled(): Boolean = System.getProperty("mazewall.fdguard")?.lowercase() == "off"
 
     companion object {
         private val NAMESPACE = Namespace.create(ForeignFdGuard::class.java)
         private val FD_KEY = "fds"
-        private val SELF_FD_DIRECTORY_TARGET = "/proc/${ProcessHandle.current().pid()}/fd"
-        private const val UNREADABLE_TARGET = "<unreadable>"
     }
 }

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_clean_overhead_and_real_bpf_ring_control",
+  "run_date": "2026-09-19",
+  "method": "All record-loop timing is disabled. The comparator uses five rotated pinned JVM forks. The real-BPF control preserves admission, task storage, in-flight accounting, and diagnostic maps while omitting only ring reservation, payload construction, and submission; control evidence is intentionally UNVERIFIED and INCOMPLETE.",
+  "comparable_matrix": {
+    "command": "MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-comparable MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-comparable-clean-20260919",
+    "results_jsonl_sha256": "6acba0f6a599aa770801141ba2acc831c60ed6a6ccc53d43739c5ed5dc99c4e5",
+    "manifest_json_sha256": "73b158107d21134a8c564b392305ea3670212d755730228563258a4e0ba2e7b9",
+    "paired_added_workload_ns_per_100_operations": {
+      "dictionary_full_stream": {
+        "median": 1723375,
+        "bootstrap_95_ci": [1607186, 2204913]
+      },
+      "dictionary_unique_edge": {
+        "median": 1700312,
+        "bootstrap_95_ci": [1615390, 1740122]
+      },
+      "user_notif_no_stack": {
+        "median": 32009940,
+        "bootstrap_95_ci": [29981465, 39610359]
+      },
+      "user_notif": {
+        "median": 37693190,
+        "bootstrap_95_ci": [36024946, 38852189]
+      }
+    },
+    "correctness": "All profiled forks PASS and COMPLETE with zero missing, wrong, and lost operations."
+  },
+  "real_bpf_ring_control": {
+    "command": "MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock MAZEWALL_TIER_E_DOCKER_IMAGE=mazewall-tier-e-rootful:perf-20260918-usdt MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-ring-submission-control MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-ring-submission-control-clean-20260919",
+    "results_jsonl_sha256": "9be802928fdd92c79b1bc240754bbe972ac88db3845470bfcf70e77e22fe2f05",
+    "manifest_json_sha256": "6b74114327d32cd9c42c6dad24a95360d60234ae05ed1350420a8faabe840c0d",
+    "enabled_minus_disabled_median_ns_per_ready_record": {
+      "dictionary_full_stream": {
+        "ready_records_per_fork": 3900,
+        "whole_drain": 10538,
+        "collector_join": 8482
+      },
+      "dictionary_unique_edge": {
+        "ready_records_per_fork": 3900,
+        "whole_drain": 9604,
+        "collector_join": 6656
+      }
+    },
+    "correctness": "Every enabled fork PASS and COMPLETE. Every disabled control is intentionally UNVERIFIED and INCOMPLETE with zero retained syscall observations."
+  },
+  "interpretation": {
+    "stable_overhead_intervals": "The five-pair workload intervals for both dictionary modes exclude zero on this host.",
+    "not_ready_to_claim": "Ring delivery and collector join remain material relative to previously retained exact stack-capture measurements. The result does not support claiming that remaining overhead is solely unavoidable exact stack walking.",
+    "publication_and_locking": "Prior clean evidence continues to show dictionary serialization and lock wait are not material on this host.",
+    "policy_eligibility": false
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "PASS for enabled arms",
+    "transport_completeness": "PASS for enabled arms; INCOMPLETE by construction for controls",
+    "attribution_coverage": "PASS for enabled arms; UNVERIFIED for controls",
+    "dictionary_integrity": "PASS for enabled arms",
+    "lifecycle_validity": "PASS for enabled arms",
+    "runtime_overhead": "host-specific complete paired measurements",
+    "policy_eligibility": false
+  }
+}

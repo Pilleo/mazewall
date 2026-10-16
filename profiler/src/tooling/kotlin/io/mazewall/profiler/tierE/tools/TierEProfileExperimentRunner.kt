@@ -1,0 +1,135 @@
+package io.mazewall.profiler.tierE.tools
+
+import io.mazewall.testing.containers.ContainerEndpoint
+import java.nio.file.Path
+
+/** Profile-selected experiments; the ambient environment supplies only the local engine endpoint. */
+public object TierEProfileExperimentRunner {
+    public fun stageSettings(
+        base: TierETrustworthySettings,
+        schedule: TierESustainedCapacitySettings,
+        stage: TierESustainedCapacitySettings.Stage,
+        shadow: Boolean,
+    ): TierETrustworthySettings =
+        base.copy(
+            runLevel = "custom",
+            scope = "tier-e-sustained-collector",
+            sustainedRate = stage.rate,
+            sustainedLoad = schedule.load,
+            receiptClock = schedule.receiptClock,
+            calibration = false,
+            iterations = schedule.iterations,
+            warmups = schedule.warmups,
+            batches = stage.batches,
+            forks = stage.forks,
+            benchmarkJavaOptions = listOfNotNull(
+                base.benchmarkJavaOptions.takeIf(String::isNotBlank),
+                "-Dmazewall.tier-e.benchmark-max-retained-records=${stage.maxRetainedRecords}",
+                "-Dmazewall.tier-e.benchmark-strace-output=/artifacts/strace-shadow.log".takeIf { shadow },
+            ).joinToString(" "),
+        )
+
+    public fun run(
+        profile: TierEExperimentProfile,
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+    ) {
+        runPrepared(profile, root, output, endpoint, null)
+    }
+
+    public fun runWithNativePackage(
+        profile: TierEExperimentProfile,
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        nativePackage: Path,
+    ) {
+        runPrepared(profile, root, output, endpoint, nativePackage)
+    }
+
+    private fun runPrepared(
+        profile: TierEExperimentProfile,
+        root: Path,
+        output: Path,
+        endpoint: ContainerEndpoint,
+        nativePackage: Path?,
+    ) {
+        val cpus = profile.cpuSet
+        cpus?.let { selected ->
+            val noisy = profile.kind == "node-noise" || profile.kind == "capacity" && profile.capacity?.runNodeNoiseProbe == true
+            TierEAllowedCpuVerifier.requireAvailable(if (noisy) "$selected,${profile.nodeNoise.cpu}" else selected)
+        }
+
+        fun runTrustworthy(
+            settings: TierETrustworthySettings,
+            artifact: Path,
+        ) {
+            if (nativePackage == null) {
+                TierETrustworthyRunner.run(settings, endpoint, root, artifact, profile.image, cpus)
+            } else {
+                TierETrustworthyRunner.runWithNativePackage(settings, endpoint, root, artifact, profile.image, cpus, nativePackage)
+            }
+        }
+
+        fun runNoise(
+            settings: TierETrustworthySettings,
+            artifact: Path,
+            requestedCpus: String,
+        ) {
+            if (nativePackage == null) {
+                TierENodeNoiseProbe.run(
+                    root,
+                    artifact,
+                    endpoint,
+                    profile.image,
+                profile.nodeNoise.runs,
+                    profile.nodeNoise.durationSeconds,
+                    profile.nodeNoise.cpu,
+                    settings,
+                    requestedCpus,
+                )
+            } else {
+                TierENodeNoiseProbe.runWithNativePackage(
+                    root,
+                    artifact,
+                    endpoint,
+                    profile.image,
+                profile.nodeNoise.runs,
+                    profile.nodeNoise.durationSeconds,
+                    profile.nodeNoise.cpu,
+                    settings,
+                    requestedCpus,
+                    nativePackage,
+                )
+            }
+        }
+        when (profile.kind) {
+            "trustworthy" -> runTrustworthy(profile.trustworthy, output)
+            "node-noise" -> runNoise(profile.trustworthy, output, cpus ?: System.getenv("MAZEWALL_TIER_E_BENCHMARK_CPUS") ?: "0,1")
+            "capacity" -> {
+                requireNotNull(cpus) { "Capacity profile requires explicit workload and collector CPUs" }
+                val schedule = requireNotNull(profile.capacity)
+                TierESustainedCapacityRunner.run(schedule, output, root, nodeNoise = { destination ->
+                    val target = profile.trustworthy.copy(
+                        runLevel = "custom",
+                        scope = "tier-e-sustained-collector",
+                        workload = "syscall_dense",
+                        sustainedLoad = "near_capacity",
+                        sustainedRate = 1000,
+                        iterations = 10000,
+                        warmups = 0,
+                        batches = 1,
+                        forks = 1,
+                        calibration = false,
+                        benchmarkJavaOptions = "-Dmazewall.tier-e.attachment-ready-file=/artifacts/attachment-ready",
+                    )
+                    runNoise(target, destination, cpus)
+                }) { stage, artifact, shadow ->
+                    runTrustworthy(stageSettings(profile.trustworthy, schedule, stage, shadow), artifact)
+                }
+            }
+            else -> error("Unknown experiment kind: ${profile.kind}")
+        }
+    }
+}

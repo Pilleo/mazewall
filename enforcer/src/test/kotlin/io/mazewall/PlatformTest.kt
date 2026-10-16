@@ -1,5 +1,12 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
 import kotlin.test.assertEquals
@@ -81,8 +88,8 @@ class PlatformTest {
 
             override fun getSeccompMode(): SeccompMode = SeccompMode.Disabled
 
-            override fun checkSeccompSanity(): io.mazewall.LinuxNative.SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> =
-                io.mazewall.LinuxNative.SyscallResult
+            override fun checkSeccompSanity(): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled> =
+                io.mazewall.platform.native.LinuxNative.SyscallResult
                 .Error(38, -1)
 
             override fun isNoNewPrivsEnabled(): Boolean = false

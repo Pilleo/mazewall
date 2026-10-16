@@ -67,47 +67,90 @@ dependencies {
 
 - Linux only. Record the exact kernel, Landlock ABI, JDK, container runtime, and outer Seccomp profile used for testing.
 - Install the process-wide baseline before framework or application thread pools start. It is irreversible for the life of the process.
-- Use a dedicated **platform-thread** executor for contained work. Do not wrap `ForkJoinPool.commonPool()`, framework-managed pools, or an executor reused for unrelated work: kernel restrictions remain on its workers.
+- Use `ManagedRuntime` to own dedicated **platform-thread** workers and require installation before admission. Kernel restrictions remain on living workers; unrelated pools and late callbacks are outside this contract.
 - Thread-scoped restrictions protect trusted code handling untrusted data. They do not isolate arbitrary hostile Java code, existing file descriptors, shared JVM memory, or unrestricted sibling threads.
 - Validate every policy against representative normal, error, lazy-loading, and dependency-upgrade workloads. Profiler output is a candidate policy, not proof of future behavior.
 
 ## Quick Start: Your First Evaluation
 
-### Step 1 — Install a process-wide exec baseline at startup
+### Step 1 — Choose the process baseline at trusted bootstrap
 
-This prevents the JVM process from creating a child process after installation, including from an uncontained thread. Install it only after confirming that your application does not need later process creation or dynamic native-agent loading.
-
-```kotlin
-// Call once, early in main() / Application.run(), before application thread pools exist.
-ContainedExecutors.installOnProcess(
-    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
-)
-```
+The example below is for an application that needs no later child processes or
+dynamic native-agent loading. Its baseline prevents process creation even from an
+uncontained sibling thread. A host that launches or replaces Portal workers must
+instead choose an explicit launch-compatible baseline. Starting a worker once does
+not preserve permission to replace it later. Do not silently weaken the baseline.
 
 > [!IMPORTANT]
 > Once installed, the filter applies to current and future threads in the process and cannot be removed.
 
-### Step 2 — Restrict a dedicated worker pool
+### Step 2 — Prepare owned workers and call a synchronous body
 
+<!-- consumer: getting-started-owned -->
 ```kotlin
-import io.mazewall.enforcer.api.ContainedExecutors
-import io.mazewall.Policy
-import io.mazewall.ProcessPolicies
-import io.mazewall.RuntimeProfile
-import java.util.concurrent.Executors
+import io.mazewall.enforcer.api.Mazewall
+import io.mazewall.enforcer.api.ProcessPolicies
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.DrainReport
+import io.mazewall.enforcer.api.execution.InProcessDomain
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+import java.time.Duration
+import java.util.concurrent.Callable
 
-val sandboxed = ContainedExecutors.wrap(
-    Executors.newFixedThreadPool(4),
-    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
-    // or Policy.NO_EXEC_HOTSPOT — same filters; use NATIVE_IMAGE / Policy.NO_EXEC for W^X
+// The application lifecycle owner retains this runtime before preparing workers.
+fun bootstrapEvaluationRuntime(): ManagedRuntime = ManagedRuntime.open(
+    RuntimeProfile.HOTSPOT_JIT,
+    ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT),
+    Duration.ofSeconds(10),
+    Duration.ofSeconds(10),
 )
 
-// Everything submitted to this pool runs under the kernel-enforced policy.
-sandboxed.submit {
-    processUntrustedInput(payload)
-    // Configured process-creation syscalls are denied on this worker.
+fun prepareEvaluation(runtime: ManagedRuntime): InProcessDomain = runtime.prepare(
+    WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(),
+    DomainLimits(workers = 4, maxAdmissions = 64),
+)
+
+fun evaluate(
+    runtime: ManagedRuntime,
+    domain: InProcessDomain,
+    workload: Callable<String>,
+): String = Mazewall.callContained(runtime, domain, workload)
+
+// Called by the lifecycle owner at shutdown, not by evaluate().
+fun drainEvaluation(runtime: ManagedRuntime): DrainReport {
+    val report = runtime.drain(Duration.ofSeconds(10))
+    when (report) {
+        is DrainReport.Complete -> println("Retirement complete")
+        is DrainReport.Incomplete -> System.err.println("Retirement incomplete: $report")
+    }
+    return report // the owner keeps runtime reachable until Complete
 }
 ```
+
+During trusted platform-thread bootstrap, the application lifecycle owner calls
+`bootstrapEvaluationRuntime()` once and stores its returned runtime **before**
+calling `prepareEvaluation(runtime)`. It also retains the prepared domain and passes
+both owners into each `evaluate(...)` call. A preparation failure or interrupted
+evaluation does not discard or close that retained runtime. Every worker must
+install required restrictions before readiness. Admission includes queued and running
+invocations; overload rejects without executing on the caller. Four workers and 64
+admissions are illustrative, not benchmark-derived defaults. Supported bodies return
+materialized values; lazy results, independent executors and completion observers
+are outside the protected synchronous body.
+
+`runtime.submit(domain, Callable { ... })` returns a handle with separate `result()`
+and `executionEnd()` stages. Timing out while waiting does not terminate Java code.
+Request cooperative cancellation via `requestCancellation()` and retain the owner
+until physical execution/cleanup ends. `drain(timeout)` stops admission and reports
+complete or incomplete retirement; bounded `close()` throws `IncompleteDrainException`
+if it cannot finish. Neither close nor a finished invocation removes kernel filters.
+At application shutdown, call `drainEvaluation` from outside its owned workers.
+On `Incomplete`, keep the same runtime reachable and report the unfinished work;
+retry drain through the lifecycle owner after work/cleanup can finish. If using
+`close()` instead, an `IncompleteDrainException` likewise leaves that owner retained.
+Caller interruption and exceptional result delivery are not physical-end evidence.
 
 ---
 
@@ -117,16 +160,21 @@ sandboxed.submit {
 
 ### Recipe 1 — Data parser that reads files but never touches the network
 
+<!-- consumer: getting-started-parser -->
 ```kotlin
-val policy = Policy.builder()
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+
+fun prepareParser(runtime: ManagedRuntime) = runtime.prepare(
+    WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
     .base(Policy.NO_NETWORK)
     .allowFsRead("/data/incoming")   // explicit allow; everything else is denied by Landlock
     .allowJvmClasspath()             // required if your parser lazily loads classes
-    .build()
-
-val parserPool = ContainedExecutors.wrap(
-    Executors.newFixedThreadPool(2),
-    policy
+    .build(),
+    DomainLimits(workers = 2, maxAdmissions = 16),
 )
 ```
 
@@ -134,45 +182,64 @@ val parserPool = ContainedExecutors.wrap(
 
 These workers shouldn't touch the network, spawn processes, or write to arbitrary paths.
 
+Use this recipe only in a runtime bootstrapped with `NATIVE_IMAGE`; executable
+mapping denial is not safe merely because work runs on one HotSpot worker.
+
+<!-- consumer: getting-started-compute -->
 ```kotlin
-val policy = Policy.builder()
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+
+fun prepareCompute(runtime: ManagedRuntime) = runtime.prepare(
+    WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
     .base(Policy.PURE_COMPUTE)       // blocks exec + network + filesystem writes + mmap(PROT_EXEC)
     .allowFsRead("/models")          // model weights
     .allowFsWrite("/tmp/inference")  // scratch space only
-    .build()
-
-val workerPool = ContainedExecutors.wrap(
-    Executors.newFixedThreadPool(8),
-    policy
+    .build(),
+    DomainLimits(workers = 8, maxAdmissions = 32),
 )
 ```
 
-### Recipe 3 — Proving behavioral constraints for regulated data (PCI, HIPAA)
+### Recipe 3 — Restricting a reviewed data-processing operation
 
+<!-- consumer: getting-started-data -->
 ```kotlin
-val policy = Policy.builder()
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.execution.DomainLimits
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+
+fun prepareDataOperation(runtime: ManagedRuntime) = runtime.prepare(
+    WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
     .base(Policy.PURE_COMPUTE_UNSAFE)
+    .forRuntime(RuntimeProfile.HOTSPOT_JIT)
     .allowFsRead("/secure/input")
     .allowFsWrite("/secure/output")
+    .allowJvmClasspath()
     // No .allowNetwork() → connect/sendmsg are blocked at kernel level
-    .build()
-
-val auditedPool = ContainedExecutors.wrap(
-    Executors.newFixedThreadPool(2), // dedicated; do not reuse outside this scope
-    policy,
+    .build(),
+    DomainLimits(workers = 2, maxAdmissions = 16),
 )
-
-// Any ContainmentViolationException from this pool is observable proof
-// that the declared behavioral constraints were violated — enforced by the kernel,
-// not by application code that an attacker could bypass.
 ```
+
+An exception class alone is not confirmed kernel-denial evidence or regulatory
+certification. Preserve observed versus inferred diagnostics and the original cause.
 
 ---
 
 ## Building a Custom Policy
 
+<!-- consumer: getting-started-custom -->
 ```kotlin
-val policy = Policy.builder()
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+
+fun customPolicy() = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
     // Start from a built-in base
     .base(Policy.NO_EXEC_HOTSPOT)
 
@@ -183,7 +250,7 @@ val policy = Policy.builder()
 
     // Fine-grained syscall control (advanced — see enforcer/README.md)
     // .allowMmapExec()         // needed if the pool runs a JIT-compiled native agent
-    // .allowCloneFork()        // needed for libraries that fork subprocesses
+    // .allowNonThreadClone(true) // advanced: permits non-thread clone; review process creation separately
 
     .build()
 ```
@@ -226,30 +293,27 @@ Tests that interact with the Linux kernel require specific capabilities and a cu
 
 ## Debugging Containment Violations
 
-If a sandboxed thread attempts an unauthorized operation, the Linux kernel intercepts it and blocks execution. The JVM then raises an exception:
-
-```
-io.mazewall.ContainmentViolationException: Containment violation detected: blocked syscall execve (59)
-```
+Kernel-denied operations often surface as ordinary Java I/O failures. ERRNO-mode
+Seccomp does not automatically supply the blocked syscall number to the JVM.
+`EPERM`/`EACCES` and `AccessDeniedException` can also come from DAC, another LSM,
+or an outer container policy. Such permission failures are inferred, not confirmed
+MazeWall denials. An observed supervised event can identify the intercepted operation;
+keep that evidence distinct from exception-based inference and preserve causes.
 
 ### How to resolve violations:
-1. **Identify the missing capability:** The exception message tells you exactly which system call was blocked. If Landlock blocks a file read or write, standard Java I/O will throw an `AccessDeniedException`.
+1. **Inspect evidence and causes:** Use observed event diagnostics where available; do not infer an exact syscall or enforcing layer from a generic permission exception. Unobserved swallowed kernel errors cannot be recovered from invocation evidence.
 2. **Auto-generate a policy:** Rather than guessing which syscalls or paths to whitelist, run your target workload under the `:profiler` inside a unit test:
-   ```kotlin
-   val result = Profiler.profile {
-       // Run the code that failed here
-   }
-   // toDsl() throws if exec/connect destinations were observed but cannot be enforced.
-   // Pass allowIncomplete=true if you cannot enforce all destinations (e.g., dynamic exec).
-   println(result.behavior.toDsl(allowIncomplete = true)) // Prints the exact Policy builder code needed!
-   ```
+   Follow the [coverage-preserving profiler recipe](profiler/README.md#quick-start).
+   Export through `result.toDsl(...)`, `result.toPolicy(...)` and
+   `result.toProfileDocumentJson()` so measured coverage is retained. Incomplete
+   coverage refuses conversion; profiling is candidate discovery, not review approval.
 
 ---
 
 ## Known Limitations
 
 - **Thread-scope vs Process-scope Isolation**: Thread-scoped restrictions do not isolate arbitrary hostile Java code. Attackers can hop to unrestricted executors, and all JVM threads share heap and address-space state. Existing socket file descriptors may remain usable through generic I/O calls. Combine with a process-wide `NO_EXEC` baseline (Tier 1) and external process/container isolation where that threat model requires it. See [designs/core/security-considerations.md](docs/internals/designs/core/security-considerations.md) for the full threat model.
-- **JIT Compiler Coexistence**: The background threads that run JVM JIT compilation are unconstrained by thread-scoped policies. Therefore, thread-local executors wrapped with `Policy.NO_EXEC` or `Policy.PURE_COMPUTE` will *not* trigger JIT compiler `mmap(PROT_EXEC)` failures. However, if you apply a process-wide lockdown, use `Policy.NO_EXEC_HOTSPOT` (or append `.allowMmapExec()`) if JIT compilation is still active. Raw `Policy.NO_EXEC` denies `PROT_EXEC` mappings and can crash HotSpot.
+- **JIT Compiler Coexistence**: Unrestricted background compiler threads do not prove every executable-mapping request stays off a contained worker. Lazy/native/runtime work and inherited restrictions matter. Select `HOTSPOT_JIT` for HotSpot policies before restrictive composition and validate post-install workloads. `NO_EXEC`/`PURE_COMPUTE` deny executable mappings and are not unconditionally safe even thread-locally on HotSpot.
 - **Platform threads only**: Virtual threads (Loom) are explicitly rejected at runtime. Use platform thread pools for sandboxed work.
 - **Linux only**: macOS and Windows do not have Seccomp-BPF or Landlock. The library will fail to install and throw (configurable via the `IO_MAZEWALL_FALLBACK` env var).
 - **Policy coverage is empirical**: The profiler can record only the workload it sees. Re-run policy validation when input classes, error paths, native dependencies, the JVM, kernel, or deployment configuration changes.

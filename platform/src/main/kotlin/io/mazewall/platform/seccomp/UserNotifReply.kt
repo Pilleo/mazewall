@@ -1,12 +1,5 @@
 package io.mazewall.platform.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.MazewallInternal
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
 import io.mazewall.ffi.IoctlCommand
 import io.mazewall.ffi.IoctlPayload
 import io.mazewall.ffi.Layouts
@@ -16,10 +9,30 @@ import io.mazewall.ffi.memory.fill
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.typed
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.MazewallInternal
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.RawSyscallOperations
+
+/** The terminal outcome of one SECCOMP_IOCTL_NOTIF_SEND attempt. */
+@MazewallInternal
+internal sealed interface UserNotifReplyResult {
+    public data object Sent : UserNotifReplyResult
+
+    public data object NotificationGone : UserNotifReplyResult
+
+    public data class Failed(
+        public val errno: Int,
+    ) : UserNotifReplyResult
+}
 
 /** Shared USER_NOTIF reply layout used by supervisor, profiler, and the daemon reactor. */
 @MazewallInternal
-public object UserNotifReply {
+internal object UserNotifReply {
     public fun encodeContinue(
         resp: ManagedSegment,
         id: Long,
@@ -62,17 +75,24 @@ public object UserNotifReply {
         raw: RawSyscallOperations,
         listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership>,
         resp: ManagedSegment,
-    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        while (true) {
+        maxAttempts: Int = 8,
+    ): UserNotifReplyResult {
+        require(maxAttempts > 0)
+        repeat(maxAttempts) {
             val res = raw.ioctl(
                 listenerFd,
                 IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND,
                 resp.typed<IoctlPayload.SeccompNotifResp>(),
             )
             if (res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EINTR) {
-                continue
+                return@repeat
             }
-            return res
+            return when (res) {
+                is LinuxNative.SyscallResult.Success -> UserNotifReplyResult.Sent
+                is LinuxNative.SyscallResult.Error ->
+                    if (res.errno == NativeConstants.ENOENT) UserNotifReplyResult.NotificationGone else UserNotifReplyResult.Failed(res.errno)
+            }
         }
+        return UserNotifReplyResult.Failed(NativeConstants.EINTR)
     }
 }

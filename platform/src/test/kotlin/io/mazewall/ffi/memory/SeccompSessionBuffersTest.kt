@@ -1,0 +1,39 @@
+package io.mazewall.ffi.memory
+
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import org.junit.jupiter.api.Test
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+
+class SeccompSessionBuffersTest {
+    @Test
+    fun `failed response rental returns notification lease`() {
+        SegmentPool.owned(80L, poolSize = 1).use { notif ->
+            val resp = SegmentPool.owned(24L, poolSize = 1)
+            resp.close()
+            assertFailsWith<IllegalStateException> { SeccompSessionBuffers.acquire(notif, resp) }
+            // Closing succeeds only if the partially acquired notification lease was returned.
+            notif.close()
+        }
+    }
+
+    @Test
+    fun `session releases both rentals and its confined arena`() {
+        SegmentPool.owned(80L).use { notif ->
+            SegmentPool.owned(24L).use { resp ->
+                SeccompSessionBuffers.acquire(notif, resp).use { buffers ->
+                    assertFalse(buffers.isClosed)
+                }
+                notif.close()
+                resp.close()
+            }
+        }
+    }
+}

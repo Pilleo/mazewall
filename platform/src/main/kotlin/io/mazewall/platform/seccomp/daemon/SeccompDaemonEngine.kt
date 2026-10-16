@@ -1,14 +1,5 @@
 package io.mazewall.platform.seccomp.daemon
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.RawSyscallOperations
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -19,23 +10,69 @@ import io.mazewall.ffi.networking.SeccompConnection
 import io.mazewall.ffi.networking.SeccompConnectionEffect
 import io.mazewall.ffi.networking.SeccompConnectionEvent
 import io.mazewall.ffi.networking.SeccompConnectionMachine
+import io.mazewall.ffi.networking.SeccompConnectionOutcome
 import io.mazewall.platform.daemon.UnixListenDaemonEffect
 import io.mazewall.platform.daemon.UnixListenDaemonEvent
 import io.mazewall.platform.daemon.UnixListenDaemonMachine
+import io.mazewall.platform.daemon.UnixListenDaemonOutcome
 import io.mazewall.platform.daemon.UnixListenDaemonState
 import io.mazewall.platform.daemon.UnixListenDaemonTransition
-import io.mazewall.recover
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Deadline
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.native.recover
+import io.mazewall.platform.socket.NativeCloseFailure
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
+import java.util.Collections
+import java.util.IdentityHashMap
+import java.util.concurrent.CancellationException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
+/** Result of the bounded daemon handshake acknowledgement write. */
+internal sealed interface HandshakeWriteOutcome {
+    data object Sent : HandshakeWriteOutcome
+
+    /** The socket was not writable; the reactor must poll before trying again. */
+    data object RetryAfterPoll : HandshakeWriteOutcome
+
+    data object TimedOut : HandshakeWriteOutcome
+
+    data class Failed(
+        val errno: Int,
+    ) : HandshakeWriteOutcome
+}
+
+/** Deadlines follow connection objects, never recyclable integer descriptor values. */
+internal class HandshakeDeadlineRegistry {
+    private val deadlines = Collections.synchronizedMap(IdentityHashMap<SeccompConnection, Deadline>())
+
+    fun getOrCreate(
+        connection: SeccompConnection,
+        create: () -> Deadline,
+    ): Deadline = synchronized(deadlines) { deadlines[connection] ?: create().also { deadlines[connection] = it } }
+
+    fun remove(connection: SeccompConnection): Deadline? = deadlines.remove(connection)
+
+    val size: Int get() = deadlines.size
+}
+
 /**
  * Unified daemon engine for handling seccomp user notification UNIX server, client connections,
  * handshake protocol, and session reactors.
  */
-public class SeccompDaemonEngine(
+internal class SeccompDaemonEngine(
     private val socketPath: String,
     private val readySentinel: String = "MAZEWALL_DAEMON_READY",
     private val notifHandlerFactory: (
@@ -69,6 +106,22 @@ public class SeccompDaemonEngine(
     public val clientSockets = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
 
     private val activeListeners = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>>()
+    private val incompleteConnections = CopyOnWriteArrayList<SeccompConnection>()
+    private val failedServerCloses = CopyOnWriteArrayList<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
+    private val cleanupFailures = CopyOnWriteArrayList<Exception>()
+    private val handshakeDeadlines = HandshakeDeadlineRegistry()
+
+    /** Historical failures stay visible even if a later shutdown retry releases all descriptors. */
+    @io.mazewall.platform.lifecycle.MazewallInternal
+    public val cleanupOutcome: SeccompCleanupOutcome
+        get() = if (cleanupFailures.isEmpty() && incompleteConnections.isEmpty() && failedServerCloses.isEmpty()) {
+            SeccompCleanupOutcome.Complete
+        } else {
+            SeccompCleanupOutcome.Incomplete(
+                cleanupFailures.toList(),
+                (incompleteConnections.flatMap { it.retryableOwnership() } + failedServerCloses).distinct(),
+            )
+        }
     private val stateRef = AtomicReference<UnixListenDaemonState>(UnixListenDaemonState.Uninitialized)
     public var state: UnixListenDaemonState
         get() = stateRef.get()
@@ -78,7 +131,9 @@ public class SeccompDaemonEngine(
         private const val POLL_TIMEOUT_MS = 1000
         private const val POLLFD_STRUCT_SIZE = 8L
         private const val ACK_BUF_SIZE = 1L
+        private const val CONNECTION_WORKER_DRAIN_TIMEOUT_MS = 5_000L
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
+        private const val HANDSHAKE_ACK_TIMEOUT_MS = 30_000L
     }
 
     public fun run() {
@@ -114,11 +169,26 @@ public class SeccompDaemonEngine(
     }
 
     internal fun applyEvent(event: UnixListenDaemonEvent): UnixListenDaemonTransition {
-        return UnixListenDaemonMachine.apply(stateRef, event, ::executeEffects)
+        return UnixListenDaemonMachine.apply(stateRef, event, ::executeEffects).also { transition ->
+            when (val outcome = transition.outcome) {
+                UnixListenDaemonOutcome.Advanced,
+                UnixListenDaemonOutcome.Terminated,
+                -> Unit
+                is UnixListenDaemonOutcome.BenignObservation ->
+                    System.err.println("[SECCOMP-DAEMON] Lifecycle observation: ${outcome.name}")
+                is UnixListenDaemonOutcome.ProtocolViolation ->
+                    System.err.println("[SECCOMP-DAEMON] Lifecycle protocol violation: ${outcome.state} + ${outcome.event}")
+                is UnixListenDaemonOutcome.PostTerminalObservation ->
+                    System.err.println("[SECCOMP-DAEMON] Post-terminal lifecycle observation: ${outcome.event}")
+            }
+        }
     }
 
     private fun executeEffects(effects: List<UnixListenDaemonEffect>) {
-        for (effect in effects) {
+        SeccompCleanupInterpreter.closeResources(effects.map { effect -> { executeEffect(effect) } }, ::recordCleanup)
+    }
+
+    private fun executeEffect(effect: UnixListenDaemonEffect) {
             when (effect) {
                 is UnixListenDaemonEffect.LogListening ->
                     System.err.println("[SECCOMP-DAEMON] Listening on ${effect.socketPath} (fd=${effect.serverFd})")
@@ -128,16 +198,32 @@ public class SeccompDaemonEngine(
                 }
                 is UnixListenDaemonEffect.LogShutdown ->
                     System.err.println("[SECCOMP-DAEMON] Initiating graceful shutdown. Source: ${effect.source}.")
-                is UnixListenDaemonEffect.CloseServer ->
-                    socketManager.close(effect.serverFd)
-                is UnixListenDaemonEffect.ClearConnectionTables -> {
-                    clientSockets.clear()
-                    activeListeners.clear()
+                is UnixListenDaemonEffect.CloseServer -> {
+                    failedServerCloses.addIfAbsent(effect.serverFd)
+                    SeccompCleanupInterpreter.closeResources(listOf({ closeServer(effect.serverFd) }), ::recordCleanup)
                 }
                 is UnixListenDaemonEffect.StopConnectionWorkers ->
                     connectionExecutor.shutdownNow()
+                UnixListenDaemonEffect.AwaitConnectionWorkers -> {
+                    try {
+                        if (!connectionExecutor.awaitTermination(CONNECTION_WORKER_DRAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                            cleanupFailures += IllegalStateException("Connection workers did not terminate before descriptor cleanup")
+                            System.err.println("[SECCOMP-DAEMON] Connection workers did not terminate before owned descriptor cleanup")
+                        }
+                    } catch (_: InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        cleanupFailures += InterruptedException("Interrupted while waiting for connection workers")
+                        System.err.println("[SECCOMP-DAEMON] Interrupted while waiting for connection workers to terminate")
+                    }
+                }
+                is UnixListenDaemonEffect.CloseTrackedConnections -> {
+                    if (connectionExecutor.isTerminated) {
+                        retryCleanup()
+                    }
+                }
+                // Successful closes remove their entries; failed ownership must remain retryable.
+                is UnixListenDaemonEffect.ClearConnectionTables -> Unit
             }
-        }
     }
 
     public fun isGlobalShutdown(): Boolean {
@@ -156,7 +242,7 @@ public class SeccompDaemonEngine(
                         serverFd,
                         ManagedSegment.NULL,
                         ManagedSegment.NULL,
-                        NativeConstants.SOCK_CLOEXEC,
+                        NativeConstants.SOCK_CLOEXEC or NativeConstants.O_NONBLOCK.toInt(),
                     )
                     val clientFdVal = res.recover { errno, _ ->
                         if (errno == NativeConstants.EINTR) return@recover -1L
@@ -168,12 +254,12 @@ public class SeccompDaemonEngine(
                     }
 
                     if (clientFdVal < 0L) return
-                    clientFd = FileDescriptor.adopt(clientFdVal.toInt(), FileDescriptorRole.UnixSocket)
+                    clientFd = res.getFdOrThrow("accept client", FileDescriptorRole.UnixSocket)
                 }
 
                 if (clientSockets.size >= maxConnections) {
                     System.err.println("[SECCOMP-DAEMON] Rejecting connection: limit reached (${clientSockets.size})")
-                    socketManager.close(clientFd)
+                    cleanupFailedConnection(clientFd)
                     return
                 }
 
@@ -191,6 +277,9 @@ public class SeccompDaemonEngine(
         } catch (_: java.nio.channels.ClosedByInterruptException) {
             cleanupFailedConnection(clientFd)
             Thread.currentThread().interrupt()
+        } catch (cancelled: CancellationException) {
+            cleanupFailedConnection(clientFd)
+            throw cancelled
         } catch (expectedAcceptFailure: Exception) {
             cleanupFailedConnection(clientFd)
         } catch (expectedAcceptError: Error) {
@@ -201,8 +290,63 @@ public class SeccompDaemonEngine(
 
     private fun cleanupFailedConnection(clientFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>?) {
         clientFd ?: return
-        clientSockets.remove(clientFd)
-        runCatching { socketManager.close(clientFd) }
+        clientSockets.addIfAbsent(clientFd)
+        val connection = incompleteConnections.firstOrNull { it.socketFd == clientFd }
+            ?: SeccompConnection.Accepted(clientFd).apply { socketManager = this@SeccompDaemonEngine.socketManager }
+        cleanupConnection(connection)
+    }
+
+    private fun closeServer(server: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
+        try {
+            socketManager.close(server)
+        } catch (failure: NativeCloseFailure) {
+            failedServerCloses.remove(server)
+            throw failure
+        }
+        failedServerCloses.remove(server)
+    }
+
+    private fun recordCleanup(outcome: SeccompCleanupOutcome) {
+        when (outcome) {
+            SeccompCleanupOutcome.Complete -> Unit
+            is SeccompCleanupOutcome.Incomplete -> {
+                cleanupFailures.addAllAbsent(outcome.failures)
+                outcome.failures.forEach { System.err.println("[SECCOMP-DAEMON] Incomplete cleanup: $it") }
+            }
+        }
+    }
+
+    private fun cleanupConnection(connection: SeccompConnection) {
+        incompleteConnections.addIfAbsent(connection)
+        try {
+            SeccompCleanupInterpreter.close(connection, ::recordCleanup)
+        } finally {
+            handshakeDeadlines.remove(connection)
+            val remaining = connection.retryableOwnership()
+            if (connection.socketFd !in remaining) clientSockets.remove(connection.socketFd)
+            connection.listenerFd?.takeIf { it !in remaining }?.let { activeListeners.remove(it) }
+            if (remaining.isEmpty()) incompleteConnections.remove(connection)
+        }
+    }
+
+    /** Retries only failed owned descriptors; prior failure diagnostics remain available. */
+    @io.mazewall.platform.lifecycle.MazewallInternal
+    @Synchronized
+    public fun retryCleanup(): SeccompCleanupOutcome {
+        val connections = incompleteConnections.toMutableList()
+        if (connectionExecutor.isTerminated) {
+            clientSockets.filter { socket -> connections.none { it.socketFd == socket } }.forEach { socket ->
+                connections += SeccompConnection.Accepted(socket).apply { socketManager = this@SeccompDaemonEngine.socketManager }
+            }
+        }
+        val releases = connections.map { connection -> { cleanupConnection(connection) } } +
+            failedServerCloses.map { server ->
+                {
+                    closeServer(server)
+                }
+            }
+        SeccompCleanupInterpreter.closeResources(releases, ::recordCleanup)
+        return cleanupOutcome
     }
 
     public fun handleConnection(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
@@ -229,14 +373,17 @@ public class SeccompDaemonEngine(
         } catch (expectedInterruptedChannel: java.nio.channels.ClosedByInterruptException) {
             System.err.println("[SECCOMP-DAEMON] Connection handler channel closed by interrupt: ${expectedInterruptedChannel.message}")
             interrupted = true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failedClose: NativeCloseFailure) {
+            recordCleanup(SeccompCleanupOutcome.Incomplete(listOf(failedClose), emptyList()))
         } catch (expectedConnectionFailure: Exception) {
             System.err.println("[SECCOMP-DAEMON-WARN] Connection handler terminated with exception: ${expectedConnectionFailure.message}")
         } finally {
-            clientSockets.remove(socketFd)
-            connection.listenerFd?.let { activeListeners.remove(it) }
-            connection.close()
-            if (interrupted) {
-                Thread.currentThread().interrupt()
+            try {
+                cleanupConnection(connection)
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
             }
         }
     }
@@ -247,17 +394,57 @@ public class SeccompDaemonEngine(
         socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         pollFdManaged: ManagedSegment,
     ): SeccompConnection? {
-        if (connection is SeccompConnection.Accepted) {
-            val pollRes = raw.poll(pollFdManaged, 1L, POLL_TIMEOUT_MS)
+        val handshakeDeadline = if (connection is SeccompConnection.FdAttached) {
+            handshakeDeadlines.getOrCreate(connection) { Deadline.afterMillis(HANDSHAKE_ACK_TIMEOUT_MS) }
+        } else {
+            null
+        }
+        if (handshakeDeadline?.isExpired() == true) {
+            handshakeDeadlines.remove(connection)
+            return applyConnectionEvent(connection, SeccompConnectionEvent.AckFailed)
+        }
+        if (connection !is SeccompConnection.Active) {
+            val pollFd = PollFdSegment.of(pollFdManaged)
+            val expectedEvent = if (connection is SeccompConnection.FdAttached) NativeConstants.POLLOUT else NativeConstants.POLLIN
+            pollFd.setFd(socketFd.value)
+            pollFd.setEvents(expectedEvent)
+            pollFd.setRevents(0)
+            val timeout = handshakeDeadline?.remainingMillis()?.coerceAtMost(POLL_TIMEOUT_MS) ?: POLL_TIMEOUT_MS
+            val pollRes = raw.poll(pollFdManaged, 1L, timeout)
             val count = pollRes.recover { errno, _ ->
-                if (errno == NativeConstants.EINTR) 0L else -1L
+                if (errno == NativeConstants.EINTR) return connection
+                -1L
             }
             if (count < 0) {
-                return applyConnectionEvent(connection, SeccompConnectionEvent.PollFailed)
+                handshakeDeadlines.remove(connection)
+                val failure = if (connection is SeccompConnection.FdAttached) SeccompConnectionEvent.AckFailed else SeccompConnectionEvent.PollFailed
+                return applyConnectionEvent(connection, failure)
             }
             if (count == 0L) {
-                return applyConnectionEvent(connection, SeccompConnectionEvent.PollIdle)
+                if (handshakeDeadline?.isExpired() == true) {
+                    handshakeDeadlines.remove(connection)
+                    return applyConnectionEvent(connection, SeccompConnectionEvent.AckFailed)
+                }
+                return if (connection is SeccompConnection.Accepted) {
+                    applyConnectionEvent(connection, SeccompConnectionEvent.PollIdle)
+                } else {
+                    connection
+                }
             }
+            // A real poll always writes revents when it reports a ready descriptor. Some
+            // injected/native test pollers only return the ready count, however; treating an
+            // empty mask as the event we requested keeps the reactor seam deterministic without
+            // changing kernel behaviour.
+            val revents = pollFd.getRevents().toInt().let { value ->
+                if (value == 0 && count > 0L) expectedEvent.toInt() else value
+            }
+            val terminal = NativeConstants.POLLERR.toInt() or NativeConstants.POLLHUP.toInt() or NativeConstants.POLLNVAL.toInt()
+            if ((revents and terminal) != 0) {
+                handshakeDeadlines.remove(connection)
+                val failure = if (connection is SeccompConnection.FdAttached) SeccompConnectionEvent.AckFailed else SeccompConnectionEvent.PollFailed
+                return applyConnectionEvent(connection, failure)
+            }
+            if ((revents and expectedEvent.toInt()) == 0) return connection
         }
 
         val event = when (connection) {
@@ -272,22 +459,47 @@ public class SeccompDaemonEngine(
             is SeccompConnection.FdAttached -> {
                 val ackBuf = arena.allocate(ACK_BUF_SIZE)
                 ackBuf.writeByte(0L, handshakeAckByte)
-                var ackOk = false
-                while (true) {
-                    val res = handshakeWriter(socketFd, ackBuf, ACK_BUF_SIZE)
-                    if (res is LinuxNative.SyscallResult.Success) {
-                        ackOk = true
-                        break
+                val deadline = checkNotNull(handshakeDeadline)
+                when (writeHandshakeAck(socketFd, ackBuf, deadline)) {
+                    HandshakeWriteOutcome.Sent -> {
+                        handshakeDeadlines.remove(connection)
+                        SeccompConnectionEvent.AckSucceeded
                     }
-                    val errno = (res as LinuxNative.SyscallResult.Error).errno
-                    if (errno == NativeConstants.EINTR) continue
-                    break
+                    HandshakeWriteOutcome.RetryAfterPoll -> return connection
+                    HandshakeWriteOutcome.TimedOut,
+                    is HandshakeWriteOutcome.Failed,
+                    -> {
+                        handshakeDeadlines.remove(connection)
+                        SeccompConnectionEvent.AckFailed
+                    }
                 }
-                if (ackOk) SeccompConnectionEvent.AckSucceeded else SeccompConnectionEvent.AckFailed
             }
             is SeccompConnection.Active -> SeccompConnectionEvent.SessionFinished
         }
         return applyConnectionEvent(connection, event)
+    }
+
+    /**
+     * Writes the one-byte handshake acknowledgement without allowing EINTR to turn into an
+     * unbounded synchronous loop. The deadline is absolute and is never renewed by retries.
+     */
+    internal fun writeHandshakeAck(
+        socketFd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>,
+        ack: ManagedSegment,
+        deadline: Deadline,
+    ): HandshakeWriteOutcome {
+        if (deadline.isExpired()) return HandshakeWriteOutcome.TimedOut
+        return when (val result = handshakeWriter(socketFd, ack, ACK_BUF_SIZE)) {
+            is LinuxNative.SyscallResult.Success -> if (result.value == ACK_BUF_SIZE) {
+                HandshakeWriteOutcome.Sent
+            } else {
+                HandshakeWriteOutcome.Failed(NativeConstants.EIO)
+            }
+            is LinuxNative.SyscallResult.Error -> when (result.errno) {
+                NativeConstants.EAGAIN, NativeConstants.EINTR -> HandshakeWriteOutcome.RetryAfterPoll
+                else -> HandshakeWriteOutcome.Failed(result.errno)
+            }
+        }
     }
 
     private fun applyConnectionEvent(
@@ -295,6 +507,14 @@ public class SeccompDaemonEngine(
         event: SeccompConnectionEvent,
     ): SeccompConnection? {
         val transition = SeccompConnectionMachine.evaluate(connection, event)
+        when (val outcome = transition.outcome) {
+            SeccompConnectionOutcome.Advanced,
+            SeccompConnectionOutcome.IdlePoll,
+            SeccompConnectionOutcome.Terminated,
+            -> Unit
+            is SeccompConnectionOutcome.ProtocolViolation ->
+                System.err.println("[SECCOMP-DAEMON] Terminating malformed connection protocol: ${outcome.state} + ${outcome.event}")
+        }
         for (effect in transition.effects) {
             when (effect) {
                 is SeccompConnectionEffect.RegisterListener -> {
@@ -309,6 +529,11 @@ public class SeccompDaemonEngine(
                     handleSession(active)
                     System.err.println("[SECCOMP-DAEMON] Session reactor finished. Closing connection.")
                 }
+                is SeccompConnectionEffect.CloseRejectedListener ->
+                    SeccompCleanupInterpreter.closeResources(
+                        listOf({ socketManager.close(effect.listenerFd) }),
+                        ::recordCleanup,
+                    )
             }
         }
         return transition.connection?.also { it.socketManager = socketManager }
@@ -319,7 +544,7 @@ public class SeccompDaemonEngine(
         val listenerFd = connection.listenerFd
         val notifHandler = notifHandlerFactory(socketFd, listenerFd)
         try {
-            SeccompSessionHandler(
+            val sessionHandler = SeccompSessionHandler(
                 socketFd = socketFd,
                 listenerFd = listenerFd,
                 notifHandler = notifHandler,
@@ -327,9 +552,10 @@ public class SeccompDaemonEngine(
                 onSocketClosed = connection::markSocketClosed,
                 engine = engine,
                 socketManager = socketManager,
-            ).use { sessionHandler ->
+            )
+            try {
                 NativeArena.ofConfined().use { sessionArena ->
-                    val pollFds = sessionArena.allocate(Layouts.POLLFD, 2)
+                    val pollFds = sessionArena.allocate(Layouts.POLLFD, 3)
                     val pfd1 = PollFdSegment.of(pollFds.asSlice(0L, Layouts.POLLFD_SIZE))
                     pfd1.setFd(listenerFd.value)
                     pfd1.setEvents(NativeConstants.POLLIN)
@@ -338,13 +564,25 @@ public class SeccompDaemonEngine(
                     pfd2.setFd(socketFd.value)
                     pfd2.setEvents(NativeConstants.POLLIN)
 
+                    val pfd3 = PollFdSegment.of(pollFds.asSlice(POLLFD_STRUCT_SIZE * 2, Layouts.POLLFD_SIZE))
+                    pfd3.setFd(sessionHandler.completionWakeupPollFd)
+                    pfd3.setEvents(NativeConstants.POLLIN)
+
                     while (!isGlobalShutdown()) {
-                        val pollRes = raw.poll(pollFds, 2L, POLL_TIMEOUT_MS)
+                        // Expiration and helper completions are reactor events even on idle/EINTR polls.
+                        pfd1.setRevents(0)
+                        pfd2.setRevents(0)
+                        pfd3.setRevents(0)
+                        val pollRes = raw.poll(pollFds, 3L, sessionHandler.pollTimeoutMillis())
                         val count = pollRes.recover { errno, _ ->
                             if (errno != NativeConstants.EINTR) return@use
                             0L
                         }
-                        if (count <= 0) continue
+                        if (count <= 0) {
+                            pfd1.setRevents(0)
+                            pfd2.setRevents(0)
+                            pfd3.setRevents(0)
+                        }
 
                         var shouldBreak = false
                         NativeArena.ofConfined().use { iterationArena ->
@@ -366,10 +604,12 @@ public class SeccompDaemonEngine(
                         if (isGlobalShutdown()) break
                     }
                 }
+            } finally {
+                sessionHandler.closeWithResult(::recordCleanup)
             }
         } finally {
-            (notifHandler as? AutoCloseable)?.close()
-            // connection.close() in handleConnection's finally block will handle listenerFd closure.
+            SeccompCleanupInterpreter.closeResources(listOf({ (notifHandler as? AutoCloseable)?.close() }), ::recordCleanup)
+            // The connection owner's finally block interprets listener descriptor cleanup.
         }
     }
 }

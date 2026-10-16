@@ -1,0 +1,1 @@
+{"schema_version":1,"forks":5,"warmups":3,"measured_batches":10,"iterations_per_batch":200,"target_cpu":"0","collector_cpu":"1","calibration_target":"unmet","reason":"inline native 64 MiB budget limits shared syscall-dense workload to short batches","policy_eligibility":false}

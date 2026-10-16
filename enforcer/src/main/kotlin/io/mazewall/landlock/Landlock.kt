@@ -1,20 +1,11 @@
 package io.mazewall.landlock
 
-import io.mazewall.LinuxNative
-import io.mazewall.Platform
-import io.mazewall.PolicyDefinition
-import io.mazewall.PolicyPresets
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.PrctlCommand
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.Syscall
-import io.mazewall.core.use
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.PolicyPresets
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
@@ -26,10 +17,21 @@ import io.mazewall.ffi.memory.LandlockRulesetAttrSegment
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
-import io.mazewall.getFdOrThrow
-import io.mazewall.onFailure
-import io.mazewall.onSuccess
-import io.mazewall.recover
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.fd.use
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.native.onFailure
+import io.mazewall.platform.native.onSuccess
+import io.mazewall.platform.native.recover
+import io.mazewall.platform.syscall.PrctlCommand
+import io.mazewall.platform.syscall.Syscall
 import java.io.File
 import java.util.logging.Logger
 
@@ -58,7 +60,7 @@ import java.util.logging.Logger
  * ### Stacking & thread-pool interaction
  * Landlock rulesets are permanent and additive-intersective for the lifetime of the OS thread.
  * In a recycled thread pool, every task execution that calls [applyRuleset] pushes a new
- * layer. After ~16 layers the kernel returns `E2BIG`. Callers (i.e. [io.mazewall.enforcer.ContainedExecutors])
+ * layer. After ~16 layers the kernel returns `E2BIG`. Callers (i.e. [io.mazewall.enforcer.api.ContainedExecutors])
  * must track whether a thread has already been restricted and skip re-application.
  *
  * ### ABI versioning
@@ -85,12 +87,12 @@ import java.util.logging.Logger
  * retroactive process-wide restriction breaks sibling thread transparency in multi-threaded JVMs
  * (GC, JIT, and test runners), `mazewall` disables it by default in standard enforcement.
  *
- * @see io.mazewall.PolicyBuilder.allowFsRead
- * @see io.mazewall.PolicyBuilder.allowFsWrite
- * @see io.mazewall.PolicyBuilder.allowJvmClasspath
- * @see io.mazewall.enforcer.ContainedExecutors.wrap
+ * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsRead
+ * @see io.mazewall.enforcer.api.PolicyBuilder.allowFsWrite
+ * @see io.mazewall.enforcer.api.PolicyBuilder.allowJvmClasspath
+ * @see io.mazewall.enforcer.api.execution.ManagedRuntime.prepare
  */
-object Landlock {
+internal object Landlock {
     /** The kernel requires the request size to stop at fields supported by its ABI. */
     internal fun rulesetAttrSize(abi: Int): Long =
         when {
@@ -112,7 +114,7 @@ object Landlock {
      */
     private val logger = Logger.getLogger(Landlock::class.java.name)
 
-    private sealed interface AddRuleResult {
+    internal sealed interface AddRuleResult {
         object Success : AddRuleResult
 
         data class Error(
@@ -221,17 +223,22 @@ object Landlock {
      * Queries the kernel for the highest Landlock ABI version it supports.
      */
     fun getAbiVersion(): Int {
-        return LinuxNative.raw
+        val result = LinuxNative.raw
             .syscall(
             NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0L),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0L),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(NativeConstants.LANDLOCK_CREATE_RULESET_VERSION),
-        ).recover { _, _ -> 0L }
-            .toInt()
+        )
+        return when (val outcome = LandlockCapabilityProbe.classify(result)) {
+            is LandlockCapabilityProbe.Outcome.Supported -> outcome.abi
+            LandlockCapabilityProbe.Outcome.Unsupported -> 0
+            is LandlockCapabilityProbe.Outcome.Rejected ->
+                error("query Landlock ABI version failed with errno=${outcome.errno}")
+        }
     }
 
     /**
@@ -253,8 +260,12 @@ object Landlock {
     internal fun tryApplyRuleset(
         policy: PolicyDefinition<*>,
         processWide: Boolean = false,
+        fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
+        native: NativeEngine = LinuxNative.snapshot(),
+        capabilities: KernelFeatureSnapshot = Platform.featureSnapshot,
+        onRestrictionApplied: () -> Unit = {},
     ): LandlockApplyResult {
-        val session = LandlockSession(policy, processWide)
+        val session = LandlockSession(policy, processWide, onRestrictionApplied, fallback, native, capabilities)
         return session.tryApplyRuleset()
     }
 
@@ -290,6 +301,7 @@ object Landlock {
     internal fun classifyLandlockErrno(
         op: String,
         errno: Int,
+        fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
     ): LandlockApplyResult {
         val errnoName = when (errno) {
             NativeConstants.ENOSYS -> "ENOSYS"
@@ -309,7 +321,6 @@ object Landlock {
         } else {
             "$op failed with errno=$errnoName"
         }
-        val fallback = Platform.configuredFallback()
         return if (unsupported && fallback != Platform.FallbackBehavior.FAIL) {
             if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
                 logger.warning(reason)
@@ -320,8 +331,7 @@ object Landlock {
         }
     }
 
-    internal fun handleUnsupportedLandlockOutcome(): LandlockApplyResult {
-        val fallback = Platform.configuredFallback()
+    internal fun handleUnsupportedLandlockOutcome(fallback: Platform.FallbackBehavior = Platform.configuredFallback()): LandlockApplyResult {
         val msg = "Landlock is not supported on this kernel (requires Linux kernel 5.13+ with Landlock LSM enabled) but FS rules were requested."
         return when (fallback) {
             Platform.FallbackBehavior.FAIL -> LandlockApplyResult.Rejected(msg)
@@ -352,9 +362,10 @@ object Landlock {
         classPath.split(File.pathSeparator).forEach {
             val file = File(it)
             if (file.exists()) {
-                val dir = if (file.isDirectory) file.absolutePath else file.parent
-                if (seen.add(dir)) {
-                    addRuleFollowSymlinks(ruleset, dir, accessFlags)
+                val path = file.absolutePath
+                if (seen.add(path)) {
+                    val rights = if (file.isDirectory) accessFlags else accessFlags and LANDLOCK_ACCESS_FS_READ_DIR.inv()
+                    addRuleFollowSymlinks(ruleset, path, rights)
                 }
             }
         }
@@ -365,20 +376,25 @@ object Landlock {
         path: String,
         allowedAccess: Long,
     ) {
-        val fdResult = openPath(path, io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC))
+        val fdResult = openPath(
+            path,
+            io.mazewall.platform.lifecycle
+            .OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC),
+            ruleset.native,
+        )
 
         fdResult
             .onSuccess { value ->
-            FileDescriptor.adopt(value.toInt(), FileDescriptorRole.OPath).use { pathFd ->
+            fdResult.getFdOrThrow("open classpath", FileDescriptorRole.OPath).use(ruleset.native.fileSystem) { pathFd ->
                 when (val addRes = addRuleToRuleset(ruleset, pathFd, allowedAccess)) {
                     is AddRuleResult.Success -> {}
                     is AddRuleResult.Error -> {
-                        logger.warning("landlock_add_rule failed for JVM classpath $path with errno ${addRes.errno}")
+                        error("landlock_add_rule failed for JVM classpath $path with errno ${addRes.errno}")
                     }
                 }
             }
         }.onFailure { errno, _ ->
-            logger.warning("Could not open JVM classpath $path for landlock rule: errno $errno")
+            error("Could not open JVM classpath $path for landlock rule: errno $errno")
         }
     }
 
@@ -401,10 +417,11 @@ object Landlock {
         allowedAccess: Long,
     ) {
         val resolvedPath = path.value
-        val openFlags = io.mazewall.core.OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW)
-        val initialResult = openPath(resolvedPath, openFlags)
+        val openFlags = io.mazewall.platform.lifecycle
+            .OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW)
+        val initialResult = openPath(resolvedPath, openFlags, ruleset.native)
 
-        val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, allowedAccess)
+        val openRes = handleInitialOpenFailure(initialResult, resolvedPath, openFlags, allowedAccess, ruleset.native)
         val (pathFd, isFallback) = when (openRes) {
             is OpenResult.Success -> openRes.fd to openRes.isFallback
             is OpenResult.Error -> {
@@ -413,7 +430,7 @@ object Landlock {
             }
         }
 
-        pathFd.use {
+        pathFd.use(ruleset.native.fileSystem) {
             val finalAccess = calculateFinalAccess(allowedAccess, isFallback, resolvedPath)
             addRuleToRulesetAndVerify(ruleset, pathFd, finalAccess, resolvedPath)
         }
@@ -422,8 +439,9 @@ object Landlock {
     context(arena: NativeArena) private fun handleInitialOpenFailure(
         res: LinuxNative.SyscallResult<Long, *>,
         resolvedPath: String,
-        flags: io.mazewall.core.OpenFlags,
+        flags: io.mazewall.platform.lifecycle.OpenFlags,
         allowedAccess: Long,
+        native: NativeEngine,
     ): OpenResult {
         if (res is LinuxNative.SyscallResult.Error && res.errno == 2) { // ENOENT
             if (resolvedPath.endsWith(" (deleted)")) {
@@ -445,15 +463,16 @@ object Landlock {
             }
             val parentPath = File(resolvedPath).parent ?: "/"
             logger.info("Path $resolvedPath does not exist, falling back to parent directory: $parentPath")
-            val fallbackFlags = io.mazewall.core.OpenFlags((flags.value or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv())
-            val openResult = openPath(parentPath, fallbackFlags)
+            val fallbackFlags = io.mazewall.platform.lifecycle
+                .OpenFlags((flags.value or NativeConstants.O_PATH or NativeConstants.O_CLOEXEC) and NativeConstants.O_NOFOLLOW.inv())
+            val openResult = openPath(parentPath, fallbackFlags, native)
             return when (openResult) {
-                is LinuxNative.SyscallResult.Success -> OpenResult.Success(FileDescriptor.adopt(openResult.value.toInt(), FileDescriptorRole.OPath), true)
+                is LinuxNative.SyscallResult.Success -> OpenResult.Success(openResult.getFdOrThrow("open path", FileDescriptorRole.OPath), true)
                 is LinuxNative.SyscallResult.Error -> OpenResult.Error(openResult.errno)
             }
         }
         return when (res) {
-            is LinuxNative.SyscallResult.Success -> OpenResult.Success(FileDescriptor.adopt(res.value.toInt(), FileDescriptorRole.OPath), false)
+            is LinuxNative.SyscallResult.Success -> OpenResult.Success(res.getFdOrThrow("open path", FileDescriptorRole.OPath), false)
             is LinuxNative.SyscallResult.Error -> OpenResult.Error(res.errno)
         }
     }
@@ -512,26 +531,30 @@ object Landlock {
     internal fun tryEnforceRuleset(
         ruleset: LandlockRuleset<RulesetState.Building>,
         processWide: Boolean = false,
+        onRestrictionApplied: () -> Unit = {},
     ): LandlockRestrictOutcome {
-        val prctlResult = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
+        val prctlResult = ruleset.native.process.prctl(PrctlCommand.SetNoNewPrivs(true))
         if (prctlResult is LinuxNative.SyscallResult.Error) {
             return LandlockRestrictOutcome.Err(prctlResult.errno)
         }
         val flags = if (processWide) LANDLOCK_RESTRICT_SELF_TSYNC else 0L
-        val restrictResult = LinuxNative.raw.syscall(
+        val restrictResult = ruleset.native.raw.syscall(
             NativeConstants.LANDLOCK_RESTRICT_SELF_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .FdArg(ruleset.fd),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(flags),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(ManagedSegment.NULL),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(0),
         )
         return when (restrictResult) {
-            is LinuxNative.SyscallResult.Success ->
-                LandlockRestrictOutcome.Ok(LandlockRuleset(ruleset.fd))
+            is LinuxNative.SyscallResult.Success -> {
+                // Publish before outcome allocation or any ruleset/arena cleanup can fail.
+                onRestrictionApplied()
+                LandlockRestrictOutcome.Ok(LandlockRuleset(ruleset.fd, ruleset.native))
+            }
             is LinuxNative.SyscallResult.Error -> LandlockRestrictOutcome.Err(restrictResult.errno)
         }
     }
@@ -575,13 +598,14 @@ object Landlock {
     internal fun getAccessMask(
         abi: Int,
         policy: PolicyDefinition<*>,
+        fallback: Platform.FallbackBehavior = Platform.configuredFallback(),
     ): Long {
         var accessMaskFs = getFullAccessMask(1) // Base mask
         if (abi >= 2) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_REFER
         if (abi >= ABI_V3) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_TRUNCATE
         if (abi >= ABI_V5) accessMaskFs = accessMaskFs or LANDLOCK_ACCESS_FS_IOCTL_DEV
 
-        validateAbiSupport(abi, policy)
+        validateAbiSupport(abi, policy, fallback)
         return accessMaskFs
     }
 
@@ -603,6 +627,7 @@ object Landlock {
     private fun validateAbiSupport(
         abi: Int,
         policy: PolicyDefinition<*>,
+        fallback: Platform.FallbackBehavior,
     ) {
         val unsupportedErrors = mutableListOf<String>()
         if (abi < 2 && (policy.isSyscallAllowed(Syscall.RENAME) || policy.isSyscallAllowed(Syscall.LINK))) {
@@ -616,7 +641,6 @@ object Landlock {
         }
         if (unsupportedErrors.isNotEmpty()) {
             val msg = "Fatal Security Error: ${unsupportedErrors.joinToString("; ")}"
-            val fallback = Platform.configuredFallback()
             if (fallback == Platform.FallbackBehavior.FAIL) {
                 throw UnsupportedOperationException(msg)
             } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
@@ -643,11 +667,11 @@ object Landlock {
         val rulesetAttrManaged = rulesetAttr.managed
         val res = LinuxNative.raw.syscall(
             NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(rulesetAttrManaged),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(size),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(ManagedSegment.NULL),
         )
         return when (val created = mapCreateRuleset(res)) {
@@ -665,19 +689,20 @@ object Landlock {
         accessMaskFs: Long,
         accessMaskNet: Long,
         abi: Int,
+        native: NativeEngine = LinuxNative.snapshot(),
     ): LandlockFdOutcome {
         val rulesetAttr = LandlockRulesetAttrSegment.allocate()
         rulesetAttr.setHandledAccessFs(accessMaskFs)
         rulesetAttr.setHandledAccessNet(accessMaskNet)
         rulesetAttr.setScoped(0L)
         val size = rulesetAttrSize(abi)
-        val res = LinuxNative.raw.syscall(
+        val res = native.raw.syscall(
             NativeConstants.LANDLOCK_CREATE_RULESET_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(rulesetAttr.managed),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(size),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(ManagedSegment.NULL),
         )
         return mapCreateRuleset(res)
@@ -686,7 +711,7 @@ object Landlock {
     private fun mapCreateRuleset(res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>): LandlockFdOutcome {
         return when (res) {
             is LinuxNative.SyscallResult.Success ->
-                LandlockFdOutcome.Ok(FileDescriptor.adopt(res.value.toInt(), FileDescriptorRole.Ruleset))
+                LandlockFdOutcome.Ok(res.getFdOrThrow("create ruleset", FileDescriptorRole.Ruleset))
             is LinuxNative.SyscallResult.Error -> LandlockFdOutcome.Err(res.errno, res.rawValue)
         }
     }
@@ -714,7 +739,7 @@ object Landlock {
             .throwErrno("landlock_create_ruleset")
     }
 
-    context(arena: NativeArena) private fun addRuleToRuleset(
+    context(arena: NativeArena) internal fun addRuleToRuleset(
         ruleset: LandlockRuleset<RulesetState.Building>,
         pathFd: FileDescriptor<FileDescriptorRole.OPath, FdState.Open, FdOwnership.Owned>,
         accessMask: Long,
@@ -723,15 +748,15 @@ object Landlock {
         pathAttr.setAllowedAccess(accessMask)
         pathAttr.setParentFd(pathFd.value)
         val pathAttrManaged = pathAttr.managed
-        val res = LinuxNative.raw.syscall(
+        val res = ruleset.native.raw.syscall(
             NativeConstants.LANDLOCK_ADD_RULE_NR,
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .FdArg(ruleset.fd),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(NativeConstants.LANDLOCK_RULE_PATH_BENEATH.toLong()),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .MemoryArg(pathAttrManaged),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .IntArg(0),
         )
         return when (res) {

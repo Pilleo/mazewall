@@ -1,0 +1,34 @@
+---
+title: "Keep orchestrator GitHub/CI/PR/merge states until a dispatcher replacement exists"
+severity: "MEDIUM"
+status: "resolved"
+priority: high
+dependencies: []
+component: "orchestrator"
+target_modules:
+  - ":tools:orchestrator"
+target_files:
+  - "tools/orchestrator/AGENTS.md"
+  - "tools/orchestrator/README.md"
+  - "docs/plans/remediation-plan.md"
+effort: "small"
+autonomy: "autonomous"
+open_questions: false
+paperclip_issue_id: "21afda5d-d814-44b2-8e00-1ecade6bf0b5"
+paperclip_identifier: "MAZ-1085"
+---
+
+# 🟡 [Severity: MEDIUM]: Keep orchestrator GitHub/CI/PR/merge states until a dispatcher replacement exists
+
+**Context:**
+Paperclip heartbeats wake an adapter and record runs. They do not poll GitHub PR creation, CI checks, Jules session failure retries, structured `VERDICT:` review, serial merge, or superseded-generation on conflict. Those are `AwaitingPrState`, `CiRunningState`, `AwaitingReviewState`, `AwaitingMergeState`, `CreateGenerationState`, `ResolveTaskState` in `OrchestratorStates.kt`. The hybrid plan (`plan.md`) sketches “Reviewer & Verification Agent” and “git lifecycle hook” as Python/Telegram. Live glue does none of the CI/PR loop. Deleting or gutting those states because “we moved to Paperclip” would drop the only working merge queue.
+
+**Needed:**
+1. Add an invariant to `../../../../tools/orchestrator/AGENTS.md`: do not remove GitHub issue/PR/CI/review/merge/generation states unless a replacement dispatcher has tests covering the same transitions (PR appears, CI fail comments once per SHA, review verdict, merge, conflict → new generation).
+2. Correct the current remediation plan's Phase 3–4 guidance: Paperclip is board + multi-adapter wakeup; GitHub/CI/merge stays in `:tools:orchestrator` (or a future dedicated dispatcher module), not in a board notification script.
+3. README: one sentence that Jules is *an* adapter, not the control plane, and that CI/merge remains orchestrator-owned.
+4. No functional state-machine rewrite in this issue.
+
+---
+
+**Verification:** Docs match the hybrid split. `./gradlew :tools:orchestrator:checkBacklog`.

@@ -1,0 +1,1 @@
+{"schema_version":1,"forks":5,"warmups":3,"measured_batches":10,"iterations_per_batch":200,"workload_profile":"calibration_cpu_heavy","target_cpu":"0","collector_cpu":"1","policy_eligibility":false}

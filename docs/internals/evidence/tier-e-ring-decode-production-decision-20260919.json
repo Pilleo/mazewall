@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_ring_decode_production_decision",
+  "date": "2026-09-19",
+  "decision": "reject_direct_decode_as_default",
+  "decision_reason": "Direct decoding reduces local drain time and allocation, but it does not improve end-to-end workload latency or total process CPU. Every workload confidence interval crosses zero, every workload median slightly favors legacy decoding, and paired CPU medians also favor legacy. Legacy byte decoding therefore remains the production default.",
+  "method": {
+    "scope": "tier-e-ring-decode",
+    "warmups": 3,
+    "measured_batches": 10,
+    "operations_per_batch": 100,
+    "rotated_forks": 15,
+    "cpu_set": "0,2",
+    "native_build_type": "Release",
+    "task_identity": "reuse-consecutive",
+    "unrelated_user_notif_arms_included": false
+  },
+  "correctness": {
+    "workload_correctness": "PASS",
+    "tier_e_complete_forks": 120,
+    "tier_e_incomplete_forks": 0,
+    "excluded_pairs": 0
+  },
+  "paired_workload_legacy_minus_direct_ns_per_batch": {
+    "dictionary_full_stream": {"median": -20718, "bootstrap_95_ci": [-310600, 32193]},
+    "dictionary_unique_edge": {"median": -38957, "bootstrap_95_ci": [-370755, 473184]},
+    "inline_full_stream": {"median": -24931, "bootstrap_95_ci": [-76478, 723100]},
+    "inline_unique_edge": {"median": -34330, "bootstrap_95_ci": [-125814, 240961]}
+  },
+  "paired_resource_legacy_minus_direct_medians_per_fork": {
+    "dictionary_full_stream": {"drain_ns": 60862296, "drain_allocated_bytes": 906888, "cpu_ns": -50000000, "peak_rss_bytes": 225280},
+    "dictionary_unique_edge": {"drain_ns": 22778268, "drain_allocated_bytes": 865904, "cpu_ns": -60000000, "peak_rss_bytes": -319488},
+    "inline_full_stream": {"drain_ns": 57836039, "drain_allocated_bytes": 856248, "cpu_ns": -10000000, "peak_rss_bytes": 0},
+    "inline_unique_edge": {"drain_ns": 58916323, "drain_allocated_bytes": 855928, "cpu_ns": -20000000, "peak_rss_bytes": -135168}
+  },
+  "interpretation": {
+    "positive_direction": "legacy consumes more; direct is better",
+    "local_drain_improvement": true,
+    "allocation_improvement": true,
+    "workload_improvement_supported": false,
+    "total_cpu_improvement_supported": false,
+    "accepted_default_change": false,
+    "next_investigation": "Measure readiness-driven collection or native capture work; do not repeat decoder-allocation tuning without new evidence."
+  },
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 42,
+    "source_fingerprint": "56b5eaef8d5cf841e9ff3c1815b85cb46e75dfca85878654c09e82f2102a33fc",
+    "image": "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+    "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "artifact_path": "build/tier-e-ring-decode-decision-20260919/results.jsonl",
+    "artifact_sha256": "4213ed795244582ec51d57fb2db8cc2602673cab333b543d530d26707e970095"
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "failed",
+    "policy_eligibility": false,
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  }
+}

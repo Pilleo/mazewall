@@ -1,0 +1,37 @@
+{
+  "kind": "tier_e_child_termination_rootful_fixture",
+  "timestamp": "2026-09-20",
+  "implementation_commit": "7230a6de",
+  "environment": {
+    "runner": "local rootful Docker",
+    "run_level": "custom",
+    "scope": "full",
+    "workload": "syscall_dense",
+    "iterations": 1000,
+    "warmups": 0,
+    "batches": 1,
+    "forks": 1
+  },
+  "command": "env -u DOCKER_HOST MAZEWALL_TIER_E_RUN_LEVEL=custom MAZEWALL_TIER_E_CALIBRATION=false MAZEWALL_TIER_E_BENCHMARK_SCOPE=full MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_ITERATIONS=1000 MAZEWALL_TIER_E_WARMUPS=0 MAZEWALL_TIER_E_BATCHES=1 MAZEWALL_TIER_E_FORKS=1 MAZEWALL_TIER_E_FIXTURE_CHILD_TERMINATION_AFTER_MILLIS=100 bash scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-child-termination-rootful",
+  "artifact": "build/tier-e-child-termination-rootful/results.jsonl",
+  "expected_runner_exit": "nonzero",
+  "retained_records": {
+    "baseline": "PASS/NOT_APPLICABLE",
+    "failure_variant": "dictionary_full_stream",
+    "failure_class": "injected_child_termination",
+    "terminal_success": false,
+    "durable_partial_output": true
+  },
+  "dimensions": {
+    "capture_domain_validity": "incomplete",
+    "transport_completeness": "incomplete",
+    "attribution_coverage": "incomplete",
+    "dictionary_integrity": "incomplete",
+    "lifecycle_validity": "incomplete",
+    "runtime_overhead": "not_measured"
+  },
+  "evidence_integrity": "incomplete",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false,
+  "conclusion": "A deliberate SIGKILL-equivalent child termination is not mistaken for success. The harness appends the failure and terminal JSONL records before propagating the expected nonzero runner result."
+}

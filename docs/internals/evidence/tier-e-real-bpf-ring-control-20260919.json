@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "title": "Tier E real-BPF ring-submission control",
+  "run_date": "2026-09-19",
+  "artifact_directory": "build/tier-e-ring-submission-control-20260919",
+  "command": "MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-ring-submission-control MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=syscall_dense MAZEWALL_TIER_E_FORKS=5 MAZEWALL_TIER_E_WARMUPS=3 MAZEWALL_TIER_E_BATCHES=10 MAZEWALL_TIER_E_ITERATIONS=100 bash ./scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-ring-submission-control-20260919",
+  "environment": {
+    "execution": "rootful Docker privileged benchmark runner",
+    "workload": "syscall_dense",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_jvm_forks_per_arm": 5,
+    "operations_per_batch": 100
+  },
+  "artifact_checksums": {
+    "results_jsonl_sha256": "237d1a5972fb9fd7d98b116f790e5acf50ed6047a6b51dce4a183870db771650",
+    "manifest_json_sha256": "9df1cedff40a0b78098a00e85e60ba62c7697bd6849179f97a8ce6862e4ecb6f",
+    "paired_analysis_sha256": "f86852b07e64b776c1054f233d28c7fe8130eda7046637580a45e3e695c5ad4f"
+  },
+  "control_contract": {
+    "ring_submission_disabled": "The generated BPF program retains target filtering, active-marker admission, task-storage lookup, in-flight accounting, and unique-edge diagnostic coverage. It omits ring-buffer reservation, payload construction, and submission.",
+    "evidence_status": "UNVERIFIED and INCOMPLETE by construction",
+    "policy_eligibility": false,
+    "observation_contract": "A disabled arm must retain zero syscall observations and zero resolved syscalls; it is never usable as Tier E evidence."
+  },
+  "correctness": {
+    "enabled_full_stream": {
+      "forks": 5,
+      "workload_correctness": "PASS",
+      "whole_session_evidence": "COMPLETE",
+      "resolved_syscalls": 19500
+    },
+    "enabled_unique_edge": {
+      "forks": 5,
+      "workload_correctness": "PASS",
+      "whole_session_evidence": "COMPLETE",
+      "resolved_syscalls": 20
+    },
+    "disabled_full_stream": {
+      "forks": 5,
+      "workload_correctness": "UNVERIFIED",
+      "whole_session_evidence": "INCOMPLETE",
+      "resolved_syscalls": 0
+    },
+    "disabled_unique_edge": {
+      "forks": 5,
+      "workload_correctness": "UNVERIFIED",
+      "whole_session_evidence": "INCOMPLETE",
+      "resolved_syscalls": 0
+    }
+  },
+  "paired_median_enabled_minus_disabled": {
+    "dictionary_full_stream": {
+      "ring_ready_events_per_fork": 3900,
+      "whole_ring_drain_ns": 70599029,
+      "whole_ring_drain_ns_per_ready_event": 18102,
+      "collector_join_ns": 33039335,
+      "collector_join_ns_per_ready_event": 8471,
+      "workload_ns": -12256648,
+      "elapsed_ns": 7913853
+    },
+    "dictionary_unique_edge": {
+      "ring_ready_events_per_fork": 3900,
+      "whole_ring_drain_ns": 55882318,
+      "whole_ring_drain_ns_per_ready_event": 14329,
+      "collector_join_ns": 28215957,
+      "collector_join_ns_per_ready_event": 7235,
+      "workload_ns": -5974495,
+      "elapsed_ns": 35260656
+    }
+  },
+  "interpretation": {
+    "supported": "Real ring submission and collector resolution account for a material amount of the measured session phase time. Dictionary serialization and lock wait are not isolated by this control and must not be inferred from it.",
+    "not_supported": "The paired workload and elapsed deltas are high variance and do not establish an end-to-end application slowdown or a ranking between emission modes.",
+    "next_measurement": "Use this control with an improved steady-state workload and per-event ring-reader component timing before optimizing the ring path."
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete for enabled arms; unverified for controls",
+    "transport_completeness": "complete for enabled arms; incomplete for controls",
+    "attribution_coverage": "complete for enabled arms; unverified for controls",
+    "dictionary_integrity": "complete for enabled arms; unverified for controls",
+    "lifecycle_validity": "complete for enabled arms; control lifecycle exercised but evidence intentionally incomplete",
+    "runtime_overhead": "measured phase attribution only"
+  }
+}

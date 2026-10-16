@@ -10,8 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: "a67bdf92-36de-4e13-9182-6e6c6ca91647"
-paperclip_identifier: "MAZ-1116"
+paperclip_issue_id: "3c9ea89c-de77-4ac5-b4c0-0848722f1f32"
+paperclip_identifier: "MAZ-1425"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Unprivileged Pivot Root (Empty `tmpfs`)

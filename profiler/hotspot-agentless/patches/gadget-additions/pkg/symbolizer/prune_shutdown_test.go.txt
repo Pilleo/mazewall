@@ -1,0 +1,62 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symbolizer
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+)
+
+type heldPruneResolver struct {
+	ResolverInstance
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func TestAuxiliaryStopWithoutStartedPruningSealsAdmission(t *testing.T) {
+	s := &Symbolizer{exit: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.stopPruning(ctx); err != nil {
+		t.Fatal("unstarted prune loop invented a pending join", err)
+	}
+	s.ensurePruning()
+	if s.pruneLoopStarted || s.pruneDone != nil {
+		t.Fatal("prune worker admitted after stop")
+	}
+}
+
+func (r *heldPruneResolver) PruneOldObjects(time.Time, time.Duration) {
+	r.once.Do(func() { close(r.entered) })
+	<-r.release
+}
+
+func TestAuxiliaryStopJoinsActualPruneCallback(t *testing.T) {
+	r := &heldPruneResolver{entered: make(chan struct{}), release: make(chan struct{})}
+	s := &Symbolizer{exit: make(chan struct{}), pruneDone: make(chan struct{}), pruneTickerTime: time.Nanosecond, resolvers: []ResolverInstance{r}}
+	go s.pruneLoop()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	select {
+	case <-r.entered:
+	case <-ctx.Done():
+		t.Fatal("prune callback not entered")
+	}
+	expired, stop := context.WithCancel(context.Background())
+	stop()
+	if err := s.stopPruning(expired); !errors.Is(err, context.Canceled) {
+		t.Fatal("held prune callback certified as joined", err)
+	}
+	close(r.release)
+	if err := s.stopPruning(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.pruneDone:
+	default:
+		t.Fatal("prune completion missing")
+	}
+}

@@ -2,7 +2,7 @@ package io.mazewall.ffi
 
 import io.mazewall.ffi.memory.ManagedSegment
 
-public sealed interface IoctlPayload {
+internal sealed interface IoctlPayload {
     public interface SeccompNotif : IoctlPayload
 
     public interface SeccompNotifResp : IoctlPayload
@@ -11,13 +11,13 @@ public sealed interface IoctlPayload {
 }
 
 @JvmInline
-public value class TypedSegment<out P : IoctlPayload>(
+internal value class TypedSegment<out P : IoctlPayload>(
     public val segment: ManagedSegment,
 )
 
-public fun <P : IoctlPayload> ManagedSegment.typed(): TypedSegment<P> = TypedSegment(this)
+internal fun <P : IoctlPayload> ManagedSegment.typed(): TypedSegment<P> = TypedSegment(this)
 
-public class IoctlCommand<Req, Res>(
+internal class IoctlCommand<Req, Res>(
     public val code: Long,
 ) {
     public companion object {

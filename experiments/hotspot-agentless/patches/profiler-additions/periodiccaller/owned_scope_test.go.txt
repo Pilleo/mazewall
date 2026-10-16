@@ -1,0 +1,142 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"context"
+	"errors"
+	"os"
+	"syscall"
+	"testing"
+	"time"
+)
+
+func TestOwnedAuxiliaryJoinRetainsHeldCallbackAndIndependentLifetime(t *testing.T) {
+	definitionCtx, definitionCancel := context.WithCancel(context.Background())
+	defer definitionCancel()
+	s := NewOwnedScope(definitionCtx, nil)
+	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	if !s.Go(func() { close(entered); <-release; close(finished) }) {
+		t.Fatal("admission rejected")
+	}
+	<-entered
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Stop(expired); !errors.Is(err, context.Canceled) || s.Joined() {
+		t.Fatal("held callback authorized retirement", err)
+	}
+	if definitionCtx.Err() != nil {
+		t.Fatal("auxiliary cancellation contaminated definitions/enrichment")
+	}
+	if s.Go(func() { t.Error("post-stop callback") }) {
+		t.Fatal("sealed admission reopened")
+	}
+	close(release)
+	ctx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := s.Stop(ctx); err != nil || !s.Joined() {
+		t.Fatal("released owner not joined", err)
+	}
+	<-finished
+}
+
+func TestOwnedAuxiliaryStopPreservesCloserNativeCauses(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	if err := s.AddCloser(func() error { return syscall.EPERM }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddCloser(func() error { return syscall.EACCES }); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := s.Stop(ctx)
+	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) || s.Joined() {
+		t.Fatal("native auxiliary close errors downgraded", err)
+	}
+}
+
+func TestOwnedAuxiliaryCanceledReadStillPreservesPermissions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, cause := range []error{syscall.EPERM, syscall.EACCES, syscall.ENOMEM} {
+		if err := OwnedReadError(ctx, cause); !errors.Is(err, cause) {
+			t.Fatal("cancellation masked native permission failure", cause, err)
+		}
+	}
+	if err := OwnedReadError(ctx, os.ErrClosed); err != nil {
+		t.Fatal("expected canceled reader wake treated as failure", err)
+	}
+}
+
+func TestOwnedPeriodicCancellationJoinsAndRejectsManualAdmission(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	trigger, called := make(chan bool, 1), make(chan bool, 2)
+	stop := StartWithManualTrigger(s.Context(), time.Hour, trigger, func(manual bool) bool { called <- manual; return true })
+	defer stop()
+	trigger <- true
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	select {
+	case <-called:
+	case <-ctx.Done():
+		t.Fatal("callback not started")
+	}
+	if err := s.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	trigger <- true
+	select {
+	case <-called:
+		t.Fatal("callback after acknowledged stop")
+	default:
+	}
+}
+
+func TestOwnedAuxiliaryParentCancellationWakesBlockingReader(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	s := NewOwnedScope(parent, nil)
+	wake, entered := make(chan struct{}), make(chan struct{})
+	if err := s.AddCloser(func() error { close(wake); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	s.Go(func() { close(entered); <-wake })
+	<-entered
+	cancel()
+	ctx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := s.Stop(ctx); err != nil {
+		t.Fatal("parent cancellation failed to wake/join", err)
+	}
+}
+
+func TestOwnedAuxiliaryFinalizerRunsOnlyAfterWorkerJoin(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	entered, release, retired := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	s.Go(func() { close(entered); <-release })
+	<-entered
+	if err := s.AddFinalizer(func() error { close(retired); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Stop(expired); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	select {
+	case <-retired:
+		t.Fatal("resource retired under held callback")
+	default:
+	}
+	close(release)
+	ctx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := s.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-retired:
+	default:
+		t.Fatal("joined resource was not retired")
+	}
+}

@@ -1,0 +1,12 @@
+{
+  "context": {
+    "jsonl": "/tmp/probe-ulibxwnr/rows.jsonl"
+  },
+  "errors": [
+    "jsonl_unreadable: nonstandard_json_constant: NaN"
+  ],
+  "policy_eligibility": false,
+  "schema_version": 1,
+  "verdict": "INCOMPLETE",
+  "verification_mode": "jsonl-only"
+}

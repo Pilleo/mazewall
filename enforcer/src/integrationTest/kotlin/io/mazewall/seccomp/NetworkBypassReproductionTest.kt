@@ -1,15 +1,24 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.LinuxNative
-import io.mazewall.Policy
-import io.mazewall.core.NativeArg
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.NativeArg
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.test.assertTrue
 import kotlin.test.fail
 
 class NetworkBypassReproductionTest : BaseIntegrationTest() {
@@ -17,12 +26,13 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
         fun `reproduce sendmmsg and recvmmsg bypass under NO_NETWORK`() {
         val executor = Executors.newSingleThreadExecutor()
-        // Wrap with NO_NETWORK which should block all networking
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_NETWORK)
 
         try {
-            safeExecutor
+            executor
                 .submit {
+                    ContainedExecutors.installOnCurrentThread(Policy.NO_NETWORK).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching {
                     // Determine arch-specific syscall numbers for sendmmsg and recvmmsg
                     val osArch = System.getProperty("os.arch")
                     val isAarch64 = osArch == "aarch64" || osArch == "arm64"
@@ -66,7 +76,12 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
                     } else {
                         throw IllegalStateException("SECURITY BYPASS: recvmmsg reached the kernel and succeeded (unexpected)!")
                     }
-                }.get()
+                    }.getOrElse {
+                        throw io.mazewall.enforcer.internal
+                        .containmentFailureForCaller(it)
+                    }
+                    }
+                }.get(10, TimeUnit.SECONDS)
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause is ContainmentViolationException) {
@@ -85,6 +100,7 @@ class NetworkBypassReproductionTest : BaseIntegrationTest() {
             throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 }

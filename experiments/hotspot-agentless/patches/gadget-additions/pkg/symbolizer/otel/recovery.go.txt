@@ -1,0 +1,138 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"slices"
+
+	"github.com/cilium/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+type cacheIterator interface {
+	Next(interface{}, interface{}) bool
+	Err() error
+}
+type referenceCache interface {
+	Iterator() cacheIterator
+	Lookup([]byte) (uint64, error)
+	Delete([]byte) error
+	EntryLimit() uint32
+}
+type nativeReferenceCache struct{ m *ebpf.Map }
+
+func (c nativeReferenceCache) Iterator() cacheIterator { return c.m.Iterate() }
+func (c nativeReferenceCache) Lookup(key []byte) (uint64, error) {
+	var id uint64
+	err := c.m.Lookup(key, &id)
+	return id, err
+}
+func (c nativeReferenceCache) Delete(key []byte) error { return c.m.Delete(key) }
+func (c nativeReferenceCache) EntryLimit() uint32      { return c.m.MaxEntries() }
+
+func (o *otelResolverInstance) RecoverDefinition(ctx context.Context, task symbolizer.Task) (bool, error) {
+	if task.CorrelationID == 0 || task.Tgid == 0 || len(task.PidNumbers) == 0 || task.PidNumbers[0].Pid == 0 {
+		return false, fmt.Errorf("invalid recovery task")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if trace, ok := o.correlationMap[task.CorrelationID]; ok {
+		if trace.pid != task.Tgid || trace.tid != task.PidNumbers[0].Pid {
+			return false, symbolizer.ErrStackIdentityMismatch
+		}
+		if task.HotSpotIdentity.State == libpf.HotSpotEpochStable && trace.identity != task.HotSpotIdentity {
+			return false, symbolizer.ErrStackIdentityMismatch
+		}
+		// A late definition is already available to subsequent lookups.
+		return false, nil
+	}
+	if o.trc == nil || o.trc.GetStackCacheMap() == nil {
+		return false, symbolizer.ErrReferenceRecoveryUnavailable
+	}
+	m := o.trc.GetStackCacheMap()
+	if m.Type() != ebpf.LRUHash || m.KeySize() != 24+3072*8 || m.ValueSize() != 8 {
+		return false, fmt.Errorf("unsupported stack cache ABI")
+	}
+	return invalidateReference(ctx, nativeReferenceCache{m: m}, task)
+}
+
+func invalidateReference(ctx context.Context, cache referenceCache, task symbolizer.Task) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if task.CorrelationID == 0 || task.Tgid == 0 || len(task.PidNumbers) == 0 {
+		return false, fmt.Errorf("invalid recovery task")
+	}
+	iter := cache.Iterator()
+	var key, candidate []byte
+	var id uint64
+	var count uint32
+	for iter.Next(&key, &id) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		count++
+		if count > cache.EntryLimit() {
+			return false, fmt.Errorf("unstable stack cache scan: %w", ebpf.ErrIterationAborted)
+		}
+		if len(key) < 8 {
+			return false, fmt.Errorf("invalid stack cache key")
+		}
+		if id != task.CorrelationID || binary.NativeEndian.Uint32(key) != task.Tgid || binary.NativeEndian.Uint32(key[4:]) != task.PidNumbers[0].Pid {
+			continue
+		}
+		if task.HotSpotIdentity.State == libpf.HotSpotEpochStable {
+			if len(key) != 24+3072*8 {
+				return false, fmt.Errorf("invalid epoch recovery key")
+			}
+			captured := libpf.HotSpotIdentity{Epoch: binary.NativeEndian.Uint64(key[8:]), State: libpf.HotSpotEpochState(binary.NativeEndian.Uint32(key[16:])), ReadError: int32(binary.NativeEndian.Uint32(key[20:]))}
+			if captured != task.HotSpotIdentity {
+				continue
+			}
+		}
+		if candidate != nil {
+			return false, fmt.Errorf("ambiguous correlation ID within task")
+		}
+		candidate = slices.Clone(key)
+	}
+	// Never act on a partial map iteration. Memory is one candidate key and
+	// the iterator cursor, rather than another stack dictionary or cache.
+	if err := iter.Err(); err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if candidate == nil {
+		return false, nil
+	}
+	current, err := cache.Lookup(candidate)
+	if errors.Is(err, ebpf.ErrKeyNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if current != task.CorrelationID {
+		return false, nil
+	}
+	// Linux does not provide compare-and-delete for this existing LRU value.
+	// Concurrent eviction/republication can turn this deletion into another
+	// availability miss; it cannot bind a different ID to an old event. The
+	// next operation republishes through the unchanged producer path.
+	if err := cache.Delete(candidate); err != nil {
+		if errors.Is(err, ebpf.ErrKeyNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}

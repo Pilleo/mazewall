@@ -37,12 +37,33 @@ plugins {
 include(":platform")
 include(":enforcer")
 include(":profiler")
-include(":portal")
-include(":portal-codegen")
-include(":portal-worker")
+include(":portals")
+include(":portals:runtime")
+include(":portals:codegen")
+include(":portals:worker")
 include(":demos:cli-demo")
 include(":demos:vulnerable-web-app")
 include(":demos:agent-sandbox-demo")
+
+// Incubating framework adapters are verified explicitly without changing core dependencies.
+if (providers.gradleProperty("includeSpringIntegration").orNull == "true") {
+    include(":integrations:spring:mazewall-spring-boot")
+    include(":integrations:spring:mazewall-spring-boot-starter")
+}
+
+// The demo consumes the plugin built by scripts/koog-build.sh in a preceding build.
+// Bootstrap includes only the adapter, so demo buildscript evaluation cannot race its producer.
+if (providers.gradleProperty("includeKoogIntegration").orNull == "true") {
+    include(":integrations:koog")
+    if (providers.gradleProperty("koogBootstrap").orNull != "true") {
+        include(":demos:koog-contained-tool")
+        include(":demos:koog-contained-tool:service-api")
+        if (providers.gradleProperty("koogNativeFixtures").orNull == "true") {
+            include(":koog-denied-api")
+            project(":koog-denied-api").projectDir = file("tests/consumers/koog-portal/denied-api")
+        }
+    }
+}
 
 // :tools:orchestrator stays out of the default build so in-flight work there
 // cannot fail ./gradlew build. Opt in:

@@ -2,10 +2,16 @@ import java.math.BigDecimal
 
 plugins {
     id("mazewall.quality-conventions")
-    id("mazewall.publishing-conventions")
     id("info.solidsoft.pitest")
     alias(libs.plugins.plantuml)
     alias(libs.plugins.kotlinPluginSerialization)
+}
+
+kotlin {
+    jvmToolchain(25)
+    explicitApi()
+    @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
+    abiValidation()
 }
 
 sourceSets {
@@ -22,6 +28,13 @@ sourceSets {
 // Associate integration tests with main and test to allow accessing internal members and test utilities
 val kotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val kotlinCompilations = kotlinExtension.target.compilations
+val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
+kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
+    compileTaskProvider.configure {
+        dependsOn(platformJar)
+        compilerOptions.freeCompilerArgs.addAll(platformJar.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") })
+    }
+}
 kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("main"))
     associateWith(kotlinCompilations.getByName("test"))
@@ -35,10 +48,33 @@ configurations.named("integrationTestRuntimeOnly") {
     extendsFrom(configurations.testRuntimeOnly.get())
 }
 
+configurations.named("integrationTestCompileClasspath") {
+    attributes.attribute(
+        org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
+        objects.named(org.gradle.api.attributes.LibraryElements.JAR),
+    )
+}
+
 val compileVulnerableRop =
     tasks.register<Exec>("compileVulnerableRop") {
         group = "build"
         description = "Compiles the vulnerable C library for CET testing"
+        inputs
+            .files(
+                rootProject.file("scripts/run_cet_demo.sh"),
+                rootProject.file("scripts/cet_fixture_fingerprint.sh"),
+                rootProject.file("enforcer/src/test/c/libvulnerable_rop.c"),
+            ).withPathSensitivity(PathSensitivity.RELATIVE)
+        val compilerFingerprint =
+            providers
+                .exec {
+                    commandLine("bash", rootProject.file("scripts/cet_fixture_fingerprint.sh"))
+                }.standardOutput.asText
+                .map { it.trim() }
+        inputs.property("localCompilerFingerprint", compilerFingerprint)
+        outputs.file(rootProject.file("libvulnerable_rop.so"))
+        // Local up-to-date reuse only; a native library is not portable cached test evidence.
+        outputs.cacheIf { false }
         commandLine("bash", "$rootDir/scripts/run_cet_demo.sh")
     }
 
@@ -138,6 +174,10 @@ val integrationTestFreshJvm =
     tasks.register<Test>("integrationTestFreshJvm") {
         configureEnforcerIntegrationPrerequisites()
         description = "Kernel tests that install seccomp/USER_NOTIF on the worker JVM"
+        // Both kernel suites install restrictive filters. Running their worker processes concurrently
+        // can deny HotSpot's post-install native-memory commits, so preserve fresh-JVM isolation
+        // across the complete check graph as well as within this task.
+        mustRunAfter(integrationTest)
         useJUnitPlatform {
             includeTags("needs-fresh-jvm")
         }
@@ -201,7 +241,7 @@ pitest {
             "io.mazewall.SbobParser*",
             "io.mazewall.enforcer.engine.FilterInstallationPlanner*",
             "io.mazewall.enforcer.PolicyCombining*",
-            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachine*",
+            "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachine*",
             "io.mazewall.enforcer.state.ContainmentStateRegistry*",
         ),
     )
@@ -225,7 +265,7 @@ pitest {
             "io.mazewall.seccomp.BpfFilterTest",
             "io.mazewall.SbobParserTest",
             "io.mazewall.enforcer.FilterInstallationPlannerTest",
-            "io.mazewall.enforcer.supervisor.SupervisorNotificationMachineTest",
+            "io.mazewall.enforcer.internal.supervisor.SupervisorNotificationMachineTest",
             "io.mazewall.enforcer.ContainmentStateRegistryTest",
         ),
     )
@@ -247,7 +287,6 @@ classDiagrams {
     renderClasspath(plantumlConfig)
     defaults {
         style {
-            hidePackages()
             theme("spacelab")
             hide("empty members")
         }
@@ -258,9 +297,9 @@ classDiagrams {
         exclude(methods().withName("combineProcessWide") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(methods().withName("combine") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
         exclude(classes().withNameLike("*\\$*"))
-        // Exclude constant/data-heavy/mapper noise
-        exclude(classes().withName("io.mazewall.core.Arch"))
-        exclude(classes().withName("io.mazewall.core.Syscall"))
+        exclude(classes().withNameLike("*Kt"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Arch"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Syscall"))
         exclude(classes().withNameLike("io.mazewall.core.*Mapper"))
         exclude(classes().withName("io.mazewall.ffi.NativeConstants"))
         exclude(classes().withName("io.mazewall.ffi.Layouts"))
@@ -268,7 +307,9 @@ classDiagrams {
 
     diagram {
         name("Enforcer Class Diagram")
-        include(packages().withName("io.mazewall"))
+        include(packages().withName("io.mazewall.enforcer"))
+        include(packages().withName("io.mazewall.seccomp"))
+        include(packages().withName("io.mazewall.landlock"))
         writeTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.puml"))
         renderTo(file("$rootDir/docs/diagrams/enforcer_class_diagram.svg"))
     }
@@ -286,6 +327,7 @@ tasks.named("generateClassDiagrams") {
                 content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
                 // Strip any leftover internal module access flags (e.g. $io_mazewall_enforcer)
                 content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+                content = content.replace("set separator none\n", "")
                 // Fix PlantUML SVG XML parsing error (duplicate data attribute in <g class="entity">)
                 content = content.replace(Regex(" data=\"([^\"]*)\" id=\"([^\"]*)\" data=\"([^\"]*)\""), " data-name=\"$1\" id=\"$2\" data-line=\"$3\"")
                 file.writeText(content)
@@ -296,3 +338,5 @@ tasks.named("generateClassDiagrams") {
         cleanup(svgFile)
     }
 }
+// Diagram generation writes checked-in documentation. Keep it explicit (`generateClassDiagrams`)
+// so ordinary builds remain read-only with respect to the source tree.

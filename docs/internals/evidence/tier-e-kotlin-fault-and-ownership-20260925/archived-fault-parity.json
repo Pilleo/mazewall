@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "source_archive": "docs/internals/evidence/tier-e-hybrid-20260923/fault-fifteen-discovery.tar.zst",
+  "arms": 30,
+  "all_exact": true,
+  "policy_eligibility": false,
+  "checks": [
+    {
+      "arm": "fork-0-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-0-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-1-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-1-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-10-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-10-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-11-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-11-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-12-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-12-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-13-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-13-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-14-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-14-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-2-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-2-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-3-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-3-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-4-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-4-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-5-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-5-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-6-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-6-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-7-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-7-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-8-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-8-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-9-full-stream",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    },
+    {
+      "arm": "fork-9-unique-stack-syscall",
+      "exit": 0,
+      "coverage": "PASS",
+      "terminal": "INCOMPLETE",
+      "exact": true
+    }
+  ]
+}

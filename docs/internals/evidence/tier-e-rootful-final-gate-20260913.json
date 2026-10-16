@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "evidence_id": "tier-e-rootful-final-gate-20260913",
+  "status": "PASS",
+  "commit_sha": "50e148591179f94e58012c8a714e05057342068f",
+  "docker_image": "mazewall-tier-e-rootful:latest",
+  "kernel": "Linux 7.2.4-x64v3-xanmod1 #0~20260907.g48995b0 SMP PREEMPT_DYNAMIC Mon Sep 7 19:39:22 UTC x86_64",
+  "command": "DOCKER_HOST=unix:///var/run/docker.sock TIER_E_ARTIFACT_DIR=/home/leanid/Documents/code/java/jseccomp/build/tier-e-evidence-final ./scripts/run_tier_e_rootful_gate.sh",
+  "result": "gate_status=0",
+  "test_reports": {
+    "io.mazewall.profiler.TierEEndToEndIntegrationTest": {
+      "tests": 1,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "test": "native session captures definitions and becomes terminal after finish()"
+    },
+    "io.mazewall.profiler.TierEDaemonNativeWorkflowIntegrationTest": {
+      "tests": 1,
+      "skipped": 0,
+      "failures": 0,
+      "errors": 0,
+      "test": "daemon controls an agent loaded workload through attach detach and shutdown()"
+    }
+  },
+  "coverage": [
+    "native stack capture",
+    "dictionary publication acknowledgement",
+    "failed dictionary write and byte-identical retry",
+    "daemon attach and status",
+    "detach invalidation",
+    "terminal shutdown",
+    "warmed benchmark regression gate"
+  ],
+  "verdict_dimensions": {
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "PASS"
+  },
+  "environment_constraints": {
+    "rootful_docker": "authoritative local privileged fixture",
+    "rootless_podman": "INCOMPLETE; not authoritative for privileged BPF fixtures",
+    "observed_non_fatal_shutdown_notes": [
+      "one profiler ACK EPIPE during listener shutdown",
+      "temporary Unix socket cleanup reported Function not implemented"
+    ]
+  },
+  "artifact_directory": "build/tier-e-evidence-final"
+}

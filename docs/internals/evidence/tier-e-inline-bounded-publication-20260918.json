@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "title": "Tier E inline transport bounded-publication evidence",
+  "date": "2026-09-18",
+  "environment": {
+    "executor": "local rootful Docker",
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty": true
+  },
+  "workload": {
+    "profile": "calibration_cpu",
+    "warmups": 3,
+    "measured_batches": 10,
+    "operations_per_batch": 1000,
+    "captured_native_boundaries": 78027
+  },
+  "result": {
+    "status": "INCOMPLETE_RESOURCE_BOUND",
+    "failure_class": "inline_snapshot_exceeds_retained_limit",
+    "native_failure_token": "definition_publication_failure=encoded_snapshot_exceeds_retained_limit",
+    "native_retained_limit_bytes": 67108864,
+    "serialized_bytes": 0,
+    "publication_count": 0,
+    "policy_eligibility": false
+  },
+  "interpretation": {
+    "dictionary_full_stream": "complete",
+    "dictionary_unique_edge": "complete",
+    "inline_full_stream": "not comparable at this volume under the default native retained-state bound",
+    "safety": "The agent refused publication before allocation; no partial inline snapshot was admitted."
+  },
+  "artifacts": {
+    "results": "build/tier-e-inline-classified-bound-20260918/results.jsonl",
+    "runner_events": "build/tier-e-inline-classified-bound-20260918/runner-events.jsonl",
+    "raw_log": "/tmp/tier-e-inline-classified-bound.log"
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "unverified",
+    "transport_completeness": "incomplete",
+    "attribution_coverage": "incomplete",
+    "dictionary_integrity": "not_applicable",
+    "lifecycle_validity": "unverified",
+    "runtime_overhead": "not_measured"
+  }
+}

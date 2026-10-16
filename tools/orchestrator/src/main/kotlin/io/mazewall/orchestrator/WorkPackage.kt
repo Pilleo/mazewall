@@ -116,7 +116,7 @@ data class WorkPackage(
             val stages = mutableListOf<WorkPackageStage>()
 
             val p1Files = allFiles.filter { it.startsWith("platform/") }
-            val p2Files = allFiles.filter { it.startsWith("enforcer/") || it.startsWith("portal/") || it.startsWith("portal-codegen/") || it.startsWith("portal-worker/") }
+            val p2Files = allFiles.filter { it.startsWith("enforcer/") || it.startsWith("portals/") }
             val p3Files = allFiles.filter { it.startsWith("profiler/") || it.startsWith("demos/") }
             val otherFiles = allFiles.filter { it !in p1Files && it !in p2Files && it !in p3Files }
 

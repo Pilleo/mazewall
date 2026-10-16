@@ -1,0 +1,626 @@
+package io.mazewall.profiler.api
+
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.SyscallEvent
+import io.mazewall.profiler.api.SyscallEventState
+import java.util.Locale
+
+private fun defaultOpenFlagsEvidence(
+    syscallName: String,
+    flags: Long,
+): OpenFlagsEvidence =
+    if (syscallName.equals("OPENAT2", ignoreCase = true)) {
+        OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags"))
+    } else {
+        OpenFlagsEvidence.Complete(flags)
+    }
+
+/** A syscall identity that keeps forward-compatible names explicit. */
+public sealed interface ObservedSyscall {
+    public data class Known(
+        public val syscall: Syscall,
+    ) : ObservedSyscall
+
+    public data class Unknown(
+        public val raw: String,
+    ) : ObservedSyscall
+
+    public companion object {
+        public fun parse(raw: String): ObservedSyscall =
+            runCatching { Known(Syscall.valueOf(raw.uppercase(Locale.ROOT))) }
+                .getOrElse { Unknown(raw) }
+    }
+}
+
+/** Linux socket address-family values, including future or platform-specific values. */
+public sealed interface AddressFamily {
+    public enum class Known : AddressFamily {
+        INET,
+        INET6,
+    }
+
+    public data class Unknown(
+        public val raw: Int,
+    ) : AddressFamily
+
+    public companion object {
+        internal const val INET_RAW: Int = 2
+        internal const val INET6_RAW: Int = 10
+
+        public fun fromRaw(raw: Int): AddressFamily =
+            when (raw) {
+                INET_RAW -> Known.INET
+                INET6_RAW -> Known.INET6
+                else -> Unknown(raw)
+            }
+    }
+}
+
+/** Raw socket type bits remain available while preventing accidental protocol mixing. */
+@JvmInline
+public value class SocketType(
+    public val raw: Int,
+)
+
+/** Raw IP protocol numbers remain available while preventing accidental socket-type mixing. */
+@JvmInline
+public value class IpProtocol(
+    public val raw: Int,
+)
+
+/** Linux `mmap(2)` protection bits kept distinct from unrelated integer arguments. */
+@JvmInline
+public value class MmapProtection(
+    public val bits: Int,
+) {
+    public val allowsExecution: Boolean get() = bits and EXECUTE_BIT != 0
+
+    private companion object {
+        private const val EXECUTE_BIT = 0x04
+    }
+}
+
+/** Linux `mmap(2)` mapping flags kept distinct from protection bits and descriptors. */
+@JvmInline
+public value class MmapFlags(
+    public val bits: Int,
+)
+
+/** The raw `mmap(2)` descriptor argument; `-1` is valid for anonymous mappings. */
+@JvmInline
+public value class MmapFileDescriptor(
+    public val value: Int,
+)
+
+/**
+ * A semantic, polymorphic representation of a trapped system call.
+ *
+ * Instead of raw register arrays, this hierarchy provides named, typed properties
+ * for syscall parameters, eliminating brittle index-based access in the analysis engine.
+ *
+ * ### ⚠️ FFM Memory Safety & Lifetime Invariant:
+ * To prevent memory segment lifetime leaks, high GC pressure, and native memory leaks,
+ * all data from foreign function and memory (FFM) `MemorySegment` objects (such as path strings
+ * or raw register structs) **must be fully materialized into JVM heap objects** (e.g., standard
+ * [String], [LongArray], [List], etc.) before crossing the [TraceEvent] boundary into the compiler or logger.
+ * No `MemorySegment` references, slices, or views of off-heap memory may escape or be stored within
+ * any [TraceEvent] instance.
+ */
+public sealed class TraceEvent {
+    public abstract val tid: Tid
+    public abstract val syscallName: String
+    public abstract val stackTrace: List<String>?
+    public val observedSyscall: ObservedSyscall get() = ObservedSyscall.parse(syscallName)
+
+    /**
+     * List of filesystem paths associated with this event.
+     * Defaults to empty for non-file syscalls.
+     */
+    public open val paths: List<String> get() = emptyList()
+
+    private var resolutionEvidence: PathResolution? = null
+    private var connectEvidence: ConnectResolution? = null
+    internal val connectResolution: ConnectResolution get() = connectEvidence ?: legacyConnectResolution(syscallName)
+
+    /** Typed collector evidence, or the explicitly lossy legacy-constructor projection. */
+    public val pathResolution: PathResolution get() = resolutionEvidence ?: legacyPathResolution(syscallName, paths)
+
+    /** Copies attach immutable evidence before publishing the newly constructed event. */
+    protected fun <E : TraceEvent> copyEvidenceTo(copy: E): E {
+        if (copy.syscallName == syscallName && copy.paths == paths) (copy as TraceEvent).resolutionEvidence = resolutionEvidence
+        if (this is Generic && copy is Generic && copy.syscallName == syscallName && copy.args == args) (copy as TraceEvent).connectEvidence = connectEvidence
+        return copy
+    }
+
+    @Volatile
+    private var jvmStackTraceStorage: Array<StackTraceElement>? = null
+
+    /** A defensive snapshot; attribution must not mutate an event after publication. */
+    public var jvmStackTrace: Array<StackTraceElement>?
+        get() = jvmStackTraceStorage?.copyOf()
+        set(value) {
+            jvmStackTraceStorage = value?.copyOf()
+        }
+
+    /**
+     * A generic event for syscalls that don't have a specialized type yet.
+     */
+    public class Generic(
+        override val tid: Tid,
+        override val syscallName: String,
+        args: List<Long>,
+        paths: List<String> = emptyList(),
+        stackTrace: List<String>? = null,
+    ) : TraceEvent() {
+        public val args: List<Long> = java.util.List.copyOf(args)
+        override val paths: List<String> = java.util.List.copyOf(paths)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            args: List<Long> = this.args,
+            paths: List<String> = this.paths,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Generic = copyEvidenceTo(Generic(tid, syscallName, args, paths, stackTrace))
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): List<Long> = args
+
+        public operator fun component4(): List<String> = paths
+
+        public operator fun component5(): List<String>? = stackTrace
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is Generic) return false
+            // INVARIANT: TID is ignored for behavioral equality (required for deduplication)
+            if (syscallName != other.syscallName) return false
+            if (args != other.args) return false
+            if (paths != other.paths) return false
+            if (stackTrace != other.stackTrace) return false
+            return pathResolution == other.pathResolution && connectResolution == other.connectResolution
+        }
+
+        override fun hashCode(): Int {
+            var result = syscallName.hashCode()
+            result = 31 * result + args.hashCode()
+            result = 31 * result + paths.hashCode()
+            result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
+            result = 31 * result + connectResolution.hashCode()
+            return result
+        }
+    }
+
+    /**
+     * Specialized event for file opening operations (OPEN, OPENAT, OPENAT2).
+     */
+    public class Open(
+        override val tid: Tid,
+        override val syscallName: String,
+        public val path: String,
+        public val flags: Long,
+        public val mode: Int,
+        stackTrace: List<String>? = null,
+        public val openFlagsEvidence: OpenFlagsEvidence = defaultOpenFlagsEvidence(syscallName, flags),
+    ) : TraceEvent() {
+        override val paths: List<String> = listOf(path)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        init {
+            require(flags == openFlagsEvidence.value) {
+                "Legacy flags must agree with typed openFlagsEvidence"
+            }
+        }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            path: String = this.path,
+            flags: Long = this.flags,
+            mode: Int = this.mode,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Open {
+            val evidence = if (flags != this.flags) {
+                OpenFlagsEvidence.Complete(flags)
+            } else if (syscallName.equals(this.syscallName, ignoreCase = true)) {
+                openFlagsEvidence
+            } else {
+                defaultOpenFlagsEvidence(syscallName, flags)
+            }
+            return copyEvidenceTo(Open(tid, syscallName, path, flags, mode, stackTrace, evidence))
+        }
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): String = path
+
+        public operator fun component4(): Long = flags
+
+        public operator fun component5(): Int = mode
+
+        public operator fun component6(): List<String>? = stackTrace
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is Open) return false
+            if (syscallName != other.syscallName) return false
+            if (path != other.path) return false
+            if (flags != other.flags) return false
+            if (mode != other.mode) return false
+            if (openFlagsEvidence != other.openFlagsEvidence) return false
+            if (stackTrace != other.stackTrace) return false
+            return pathResolution == other.pathResolution
+        }
+
+        override fun hashCode(): Int {
+            var result = syscallName.hashCode()
+            result = 31 * result + path.hashCode()
+            result = 31 * result + flags.hashCode()
+            result = 31 * result + mode
+            result = 31 * result + openFlagsEvidence.hashCode()
+            result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
+            return result
+        }
+    }
+
+    /**
+     * Specialized event for process execution (EXECVE, EXECVEAT).
+     */
+    public class Exec(
+        override val tid: Tid,
+        override val syscallName: String,
+        public val path: String,
+        stackTrace: List<String>? = null,
+    ) : TraceEvent() {
+        override val paths: List<String> = listOf(path)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            path: String = this.path,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Exec = copyEvidenceTo(Exec(tid, syscallName, path, stackTrace))
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): String = path
+
+        public operator fun component4(): List<String>? = stackTrace
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is Exec) return false
+            if (syscallName != other.syscallName) return false
+            if (path != other.path) return false
+            if (stackTrace != other.stackTrace) return false
+            return pathResolution == other.pathResolution
+        }
+
+        override fun hashCode(): Int {
+            var result = syscallName.hashCode()
+            result = 31 * result + path.hashCode()
+            result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
+            return result
+        }
+    }
+
+    /**
+     * Specialized event for memory mapping (MMAP).
+     */
+    public class Mmap(
+        override val tid: Tid,
+        public val addr: Long,
+        public val len: Long,
+        public val protection: MmapProtection,
+        public val mappingFlags: MmapFlags,
+        public val fileDescriptor: MmapFileDescriptor,
+        public val offset: Long,
+        stackTrace: List<String>? = null,
+    ) : TraceEvent() {
+        override val syscallName: String = "MMAP"
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            addr: Long = this.addr,
+            len: Long = this.len,
+            protection: MmapProtection = this.protection,
+            mappingFlags: MmapFlags = this.mappingFlags,
+            fileDescriptor: MmapFileDescriptor = this.fileDescriptor,
+            offset: Long = this.offset,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Mmap = copyEvidenceTo(Mmap(tid, addr, len, protection, mappingFlags, fileDescriptor, offset, stackTrace))
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): Long = addr
+
+        public operator fun component3(): Long = len
+
+        public operator fun component4(): MmapProtection = protection
+
+        public operator fun component5(): MmapFlags = mappingFlags
+
+        public operator fun component6(): MmapFileDescriptor = fileDescriptor
+
+        public operator fun component7(): Long = offset
+
+        public operator fun component8(): List<String>? = stackTrace
+
+        /** Returns true if the mapping is executable (PROT_EXEC). */
+        public val isExecutable: Boolean get() = protection.allowsExecution
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is Mmap) return false
+            if (addr != other.addr) return false
+            if (len != other.len) return false
+            if (protection != other.protection) return false
+            if (mappingFlags != other.mappingFlags) return false
+            if (fileDescriptor != other.fileDescriptor) return false
+            if (offset != other.offset) return false
+            if (stackTrace != other.stackTrace) return false
+            return pathResolution == other.pathResolution
+        }
+
+        override fun hashCode(): Int {
+            var result = addr.hashCode()
+            result = 31 * result + len.hashCode()
+            result = 31 * result + protection.hashCode()
+            result = 31 * result + mappingFlags.hashCode()
+            result = 31 * result + fileDescriptor.hashCode()
+            result = 31 * result + offset.hashCode()
+            result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
+            return result
+        }
+    }
+
+    /**
+     * Specialized event for network socket operations.
+     */
+    public class Socket(
+        override val tid: Tid,
+        public val domain: Int,
+        public val type: Int,
+        public val protocol: Int,
+        stackTrace: List<String>? = null,
+    ) : TraceEvent() {
+        override val syscallName: String = "SOCKET"
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            domain: Int = this.domain,
+            type: Int = this.type,
+            protocol: Int = this.protocol,
+            stackTrace: List<String>? = this.stackTrace,
+        ): Socket = copyEvidenceTo(Socket(tid, domain, type, protocol, stackTrace))
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): Int = domain
+
+        public operator fun component3(): Int = type
+
+        public operator fun component4(): Int = protocol
+
+        public operator fun component5(): List<String>? = stackTrace
+
+        public val addressFamily: AddressFamily get() = AddressFamily.fromRaw(domain)
+        public val socketType: SocketType get() = SocketType(type)
+        public val ipProtocol: IpProtocol get() = IpProtocol(protocol)
+
+        /** Returns true if this is an AF_INET or AF_INET6 socket. */
+        public val isIpSocket: Boolean get() = domain == AddressFamily.INET_RAW || domain == AddressFamily.INET6_RAW
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is Socket) return false
+            if (domain != other.domain) return false
+            if (type != other.type) return false
+            if (protocol != other.protocol) return false
+            if (stackTrace != other.stackTrace) return false
+            return pathResolution == other.pathResolution
+        }
+
+        override fun hashCode(): Int {
+            var result = domain
+            result = 31 * result + type
+            result = 31 * result + protocol
+            result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
+            return result
+        }
+    }
+
+    /**
+     * Specialized event for filesystem mutation (MKDIR, RMDIR, UNLINK, etc.).
+     */
+    public class FsMutation(
+        override val tid: Tid,
+        override val syscallName: String,
+        paths: List<String>,
+        stackTrace: List<String>? = null,
+    ) : TraceEvent() {
+        override val paths: List<String> = java.util.List.copyOf(paths)
+        override val stackTrace: List<String>? = stackTrace?.let { java.util.List.copyOf(it) }
+
+        public fun copy(
+            tid: Tid = this.tid,
+            syscallName: String = this.syscallName,
+            paths: List<String> = this.paths,
+            stackTrace: List<String>? = this.stackTrace,
+        ): FsMutation = copyEvidenceTo(FsMutation(tid, syscallName, paths, stackTrace))
+
+        public operator fun component1(): Tid = tid
+
+        public operator fun component2(): String = syscallName
+
+        public operator fun component3(): List<String> = paths
+
+        public operator fun component4(): List<String>? = stackTrace
+
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is FsMutation) return false
+            if (syscallName != other.syscallName) return false
+            if (paths != other.paths) return false
+            if (stackTrace != other.stackTrace) return false
+            return pathResolution == other.pathResolution
+        }
+
+        override fun hashCode(): Int {
+            var result = syscallName.hashCode()
+            result = 31 * result + paths.hashCode()
+            result = 31 * result + (stackTrace?.hashCode() ?: 0)
+            result = 31 * result + pathResolution.hashCode()
+            return result
+        }
+    }
+
+    public companion object {
+        public fun fromSyscallEvent(event: SyscallEvent<SyscallEventState.Resolved>): TraceEvent =
+            invoke(event.tid.value, event.syscallName, event.args.toLongArray(), event.paths, event.stackTrace).also {
+                it.resolutionEvidence = event.pathResolution
+                it.connectEvidence = event.connectResolution
+            }
+
+        private const val INDEX_ADDR = 0
+        private const val INDEX_LEN = 1
+        private const val INDEX_PROT = 2
+        private const val INDEX_FLAGS = 3
+        private const val INDEX_FD = 4
+        private const val INDEX_OFFSET = 5
+
+        private const val INDEX_DOMAIN = 0
+        private const val INDEX_TYPE = 1
+        private const val INDEX_PROTOCOL = 2
+
+        private const val INDEX_OPEN_FLAGS = 1
+        private const val INDEX_OPENAT_FLAGS = 2
+
+        private const val MIN_MMAP_ARGS = 6
+        private const val MIN_SOCKET_ARGS = 3
+
+        /**
+         * Legacy factory method for creating a [TraceEvent].
+         * Maps raw data into the polymorphic hierarchy.
+         */
+        public operator fun invoke(
+            tidValue: Int,
+            syscallName: String,
+            args: LongArray,
+            paths: List<String> = emptyList(),
+            stackTrace: List<String>? = null,
+        ): TraceEvent {
+            val tid = Tid(tidValue)
+            return when (syscallName) {
+                "OPEN", "OPENAT", "OPENAT2" -> createOpenEvent(tid, syscallName, args, paths, stackTrace)
+                "EXECVE", "EXECVEAT" -> createExecEvent(tid, syscallName, args, paths, stackTrace)
+                "MMAP" -> createMmapEvent(tid, args, stackTrace)
+                "SOCKET" -> createSocketEvent(tid, args, stackTrace)
+                "MKDIR", "MKDIRAT", "RMDIR", "UNLINK", "UNLINKAT", "RENAME", "RENAMEAT", "RENAMEAT2", "LINK", "LINKAT", "SYMLINK", "SYMLINKAT", "CHMOD", "FCHMODAT", "CHOWN", "LCHOWN", "FCHOWNAT" ->
+                    createFsMutationEvent(tid, syscallName, paths, stackTrace)
+
+                else -> Generic(tid, syscallName, args.toList(), paths, stackTrace)
+            }
+        }
+
+        private fun createOpenEvent(
+            tid: Tid,
+            syscallName: String,
+            args: LongArray,
+            paths: List<String>,
+            stackTrace: List<String>?,
+        ): TraceEvent {
+            return if (paths.isNotEmpty()) {
+                val (flags, evidence) = when (syscallName) {
+                    "OPEN" -> args.getOrNull(INDEX_OPEN_FLAGS)?.let { it to OpenFlagsEvidence.Complete(it) }
+                        ?: 0L to OpenFlagsEvidence.Incomplete(0L, setOf("flags"))
+                    "OPENAT" -> args.getOrNull(INDEX_OPENAT_FLAGS)?.let { it to OpenFlagsEvidence.Complete(it) }
+                        ?: 0L to OpenFlagsEvidence.Incomplete(0L, setOf("flags"))
+                    "OPENAT2" -> 0L to OpenFlagsEvidence.Incomplete(0L, setOf("open_how.flags"))
+                    else -> 0L to OpenFlagsEvidence.Incomplete(0L, setOf("flags"))
+                }
+                Open(tid, syscallName, paths[0], flags, 0, stackTrace, evidence)
+            } else {
+                Generic(tid, syscallName, args.toList(), paths, stackTrace)
+            }
+        }
+
+        private fun createExecEvent(
+            tid: Tid,
+            syscallName: String,
+            args: LongArray,
+            paths: List<String>,
+            stackTrace: List<String>?,
+        ): TraceEvent {
+            return if (paths.isNotEmpty()) {
+                Exec(tid, syscallName, paths[0], stackTrace)
+            } else {
+                Generic(tid, syscallName, args.toList(), paths, stackTrace)
+            }
+        }
+
+        private fun createMmapEvent(
+            tid: Tid,
+            args: LongArray,
+            stackTrace: List<String>?,
+        ): TraceEvent {
+            return if (args.size >= MIN_MMAP_ARGS) {
+                Mmap(
+                    tid,
+                    args[INDEX_ADDR],
+                    args[INDEX_LEN],
+                    MmapProtection(args[INDEX_PROT].toInt()),
+                    MmapFlags(args[INDEX_FLAGS].toInt()),
+                    MmapFileDescriptor(args[INDEX_FD].toInt()),
+                    args[INDEX_OFFSET],
+                    stackTrace,
+                )
+            } else {
+                Generic(tid, "MMAP", args.toList(), emptyList(), stackTrace)
+            }
+        }
+
+        private fun createSocketEvent(
+            tid: Tid,
+            args: LongArray,
+            stackTrace: List<String>?,
+        ): TraceEvent {
+            return if (args.size >= MIN_SOCKET_ARGS) {
+                Socket(tid, args[INDEX_DOMAIN].toInt(), args[INDEX_TYPE].toInt(), args[INDEX_PROTOCOL].toInt(), stackTrace)
+            } else {
+                Generic(tid, "SOCKET", args.toList(), emptyList(), stackTrace)
+            }
+        }
+
+        private fun createFsMutationEvent(
+            tid: Tid,
+            syscallName: String,
+            paths: List<String>,
+            stackTrace: List<String>?,
+        ): TraceEvent {
+            return if (paths.isNotEmpty()) {
+                FsMutation(tid, syscallName, paths, stackTrace)
+            } else {
+                Generic(tid, syscallName, emptyList(), paths, stackTrace)
+            }
+        }
+    }
+}

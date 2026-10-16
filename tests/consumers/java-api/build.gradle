@@ -1,0 +1,27 @@
+plugins { id 'application' }
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(providers.gradleProperty('consumerJdk').getOrElse('25').toInteger()) } }
+
+dependencies {
+    implementation "io.mazewall:enforcer:${providers.gradleProperty('consumerVersion').get()}"
+}
+
+application { mainClass = 'consumer.JavaApiConsumer' }
+
+['verifyCallableEntry': 'callable', 'verifyScopeBoundaries': 'scope', 'verifyRejectedApi': 'rejected-api'].each { taskName, fixture ->
+    tasks.register(taskName, JavaExec) {
+        dependsOn tasks.named('classes')
+        javaLauncher = javaToolchains.launcherFor(java.toolchain)
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = 'consumer.VerifyCompilation'
+        def diagnosticCompileClasspath = sourceSets.main.compileClasspath
+        inputs.files(diagnosticCompileClasspath)
+            .withPropertyName('diagnosticCompileClasspath').withNormalizer(ClasspathNormalizer)
+        // Keep javac's exact classpath argument, resolving it only for execution.
+        doFirst {
+            args fixture, diagnosticCompileClasspath.asPath,
+                file("src/${fixture}/java/consumer").absolutePath,
+                layout.buildDirectory.dir(fixture).get().asFile.absolutePath
+        }
+    }
+}

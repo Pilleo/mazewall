@@ -1,12 +1,4 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.LinuxNative
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.NativeArg
-import io.mazewall.core.Tid
+package io.mazewall.profiler.internal.engine
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
@@ -14,12 +6,27 @@ import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.SegmentPool
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.ffi.HandshakeSession
 import io.mazewall.profiler.ffi.NativeIoOperations
 import io.mazewall.profiler.ffi.ProfilerTransport
 import io.mazewall.profiler.ffi.SeccompResponder
 import io.mazewall.profiler.ffi.SocketLifecycleManager
 import io.mazewall.profiler.ffi.TraceEventPublisher
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -28,7 +35,7 @@ import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
 
-@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.core.ForeignFdGuard::class)
+@org.junit.jupiter.api.extension.ExtendWith(io.mazewall.platform.lifecycle.ForeignFdGuard::class)
 class ProfilerDaemonBenchmarkTest {
     private companion object {
         private const val PROTOCOL_ACK_BYTE = 0xAC.toByte()
@@ -40,7 +47,7 @@ class ProfilerDaemonBenchmarkTest {
         TraceEventPublisher,
         NativeIoOperations,
         SocketLifecycleManager {
-        override val raw = object : io.mazewall.RawSyscallOperations {
+        override val raw = object : io.mazewall.platform.native.RawSyscallOperations {
             override fun poll(
                 fds: ManagedSegment,
                 nfds: Long,
@@ -96,13 +103,13 @@ class ProfilerDaemonBenchmarkTest {
         context(arena: Arena) override fun sendSeccompContinue(
             session: HandshakeSession.Success,
             resp: MemorySegment,
-        ) {}
+        ): io.mazewall.profiler.ffi.SeccompReplyResult = io.mazewall.profiler.ffi.SeccompReplyResult.SENT
 
         context(arena: Arena) override fun sendSeccompError(
             session: HandshakeSession.Failed,
             resp: MemorySegment,
             errorNr: Int,
-        ) {}
+        ): io.mazewall.profiler.ffi.SeccompReplyResult = io.mazewall.profiler.ffi.SeccompReplyResult.SENT
 
         override fun read(
             fd: FileDescriptor<*, FdState.Open, FdOwnership>,
@@ -140,12 +147,17 @@ class ProfilerDaemonBenchmarkTest {
             arg: MemorySegment,
         ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Success(0L)
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(99)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(99)
 
         override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
-            FileDescriptor.replace(100)
+            TestFileDescriptors
+                .replace(100)
 
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(101)
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(101)
 
         override fun sendDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
@@ -154,7 +166,9 @@ class ProfilerDaemonBenchmarkTest {
 
         override fun recvDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
-        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? = FileDescriptor.replace(20)
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? =
+            TestFileDescriptors
+            .replace(20)
 
         override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {}
     }
@@ -179,13 +193,14 @@ class ProfilerDaemonBenchmarkTest {
         val syscallMap = mapOf(2 to "OPEN")
 
         System.gc()
-        Thread.sleep(100)
         val heapBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 
         val startTime = System.currentTimeMillis()
 
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(20)
+        val socketFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(10)
+        val listenerFd = TestFileDescriptors
+            .replace<FileDescriptorRole.SeccompNotif>(20)
         ProfilerSessionHandler(
             socketFd,
             listenerFd,
@@ -195,8 +210,10 @@ class ProfilerDaemonBenchmarkTest {
             reader,
             syscallMap,
         ) { }.use { handler ->
-            val notif = SegmentPool.SECCOMP_NOTIF_POOL.rent()
-            val resp = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+            val notifLease = SegmentPool.SECCOMP_NOTIF_POOL.rent()
+                val notif = notifLease.segment
+            val respLease = SegmentPool.SECCOMP_NOTIF_RESP_POOL.rent()
+                val resp = respLease.segment
             try {
                 notif.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 123L)
                 notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 456)
@@ -212,8 +229,8 @@ class ProfilerDaemonBenchmarkTest {
                     }
                 }
             } finally {
-                SegmentPool.SECCOMP_NOTIF_POOL.release(notif)
-                SegmentPool.SECCOMP_NOTIF_RESP_POOL.release(resp)
+                notifLease.close()
+                respLease.close()
             }
         }
 
@@ -221,7 +238,6 @@ class ProfilerDaemonBenchmarkTest {
         System.err.println("Benchmark duration for 100,000 syscall notifications: $duration ms")
 
         System.gc()
-        Thread.sleep(100)
         val heapAfter = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()
 
         System.err.println("Heap memory change: before=$heapBefore, after=$heapAfter, delta=${heapAfter - heapBefore}")

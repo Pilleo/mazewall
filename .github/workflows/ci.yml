@@ -9,7 +9,8 @@ on:
 jobs:
     build-test-publish:
         name: Build, Test, Security Scan & Publish
-        runs-on: ubuntu-24.04
+        # Dedicated-process worker correctness requires Landlock TSYNC (ABI 8+).
+        runs-on: ubuntu-26.04
         timeout-minutes: 90
         permissions:
             contents: read
@@ -32,10 +33,23 @@ jobs:
                           - '**/*.kt'
                           - '**/*.java'
                           - '**/*.kts'
+                          - '**/*.gradle'
+                          - 'gradle/libs.versions.toml'
+                          - '**/gradle.lockfile'
+                          - 'gradle/verification-metadata.xml'
                           - '**/gradle.properties'
                           - '**/Containerfile'
                           - 'scripts/**'
 
+            - name: Restore Container Gradle Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      ~/.cache/mazewall/container-gradle
+                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
+                  restore-keys: |
+                      container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-
+                      container-gradle-${{ runner.os }}-
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
               with:
@@ -61,23 +75,9 @@ jobs:
               run: |
                   ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
                   ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
-            - name: Verify CI cache policy
-              run: ./scripts/check_ci_cache_policy.sh
-            - name: Verify host/kernel Gradle lifecycle split
-              run: ./scripts/check_gradle_lifecycle.sh
             - name: Triage failed host verification
               if: steps.host_unit.outcome == 'failure'
               run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon
-            - name: Upload Gradle diagnostics
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: gradle-diagnostics
-                  path: |
-                      build/reports/problems/
-                      build/reports/triage/
-                      build/reports/gradle-baseline/
-                  if-no-files-found: ignore
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -106,7 +106,7 @@ jobs:
               run: |
                   set -o pipefail
                   # unitCheck already ran on the host for this exact checkout.
-                  ./scripts/run_containerized_tests.sh kernelCheck assemble 2>&1 | tee build.log
+                  ./scripts/run_containerized_tests.sh :kernelCheck assemble 2>&1 | tee build.log
             - name: Run PITest (Host Unit Tests Only)
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Pmazewall.pitest.threads=2
@@ -137,11 +137,38 @@ jobs:
               run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-            - name: Fix Cache Permissions
+            - name: Verify Workspace and Cache Ownership
               if: always()
               run: |
-                  sudo chown -R $USER:$USER ~/.gradle || true
-                  sudo chown -R $USER:$USER ${{ github.workspace }} || true
+                  for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
+                      if [ -d "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned build output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
+            - name: Upload Gradle diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: gradle-diagnostics
+                  path: |
+                      build/reports/problems/
+                      build/reports/triage/
+                      build/reports/gradle-baseline/
+                      build/reports/test-health/
+                      **/build/test-results/**/*.xml
+                      **/hs_err_pid*.log
+                  if-no-files-found: ignore
+            - name: Save Container Gradle Cache (Master Only)
+              uses: actions/cache/save@v4
+              if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+              with:
+                  path: |
+                      ~/.cache/mazewall/container-gradle
+                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository

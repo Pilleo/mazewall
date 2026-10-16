@@ -1,0 +1,182 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"sync"
+)
+
+type ownedScopeKey struct{}
+
+// OwnedScope tracks auxiliary callbacks without owning definition/enrichment work.
+// Enrollment is sealed before cancellation; close/wake operations and callbacks
+// must both complete before Stop succeeds. A timeout cannot authorize retirement.
+type OwnedScope struct {
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	sealed     bool
+	closers    []func() error
+	finalizers []func() error
+	err        error
+	wg         sync.WaitGroup
+	onError    func(error)
+	once       sync.Once
+	done       chan struct{}
+	watchDone  chan struct{}
+}
+
+func NewOwnedScope(parent context.Context, onError func(error)) *OwnedScope {
+	ctx, cancel := context.WithCancel(parent)
+	s := &OwnedScope{cancel: cancel, onError: onError, done: make(chan struct{}), watchDone: make(chan struct{})}
+	s.ctx = context.WithValue(ctx, ownedScopeKey{}, s)
+	go func() { defer close(s.watchDone); <-ctx.Done(); s.beginStop() }()
+	return s
+}
+func (s *OwnedScope) Context() context.Context { return s.ctx }
+func OwnedScopeFrom(ctx context.Context) *OwnedScope {
+	s, _ := ctx.Value(ownedScopeKey{}).(*OwnedScope)
+	return s
+}
+func (s *OwnedScope) Go(fn func()) bool {
+	s.mu.Lock()
+	if s.sealed || s.ctx.Err() != nil {
+		s.mu.Unlock()
+		return false
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	go func() {
+		defer s.wg.Done()
+		fn()
+	}()
+	return true
+}
+
+func allowOwnedCallback(ctx context.Context) bool {
+	return OwnedScopeFrom(ctx) == nil || ctx.Err() == nil
+}
+
+// GoOwned preserves ordinary goroutine behavior for contexts without a scope.
+func GoOwned(ctx context.Context, fn func()) bool {
+	if s := OwnedScopeFrom(ctx); s != nil {
+		return s.Go(fn)
+	}
+	go fn()
+	return true
+}
+func (s *OwnedScope) AddCloser(close func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sealed || s.ctx.Err() != nil {
+		return fmt.Errorf("auxiliary enrollment stopped")
+	}
+	s.closers = append(s.closers, close)
+	return nil
+}
+
+func OwnedCloser(name string, close func() error) func() error {
+	return func() error {
+		if err := close(); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		return nil
+	}
+}
+
+func (s *OwnedScope) AddFinalizer(close func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sealed || s.ctx.Err() != nil {
+		return fmt.Errorf("auxiliary enrollment stopped")
+	}
+	s.finalizers = append(s.finalizers, close)
+	return nil
+}
+func (s *OwnedScope) Fail(err error) {
+	if err == nil {
+		return
+	}
+	s.mu.Lock()
+	s.err = errors.Join(s.err, err)
+	s.mu.Unlock()
+	s.cancel()
+	if s.onError != nil {
+		s.onError(err)
+	}
+}
+func ReportOwnedError(ctx context.Context, err error) bool {
+	if s := OwnedScopeFrom(ctx); s != nil {
+		s.Fail(err)
+		return true
+	}
+	return false
+}
+
+func OwnedReadError(ctx context.Context, err error) error {
+	if ctx.Err() != nil && (errors.Is(err, os.ErrClosed) || errors.Is(err, net.ErrClosed) || errors.Is(err, os.ErrDeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return nil
+	}
+	return err
+}
+
+func ReportOwnedReadError(ctx context.Context, name string, err error) {
+	if err = OwnedReadError(ctx, err); err != nil {
+		ReportOwnedError(ctx, fmt.Errorf("%s: %w", name, err))
+	}
+}
+func (s *OwnedScope) beginStop() {
+	s.once.Do(func() {
+		s.mu.Lock()
+		s.sealed = true
+		closers := s.closers
+		s.closers = nil
+		finalizers := s.finalizers
+		s.finalizers = nil
+		s.mu.Unlock()
+		s.cancel()
+		go func() {
+			defer close(s.done)
+			for _, close := range closers {
+				if err := close(); err != nil {
+					s.Fail(err)
+				}
+			}
+			s.wg.Wait()
+			for _, close := range finalizers {
+				if err := close(); err != nil {
+					s.Fail(err)
+				}
+			}
+			<-s.watchDone
+		}()
+	})
+}
+func (s *OwnedScope) result() error { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
+func (s *OwnedScope) Stop(ctx context.Context) error {
+	s.beginStop()
+	select {
+	case <-s.done:
+		return s.result()
+	default:
+	}
+	select {
+	case <-s.done:
+		return s.result()
+	case <-ctx.Done():
+		return errors.Join(s.result(), ctx.Err())
+	}
+}
+func (s *OwnedScope) Joined() bool {
+	select {
+	case <-s.done:
+		return s.result() == nil
+	default:
+		return false
+	}
+}

@@ -1,8 +1,9 @@
 package io.mazewall.landlock
 
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.FdOwnership
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
 
 /**
  * Outcome of applying a Landlock ruleset. Callers must unpack this type;
@@ -10,7 +11,7 @@ import io.mazewall.ffi.NativeConstants
  */
 internal sealed interface LandlockFdOutcome {
     data class Ok(
-        val fd: io.mazewall.core.FileDescriptor<io.mazewall.core.FileDescriptorRole.Ruleset, io.mazewall.core.FdState.Open, FdOwnership.Owned>,
+        val fd: io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.Ruleset, io.mazewall.platform.fd.FdState.Open, FdOwnership.Owned>,
     ) : LandlockFdOutcome
 
     data class Err(
@@ -29,7 +30,7 @@ internal sealed interface LandlockRestrictOutcome {
     ) : LandlockRestrictOutcome
 }
 
-public sealed interface LandlockApplyResult {
+internal sealed interface LandlockApplyResult {
     public data object Applied : LandlockApplyResult
 
     /** Operator-configured fallback allowed the process to continue without Landlock. */

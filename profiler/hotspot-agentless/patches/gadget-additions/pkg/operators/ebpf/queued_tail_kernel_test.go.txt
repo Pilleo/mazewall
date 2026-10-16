@@ -1,0 +1,279 @@
+//go:build mw_kernel
+
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"os"
+	"reflect"
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	"golang.org/x/sys/unix"
+)
+
+const queuedTailTokens = 8
+
+type queuedTailFixture struct {
+	read       func() ([]byte, error)
+	flush      func() error
+	close      func() error
+	flushed    error
+	ringReader *ringbuf.Reader
+}
+
+// Production is complete before the fixture is returned. Every output is
+// independently checked; the reader has consumed none of the eight unique IDs.
+func newQueuedTailFixture(t *testing.T, transport string) queuedTailFixture {
+	t.Helper()
+	spec := &ebpf.MapSpec{Type: ebpf.RingBuf, MaxEntries: 4096}
+	if transport == "perf" {
+		cpus, err := ebpf.PossibleCPU()
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec = &ebpf.MapSpec{Type: ebpf.PerfEventArray, MaxEntries: uint32(cpus), KeySize: 4, ValueSize: 4}
+	}
+	output, err := ebpf.NewMap(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := output.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	f := queuedTailFixture{}
+	if transport == "ring" {
+		reader, err := ringbuf.NewReader(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.close, f.flush, f.flushed, f.ringReader = reader.Close, reader.Flush, ringbuf.ErrFlushed, reader
+		reader.SetDeadline(time.Now().Add(2 * time.Second))
+		var record ringbuf.Record
+		f.read = func() ([]byte, error) { err := reader.ReadInto(&record); return record.RawSample, err }
+	} else {
+		reader, err := perf.NewReader(output, 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.close, f.flush, f.flushed = reader.Close, reader.Flush, perf.ErrFlushed
+		reader.SetDeadline(time.Now().Add(2 * time.Second))
+		var record perf.Record
+		f.read = func() ([]byte, error) {
+			err := reader.ReadInto(&record)
+			if err == nil && record.LostSamples != 0 {
+				t.Fatalf("fixture unexpectedly lost %d samples", record.LostSamples)
+			}
+			return record.RawSample, err
+		}
+	}
+	t.Cleanup(func() {
+		if err := f.close(); err != nil {
+			t.Error(err)
+		}
+	})
+	counter, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: 4, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := counter.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	ins := asm.Instructions{
+		asm.Mov.Reg(asm.R6, asm.R1),
+		asm.StoreImm(asm.R10, -4, 0, asm.Word),
+		asm.LoadMapPtr(asm.R1, counter.FD()),
+		asm.Mov.Reg(asm.R2, asm.R10),
+		asm.Add.Imm(asm.R2, -4),
+		asm.FnMapLookupElem.Call(),
+		asm.JEq.Imm(asm.R0, 0, "fail"),
+		asm.LoadMem(asm.R7, asm.R0, 0, asm.Word),
+		asm.Add.Imm(asm.R7, 1),
+		asm.StoreMem(asm.R0, 0, asm.R7, asm.Word),
+		asm.StoreMem(asm.R10, -8, asm.R7, asm.Word),
+	}
+	if transport == "ring" {
+		ins = append(ins, asm.LoadMapPtr(asm.R1, output.FD()), asm.Mov.Reg(asm.R2, asm.R10), asm.Add.Imm(asm.R2, -8), asm.Mov.Imm(asm.R3, 4), asm.Mov.Imm(asm.R4, 0), asm.FnRingbufOutput.Call())
+	} else {
+		ins = append(ins, asm.Mov.Reg(asm.R1, asm.R6), asm.LoadMapPtr(asm.R2, output.FD()), asm.LoadImm(asm.R3, 0xffffffff, asm.DWord), asm.Mov.Reg(asm.R4, asm.R10), asm.Add.Imm(asm.R4, -8), asm.Mov.Imm(asm.R5, 4), asm.FnPerfEventOutput.Call())
+	}
+	ins = append(ins, asm.JEq.Imm(asm.R0, 0, "ok"), asm.Mov.Imm(asm.R0, 0).WithSymbol("fail"), asm.Return(), asm.Mov.Imm(asm.R0, 2).WithSymbol("ok"), asm.Return())
+	program, err := ebpf.NewProgram(&ebpf.ProgramSpec{Type: ebpf.XDP, License: "GPL", Instructions: ins})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := program.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	// Perf rings are per-CPU. Execute every token on one permitted CPU so the
+	// fixture's exact ordering is not an assumption about cross-CPU merging.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	var affinity unix.CPUSet
+	if err := unix.SchedGetaffinity(0, &affinity); err != nil {
+		t.Fatal(err)
+	}
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		t.Fatal(err)
+	}
+	producerCPU := -1
+	for cpu := 0; cpu < cpus; cpu++ {
+		if affinity.IsSet(cpu) {
+			producerCPU = cpu
+			break
+		}
+	}
+	if producerCPU < 0 {
+		t.Fatal("no permitted producer CPU")
+	}
+	var pinned unix.CPUSet
+	pinned.Set(producerCPU)
+	if err := unix.SchedSetaffinity(0, &pinned); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := unix.SchedSetaffinity(0, &affinity); err != nil {
+			t.Error("restoring producer affinity", err)
+		}
+	}()
+	for i := 0; i < queuedTailTokens; i++ {
+		ret, _, err := program.Test(make([]byte, 64))
+		if err != nil || ret != 2 {
+			t.Fatalf("native output %d failed: return=%d err=%v", i+1, ret, err)
+		}
+	}
+	return f
+}
+
+func readQueuedTailToken(t *testing.T, f queuedTailFixture) uint32 {
+	t.Helper()
+	data, err := f.read()
+	if err != nil || len(data) < 4 {
+		t.Fatalf("reading known queued token: %v, %v", data, err)
+	}
+	return binary.LittleEndian.Uint32(data[:4])
+}
+
+func TestKernelQueuedTailCloseVersusFlush(t *testing.T) {
+	for _, transport := range []string{"ring", "perf"} {
+		for _, stop := range []string{"close", "flush"} {
+			t.Run(transport+"_"+stop, func(t *testing.T) {
+				f := newQueuedTailFixture(t, transport)
+				got := []uint32{readQueuedTailToken(t, f)}
+				if got[0] != 1 {
+					t.Fatal("unexpected first token", got)
+				}
+				if stop == "close" {
+					if err := f.close(); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := f.read(); !errors.Is(err, os.ErrClosed) {
+						t.Fatal("closed reader remained readable", err)
+					}
+					t.Logf("produced=%d delivered=%d queued_tail_unconsumed=%d", queuedTailTokens, len(got), queuedTailTokens-len(got))
+					return
+				}
+				if err := f.flush(); err != nil {
+					t.Fatal(err)
+				}
+				for i := 1; i < queuedTailTokens; i++ {
+					got = append(got, readQueuedTailToken(t, f))
+				}
+				if _, err := f.read(); !errors.Is(err, f.flushed) {
+					t.Fatal("missing explicit flush boundary", err)
+				}
+				if !reflect.DeepEqual(got, []uint32{1, 2, 3, 4, 5, 6, 7, 8}) {
+					t.Fatal("queued tokens lost, reordered or duplicated", got)
+				}
+				t.Logf("produced=%d delivered=%d flush_boundary_observed=true", queuedTailTokens, len(got))
+			})
+		}
+	}
+}
+
+func TestKernelGadgetCloseDoesNotDrainHeldCallbackTail(t *testing.T) {
+	f := newQueuedTailFixture(t, "ring")
+	ds, err := datasource.New(datasource.TypeSingle, "event")
+	if err != nil {
+		t.Fatal(err)
+	}
+	accessor, err := ds.AddField("wire", api.Kind_Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, release, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	var got []uint32
+	if err = ds.Subscribe(func(_ datasource.DataSource, data datasource.Data) error {
+		payload, err := accessor.Bytes(data)
+		if err != nil {
+			return err
+		}
+		got = append(got, binary.LittleEndian.Uint32(payload))
+		if len(got) == 1 {
+			close(first)
+			<-release
+		}
+		return nil
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	tr := &Tracer{ds: ds, accessor: accessor, eventSize: 4, mapType: ebpf.RingBuf, ringbufReader: f.ringReader, done: make(chan struct{})}
+	gc := gadgetcontext.New(context.Background(), "queued-tail-control")
+	defer gc.Cancel()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var receiveErr error
+	go func() { defer close(done); receiveErr = tr.receiveEvents(gc, &wg) }()
+	defer func() {
+		unblock()
+		f.close()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("owned receiver did not join")
+		}
+	}()
+	select {
+	case <-first:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first native event not delivered")
+	}
+	if f.ringReader.AvailableBytes() == 0 {
+		t.Fatal("control did not retain a queued native tail")
+	}
+	tr.close()
+	unblock()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("closed receiver did not join")
+	}
+	wg.Wait()
+	if !errors.Is(receiveErr, os.ErrClosed) || !reflect.DeepEqual(got, []uint32{1}) {
+		t.Fatal("unexpected current Gadget close behavior", got, receiveErr)
+	}
+	t.Logf("produced=%d callback_completed=true receiver_joined=true delivered=%d queued_tail_unconsumed=%d", queuedTailTokens, len(got), queuedTailTokens-len(got))
+}

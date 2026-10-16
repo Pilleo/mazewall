@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.testing.containers.ContainerEndpointDiscoveryTest$ConditionFixture" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-09-25T18:27:46.080Z" hostname="leanid-nitroanv1541" time="0.003">
+  <properties/>
+  <testcase name="condition injects the admitted endpoint(ContainerEndpoint)" classname="io.mazewall.testing.containers.ContainerEndpointDiscoveryTest$ConditionFixture" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

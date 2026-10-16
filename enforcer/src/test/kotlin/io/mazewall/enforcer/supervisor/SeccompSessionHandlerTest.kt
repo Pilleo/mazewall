@@ -1,22 +1,30 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
 import io.mazewall.ffi.memory.writeByte
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
 import io.mazewall.platform.seccomp.daemon.LoopAction
 import io.mazewall.platform.seccomp.daemon.NotifResult
 import io.mazewall.platform.seccomp.daemon.SeccompNotifHandler
 import io.mazewall.platform.seccomp.daemon.SeccompSessionHandler
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
@@ -41,16 +49,19 @@ class SeccompSessionHandlerTest {
         }
         val engine = MockNativeEngine(memory = memory)
         val notifHandler = object : SeccompNotifHandler {
-            context(arena: NativeArena) override fun processNotification(
+            context(arena: NativeArena) override fun beginNotification(
                 notif: ManagedSegment,
                 resp: ManagedSegment,
                 listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
                 socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
-            ): NotifResult = NotifResult.HANDLED
+                deadline: io.mazewall.platform.lifecycle.Deadline,
+            ): io.mazewall.platform.seccomp.daemon.NotificationWork = error("unused")
         }
         val handler = SeccompSessionHandler(
-            socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10),
-            listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11),
+            socketFd = TestFileDescriptors
+                .replace<FileDescriptorRole.UnixSocket>(10),
+            listenerFd = TestFileDescriptors
+                .replace<FileDescriptorRole.SeccompNotif>(11),
             notifHandler = notifHandler,
             engine = engine,
         )

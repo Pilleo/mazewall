@@ -1,0 +1,47 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"sync"
+	"testing"
+)
+
+func TestTraceReaderHealthSurvivesMetricDrainAndIsTracerOwned(t *testing.T) {
+	a, b := &Tracer{}, &Tracer{}
+	if _, ok := a.TraceReaderHealth(); ok {
+		t.Fatal("unstarted reader reported zero loss")
+	}
+	a.traceReaderCounters.ready.Store(true)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 100 {
+				a.traceReaderCounters.lost.Add(2)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := a.traceReaderCounters.lost.Swap(0); got != 1600 {
+		t.Fatalf("original metric delta = %d", got)
+	}
+	for range 2 {
+		h, ok := a.TraceReaderHealth()
+		if !ok || h.Lost != 1600 {
+			t.Fatalf("snapshot consumed metric or total: %+v", h)
+		}
+	}
+	if _, ok := b.TraceReaderHealth(); ok {
+		t.Fatal("other tracer inherited observations")
+	}
+	a.traceReaderCounters.lost.Add(3)
+	if got := a.traceReaderCounters.lost.Swap(0); got != 3 {
+		t.Fatalf("metric reset semantics changed: %d", got)
+	}
+	h, _ := a.TraceReaderHealth()
+	if h.Lost != 1603 {
+		t.Fatal("cumulative observation lost drained delta")
+	}
+}

@@ -1,6 +1,6 @@
-package io.mazewall.profiler
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.enforcer.engine.JvmFloorWorkload
 import io.mazewall.profiler.internal.DescendantStrace
 import org.junit.jupiter.api.Test
@@ -31,11 +31,10 @@ class JvmFloorProfilingTest : BaseIntegrationTest() {
 
         println("\n=== GENERATED JVM FLOOR BILL OF BEHAVIOR ===")
         println(
-            bob.toDsl(
+            bob.toDslAllowingIncomplete(
                 baseCwd = java.nio.file.Paths
             .get("")
             .toAbsolutePath(),
-                allowIncomplete = true,
             ),
         )
         println("============================================")

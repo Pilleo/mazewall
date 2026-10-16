@@ -1,0 +1,79 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"errors"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"sync"
+)
+
+type definitionDrainBackend interface {
+	Quiesce(context.Context) error
+	DrainReader(context.Context) error
+	JoinConsumer(context.Context) error
+}
+type definitionDrainOwner struct {
+	backend     definitionDrainBackend
+	done        chan struct{}
+	once        sync.Once
+	mu          sync.Mutex
+	observation symbolizer.DefinitionStopObservation
+	err         error
+}
+
+func newDefinitionDrainOwner(b definitionDrainBackend) *definitionDrainOwner {
+	return &definitionDrainOwner{backend: b, done: make(chan struct{})}
+}
+func (o *definitionDrainOwner) execute(ctx context.Context) {
+	defer close(o.done)
+	fail := func(err error) { o.mu.Lock(); o.err = errors.Join(o.err, err); o.mu.Unlock() }
+	if err := ctx.Err(); err != nil {
+		fail(err)
+		return
+	}
+	if err := o.backend.Quiesce(ctx); err != nil {
+		fail(err)
+		return
+	}
+	if err := o.backend.DrainReader(ctx); err != nil {
+		fail(err)
+		return
+	}
+	o.mu.Lock()
+	o.observation.ReaderStopped = true
+	o.mu.Unlock()
+	if err := o.backend.JoinConsumer(ctx); err != nil {
+		fail(err)
+		return
+	}
+	if err := ctx.Err(); err != nil {
+		fail(err)
+		return
+	}
+	o.mu.Lock()
+	o.observation.ConsumerStopped = true
+	o.observation.BuffersDrained = true
+	o.mu.Unlock()
+}
+func (o *definitionDrainOwner) result() (symbolizer.DefinitionStopObservation, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.observation, o.err
+}
+func (o *definitionDrainOwner) stop(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
+	o.once.Do(func() { go o.execute(ctx) })
+	select {
+	case <-o.done:
+		return o.result()
+	default:
+	}
+	select {
+	case <-o.done:
+		return o.result()
+	case <-ctx.Done():
+		r, err := o.result()
+		return r, errors.Join(err, ctx.Err())
+	}
+}

@@ -1,0 +1,79 @@
+--- a/libpf/trace.go
++++ b/libpf/trace.go
+@@ -100,2 +100,4 @@
+ type Trace struct {
++	HotSpotIdentity HotSpotIdentity
++	HotSpotValidation HotSpotValidation
+ 	Frames        Frames
+@@ -108,2 +110,3 @@
+ type EbpfTrace struct {
++	HotSpotIdentity HotSpotIdentity
+ 	Comm             String
+--- a/processmanager/types.go
++++ b/processmanager/types.go
+@@ -36,2 +36,3 @@
+ type frameCacheKey struct {
++	epoch libpf.HotSpotIdentity
+ 	// pid is the PID of the process if the frame had FRAME_FLAG_PID_SPECIFIC set
+@@ -45,2 +46,4 @@
+ type ProcessManager struct {
++	epochTarget libpf.HotSpotEpochTarget
++	epochFatal func(error)
+ 	// A mutex to synchronize access to internal data within this struct.
+--- a/processmanager/manager.go
++++ b/processmanager/manager.go
+@@ -301,2 +301,2 @@
+-	return h.Sum32()
++	return h.Sum32() ^ uint32(fk.epoch.Epoch) ^ uint32(fk.epoch.Epoch>>32) ^ uint32(fk.epoch.State)
+ }
+@@ -308,2 +308,6 @@
+ func (pm *ProcessManager) HandleTrace(bpfTrace *libpf.EbpfTrace) {
++	if pm.epochTarget.PID != 0 && bpfTrace.PID == pm.epochTarget.PID {
++		pm.handleHotSpotEpochTrace(bpfTrace)
++		return
++	}
+ 	meta := &samples.TraceEventMeta{
+--- a/processmanager/processinfo.go
++++ b/processmanager/processinfo.go
+@@ -179,2 +179,9 @@
++	if pm.epochTarget.PID == pid {
++		if capable, ok := instance.(interpreter.HotSpotEpochInstance); ok {
++			if err := capable.ConfigureHotSpotEpoch(pm.epochTarget); err != nil {
++				return err
++			}
++		}
++	}
+ 	log.Debugf("Attached to %v interpreter in PID %v", data, pid)
+ 	pm.assignInterpreter(pid, oid, instance)
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -129,2 +129,4 @@
+ type Config struct {
++	HotSpotEpochTarget libpf.HotSpotEpochTarget
++	OnHotSpotFatal func(error)
+ 	// ExecutableReporter allows to configure a ExecutableReporter to hook seen executables.
+@@ -248,1 +250,6 @@
++	if cfg.HotSpotEpochTarget.PID != 0 {
++		if err := processManager.ConfigureHotSpotEpochTarget(cfg.HotSpotEpochTarget, cfg.OnHotSpotFatal); err != nil {
++			return nil, err
++		}
++	}
+ 	perfEventList := []*perf.Event{}
+@@ -1084,2 +1084,5 @@
+ 	ptr := traceFromRaw(raw)
++	if ptr.Frame_data_len > 3072 || ptr.Num_frames > ptr.Frame_data_len {
++		return nil, fmt.Errorf("invalid raw frame counts: %d/%d", ptr.Num_frames, ptr.Frame_data_len)
++	}
+ 	frameDataLen := int(ptr.Frame_data_len) * 8
+@@ -1093,2 +1100,7 @@
++	identity := libpf.HotSpotIdentity{Epoch: ptr.Hotspot_identity.Epoch, State: libpf.HotSpotEpochState(ptr.Hotspot_identity.State), ReadError: ptr.Hotspot_identity.Error}
++	if err := identity.Validate(); err != nil {
++		return nil, err
++	}
++
+ 	pid := libpf.PID(ptr.Pid)
+ 	procMeta := t.processManager.MetaForPID(pid)
+@@ -1096,2 +1108,3 @@
+ 	*trace = libpf.EbpfTrace{
++		HotSpotIdentity: identity,
+ 		Comm:             goString(ptr.Comm[:]),

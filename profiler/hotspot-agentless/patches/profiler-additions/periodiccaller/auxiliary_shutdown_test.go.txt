@@ -1,0 +1,62 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+// Characterization: the upstream stop function is not a cancellation/join lease.
+func TestAuxiliaryPeriodicStopStillAdmitsManualCallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	trigger := make(chan bool, 1)
+	called := make(chan bool, 1)
+	stop := StartWithManualTrigger(ctx, time.Hour, trigger, func(manual bool) bool { called <- manual; return true })
+	stop()
+	trigger <- true
+	select {
+	case manual := <-called:
+		if !manual {
+			t.Fatal("unexpected periodic callback")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected upstream manual callback after ticker stop")
+	}
+}
+
+func TestAuxiliaryCancellationDoesNotJoinHeldCallback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	trigger := make(chan bool, 1)
+	entered, release, completed := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	stop := StartWithManualTrigger(ctx, time.Hour, trigger, func(bool) bool {
+		close(entered)
+		<-release
+		close(completed)
+		return false
+	})
+	defer func() {
+		close(release)
+		select {
+		case <-completed:
+		case <-time.After(time.Second):
+			t.Error("released callback did not finish")
+		}
+	}()
+	trigger <- true
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("callback did not start")
+	}
+	cancel()
+	stop()
+	select {
+	case <-completed:
+		t.Fatal("held callback unexpectedly completed")
+	default:
+	}
+}

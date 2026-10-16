@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "short_profiles": {
+    "syscall_dense:dictionary-full-stream:terminal": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 819470,
+      "publication_cpu_ns_median": 1283277,
+      "native_retained_peak_median": 877750,
+      "native_live_publications_median": 0
+    },
+    "syscall_dense:dictionary-full-stream:live": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 6595505,
+      "publication_cpu_ns_median": 11843959,
+      "native_retained_peak_median": 877750,
+      "native_live_publications_median": 9
+    },
+    "syscall_dense:dictionary-unique-edge:terminal": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 819470,
+      "publication_cpu_ns_median": 1206008,
+      "native_retained_peak_median": 877750,
+      "native_live_publications_median": 0
+    },
+    "syscall_dense:dictionary-unique-edge:live": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 5984035,
+      "publication_cpu_ns_median": 11623867,
+      "native_retained_peak_median": 877750,
+      "native_live_publications_median": 8
+    },
+    "stack_diverse:dictionary-full-stream:terminal": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 892955,
+      "publication_cpu_ns_median": 1280746,
+      "native_retained_peak_median": 1005115,
+      "native_live_publications_median": 0
+    },
+    "stack_diverse:dictionary-full-stream:live": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 6641913,
+      "publication_cpu_ns_median": 12827707,
+      "native_retained_peak_median": 1005115,
+      "native_live_publications_median": 9
+    },
+    "stack_diverse:dictionary-unique-edge:terminal": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 892955,
+      "publication_cpu_ns_median": 1387841,
+      "native_retained_peak_median": 1005115,
+      "native_live_publications_median": 0
+    },
+    "stack_diverse:dictionary-unique-edge:live": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 6184666,
+      "publication_cpu_ns_median": 11420057,
+      "native_retained_peak_median": 1005115,
+      "native_live_publications_median": 8
+    },
+    "class_churn:dictionary-full-stream:terminal": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 1004681,
+      "publication_cpu_ns_median": 1571063,
+      "native_retained_peak_median": 1184198,
+      "native_live_publications_median": 0
+    },
+    "class_churn:dictionary-full-stream:live": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 7099264,
+      "publication_cpu_ns_median": 12826788,
+      "native_retained_peak_median": 1184198,
+      "native_live_publications_median": 9
+    },
+    "class_churn:dictionary-unique-edge:terminal": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 1004681,
+      "publication_cpu_ns_median": 2322131,
+      "native_retained_peak_median": 1184198,
+      "native_live_publications_median": 0
+    },
+    "class_churn:dictionary-unique-edge:live": {
+      "forks": 5,
+      "complete": 5,
+      "publication_bytes_median": 9441144,
+      "publication_cpu_ns_median": 15529637,
+      "native_retained_peak_median": 1184198,
+      "native_live_publications_median": 11
+    }
+  },
+  "short_complete": 60,
+  "short_failed": 0,
+  "sustained": {
+    "live": {
+      "full-stream": {
+        "forks": 5,
+        "complete": 5,
+        "recovered_paths_each": [
+          72
+        ],
+        "median_max_dictionary_wait_ns": 249735796,
+        "max_dictionary_wait_ns": 332947234,
+        "max_discovery_p99_upper_ns": 1499999,
+        "median_native_live_publications": 541
+      },
+      "unique-stack-syscall": {
+        "forks": 5,
+        "complete": 5,
+        "recovered_paths_each": [
+          72
+        ],
+        "median_max_dictionary_wait_ns": 239013986,
+        "max_dictionary_wait_ns": 2294490653,
+        "max_discovery_p99_upper_ns": 4299999,
+        "median_native_live_publications": 549
+      }
+    },
+    "terminal": {
+      "full-stream": {
+        "forks": 5,
+        "complete": 5,
+        "recovered_paths_each": [
+          72
+        ],
+        "median_max_dictionary_wait_ns": 62339685672,
+        "max_dictionary_wait_ns": 63939581360,
+        "max_discovery_p99_upper_ns": 999999,
+        "median_native_live_publications": 0
+      },
+      "unique-stack-syscall": {
+        "forks": 5,
+        "complete": 5,
+        "recovered_paths_each": [
+          72
+        ],
+        "median_max_dictionary_wait_ns": 62405687218,
+        "max_dictionary_wait_ns": 63776897316,
+        "max_discovery_p99_upper_ns": 599999,
+        "median_native_live_publications": 0
+      }
+    }
+  },
+  "policy_eligibility": false
+}

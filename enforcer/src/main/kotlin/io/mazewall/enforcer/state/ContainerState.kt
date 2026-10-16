@@ -1,15 +1,15 @@
 package io.mazewall.enforcer.state
 
-import io.mazewall.PolicyDefinition
-import io.mazewall.core.Arch
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 
 /**
@@ -25,7 +25,11 @@ internal data class ContainerState(
     val allowsMmapExec: Boolean = true,
     val allowsNonThreadClone: Boolean = true,
     val allowsUnsafePrctl: Boolean = true,
+    /** Terminal installation failure; independent of applied-policy and engine-state strength. */
+    val installationEvidence: InstallationEvidence = InstallationEvidence(),
 ) {
+    val installationFailure: Throwable? get() = installationEvidence.failure
+
     /** Returns true if the given [syscall] is unconditionally allowed by this state. */
     fun isSyscallAllowed(syscall: Syscall): Boolean {
         val action = syscallActions[syscall] ?: defaultAction
@@ -45,12 +49,20 @@ internal data class ContainerState(
         nr: Int,
         arch: Arch,
     ): SeccompAction {
-        for (syscall in Syscall.entries) {
-            if (syscall.numberFor(arch) == nr) {
-                return syscallActions[syscall] ?: defaultAction
+        val syscall = if (nr in 0..MAX_SYSCALL_NR) {
+            when (arch) {
+                Arch.AMD64 -> amd64SyscallTable[nr]
+                Arch.AARCH64 -> aarch64SyscallTable[nr]
+                else -> Syscall.entries.find { it.numberFor(arch) == nr }
             }
+        } else {
+            Syscall.entries.find { it.numberFor(arch) == nr }
         }
-        return defaultAction
+        return if (syscall != null) {
+            syscallActions[syscall] ?: defaultAction
+        } else {
+            defaultAction
+        }
     }
 
     fun withNewSeccompPolicy(
@@ -94,6 +106,13 @@ internal data class ContainerState(
 
     fun withEngineState(next: SeccompInstallationState): ContainerState = copy(engineState = next)
 
+    fun withInstallationFailure(failure: Throwable): ContainerState = if (installationFailure == null) copy(installationEvidence = installationEvidence.copy(failure = failure)) else this
+
+    fun withCetProof(proof: CetThreadProof): ContainerState = copy(installationEvidence = installationEvidence.copy(cet = proof))
+
+    fun withRetainedInstallationEvidence(prior: InstallationEvidence): ContainerState =
+        copy(installationEvidence = InstallationEvidence(prior.failure ?: installationFailure, prior.cet ?: installationEvidence.cet))
+
     internal companion object {
         /**
          * Resolves the cumulative security state of the current thread,
@@ -110,6 +129,24 @@ internal data class ContainerState(
          * are active or shutting down is unsupported, as the state resolution of late-running
          * tasks may interleave with global state transitions.
          */
+        private const val MAX_SYSCALL_NR = 512
+        private val amd64SyscallTable = arrayOfNulls<Syscall>(MAX_SYSCALL_NR + 1).also { table ->
+            for (syscall in Syscall.entries) {
+                val nr = syscall.numberFor(Arch.AMD64)
+                if (nr in 0..MAX_SYSCALL_NR) {
+                    table[nr] = syscall
+                }
+            }
+        }
+        private val aarch64SyscallTable = arrayOfNulls<Syscall>(MAX_SYSCALL_NR + 1).also { table ->
+            for (syscall in Syscall.entries) {
+                val nr = syscall.numberFor(Arch.AARCH64)
+                if (nr in 0..MAX_SYSCALL_NR) {
+                    table[nr] = syscall
+                }
+            }
+        }
+
         fun resolveCurrentState(): ContainerState {
             return ContainmentStateRegistry.resolveCurrentState()
         }

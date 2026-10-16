@@ -1,6 +1,10 @@
 package io.mazewall.profiler.tierE.daemon
-
-import io.mazewall.profiler.attribution.TierEEmissionMode
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.Arguments
 import org.junit.jupiter.params.provider.MethodSource
@@ -45,6 +49,14 @@ class ControlProtocolTest {
     }
 
     @Test
+    fun `attach accepts auto marker transport without changing explicit transports`() {
+        val parsed = parseControlCommand("ATTACH 42 auto /opt/libagent.so b0aa 4d5a")
+        val attach = assertIs<Either.Left<ControlCommand, ControlReply>>(parsed).value
+
+        assertEquals(ControlCommand.Attach(42, AttachMode.AUTO, "/opt/libagent.so", 0xb0aa, 0x4d5a), attach)
+    }
+
+    @Test
     fun `attach defaults to full stream and accepts explicit unique edge coverage`() {
         val defaultAttach = assertIs<Either.Left<ControlCommand, ControlReply>>(
             parseControlCommand("ATTACH 42 uprobe /opt/libagent.so b0aa 4d5a"),
@@ -73,7 +85,7 @@ class ControlProtocolTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("simpleCommands")
-    fun `simple control commands parse despite surrounding whitespace`(
+    internal fun `simple control commands parse despite surrounding whitespace`(
         name: String,
         wire: String,
         expected: ControlCommand,

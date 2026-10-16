@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_usdt_marker_transport_matrix",
+  "date": "2026-09-18",
+  "decision": "promote_usdt_to_broader_lifecycle_validation",
+  "decision_reason": "Both dictionary modes show a paired Uprobe-minus-USDT workload reduction with 95 percent bootstrap intervals excluding zero. The matrix covers the normal lifecycle only, so it does not yet authorize a production-default transport change.",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 32,
+    "image": "mazewall-tier-e-rootful:perf-20260918-usdt",
+    "image_id": "sha256:4d1e1d1ab8e5a7f859198595ba655eb156a35e30273ce2047649df23c6905188",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "workload": "calibration_cpu",
+    "workload_contract": "Each verified shared-openat operation performs 1,500,000 deterministic CPU rounds after the syscall.",
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "rotated_forks": 5,
+    "operations_per_batch": 1000,
+    "modes": ["baseline", "dictionary_full_stream_marker_uprobe", "dictionary_full_stream_marker_usdt", "dictionary_unique_edge_marker_uprobe", "dictionary_unique_edge_marker_usdt", "user_notif_no_stack", "user_notif"]
+  },
+  "quality": {
+    "profiled_forks": 20,
+    "measured_operations_per_tier_e_arm": 50000,
+    "invalid_workload_forks": 0,
+    "incomplete_evidence_forks": 0,
+    "oracle_mismatch_forks": 0,
+    "policy_eligible_records": 0
+  },
+  "paired_uprobe_minus_usdt_ns_per_1000_operations": {
+    "dictionary_full_stream": {"median": 8082619, "bootstrap_95_ci": [7285731, 14808928]},
+    "dictionary_unique_edge": {"median": 5067176, "bootstrap_95_ci": [4006332, 7655689]}
+  },
+  "interpretation": {
+    "result": "USDT is faster than Uprobe for both dictionary modes on this host and workload.",
+    "promotion_boundary": "Keep Uprobe as the default until the detach, callback-suppression, capture-failure, exec, and terminal-drain lifecycle fixtures demonstrate equivalent outcomes under USDT.",
+    "image_contract": "The rootful benchmark image must compile #include <sys/sdt.h>; Ubuntu multiarch placement is supported. CMake rechecks the optional header after prior failed configurations.",
+    "scope_limit": "This is a normal-lifecycle workload result on one host and is not a general application slowdown estimate."
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "not_measured",
+    "policy_eligibility": false,
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "raw_artifacts": {
+    "results_path": "build/tier-e-marker-comparable-decision-20260918/results.jsonl",
+    "results_sha256": "b14341a9cc9b8548143a2d118f6e3a4ed0ffabc6f307ea8e7e9eb150934f5065",
+    "manifest_path": "build/tier-e-marker-comparable-decision-20260918/manifest.json",
+    "manifest_sha256": "9238ebac0d5bad7dcc8fdbcae829d2a0ec07b565d8681c71869d0ce339b72e48"
+  }
+}

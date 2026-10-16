@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_ring_argument_ownership_paired_control",
+  "run_date": "2026-09-19",
+  "artifact": {
+    "directory": "build/tier-e-ring-argument-list-control-20260919",
+    "manifest_sha256": "cca139dc5a7a3e84a683eb8ed2b7b2d47b1c8d7345391e23f765f9d778cc0080",
+    "results_sha256": "7d89d57fb50b45970c252eeed3518c525ea13848f4cf2e49a0fc4f6aea0a062c",
+    "benchmark_log_sha256": "298e3744458ee758c192d69f0ad83b2da18155243befe6c64b2c97d2a4bedb21"
+  },
+  "method": {
+    "execution": "rootful Docker",
+    "scope": "tier-e-ring-argument-list",
+    "forks": 5,
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "paired_control": "immutable argument factory versus lambda copy"
+  },
+  "result": {
+    "workload_correctness": "PASS",
+    "tier_e_evidence": "COMPLETE",
+    "policy_eligibility": false,
+    "pairs": 5,
+    "lambda_copy_minus_immutable_factory_median_ns": 35252,
+    "paired_95_percent_interval_ns": [-363579, 64242],
+    "interval_includes_zero": true
+  },
+  "interpretation": "Argument ownership/copy strategy does not establish a measurable application-workload latency difference. The payload-slice timer is not sufficient evidence to justify another ownership refactor; preserve the accepted allocation-safe lazy compatibility view.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "partially_attributed"
+  }
+}

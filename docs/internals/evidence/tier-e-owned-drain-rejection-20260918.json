@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-18",
+  "experiment": "tier-e-owned-ring-drain-lazy-decode",
+  "decision": "rejected",
+  "reason": "No end-to-end workload-time comparison has a bootstrap 95% confidence interval wholly below zero.",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 13,
+    "forks_per_mode": 15,
+    "warmup_batches": 3,
+    "measured_batches": 10,
+    "workload": "controlled openat oracle",
+    "raw_compatibility_artifact": "/tmp/tier-e-drain-list-decision-20260918/results.jsonl",
+    "raw_owned_artifact": "/tmp/tier-e-drain-owned-decision-20260918/results.jsonl",
+    "paired_analysis_artifact": "/tmp/tier-e-drain-owned-vs-list-20260918.tsv"
+  },
+  "correctness": {
+    "compatibility_profiled_records_invalid": 0,
+    "owned_profiled_records_invalid": 0,
+    "policy_eligibility": false
+  },
+  "paired_effects": [
+    {
+      "mode": "dictionary_full_stream",
+      "metric": "workload_total_ns",
+      "direction": "owned_minus_compatibility",
+      "pairs": 15,
+      "median_ns": -4868623,
+      "bootstrap_95_ci_ns": [-16457011, 43866909]
+    },
+    {
+      "mode": "dictionary_unique_edge",
+      "metric": "workload_total_ns",
+      "direction": "owned_minus_compatibility",
+      "pairs": 15,
+      "median_ns": -8848052,
+      "bootstrap_95_ci_ns": [-22407388, 10968909]
+    },
+    {
+      "mode": "inline_full_stream",
+      "metric": "workload_total_ns",
+      "direction": "owned_minus_compatibility",
+      "pairs": 15,
+      "median_ns": 4165226,
+      "bootstrap_95_ci_ns": [-10502971, 16790524]
+    },
+    {
+      "mode": "inline_unique_edge",
+      "metric": "workload_total_ns",
+      "direction": "owned_minus_compatibility",
+      "pairs": 15,
+      "median_ns": 10129513,
+      "bootstrap_95_ci_ns": [-4400934, 34361616]
+    }
+  ],
+  "implementation_action": "Removed the ownedDrain switch, lazy decoded-event iterator, and ownership-transfer counters; retained the original copied decoded-event-list path."
+}

@@ -1,10 +1,17 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.enforcer.diagnostics.ViolationMatcher
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.io.IOException
@@ -101,8 +108,8 @@ class ContainmentViolationDetectorExtensibilityTest {
 
     @Test
     fun `can configure custom phrases and regexes via Policy and PolicyBuilder`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .customViolationPhrase("blocked by sandbox")
             .customViolationRegex(Regex("""restricted: \d+"""))
             .build()

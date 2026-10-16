@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" tests="24" skipped="0" failures="0" errors="0" timestamp="2026-09-21T15:03:48.169Z" hostname="leanid-nitroanv1541" time="0.06">
+  <properties/>
+  <testcase name="emission acknowledgement requires the exact outstanding token()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.005"/>
+  <testcase name="unique edge observer does not change resolved evidence or integrity()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.007"/>
+  <testcase name="ready join preserves a single pending observation without requiring a mutable bucket()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="capture domain unknown can be declared explicitly()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="ready join transfer preserves order and is immutable()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.002"/>
+  <testcase name="unique edge deduplication retries after failed emit and suppresses after acknowledgement()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="resolves a syscall with its opaque virtual execution context()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.006"/>
+  <testcase name="same canonical stack retains the execution owner of each invocation()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="legacy virtual observation without execution identity is incomplete()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="sys_enter tracepoint domain means only post-seccomp dispatched syscalls are observed()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="stale process incarnation is rejected before dictionary joining()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.003"/>
+  <testcase name="detached attribution stays uncertain until explicit reentry()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="resolves a syscall when its delayed stack definition arrives()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="unique edge audit distinguishes candidate acknowledgement and suppression()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.002"/>
+  <testcase name="finishes unknown metadata as unresolved and marks loss incomplete()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.002"/>
+  <testcase name="unique edge mode retains only the first resolved stack syscall pair()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="dictionary drops recorded via recordDictionaryDrops surface as incomplete session()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="unique edge allocation accounting separates observer diagnostics from ownership()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.003"/>
+  <testcase name="pending overflow drops new observations and makes integrity incomplete()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="capture domain attempt missed is a limitation and never an exact event()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.002"/>
+  <testcase name="causal uncertain observation maps to causal uncertain resolution and is never resolved()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <testcase name="out of domain syscall attempt is recorded as a boundary limitation()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.0"/>
+  <testcase name="default capture domain is sys_enter tracepoint and excludes seccomp denied attempts()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.0"/>
+  <testcase name="reports virtual native proxy pin telemetry without changing completeness()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

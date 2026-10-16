@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "bootstrap_resamples": 10000,
+  "bootstrap_seed": "0x4d5a2026",
+  "paired_unit": "fork",
+  "expected_forks": 15,
+  "declared_operations": 75000,
+  "rows": 105,
+  "complete_forks": 15,
+  "incomplete": [],
+  "incomplete_reasons": [],
+  "modes": {
+    "full-stream": {
+      "pairs": {
+        "baseline": 15,
+        "v1": 15,
+        "v2": 15,
+        "hybrid": 15
+      },
+      "complete_forks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 15,
+          "median": 13.187214611872147,
+          "upper_95": 13.904682274247492,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 12.786858974358974,
+          "upper_95": 13.672,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 13.2876254180602,
+          "upper_95": 13.98389694041868,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 15,
+          "median": 77170000000,
+          "upper_95": 80070000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 76180000000,
+          "upper_95": 78890000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 77350000000,
+          "upper_95": 79270000000,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 15,
+        "median": 1.0023377337733774,
+        "upper_95": 1.0418533213874313,
+        "status": "COMPLETE",
+        "reasons": []
+      }
+    },
+    "unique-edge": {
+      "pairs": {
+        "baseline": 15,
+        "v1": 15,
+        "v2": 15,
+        "hybrid": 15
+      },
+      "complete_forks": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "combined_cpu_ratio": {
+        "v1": {
+          "pairs": 15,
+          "median": 13.001560062402497,
+          "upper_95": 13.696043165467627,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 12.770670826833074,
+          "upper_95": 13.477707006369426,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 13.41185647425897,
+          "upper_95": 13.6672,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "incremental_cpu_ns": {
+        "v1": {
+          "pairs": 15,
+          "median": 75070000000,
+          "upper_95": 77430000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "v2": {
+          "pairs": 15,
+          "median": 73850000000,
+          "upper_95": 76930000000,
+          "status": "COMPLETE",
+          "reasons": []
+        },
+        "hybrid": {
+          "pairs": 15,
+          "median": 75610000000,
+          "upper_95": 79170000000,
+          "status": "COMPLETE",
+          "reasons": []
+        }
+      },
+      "hybrid_over_v1_incremental_ratio": {
+        "pairs": 15,
+        "median": 0.9989343279605701,
+        "upper_95": 1.034186923176914,
+        "status": "COMPLETE",
+        "reasons": []
+      }
+    }
+  },
+  "metrics_status": "COMPLETE",
+  "existing_gates_note": "diagnostic only; does not replace the combined CPU 1.25 or receipt-p99 gates",
+  "prior_adoption_decision": "REJECT_DEFAULT_PROMOTION",
+  "policy_eligibility": false
+}

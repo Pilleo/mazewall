@@ -42,7 +42,7 @@ class BuildConventionsFunctionalTest {
             tasks.register("assertConventions") {
                 doLast {
                     check(project.group == "io.mazewall") { "unexpected group: ${'$'}{project.group}" }
-                    check(project.version == "0.0.1-prealpha-SNAPSHOT") { "unexpected version: ${'$'}{project.version}" }
+                    check(project.version == "0.1.0-SNAPSHOT") { "unexpected version: ${'$'}{project.version}" }
                     check(tasks.findByName("test") != null) { "test task missing" }
                     check(tasks.findByName("ktlintCheck") != null) { "ktlintCheck task missing" }
                     check(tasks.findByName("spotbugsMain") != null) { "spotbugsMain task missing" }

@@ -1,41 +1,32 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNotEquals
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class InstallationReceiptTest {
     @Test
-    fun `receipt data operations retain installation status`() {
-        val policy = Policy.builder().build().definition
-        val session = AutoCloseable {}
-        val receipt =
-            InstallationReceipt(
-                processWide = false,
-                requestedPolicy = policy,
-                supervisorSession = session,
-                timestampMillis = 123L,
-                installed = false,
-            )
+    fun `closing a receipt retires its supervisor registration once`() {
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition
+        var closes = 0
+        val receipt = InstallationReceipt.withSupervisorRegistration(false, policy, AutoCloseable { closes++ })
 
-        assertEquals(false, receipt.component1())
-        assertSame(policy, receipt.component2())
-        assertSame(session, receipt.component3())
-        assertEquals(123L, receipt.component4())
-        assertEquals(false, receipt.component5())
+        receipt.use { assertTrue(it.installed) }
+        receipt.close()
 
-        val copy = receipt.copy()
-        assertEquals(receipt, copy)
-        assertEquals(receipt.hashCode(), copy.hashCode())
-        assertTrue(copy.toString().contains("installed=false"))
-        assertNotEquals(receipt, receipt.copy(installed = true))
+        assertEquals(1, closes)
     }
 
     @Test
     fun `receipt defaults to installed status`() {
-        val receipt = InstallationReceipt(false, Policy.builder().build().definition)
+        val receipt = InstallationReceipt(false, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
 
         assertTrue(receipt.installed)
         assertEquals(false, receipt.landlockApplied)
@@ -46,7 +37,7 @@ class InstallationReceiptTest {
         val receipt =
             InstallationReceipt(
                 processWide = false,
-                requestedPolicy = Policy.builder().build().definition,
+                requestedPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition,
                 installed = false,
                 landlockApplied = true,
             )
@@ -55,23 +46,20 @@ class InstallationReceiptTest {
     }
 
     @Test
-    fun `receipt retains the pre-outcome JVM constructor`() {
-        val constructor =
-            InstallationReceipt::class.java.getConstructor(
-                Boolean::class.javaPrimitiveType,
-                PolicyDefinition::class.java,
-                AutoCloseable::class.java,
-                Long::class.javaPrimitiveType,
-            )
+    fun `unsupervised receipts can be released by fire-and-forget install APIs`() {
+        val receipt = InstallationReceipt(false, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition)
+        receipt.releaseIfUnsupervised()
+    }
 
+    @Test
+    fun `supervised receipts cannot be dropped by fire-and-forget install APIs`() {
         val receipt =
-            constructor.newInstance(
+            InstallationReceipt.withSupervisorRegistration(
                 false,
-                Policy.builder().build().definition,
-                null,
-                123L,
+                ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition,
+                AutoCloseable { },
             )
-
-        assertTrue(receipt.installed)
+        kotlin.test.assertFailsWith<IllegalStateException> { receipt.releaseIfUnsupervised() }
+        receipt.close()
     }
 }

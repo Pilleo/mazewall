@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.tierE.stress.TierECoverageOracleTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-09-21T15:03:48.339Z" hostname="leanid-nitroanv1541" time="0.082">
+  <properties/>
+  <testcase name="wrong paths syscalls and unexpected identities fail explicitly()" classname="io.mazewall.profiler.tierE.stress.TierECoverageOracleTest" time="0.006"/>
+  <testcase name="lost repetitions preserve coverage but a missing singleton does not()" classname="io.mazewall.profiler.tierE.stress.TierECoverageOracleTest" time="0.001"/>
+  <testcase name="every declared path supplies its own frame without visiting another path()" classname="io.mazewall.profiler.tierE.stress.TierECoverageOracleTest" time="0.007"/>
+  <testcase name="declared corpus has exact frequencies and distributed singletons()" classname="io.mazewall.profiler.tierE.stress.TierECoverageOracleTest" time="0.057"/>
+  <testcase name="unacknowledged and unresolved candidates do not recover coverage()" classname="io.mazewall.profiler.tierE.stress.TierECoverageOracleTest" time="0.005"/>
+  <testcase name="reduced corpus retains every declared path and rejects invalid sizes()" classname="io.mazewall.profiler.tierE.stress.TierECoverageOracleTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

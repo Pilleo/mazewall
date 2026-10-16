@@ -1,11 +1,19 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -16,7 +24,7 @@ class BpfFilterTest {
 
     @Test
     fun `filter contains arch check`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build().definition).instructions
+        val filter = BpfFilter.build(arch, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition).instructions
 
         // Find LD W ABS 4 (Load architecture audit ID)
         val ldIndex = filter.indexOfFirst { it.code == 0x20.toShort() && it.k == 4 }
@@ -39,7 +47,7 @@ class BpfFilterTest {
 
     @Test
     fun `filter contains syscall nr load`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build().definition).instructions
+        val filter = BpfFilter.build(arch, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition).instructions
         // Load syscall NR (LD W ABS 0)
         val hasSyscallLoad = filter.any { it.code == 0x20.toShort() && it.k == 0 }
         assertTrue(hasSyscallLoad, "Filter should contain instruction to load syscall number")
@@ -47,7 +55,7 @@ class BpfFilterTest {
 
     @Test
     fun `empty policy allows all syscalls`() {
-        val filter = BpfFilter.build(arch, Policy.builder().build().definition).instructions
+        val filter = BpfFilter.build(arch, ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition).instructions
         // The last instruction should be RET ALLOW
         val last = filter.last()
         assertEquals(0x06.toShort(), last.code, "Last instruction should be RET")
@@ -56,10 +64,10 @@ class BpfFilterTest {
 
     @Test
     fun `ALLOW_LIST mode has RET DENY as default`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(
-            io.mazewall.core.SeccompAction
+            io.mazewall.platform.syscall.SeccompAction
             .ACT_ERRNO(),
         ).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -71,10 +79,10 @@ class BpfFilterTest {
     @Test
     fun `ALLOW_LIST mode generates RET ALLOW for listed syscalls`() {
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(
-                    io.mazewall.core.SeccompAction
+                    io.mazewall.platform.syscall.SeccompAction
                     .ACT_ERRNO(),
                 ).allow(Syscall.READ)
                 .build()
@@ -97,10 +105,10 @@ class BpfFilterTest {
 
     @Test
     fun `clone3 always returns ENOSYS even in ALLOW_LIST`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(
-            io.mazewall.core.SeccompAction
+            io.mazewall.platform.syscall.SeccompAction
             .ACT_ERRNO(),
         ).build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -122,7 +130,7 @@ class BpfFilterTest {
 
     @Test
     fun `testBpfMmapArgumentInspection`() {
-        val policy = Policy.builder().unblock(Syscall.MMAP).build() // NO_EXEC by default blocks mmap exec
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).unblock(Syscall.MMAP).build() // NO_EXEC by default blocks mmap exec
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
         // Find JEQ mmap -> check PROT_EXEC
@@ -151,7 +159,7 @@ class BpfFilterTest {
 
     @Test
     fun `testBpfCloneArgumentInspection`() {
-        val policy = Policy.builder().build() // NO_EXEC by default protects clone
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build() // NO_EXEC by default protects clone
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val cloneNr = Syscall.CLONE.numberFor(arch)
@@ -175,7 +183,7 @@ class BpfFilterTest {
 
     @Test
     fun `testBpfPrctlArgumentInspection`() {
-        val policy = Policy.builder().build() // NO_EXEC protects prctl
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build() // NO_EXEC protects prctl
         val filter = BpfFilter.build(arch, policy.definition).instructions
 
         val prctlNr = Syscall.PRCTL.numberFor(arch)
@@ -342,8 +350,8 @@ class BpfFilterTest {
         val sys4 = Syscall.GETGID
         val sys5 = Syscall.GETEGID
 
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(sys1, sys2, sys3, sys4, sys5)
             .build()
 
@@ -406,7 +414,7 @@ class BpfFilterTest {
             .getLogger("")
         root.addHandler(handler)
         try {
-            val policy = Policy.builder().allowUnsafePrctl().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowUnsafePrctl().build()
             BpfFilter.build(arch, policy.definition)
         } finally {
             root.removeHandler(handler)
@@ -418,9 +426,9 @@ class BpfFilterTest {
     fun `JA instructions encode skip count in k with zero jt and jf`() {
         // Regression: classic BPF JA jumps by K. Emitting the offset in jt (with k=0) makes the
         // filter fall through into the next RET block for every syscall.
-        val policy = Policy
-            .builder()
-            .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
+            .defaultAction(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW)
             .block(Syscall.CONNECT)
             .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -435,8 +443,8 @@ class BpfFilterTest {
 
     @Test
     fun `blacklist policy compiled with BST contains greater-than comparisons and routes correctly`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.EXECVE, Syscall.EXECVEAT, Syscall.MEMFD_CREATE)
             .build()
@@ -502,8 +510,8 @@ class BpfFilterTest {
 
     @Test
     fun `test ACT_TRACE dynamic action compilation and evaluation`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .addAction(SeccompAction.ACT_TRACE(1234), Syscall.EXECVE)
             .addAction(SeccompAction.ACT_TRACE(5678), Syscall.MEMFD_CREATE)
             .build()
@@ -518,8 +526,8 @@ class BpfFilterTest {
 
     @Test
     fun `test ACT_ERRNO dynamic action compilation with custom errno`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .addAction(SeccompAction.ACT_ERRNO(99), Syscall.OPEN)
             .build()
         val filter = BpfFilter.build(arch, policy.definition).instructions
@@ -530,8 +538,8 @@ class BpfFilterTest {
 
     @Test
     fun `test ioctl is whitelisted in profilingMode`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.IOCTL)
             .build()
         val filter = BpfFilter.build(arch, policy.definition, profilingMode = true).instructions
@@ -570,14 +578,14 @@ class BpfFilterTest {
         // issue-20260821-113000: creat/truncate/ftruncate must be trapped so USER_NOTIF
         // profiling observes filesystem mutations. CREAT is x86_64-only (85); aarch64 uses
         // openat(O_CREAT), and BpfFilter filters unmapped NRs out of jump tables.
-        val amd64 = BpfFilter.build(Arch.AMD64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        val amd64 = BpfFilter.build(Arch.AMD64, io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
         assertEquals(
             NativeConstants.SECCOMP_RET_ERRNO or 1,
             evalBpf(amd64, Syscall.CREAT.numberFor(Arch.AMD64)),
             "creat(85) must be denied EPERM in PURE_COMPUTE_UNSAFE",
         )
 
-        val aarch64Program = BpfFilter.build(Arch.AARCH64, io.mazewall.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
+        val aarch64Program = BpfFilter.build(Arch.AARCH64, io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE.definition).instructions
         assertTrue(aarch64Program.none { it is BpfInstruction.Jmp && it.k == -1 }, "unmapped NRs must be filtered from jump tables")
     }
 

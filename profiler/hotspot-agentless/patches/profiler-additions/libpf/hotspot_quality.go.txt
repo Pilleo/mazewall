@@ -1,0 +1,42 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package libpf
+
+type HotSpotScopeLookup uint8
+
+const (
+	HotSpotScopeUnknown HotSpotScopeLookup = iota
+	HotSpotScopeInterpreter
+	HotSpotScopeExactPC
+	HotSpotScopePrecedingPC
+	HotSpotScopeMethodOnly
+	HotSpotScopeStub
+)
+
+type HotSpotBCIState uint8
+
+const (
+	HotSpotBCIUnknown HotSpotBCIState = iota
+	HotSpotBCIObservedInRange
+	HotSpotBCIUnavailable
+	HotSpotBCIOutOfRange
+)
+
+type HotSpotScopeWalk uint8
+
+const (
+	HotSpotScopeWalkUnknown HotSpotScopeWalk = iota
+	HotSpotScopeWalkReturned
+	HotSpotScopeWalkPartial
+)
+
+// HotSpotQuality is comparable and immutable when interned with a Frame.
+// In-range BCI is provider evidence, not opcode-boundary validation. Exact PC
+// concerns scope-table selection, not full stack/inline completeness.
+type HotSpotQuality struct {
+	ScopeLookup HotSpotScopeLookup
+	BCIState    HotSpotBCIState
+	ScopeWalk   HotSpotScopeWalk
+	RawBCI      uint32
+	Diagnostic  String
+}

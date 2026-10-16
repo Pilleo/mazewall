@@ -4,9 +4,12 @@ import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.state.*
+import io.mazewall.platform.fd.CleanupFailures
 import java.io.InterruptedIOException
+import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -43,12 +46,41 @@ object JvmFloorWorkload {
     /**
      * Executes the stress workload.
      */
-    fun run() {
+    fun run() = run(beforeWork = null)
+
+    /** The test barrier runs after entry validation and before the interruptible workload. */
+    fun run(beforeWork: (() -> Unit)?) =
+        runWithNetworkProbe(beforeWork) {
+        java.net.Socket().use { socket ->
+            socket.connect(java.net.InetSocketAddress("127.0.0.1", 1), 1)
+        }
+    }
+
+    /** Per-invocation test boundary; the public workload always supplies the real one-ms connect. */
+    internal fun runWithNetworkProbe(
+        beforeWork: (() -> Unit)?,
+        networkProbe: () -> Unit,
+    ) = runWithOwners(beforeWork, networkProbe, null)
+
+    /** Observation/barrier callbacks receive only owners actually acquired by this invocation. */
+    internal class OwnerBarriers(
+        val loomTask: (() -> Unit)? = null,
+        val loomAcquired: ((ExecutorService) -> Unit)? = null,
+        val workerTask: (() -> Unit)? = null,
+        val workerAcquired: ((Thread) -> Unit)? = null,
+    )
+
+    internal fun runWithOwners(
+        beforeWork: (() -> Unit)?,
+        networkProbe: () -> Unit,
+        barriers: OwnerBarriers?,
+    ) {
         println("[JVM FLOOR] Starting stress workload...")
 
         if (Thread.currentThread().isInterrupted) {
             throw InterruptedException("Workload interrupted before start")
         }
+        beforeWork?.invoke()
 
         // 1. JIT Compiler Pressure
         // Force methods to reach the compilation threshold
@@ -91,7 +123,10 @@ object JvmFloorWorkload {
         // Spawning virtual threads that yield to exercise the ForkJoinPool scheduler
         val loomStartTime = System.nanoTime()
         val executor = Executors.newVirtualThreadPerTaskExecutor()
+        var loomFailure: Throwable? = null
+        var loomInterrupted = false
         try {
+            val execution = runCatching {
             val tasks = (1..LOOM_TASK_COUNT).map { id ->
                 executor.submit(
                     Callable {
@@ -99,36 +134,41 @@ object JvmFloorWorkload {
                         return@Callable 0
                     }
                     try {
-                        Thread.sleep(LOOM_SLEEP_MS)
+                        barriers?.loomTask?.invoke()
+                        Thread.sleep(LOOM_SLEEP_MS) // Workload delay: exercise virtual-thread parking and carrier coordination.
                         Thread.yield() // Force carrier thread switch
                         id * id
                     } catch (e: InterruptedException) {
+                        System.err.println("[JVM FLOOR] Loom task cancelled: $e")
                         Thread.currentThread().interrupt() // restore status
                         0
                     }
                 },
                 )
             }
+            barriers?.loomAcquired?.invoke(executor)
             for (task in tasks) {
                 if (Thread.currentThread().isInterrupted) {
                     throw InterruptedException("Loom stress interrupted while waiting for tasks")
                 }
                 task.get()
             }
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw e
+            }
+            execution.exceptionOrNull()?.let { caught ->
+                loomFailure = caught
+                if (caught is InterruptedException) loomInterrupted = true
+            }
         } finally {
-            executor.shutdown()
             try {
-                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    executor.shutdownNow()
-                }
-            } catch (e: InterruptedException) {
-                executor.shutdownNow()
-                Thread.currentThread().interrupt()
+                loomInterrupted = Thread.interrupted() || loomInterrupted
+                val cleanup = runCatching { terminateExecutor(executor, cancel = loomFailure != null || loomInterrupted) }
+                cleanup.exceptionOrNull()?.let { loomFailure = CleanupFailures.merge(loomFailure, it) }
+            } finally {
+                loomInterrupted = Thread.interrupted() || loomInterrupted
+                if (loomInterrupted) Thread.currentThread().interrupt()
             }
         }
+        loomFailure?.let { throw it }
         val loomDuration = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - loomStartTime)
         println("[JVM FLOOR] Loom stress completed in ${loomDuration}ms")
 
@@ -139,16 +179,17 @@ object JvmFloorWorkload {
         }
         java.nio.channels.Selector.open().use { selector ->
             try {
-                java.net.Socket().use { socket ->
-                    socket.connect(java.net.InetSocketAddress("127.0.0.1", 1), 1)
-                }
+                networkProbe()
             } catch (e: SocketTimeoutException) {
-                // Connection timeout is expected and fine, we just want the syscalls
+                System.err.println("[JVM FLOOR] Expected loopback connection timeout: $e")
             } catch (e: InterruptedIOException) {
                 Thread.currentThread().interrupt()
-                throw InterruptedException("NIO warmup interrupted: $e")
-            } catch (ignored: java.io.IOException) {
-                // Connection failure is expected and fine, we just want the syscalls
+                throw InterruptedException("NIO warmup interrupted").apply { initCause(e) }
+            } catch (e: ConnectException) {
+                // Accept the expected refused loopback connection, not arbitrary
+                // IO failures (in particular EPERM/EACCES from containment).
+                if (e.message !in setOf("Connection refused", "Connection refused (connect failed)")) throw e
+                System.err.println("[JVM FLOOR] Expected loopback connection refusal: $e")
             }
         }
         println("[JVM FLOOR] NIO warmup completed")
@@ -158,34 +199,121 @@ object JvmFloorWorkload {
         if (Thread.currentThread().isInterrupted) {
             throw InterruptedException("OS Thread coordination interrupted before start")
         }
+        val workerOutcome = java.util.concurrent.atomic
+            .AtomicReference<Result<Unit>>()
         val thread = Thread {
+            val execution = runCatching {
             try {
+                barriers?.workerTask?.invoke()
                 repeat(OS_THREAD_ITERATIONS) {
                     if (Thread.currentThread().isInterrupted) {
-                        return@Thread
+                        return@runCatching
                     }
-                    Thread.sleep(OS_THREAD_SLEEP_MS)
+                    Thread.sleep(OS_THREAD_SLEEP_MS) // Workload delay: exercise OS-thread sleep, wakeup, and join syscalls.
                 }
             } catch (e: InterruptedException) {
+                System.err.println("[JVM FLOOR] OS worker cancelled: $e")
                 Thread.currentThread().interrupt()
             }
+            }
+            workerOutcome.set(execution)
         }
         thread.start()
+        var workerFailure: Throwable? = null
+        var workerInterrupted = false
         try {
-            thread.join()
-        } catch (e: InterruptedException) {
-            thread.interrupt() // Signal background thread to stop
-            try {
-                thread.join(1000) // Clean wait with timeout
-            } catch (ignored: InterruptedException) {
-                // Ignore secondary interruption during join cleanup
+            val joining = runCatching {
+                barriers?.workerAcquired?.invoke(thread)
+                thread.join()
             }
-            Thread.currentThread().interrupt() // restore status
-            throw e
+            joining.exceptionOrNull()?.let { caught ->
+                workerFailure = caught
+                if (caught is InterruptedException) workerInterrupted = true
+            }
+        } finally {
+            try {
+                workerInterrupted = Thread.interrupted() || workerInterrupted
+                val cleanup = runCatching { terminateWorker(thread) }
+                cleanup.exceptionOrNull()?.let { workerFailure = CleanupFailures.merge(workerFailure, it) }
+            } finally {
+                workerInterrupted = Thread.interrupted() || workerInterrupted
+                if (workerInterrupted) Thread.currentThread().interrupt()
+            }
         }
+        workerOutcome.get()?.exceptionOrNull()?.let { workerFailure = CleanupFailures.merge(workerFailure, it) }
+        workerFailure?.let { throw it }
         println("[JVM FLOOR] OS Thread coordination completed")
 
         println("[JVM FLOOR] Workload successfully finished.")
+    }
+
+    /** All termination observations share the original five-second cleanup budget. */
+    private fun terminateExecutor(
+        executor: ExecutorService,
+        cancel: Boolean,
+    ) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        var failure: Throwable? = null
+        var interrupted = Thread.interrupted()
+        var forced = false
+
+        fun attempt(action: () -> Unit) {
+            val outcome = runCatching(action)
+            outcome.exceptionOrNull()?.let { caught ->
+                if (caught is InterruptedException) interrupted = true
+                failure = CleanupFailures.merge(failure, caught)
+            }
+            interrupted = Thread.interrupted() || interrupted
+        }
+        try {
+            attempt { executor.shutdown() }
+            if (cancel || failure != null) {
+                attempt { executor.shutdownNow() }
+                forced = true
+            }
+            var terminated = executor.isTerminated
+            while (!terminated) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0) break
+                attempt { terminated = executor.awaitTermination(remaining, TimeUnit.NANOSECONDS) }
+                if (!terminated && !forced) {
+                    attempt { executor.shutdownNow() }
+                    forced = true
+                }
+            }
+            if (!terminated) {
+                if (!forced) attempt { executor.shutdownNow() }
+                attempt { check(executor.isTerminated) { "Loom executor cleanup could not confirm physical termination" } }
+            }
+            failure?.let { throw it }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+    }
+
+    /** Interruption never substitutes for the original bounded physical join. */
+    private fun terminateWorker(thread: Thread) {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1000)
+        var failure: Throwable? = null
+        var interrupted = Thread.interrupted()
+        val signalling = runCatching { if (thread.isAlive) thread.interrupt() }
+        signalling.exceptionOrNull()?.let { failure = CleanupFailures.merge(failure, it) }
+        try {
+            while (thread.isAlive) {
+                val remaining = deadline - System.nanoTime()
+                if (remaining <= 0) break
+                val joining = runCatching { TimeUnit.NANOSECONDS.timedJoin(thread, remaining) }
+                joining.exceptionOrNull()?.let { caught ->
+                    if (caught is InterruptedException) interrupted = true
+                    failure = CleanupFailures.merge(failure, caught)
+                }
+                interrupted = Thread.interrupted() || interrupted
+            }
+            if (thread.isAlive) failure = CleanupFailures.merge(failure, IllegalStateException("OS worker cleanup could not confirm physical termination"))
+            failure?.let { throw it }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
     }
 
     @JvmStatic

@@ -1,13 +1,20 @@
 package io.mazewall.landlock
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
-import io.mazewall.PlatformProvider
-import io.mazewall.Policy
-import io.mazewall.SeccompMode
-import io.mazewall.YamaPtraceScope
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PlatformProvider
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.SeccompMode
+import io.mazewall.enforcer.api.YamaPtraceScope
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
@@ -20,7 +27,7 @@ class LandlockExceptionSafetyTest {
         Platform.resetToDefault()
     }
 
-    object MockPlatformProvider : PlatformProvider {
+    internal object MockPlatformProvider : PlatformProvider {
         override fun getOsName(): String = "Linux"
 
         override fun getOsVersion(): String = "5.15.0"
@@ -54,12 +61,12 @@ class LandlockExceptionSafetyTest {
         val mockEngine = object : MockNativeEngine() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 // Throw an Error (not an Exception) to see if it's caught
                 throw NoSuchMethodError("Simulated native error")

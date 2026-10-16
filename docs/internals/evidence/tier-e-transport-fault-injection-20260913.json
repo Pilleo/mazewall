@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "evidence_id": "tier-e-transport-fault-injection-20260913",
+  "status": "PASS",
+  "commit_sha": "bd8b3966",
+  "command": "./gradlew :profiler:test --tests '*DictionaryBatchPublisherTest' --tests '*InvocationReplayMachineTest'",
+  "result": "BUILD SUCCESSFUL",
+  "transport_scenarios": [
+    "retry keeps the exact batch and watermark unchanged until commit",
+    "termination records an abandoned prepared batch without committing it",
+    "terminal sink failure preserves definitions and marks transport incomplete",
+    "partial write followed by reconnect replays identical bytes before commit",
+    "daemon crash before commit leaves an explicit incomplete abandoned batch",
+    "retry preserves the same opaque batch identity",
+    "ambiguous delivery is terminal and cannot be retried"
+  ],
+  "replay_scenarios": [
+    "detach and exec invalidation require validated re-entry before exact attribution",
+    "pid reuse with new process epoch evicts stale state and resets attribution",
+    "sequence gap invalidates state and never resurrects an older invocation",
+    "supported native callback unsupported syscall is causal uncertain",
+    "inner capture failure in reentrant scope does not leave stale exact attribution"
+  ],
+  "verdict_dimensions": {
+    "capture_domain_validity": "INCOMPLETE",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "INCOMPLETE"
+  },
+  "raw_log": "tier-e-transport-fault-injection-20260913.txt"
+}

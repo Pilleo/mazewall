@@ -4,13 +4,23 @@
 
 > **Tier 1** (`ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)`): Blocks `execve`/`execveat`/`memfd_create` process-wide at startup, while still allowing HotSpot to `mmap(PROT_EXEC)` for the JIT. Raw `Policy.NO_EXEC` also denies executable mappings and can fatal a JIT JVM. Nothing in this process should spawn a shell or child process after install, regardless of which thread is compromised. This is the mandatory architectural backstop.
 >
-> **Tier 2** (`ContainedExecutors.wrap(executor, policy)`): Restricts specific syscalls and filesystem paths on a given thread pool. Stops **data-plane attacks** (SSRF, XXE, path traversal, fileless malware) on processing threads where trusted code handles untrusted data.
+> **Tier 2** (`ManagedRuntime.prepare(policy, limits)` followed by owned `submit(domain, Callable)`): Restricts specific syscalls and filesystem paths on dedicated, required-ready platform workers. Stops **data-plane attacks** (SSRF, XXE, path traversal, fileless malware) on processing threads where trusted code handles untrusted data. The application retains the owner until physical execution and cleanup drain; cancellation is not termination.
 >
 > ⚠️ **Tier 2 alone does NOT isolate arbitrary Java code.** An attacker who achieves Java-level code execution (e.g., via deserialization RCE) can escape to unrestricted sibling threads using `CompletableFuture.runAsync(...)` or virtual threads — no ACE required. Always stack Tier 1 first. See [§1](#1-thread-level-vs-process-level-isolation) for the complete ACE pivot analysis.
 
 ---
 
 Using seccomp-bpf within the JVM introduces specific architectural risks. This document outlines high-level security properties and implementation trade-offs.
+
+The [notification liveness contract](notification-liveness-contract.md) bounds admitted
+USER_NOTIF work with a reactor-owned 30-second deadline and one terminal reply claim.
+It does not make thread containment an ACE boundary or guarantee immediate reclamation
+of a helper stuck in uninterruptible kernel sleep. Unknown routes and unsupported
+authority fail closed; listener failure invalidates the permanent runtime rather than
+pretending to undo its filter. Profile completeness and authenticated denial evidence
+are separate from observing a permission-looking exception message. The default web
+artifact excludes executable deserialization gadgets; only the explicit isolated
+fixture artifact/profile supplies that attack surface.
 
 ---
 
@@ -24,7 +34,7 @@ For years, industry leaders like **Elasticsearch** have successfully used a mini
 **Recommendation:** Use `ContainedExecutors.installOnProcess(Policy.NO_EXEC_HOTSPOT)` as your foundational baseline on HotSpot. Use raw `Policy.NO_EXEC` only when you intend W^X (no further code generation).
 
 ### Thread-Level Mitigation & The "ACE Shared-Memory Pivot" Threat Model
-Thread-level containment (e.g., wrapping an `ExecutorService` with restrictive policies like `PURE_COMPUTE_UNSAFE`) is a powerful tool to minimize the blast radius of un-trusted library execution. However, **thread-scoped seccomp is not an absolute security boundary against an attacker who achieves Arbitrary Code Execution (ACE) on that thread.**
+Thread-level containment (e.g., preparing an owned worker domain with restrictive policies like `PURE_COMPUTE_UNSAFE`) is a powerful tool to minimize the blast radius of un-trusted library execution. However, **thread-scoped seccomp is not an absolute security boundary against an attacker who achieves Arbitrary Code Execution (ACE) on that thread.**
 
 Because the JVM runs within a single Linux process, **all JVM threads share the same physical address space, virtual memory maps, and heap.**
 
@@ -575,14 +585,17 @@ To resolve this permission boundary without requiring elevated privileges or bro
 Immediately upon spawning the daemon process, `mazewall` invokes `prctl` with the `PR_SET_PTRACER` option:
 
 ```kotlin
-// Set the daemon process as our allowed ptrace tracer under Yama
-val daemonPid = daemonProcess.pid()
-LinuxNative.prctl(0x59616d61, daemonPid, 0, 0, 0)
+// Select the exact live daemon through the shared successful-grant record.
+DaemonPtracer.authorize(LinuxNative, daemonProcess)
 ```
 
 This instructs the Yama LSM to allow the specified daemon process to read the parent's memory, enabling high-performance, out-of-process argument resolution for all thread-scoped sandboxed operations.
 
+Both daemon managers use `DaemonPtracer` to record successful selections by process identity. Reusing a supervisor after a completed profile restores its exact PID grant; a failed restoration is propagated before the context is returned. An unchanged successful selection does not repeat `prctl`, which may already be forbidden by the process baseline. Retiring an old daemon cannot invalidate a newer daemon's recorded selection, and a replacement process must authorize again even if its numeric PID was reused.
+
+Yama exposes one selected tracer exception, not an independent grant per daemon. This record covers assignments made by the library through the same native engine; direct external changes to `PR_SET_PTRACER` invalidate that assumption. Finish profiling before switching to supervised enforcement. Independently active profiler and supervisor sessions that both need tracee memory are not a supported concurrent configuration, and a baseline that prevents a required switch produces an explicit permission failure. No broad `PR_SET_PTRACER_ANY` grant or permission fallback is used.
+
 ### Grandchild Process Boundaries
 Note that grandchild processes (e.g. processes spawned by `ProcessBuilder` within a sandboxed thread pool, like `echo` or helper scripts) do not inherit this ptrace tracer permission, and cannot easily invoke `prctl` to declare the daemon as a tracer. As a result, the daemon's `process_vm_readv` calls on grandchild processes will still return `EPERM` under `ptrace_scope = 1`.
 
-The `mazewall` supervisor handles this constraint gracefully: if a `process_vm_readv` call returns `EPERM` on a grandchild process (like during `execve`), the supervisor intercepts the system call, logs the raw address registers, and continues executing it natively without crashing or blocking the worker.
+The supervisor must obtain identity-bound authority before inspecting a child process. If authority acquisition fails with `EPERM` or `EACCES`, it denies the operation; it does not authorize pointer-bearing syscalls through a memory-read failure. The notification deadline and terminal reply owner remain responsible for resolving the notification.

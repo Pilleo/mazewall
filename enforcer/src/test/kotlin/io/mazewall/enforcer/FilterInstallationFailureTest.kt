@@ -1,16 +1,24 @@
 package io.mazewall.enforcer
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
-import io.mazewall.PlatformProvider
-import io.mazewall.Policy
-import io.mazewall.RealPlatformProvider
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.KernelCapability
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PlatformProvider
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
@@ -29,11 +37,13 @@ class FilterInstallationFailureTest {
     }
 
     @Test
-    fun `test state IS reverted on failure when Landlock is not applied`() {
+    fun `failed installation records engine progress without inventing policy installation`() {
         val mockPlatform = object : PlatformProvider by RealPlatformProvider {
             override fun getOsName(): String = "Linux"
 
             override fun getLandlockAbiVersion(): Int = 5
+
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(5)
 
             override fun hasKernelSeccompSupport(): Boolean = true
 
@@ -41,14 +51,24 @@ class FilterInstallationFailureTest {
         }
         Platform.setProvider(mockPlatform)
 
-        val mockEngine = MockNativeEngine()
+        val mockEngine = MockNativeEngine(
+            process = io.mazewall.enforcer.api.MockNativeProcess().apply {
+            onPrctl = { command ->
+                if (command is io.mazewall.platform.syscall.PrctlCommand.SetSeccomp) {
+                    LinuxNative.SyscallResult.Error(22, -1L)
+                } else {
+                    LinuxNative.SyscallResult.Success(0L)
+                }
+            }
+        },
+        )
 
         // Policy WITHOUT filesystem paths — Landlock will NOT be applied
-        val policy = Policy.builder().block(Syscall.EXECVE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.EXECVE).build()
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()
@@ -69,8 +89,9 @@ class FilterInstallationFailureTest {
             ContainedExecutors.installOnCurrentThread(policy)
         }
 
-        // VERIFY: state WAS reverted because Landlock was not applied
-        assertEquals(initialState, ContainmentStateRegistry.threadState)
+        assertEquals(initialState.filterDepth, ContainmentStateRegistry.threadState.filterDepth)
+        assertEquals(initialState.syscallActions, ContainmentStateRegistry.threadState.syscallActions)
+        kotlin.test.assertIs<io.mazewall.seccomp.SeccompInstallationState.Failed>(ContainmentStateRegistry.threadState.engineState)
         assertNull(ContainmentStateRegistry.threadState.landlockPolicy)
     }
 
@@ -81,6 +102,8 @@ class FilterInstallationFailureTest {
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1)
@@ -90,11 +113,11 @@ class FilterInstallationFailureTest {
         val mockEngine = MockNativeEngine()
 
         // Policy WITH filesystem paths — Landlock WILL be applied (and is irreversible)
-        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
 
         // PureJavaBpfEngine.install calls LinuxNative.raw.syscall(SECCOMP_SET_MODE_FILTER, ...)
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()
@@ -127,6 +150,8 @@ class FilterInstallationFailureTest {
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1)
@@ -136,10 +161,10 @@ class FilterInstallationFailureTest {
         val mockEngine = MockNativeEngine()
 
         // Policy WITH filesystem paths — Landlock WILL be applied before the seccomp failure
-        val policy = Policy.builder().allowFsRead("/tmp").build()
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead("/tmp").build()
 
         mockEngine.onSyscall = { nr, _, _, _, _, _, _ ->
-            if (nr == io.mazewall.core.Arch
+            if (nr == io.mazewall.platform.syscall.Arch
                 .current()
                 .seccompSyscallNumber
                 .toLong()

@@ -1,0 +1,21 @@
+--- a/pkg/symbolizer/otel/otel.go
++++ b/pkg/symbolizer/otel/otel.go
+@@ -66,6 +66,8 @@
+ }
+ 
+ type otelResolverInstance struct {
++	definitionDrainMu sync.Mutex
++	definitionDrain *definitionDrainOwner
+ 	definitionCancel context.CancelFunc
+ 	consumerDone chan struct{}
+ 	options symbolizer.SymbolizerOptions
+@@ -518,7 +520,8 @@
+ 		// Poll the output channels
+ 		for {
+ 			select {
+-			case trace := <-traceCh:
++			case trace, open := <-traceCh:
++				if !open { return }
+ 				if trace != nil {
+ 					trc.HandleTrace(trace)
+ 				}

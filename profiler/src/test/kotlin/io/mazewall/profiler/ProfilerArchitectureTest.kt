@@ -1,5 +1,4 @@
-package io.mazewall.profiler
-
+package io.mazewall.profiler.api
 import com.tngtech.archunit.core.domain.JavaMethod
 import com.tngtech.archunit.core.importer.ImportOption
 import com.tngtech.archunit.junit.AnalyzeClasses
@@ -10,10 +9,15 @@ import com.tngtech.archunit.lang.SimpleConditionEvent
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
-import io.mazewall.profiler.engine.ProfilerDaemonEngine
-import io.mazewall.profiler.engine.ProfilerSessionHandler
-import io.mazewall.profiler.engine.SyscallEvent
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.SyscallEvent
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.internal.engine.ProfilerDaemonEngine
+import io.mazewall.profiler.internal.engine.ProfilerSessionHandler
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 
 @AnalyzeClasses(packages = ["io.mazewall.profiler"], importOptions = [ImportOption.DoNotIncludeTests::class])
 class ProfilerArchitectureTest {
@@ -23,7 +27,6 @@ class ProfilerArchitectureTest {
             .that()
             .resideOutsideOfPackages(
                 "io.mazewall.profiler.ffi..",
-                "io.mazewall.profiler.internal..",
                 "io.mazewall.profiler.tierE.engine..",
                 "io.mazewall.profiler.tierE.ringbuf..",
             ).should()
@@ -40,6 +43,14 @@ class ProfilerArchitectureTest {
             .areAssignableTo(TraceEvent::class.java)
             .or()
             .areAssignableTo(SyscallEvent::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.api.PathResolution::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.api.PathResolutionFailure::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.api.PathResolutionCause::class.java)
+            .or()
+            .areAssignableTo(io.mazewall.profiler.internal.engine.PathStringRead::class.java)
             .should()
             .dependOnClassesThat()
             .resideInAnyPackage("java.lang.foreign..", "io.mazewall.ffi.memory..")
@@ -95,7 +106,7 @@ class ProfilerArchitectureTest {
             .arePublic()
             .and()
             .areDeclaredInClassesThat()
-            .resideInAPackage("io.mazewall.profiler")
+            .resideInAPackage("io.mazewall.profiler.api..")
             .should()
             .notHaveRawParameterTypes(java.lang.foreign.MemorySegment::class.java)
             .because("Operator-facing profiler types must not expose FFM MemorySegment; handshake I/O stays internal.")
@@ -116,15 +127,49 @@ class ProfilerArchitectureTest {
     @ArchTest
     fun observationAndEbpfOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
-            "io.mazewall.profiler.ProfileObservation" to setOf(
-                "io.mazewall.profiler.ProfileObservation\$Syscall",
-                "io.mazewall.profiler.ProfileObservation\$IoUring",
-                "io.mazewall.profiler.ProfileObservation\$Connect",
+            "io.mazewall.profiler.api.ConnectResolution" to setOf(
+                "io.mazewall.profiler.api.ConnectResolution\$NotApplicable",
+                "io.mazewall.profiler.api.ConnectResolution\$Resolved",
+                "io.mazewall.profiler.api.ConnectResolution\$Failed",
             ),
-            "io.mazewall.profiler.EbpfLoad" to setOf(
-                "io.mazewall.profiler.EbpfLoad\$Available",
-                "io.mazewall.profiler.EbpfLoad\$UserNamespaceRoot",
-                "io.mazewall.profiler.EbpfLoad\$Denied",
+            "io.mazewall.profiler.internal.engine.ProfilerAckOutcome" to setOf(
+                "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$Acknowledged",
+                "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$PassThrough",
+                "io.mazewall.profiler.internal.engine.ProfilerAckOutcome\$Rejected",
+            ),
+            "io.mazewall.profiler.internal.TraceCommandWriteResult" to setOf(
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$Written",
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$NativeFailure",
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$ShortWrite",
+                "io.mazewall.profiler.internal.TraceCommandWriteResult\$Threw",
+            ),
+            "io.mazewall.profiler.api.PathResolution" to setOf(
+                "io.mazewall.profiler.api.PathResolution\$NotApplicable",
+                "io.mazewall.profiler.api.PathResolution\$Resolved",
+                "io.mazewall.profiler.api.PathResolution\$Partial",
+                "io.mazewall.profiler.api.PathResolution\$Failed",
+            ),
+            "io.mazewall.profiler.api.PathResolutionFailure\$Reason" to setOf(
+                "io.mazewall.profiler.api.PathResolutionFailure\$Reason\$VmReadDenied",
+                "io.mazewall.profiler.api.PathResolutionFailure\$Reason\$Missing",
+                "io.mazewall.profiler.api.PathResolutionFailure\$Reason\$DirFdUnresolved",
+                "io.mazewall.profiler.api.PathResolutionFailure\$Reason\$Truncated",
+            ),
+            "io.mazewall.profiler.internal.engine.PathStringRead" to setOf(
+                "io.mazewall.profiler.internal.engine.PathStringRead\$Text",
+                "io.mazewall.profiler.internal.engine.PathStringRead\$Missing",
+                "io.mazewall.profiler.internal.engine.PathStringRead\$Denied",
+                "io.mazewall.profiler.internal.engine.PathStringRead\$Truncated",
+            ),
+            "io.mazewall.profiler.api.ProfileObservation" to setOf(
+                "io.mazewall.profiler.api.ProfileObservation\$Syscall",
+                "io.mazewall.profiler.api.ProfileObservation\$IoUring",
+                "io.mazewall.profiler.api.ProfileObservation\$Connect",
+            ),
+            "io.mazewall.profiler.api.EbpfLoad" to setOf(
+                "io.mazewall.profiler.api.EbpfLoad\$Available",
+                "io.mazewall.profiler.api.EbpfLoad\$UserNamespaceRoot",
+                "io.mazewall.profiler.api.EbpfLoad\$Denied",
             ),
             "io.mazewall.profiler.tierE.daemon.ControlCommand" to setOf(
                 "io.mazewall.profiler.tierE.daemon.ControlCommand\$Attach",
@@ -152,7 +197,7 @@ class ProfilerArchitectureTest {
     fun `native-only transport for SCM_RIGHTS`(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
             .that()
-            .resideInAPackage("io.mazewall.profiler.engine..")
+            .resideInAPackage("io.mazewall.profiler.internal.engine..")
             .should()
             .accessClassesThat()
             .resideInAPackage("java.net..")

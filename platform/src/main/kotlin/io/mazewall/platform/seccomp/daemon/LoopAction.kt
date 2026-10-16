@@ -3,10 +3,10 @@ package io.mazewall.platform.seccomp.daemon
 /**
  * Result of a reactor loop iteration.
  */
-public sealed class LoopAction {
-    public object Continue : LoopAction()
+internal sealed class LoopAction {
+    object Continue : LoopAction()
 
-    public object Break : LoopAction()
+    object Break : LoopAction()
 
-    public object Shutdown : LoopAction()
+    object Shutdown : LoopAction()
 }

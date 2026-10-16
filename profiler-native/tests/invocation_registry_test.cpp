@@ -24,4 +24,32 @@ int main() {
 
     const auto leaked_carrier_scope = registry.enter(505, 88);
     if (leaked_carrier_scope.valid() || registry.current_id() != 0) return 8;
+
+    auto callback_outer = registry.enter(606);
+    if (!callback_outer.valid() || registry.current_id() != 606) return 9;
+
+    registry.suppress();
+    if (registry.current_id() != 0) return 10;
+
+    const auto callback_inner = registry.enter(707);
+    if (!callback_inner.valid() || registry.current_id() != 707) return 11;
+    if (!registry.leave(callback_inner) || registry.current_id() != 0) return 12;
+
+    if (registry.leave(callback_outer) || registry.current_id() != 0) return 13;
+
+    auto v2_outer = registry.enter(801, 1, 11);
+    if (!v2_outer.valid() || registry.current_stack_id() != 11) return 14;
+
+    const auto v2_inner = registry.enter(802, 1, 22);
+    if (!v2_inner.valid() || registry.current_stack_id() != 22) return 15;
+
+    if (!registry.leave(v2_inner) || registry.current_stack_id() != 11) return 16;
+
+    if (!registry.leave(v2_outer) || registry.current_stack_id() != 0) return 17;
+
+    auto capture_scope = registry.enter(901);
+    if (!capture_scope.valid()) return 18;
+    registry.set_current_stack(capture_scope, 33);
+    if (registry.current_stack_id() != 33 || capture_scope.stack_trace_id != 33) return 19;
+    if (!registry.leave(capture_scope) || registry.current_stack_id() != 0) return 20;
 }

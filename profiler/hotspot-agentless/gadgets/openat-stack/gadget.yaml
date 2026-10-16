@@ -1,0 +1,96 @@
+name: mw-hotspot-openat
+description: Selected x86-64 openat handler-entry events with Gadget OTel stack references
+homepageURL: https://github.com/Pilleo/mazewall
+documentationURL: https://github.com/Pilleo/mazewall/tree/master/profiler/hotspot-agentless
+sourceURL: https://github.com/Pilleo/mazewall/tree/master/profiler/hotspot-agentless/gadgets/openat-stack
+datasources:
+  openat:
+    fields:
+      hotspot_epoch:
+        annotations:
+          description: Safepoint counter observed around the stack helper
+      hotspot_epoch_state:
+        annotations:
+          description: Captured epoch state, separate from deferred decoder validation
+      hotspot_epoch_read_error:
+        annotations:
+          description: First failed counter read, negative helper result
+      process_start_ticks:
+        annotations:
+          description: Process-leader birth time in x86-64 Linux USER_HZ clock ticks
+      cgroup_id:
+        annotations:
+          description: Kernel cgroup identity at capture
+      argument_read:
+        annotations:
+          description: Filename read result, negative on failure
+      register_read:
+        annotations:
+          description: First syscall-register read error, zero on success
+      capture_boot_ns:
+        annotations:
+          description: Capture timestamp in CLOCK_BOOTTIME nanoseconds
+      cpu:
+        annotations:
+          description: Capture CPU for occurrence identity
+      dirfd:
+        annotations:
+          description: Directory descriptor from userspace syscall registers
+      filename:
+        annotations:
+          description: Bounded filename snapshot at handler entry
+      flags:
+        annotations:
+          description: Open flags from userspace syscall registers
+      mode:
+        annotations:
+          description: Open mode from userspace syscall registers
+      path_truncated:
+        annotations:
+          description: Argument read filled the bound and may be truncated
+      sequence:
+        annotations:
+          description: Per-CPU occurrence sequence, incremented before submission
+      tgid:
+        annotations:
+          description: Target host process ID
+      tid:
+        annotations:
+          description: Capture host thread ID
+      ustack:
+        annotations:
+          description: Gadget event-correlated user stack reference
+params:
+  ebpf:
+    target_safepoint_counter:
+      key: target_safepoint_counter
+      defaultValue: "0"
+      description: Verified absolute JVM counter address, zero disables epoch capture
+    target_initial_safepoint_epoch:
+      key: target_initial_safepoint_epoch
+      defaultValue: "0"
+      description: Verified counter lower bound for the selected JVM lifetime
+    target_start_ticks:
+      key: target_start_ticks
+      defaultValue: "0"
+      description: Required process incarnation in USER_HZ ticks for structured capture
+    collect_build_id:
+      key: collect_build_id
+      defaultValue: "false"
+      description: Collect native build IDs
+    collect_otel_stack:
+      key: collect_otel_stack
+      defaultValue: "false"
+      description: Request OTel event-triggered unwinding
+    collect_ustack:
+      key: collect_ustack
+      defaultValue: "false"
+      description: Collect a user stack at the event
+    ig_build_id_max_entries:
+      key: ig_build_id_max_entries
+      defaultValue: "1024"
+      description: Gadget build-ID map capacity
+    target_pid:
+      key: target_pid
+      defaultValue: "0"
+      description: Selected host PID, zero accepts no events

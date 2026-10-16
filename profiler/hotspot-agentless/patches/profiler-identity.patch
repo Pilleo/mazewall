@@ -1,0 +1,25 @@
+--- a/interpreter/hotspot/method.go
++++ b/interpreter/hotspot/method.go
+@@ -20,6 +20,7 @@
+ type hotspotMethod struct {
++	constMethodAddr libpf.Address
+ 	sourceFileName libpf.String
+ 	objectID       libpf.FileID
+ 	methodName     libpf.String
+ 	bytecodeSize   uint16
+ 	startLineNo    uint16
+--- a/interpreter/hotspot/instance.go
++++ b/interpreter/hotspot/instance.go
+@@ -389,6 +389,7 @@
+ 	sym := &hotspotMethod{
++		constMethodAddr: constMethodAddr,
+ 		sourceFileName: sourceFileName,
+ 		objectID:       objectID,
+ 		methodName:     libpf.Intern(demangledName),
+ 		bytecodeSize:   bytecodeSize,
+ 		lineTable:      lineTable,
+@@ -903,3 +904,3 @@
+ 	case support.FrameHotspotInterpreter:
+-		method, err1 := d.getMethod(ptr, ptrCheck)
++		method, err1 := d.getInterpretedMethod(ptr, ptrCheck)
+ 		if err1 != nil {

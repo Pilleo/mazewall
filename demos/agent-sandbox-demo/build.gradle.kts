@@ -14,6 +14,7 @@ application {
 dependencies {
     implementation(project(":enforcer"))
     implementation(project(":profiler"))
+    implementation(project(":platform"))
 
     // LangChain4j dependencies
     implementation(libs.langchain4j)
@@ -22,4 +23,5 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(kotlin("test"))
+    testImplementation(rootProject.sourceSets["sharedTest"].output)
 }

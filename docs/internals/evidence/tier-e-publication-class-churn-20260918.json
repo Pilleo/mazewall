@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_class_churn_paired_publication_measurement",
+  "timestamp": "2026-09-18T15:03:45.257191789Z",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 26,
+  "environment": {
+    "java_version": "25.0.4",
+    "kernel": "Linux 7.2.4-x64v3-xanmod1",
+    "workload_cpu": 0,
+    "collector_cpu": 2,
+    "rootful_docker": true
+  },
+  "methodology": {
+    "scope": "tier-e-publication",
+    "workload": "class_churn",
+    "workload_definition": "Every 64th operation invokes the same exact openat oracle through a newly generated child-loader proxy class; all other operations use the direct path.",
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "rotated_forks": 5,
+    "operations_per_batch": 100,
+    "sample_count": 450,
+    "paired_statistic": "live_minus_terminal median batch workload time",
+    "bootstrap_resamples": 1000
+  },
+  "correctness": {
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE for every Tier E variant",
+    "dictionary_unique_edge_per_fork": {
+      "cache_misses": 34,
+      "cache_hits": 7781,
+      "native_retention_exhaustions": 0,
+      "failed_publications": 0
+    }
+  },
+  "paired_publication_effects_ns": {
+    "dictionary_full_stream": {
+      "median": -409104,
+      "bootstrap_95_ci": [-4191442, 11498851],
+      "pairs": 5
+    },
+    "dictionary_unique_edge": {
+      "median": 475952,
+      "bootstrap_95_ci": [-4154134, 6240293],
+      "pairs": 5
+    },
+    "inline_full_stream": {
+      "median": 5762842,
+      "bootstrap_95_ci": [-6631175, 7435377],
+      "pairs": 5
+    },
+    "inline_unique_edge": {
+      "median": 544255,
+      "bootstrap_95_ci": [-1337781, 5629292],
+      "pairs": 5
+    }
+  },
+  "publication_accounting": {
+    "dictionary_terminal": {
+      "publication_count_per_fork": 1,
+      "serialized_bytes_per_fork": 365919,
+      "serialization_ns_per_fork_range": [208312, 219537]
+    },
+    "dictionary_live": {
+      "publication_count_per_fork_range": [5, 6],
+      "serialized_bytes_per_fork_range": [997767, 1315164],
+      "serialization_ns_per_fork_range": [869200, 1728698]
+    }
+  },
+  "decision": {
+    "default_publication": "terminal",
+    "incremental_dictionary_transport": "deferred",
+    "reason": "Every paired confidence interval includes zero under class churn. The extra live snapshots do not prove a workload benefit, and long-session evidence remains required.",
+    "policy_eligibility": false
+  },
+  "artifacts": {
+    "results_jsonl": "build/tier-e-publication-class-churn-20260918/results.jsonl",
+    "manifest": "build/tier-e-publication-class-churn-20260918/manifest.json",
+    "runner_log": "/tmp/tier-e-publication-class-churn-20260918.log"
+  }
+}

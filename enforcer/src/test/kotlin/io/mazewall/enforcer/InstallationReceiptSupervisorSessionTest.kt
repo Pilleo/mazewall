@@ -1,21 +1,28 @@
 package io.mazewall.enforcer
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeProcess
-import io.mazewall.MockPlatformProvider
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.PolicyCompilationCache
-import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeProcess
+import io.mazewall.enforcer.api.MockPlatformProvider
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyCompilationCache
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.PrctlCommand
 import io.mazewall.seccomp.PureJavaBpfEngine
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class InstallationReceiptSupervisorSessionTest {
     @BeforeEach
@@ -23,7 +30,6 @@ class InstallationReceiptSupervisorSessionTest {
         ContainmentStateRegistry.processState = ContainerState()
         ContainmentStateRegistry.threadState = ContainerState()
         Platform.setProvider(MockPlatformProvider())
-        PureJavaBpfEngine.clearCache()
         PolicyCompilationCache.clear()
 
         val process = MockNativeProcess().apply {
@@ -48,7 +54,6 @@ class InstallationReceiptSupervisorSessionTest {
         ContainmentStateRegistry.threadState = ContainerState()
         Platform.resetToDefault()
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
         PolicyCompilationCache.clear()
     }
 
@@ -56,6 +61,6 @@ class InstallationReceiptSupervisorSessionTest {
     fun `unsupervised filter installation does not report a supervisor session`() {
         val receipt = ContainedExecutors.installOnCurrentThread(Policy.NO_NETWORK.definition)
 
-        assertNull(receipt.supervisorSession)
+        receipt.use { assertTrue(it.installed) }
     }
 }

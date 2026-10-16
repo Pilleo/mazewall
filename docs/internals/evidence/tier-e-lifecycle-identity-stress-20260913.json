@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "evidence_id": "tier-e-lifecycle-identity-stress-20260913",
+  "status": "PASS",
+  "commit_sha": "bd8b3966",
+  "fixture": "lifecycle_identity_stress_fixture",
+  "command": "cmake -S profiler-native -B /tmp/tier-e-generation-build && cmake --build /tmp/tier-e-generation-build -j2 && ctest --test-dir /tmp/tier-e-generation-build --output-on-failure",
+  "result": {
+    "tests_run": 13,
+    "tests_failed": 0,
+    "stress_cycles": 12,
+    "native_ctest_status": "PASS"
+  },
+  "contract_checks": {
+    "fork_exec_identity_transition": "PASS",
+    "old_exact_invocation_without_reentry": "REJECTED",
+    "validated_reentry": "ACCEPTED",
+    "detach_old_context": "REJECTED",
+    "stale_replacement_identity": "REJECTED"
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "INCOMPLETE",
+    "transport_completeness": "INCOMPLETE",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "INCOMPLETE",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "INCOMPLETE"
+  },
+  "raw_log": "tier-e-lifecycle-identity-stress-20260913.txt"
+}

@@ -1,0 +1,8 @@
+{"captured_at":"2026-09-25T00:00:42+02:00",
+"loadavg":"0.29 1.15 1.44 1/194 165048",
+"affinity":"0-3",
+"pid_max":4194304,
+"disk_available_gb":28,
+"docker_running":0,
+"git_dirty_count":0
+}

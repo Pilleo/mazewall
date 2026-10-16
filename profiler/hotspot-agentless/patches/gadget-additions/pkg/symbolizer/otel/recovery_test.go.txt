@@ -1,0 +1,183 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"testing"
+
+	"github.com/cilium/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"golang.org/x/sys/unix"
+)
+
+type memoryCache struct {
+	entries           map[string]uint64
+	iterationError    error
+	lookupReplacement uint64
+	lookupError       error
+	deleteError       error
+}
+
+func TestRecoveryStrictEpochCannotDeleteAnotherIncarnation(t *testing.T) {
+	key := make([]byte, 24+3072*8)
+	binary.NativeEndian.PutUint32(key, 123)
+	binary.NativeEndian.PutUint32(key[4:], 456)
+	binary.NativeEndian.PutUint64(key[8:], 2)
+	binary.NativeEndian.PutUint32(key[16:], 1)
+	cache := &memoryCache{entries: map[string]uint64{string(key): 7}}
+	task := recoveryTask()
+	task.HotSpotIdentity = libpf.HotSpotIdentity{Epoch: 4, State: libpf.HotSpotEpochStable}
+	if ok, e := invalidateReference(context.Background(), cache, task); e != nil || ok || len(cache.entries) != 1 {
+		t.Fatal("wrong epoch invalidated", ok, e)
+	}
+	task.HotSpotIdentity.Epoch = 2
+	if ok, e := invalidateReference(context.Background(), cache, task); e != nil || !ok || len(cache.entries) != 0 {
+		t.Fatal("matching epoch not invalidated", ok, e)
+	}
+}
+
+type memoryIterator struct {
+	keys    []string
+	entries map[string]uint64
+	index   int
+	err     error
+}
+
+func (m *memoryCache) Iterator() cacheIterator {
+	keys := make([]string, 0, len(m.entries))
+	for k := range m.entries {
+		keys = append(keys, k)
+	}
+	return &memoryIterator{keys: keys, entries: m.entries, err: m.iterationError}
+}
+func (m *memoryCache) Lookup(key []byte) (uint64, error) {
+	if m.lookupError != nil {
+		return 0, m.lookupError
+	}
+	if m.lookupReplacement != 0 {
+		m.entries[string(key)] = m.lookupReplacement
+	}
+	v, ok := m.entries[string(key)]
+	if !ok {
+		return 0, ebpf.ErrKeyNotExist
+	}
+	return v, nil
+}
+func (m *memoryCache) Delete(key []byte) error {
+	if m.deleteError != nil {
+		return m.deleteError
+	}
+	delete(m.entries, string(key))
+	return nil
+}
+func (m *memoryCache) EntryLimit() uint32 { return 256 }
+func (i *memoryIterator) Next(key, value interface{}) bool {
+	if i.index == len(i.keys) {
+		return false
+	}
+	k := i.keys[i.index]
+	i.index++
+	*key.(*[]byte) = []byte(k)
+	*value.(*uint64) = i.entries[k]
+	return true
+}
+func (i *memoryIterator) Err() error { return i.err }
+func recoveryKey(pid, tid uint32, marker byte) string {
+	k := make([]byte, 24+3072*8)
+	binary.NativeEndian.PutUint32(k, pid)
+	binary.NativeEndian.PutUint32(k[4:], tid)
+	k[24] = marker
+	return string(k)
+}
+func recoveryTask() symbolizer.Task {
+	return symbolizer.Task{Tgid: 123, PidNumbers: []symbolizer.PidNumbers{{Pid: 456}}, CorrelationID: 7}
+}
+
+func TestRecoveryInvalidatesOnlyTheMissingReferenceAndExactTask(t *testing.T) {
+	key := recoveryKey(123, 456, 1)
+	other := recoveryKey(999, 456, 1)
+	different := recoveryKey(123, 456, 2)
+	cache := &memoryCache{entries: map[string]uint64{key: 7, other: 7, different: 8}}
+	ok, err := invalidateReference(context.Background(), cache, recoveryTask())
+	if err != nil || !ok {
+		t.Fatalf("no invalidation: %v %v", ok, err)
+	}
+	if _, ok := cache.entries[key]; ok {
+		t.Fatal("poisoned reference remained")
+	}
+	if cache.entries[other] != 7 || cache.entries[different] != 8 {
+		t.Fatal("unrelated cache entry removed")
+	}
+}
+
+func TestRecoveryDoesNotActOnAbortedIteration(t *testing.T) {
+	key := recoveryKey(123, 456, 1)
+	cache := &memoryCache{entries: map[string]uint64{key: 7}, iterationError: ebpf.ErrIterationAborted}
+	_, err := invalidateReference(context.Background(), cache, recoveryTask())
+	if !errors.Is(err, ebpf.ErrIterationAborted) || cache.entries[key] != 7 {
+		t.Fatal("partial scan deleted a reference")
+	}
+}
+
+func TestRecoveryDoesNotDeleteAnAlreadyReplacedReference(t *testing.T) {
+	key := recoveryKey(123, 456, 1)
+	cache := &memoryCache{entries: map[string]uint64{key: 7}, lookupReplacement: 8}
+	ok, err := invalidateReference(context.Background(), cache, recoveryTask())
+	if err != nil || ok || cache.entries[key] != 8 {
+		t.Fatal("replacement invalidated")
+	}
+}
+
+func TestRecoveryCancellationLeavesCacheUntouched(t *testing.T) {
+	key := recoveryKey(123, 456, 1)
+	cache := &memoryCache{entries: map[string]uint64{key: 7}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := invalidateReference(ctx, cache, recoveryTask())
+	if !errors.Is(err, context.Canceled) || cache.entries[key] != 7 {
+		t.Fatal("cancelled recovery changed cache")
+	}
+}
+
+func TestRecoveryPreservesNativePermissionFailures(t *testing.T) {
+	key := recoveryKey(123, 456, 1)
+	for _, cache := range []*memoryCache{
+		{entries: map[string]uint64{key: 7}, lookupError: unix.EPERM},
+		{entries: map[string]uint64{key: 7}, deleteError: unix.EACCES},
+	} {
+		ok, err := invalidateReference(context.Background(), cache, recoveryTask())
+		if ok || (!errors.Is(err, unix.EPERM) && !errors.Is(err, unix.EACCES)) || cache.entries[key] != 7 {
+			t.Fatal("native permission failure downgraded or cache changed")
+		}
+	}
+}
+
+func TestRecoveryKeepsALateDefinitionAndRejectsWrongTask(t *testing.T) {
+	o := fixtureResolver()
+	o.storeTrace(7, fixtureFrames(), 123, 456)
+	ok, err := o.RecoverDefinition(context.Background(), recoveryTask())
+	if ok || err != nil || len(o.correlationMap) != 1 {
+		t.Fatal("late definition invalidated")
+	}
+	task := recoveryTask()
+	task.Tgid = 124
+	if _, err := o.RecoverDefinition(context.Background(), task); !errors.Is(err, symbolizer.ErrStackIdentityMismatch) {
+		t.Fatal("wrong task's reference accepted")
+	}
+}
+
+type tinyCache struct{ *memoryCache }
+
+func (tinyCache) EntryLimit() uint32 { return 1 }
+func TestRecoveryBoundedScanDoesNotActOnIncompleteSnapshot(t *testing.T) {
+	a, b := recoveryKey(123, 456, 1), recoveryKey(123, 456, 2)
+	cache := tinyCache{&memoryCache{entries: map[string]uint64{a: 7, b: 8}}}
+	ok, err := invalidateReference(context.Background(), cache, recoveryTask())
+	if ok || !errors.Is(err, ebpf.ErrIterationAborted) || len(cache.entries) != 2 {
+		t.Fatal("unbounded or partial scan changed cache")
+	}
+}

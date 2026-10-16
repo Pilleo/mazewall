@@ -10,8 +10,8 @@ target_modules:
 - :enforcer
 component: enforcer
 effort: medium
-paperclip_issue_id: "e43b02bf-2e70-40f5-8fbb-aaaf0a635022"
-paperclip_identifier: "MAZ-1117"
+paperclip_issue_id: "f280ed01-2fd9-431d-ae1f-215acb01f094"
+paperclip_identifier: "MAZ-1428"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Algebraic Policy Composition (Semigroup/Monoid)

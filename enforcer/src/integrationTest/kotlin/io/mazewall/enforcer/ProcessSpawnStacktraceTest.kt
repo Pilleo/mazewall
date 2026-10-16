@@ -1,13 +1,20 @@
 package io.mazewall.enforcer
 
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
-import io.mazewall.core.Tid
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
-import io.mazewall.enforcer.supervisor.SupervisorInstaller
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledOnOs
@@ -42,13 +49,14 @@ class ProcessSpawnStacktraceTest {
             )
         }
 
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .addAction(SeccompAction.ACT_NOTIFY, Syscall.EXECVE)
             .addAction(SeccompAction.ACT_NOTIFY, Syscall.EXECVEAT)
             .allowMmapExec()
             .build()
 
+        var spawnFailure: java.io.IOException? = null
         SupervisorInstaller.installSupervisedFilterForThread(policy.definition, scopingPolicy).use {
             // Initiate a process spawn. The BPF filter should trigger ACT_NOTIFY on vfork/fork/clone
             // because EXECVE is supervised. posix_spawn's child is often unreadable under Yama;
@@ -57,12 +65,13 @@ class ProcessSpawnStacktraceTest {
             try {
                 val process = pb.start()
                 process.waitFor(5, TimeUnit.SECONDS)
-            } catch (_: java.io.IOException) {
+            } catch (failure: java.io.IOException) {
+                spawnFailure = failure
                 // Spawn-child exec is still fail-closed; see issue-20260817-033800.
             }
         }
 
-        assertTrue(execveCalled.get(), "EXECVE handler should have been called")
+        assertTrue(execveCalled.get(), "EXECVE handler should have been called; spawn failure: $spawnFailure")
         val stack = stackTraceCaptured.get()
         assertTrue(stack != null && stack.isNotEmpty(), "Stack trace should not be empty")
 

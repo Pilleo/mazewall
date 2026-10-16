@@ -1,28 +1,39 @@
 package io.mazewall.landlock
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.IsolatedProcessTester
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Policy
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.IsolatedProcessTester
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.containmentFailureForCaller
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.testAcquisition
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.nio.file.AccessDeniedException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeText
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class LandlockTest : BaseIntegrationTest() {
@@ -30,38 +41,57 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(file)) }).get()
+        try {
+        val res = executor
+            .submit(
+            java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.readString(Path.of(file))
+            }
+        },
+        ).get(10, TimeUnit.SECONDS)
         if (res != "secret") throw IllegalStateException("Wrong content: $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testReadBlocked(dir: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of("/etc/passwd")) }).get()
+            executor
+                .submit(
+                java.util.concurrent.Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { Files.readString(Path.of("/etc/passwd")) }.getOrElse { throw containmentFailureForCaller(it) }
+                }
+            },
+            ).get(10, TimeUnit.SECONDS)
             throw IllegalStateException("Should have failed")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -69,146 +99,198 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsWrite(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        safeExecutor.submit { Files.writeString(Path.of(file), "hello") }.get()
+        try {
+        executor
+            .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.writeString(Path.of(file), "hello")
+            }
+        }.get(10, TimeUnit.SECONDS)
         if (Files.readString(Path.of(file)) != "hello") throw IllegalStateException("Write failed")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testWriteBlocked(
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            safeExecutor.submit { Files.writeString(Path.of(file), "hello") }.get()
+            executor
+                .submit {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { Files.writeString(Path.of(file), "hello") }.getOrElse { throw containmentFailureForCaller(it) }
+                }
+            }.get(10, TimeUnit.SECONDS)
             throw IllegalStateException("Should have failed")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
     fun testUnconstrained() {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            safeExecutor.submit { Files.readString(Path.of("/etc/passwd")) }.get()
-            throw IllegalStateException("Should have failed")
-        } catch (
-             e: ExecutionException,
-        ) {
-            // Expected
+            assertFutureDenied {
+                executor
+                    .submit {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { Files.readString(Path.of("/etc/passwd")) }.getOrElse { throw containmentFailureForCaller(it) }
+                    }
+                }.get(10, TimeUnit.SECONDS)
+            }
+            Files.readString(Path.of("/etc/passwd")) // Main thread should succeed
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
-        Files.readString(Path.of("/etc/passwd")) // Main thread should succeed
-        executor.shutdown()
     }
 
     fun testStackingRecycled(
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
+        try {
         for (i in 1..20) {
-            val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(file)) }).get()
+            val res = executor
+                .submit(
+                java.util.concurrent.Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    Files.readString(Path.of(file))
+                }
+            },
+            ).get(10, TimeUnit.SECONDS)
             if (res != "data") throw IllegalStateException("Task $i failed")
         }
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testExecBlocked(dir: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowJvmClasspath()
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            safeExecutor.submit(java.util.concurrent.Callable { ProcessBuilder("/bin/echo", "fail").start() }).get()
-            throw IllegalStateException("Should have failed")
-        } catch (
-             e: ExecutionException,
-        ) {
-            // Expected
+            assertFutureDenied {
+                executor
+                    .submit(
+                    java.util.concurrent.Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { ProcessBuilder("/bin/echo", "fail").start() }.getOrElse { throw containmentFailureForCaller(it) }
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
+            }
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
     fun testNonExistentFallback(file: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsWrite(
-                io.mazewall.core.SandboxedPath
+                io.mazewall.platform.lifecycle.SandboxedPath
                 .of(file, true),
             ).build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        safeExecutor.submit { Files.writeString(Path.of(file), "created!") }.get()
+        try {
+        executor
+            .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.writeString(Path.of(file), "created!")
+            }
+        }.get(10, TimeUnit.SECONDS)
         if (Files.readString(Path.of(file)) != "created!") throw IllegalStateException("Write failed")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testSymlinkRejection(
         realFile: String,
         symlink: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(symlink)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
         // The policy allows 'symlink', but Landlock rejects symlinks in rulesets (O_NOFOLLOW).
         // Therefore, access to the real file should be denied.
         try {
-            safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(realFile)) }).get()
+            executor
+                .submit(
+                java.util.concurrent.Callable {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    runCatching { Files.readString(Path.of(realFile)) }.getOrElse { throw containmentFailureForCaller(it) }
+                }
+            },
+            ).get(10, TimeUnit.SECONDS)
             throw IllegalStateException("Access should have been denied because the symlink rule was rejected")
         } catch (e: ExecutionException) {
             val cause = e.cause
             if (cause !is AccessDeniedException && cause !is ContainmentViolationException) throw e
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -216,69 +298,98 @@ class LandlockTest : BaseIntegrationTest() {
         dir: String,
         file: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowFsRead(dir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(file)) }).get()
+        try {
+        val res = executor
+            .submit(
+            java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.readString(Path.of(file))
+            }
+        },
+        ).get(10, TimeUnit.SECONDS)
         if (res != "auto-cp-ok") throw IllegalStateException("Wrong content: $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testNestedSymlinks(realFile: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(realFile)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(realFile)) }).get()
+        try {
+        val res = executor
+            .submit(
+            java.util.concurrent.Callable {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                Files.readString(Path.of(realFile))
+            }
+        },
+        ).get(10, TimeUnit.SECONDS)
         if (res != "nested-secret") throw IllegalStateException("Wrong content: $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     fun testDotDotTraversal(allowed: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(allowed)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
         try {
-            safeExecutor.submit(java.util.concurrent.Callable { Files.readString(Path.of(allowed).resolve("../forbidden/secret.txt")) }).get()
-            throw IllegalStateException("Should have failed")
-        } catch (
-             e: ExecutionException,
-        ) {
-            // Expected
+            assertFutureDenied {
+                executor
+                    .submit(
+                    java.util.concurrent.Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching { Files.readString(Path.of(allowed).resolve("../forbidden/secret.txt")) }.getOrElse { throw containmentFailureForCaller(it) }
+                    }
+                },
+                ).get(10, TimeUnit.SECONDS)
+            }
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
     fun testCircularSymlinks(linkA: String) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(linkA)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
-        val res = safeExecutor
+        try {
+        val res = executor
             .submit(
                 java.util.concurrent.Callable {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
                     try {
                         Files.readString(Path.of(linkA))
                         "success"
@@ -287,10 +398,14 @@ class LandlockTest : BaseIntegrationTest() {
                     ) {
                         "eloop"
                     }
+                    }
                 },
-            ).get()
+            ).get(10, TimeUnit.SECONDS)
         if (res != "eloop") throw IllegalStateException("Expected eloop, got $res")
-        executor.shutdown()
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
     }
 
     @Test
@@ -423,9 +538,9 @@ class LandlockTest : BaseIntegrationTest() {
         if (!Landlock.isSupported()) return
         val abi = Landlock.getAbiVersion()
         if (abi >= 2) return
-        val policy = Policy.builder().unblock(Syscall.RENAME).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).unblock(Syscall.RENAME).build()
         val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
-        assertTrue(ex.message!!.contains("Policy allows rename/link syscalls, but this kernel"))
+        assertTrue(assertNotNull(ex.message).contains("Policy allows rename/link syscalls, but this kernel"))
     }
 
     @Test
@@ -433,9 +548,9 @@ class LandlockTest : BaseIntegrationTest() {
         if (!Landlock.isSupported()) return
         val abi = Landlock.getAbiVersion()
         if (abi >= 3) return
-        val policy = Policy.builder().unblock(Syscall.TRUNCATE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).unblock(Syscall.TRUNCATE).build()
         val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
-        assertTrue(ex.message!!.contains("Policy allows truncate syscalls, but this kernel"))
+        assertTrue(assertNotNull(ex.message).contains("Policy allows truncate syscalls, but this kernel"))
     }
 
     @Test
@@ -443,9 +558,9 @@ class LandlockTest : BaseIntegrationTest() {
         if (!Landlock.isSupported()) return
         val abi = Landlock.getAbiVersion()
         if (abi >= 5) return
-        val policy = Policy.builder().unblock(Syscall.IOCTL).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).unblock(Syscall.IOCTL).build()
         val ex = assertFailsWith<UnsupportedOperationException> { Landlock.applyRuleset(policy.definition) }
-        assertTrue(ex.message!!.contains("Policy allows ioctl, but this kernel"))
+        assertTrue(assertNotNull(ex.message).contains("Policy allows ioctl, but this kernel"))
     }
 
     @Test
@@ -503,12 +618,12 @@ class LandlockTest : BaseIntegrationTest() {
         val mockEngine = object : MockNativeEngine() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
@@ -516,7 +631,7 @@ class LandlockTest : BaseIntegrationTest() {
                 ) {
                     LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(5) // ABI version 5
                 } else if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR) {
-                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42) // Fake ruleset FD
+                    LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(42).testAcquisition() // Fake ruleset FD
                 } else {
                     LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(0) // Success for other syscalls
                 }
@@ -538,12 +653,12 @@ class LandlockTest : BaseIntegrationTest() {
         val mockEngine = object : MockNativeEngine() {
             override fun syscall(
                 nr: Long,
-                a1: io.mazewall.core.NativeArg,
-                a2: io.mazewall.core.NativeArg,
-                a3: io.mazewall.core.NativeArg,
-                a4: io.mazewall.core.NativeArg,
-                a5: io.mazewall.core.NativeArg,
-                a6: io.mazewall.core.NativeArg,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 return if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR &&
                     a3.asLong == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_VERSION
@@ -572,23 +687,25 @@ class LandlockTest : BaseIntegrationTest() {
         allowedDir: String,
         forbiddenDir: String,
     ) {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.NO_EXEC)
             .allowMmapExec()
             .allowJvmClasspath()
             .allowFsRead(allowedDir)
             .build()
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, policy)
 
         val allowedPath = Path.of(allowedDir)
         val forbiddenPath = Path.of(forbiddenDir)
         val basePath = Path.of(baseDir)
 
         // 1. Initial reads before rename:
-        safeExecutor
+        try {
+        executor
             .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+            receipt.requireInstalled()
             // Read allowedDir/allowed.txt should succeed
             val allowedTxt = allowedPath.resolve("allowed.txt")
             if (Files.readString(allowedTxt) != "allowed") {
@@ -597,13 +714,9 @@ class LandlockTest : BaseIntegrationTest() {
 
             // Read forbiddenDir/secret.txt should fail
             val forbiddenTxt = forbiddenPath.resolve("secret.txt")
-            try {
-                Files.readString(forbiddenTxt)
-                throw IllegalStateException("Should have failed to read forbidden file initially")
-            } catch (e: Exception) {
-                // Expected
+            assertForbiddenReadDenied { Files.readString(forbiddenTxt) }
             }
-        }.get()
+        }.get(10, TimeUnit.SECONDS)
 
         // 2. Perform the rename on the main thread (unrestricted):
         val allowedRenamedPath = basePath.resolve("allowed_renamed")
@@ -611,17 +724,14 @@ class LandlockTest : BaseIntegrationTest() {
         Files.move(forbiddenPath, allowedPath)
 
         // 3. Post-rename reads:
-        safeExecutor
+        executor
             .submit {
+            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+            receipt.requireInstalled()
             // Attempt to read the new files at the old path allowedDir/secret.txt (which points to the forbidden directory)
             // This MUST be blocked because the inode of the new allowedDir was never allowed.
             val newSecretInAllowedOldPath = allowedPath.resolve("secret.txt")
-            try {
-                Files.readString(newSecretInAllowedOldPath)
-                throw IllegalStateException("TOCTOU bypass! Read succeeded on renamed forbidden directory at old allowed path")
-            } catch (e: Exception) {
-                // Expected block
-            }
+            assertForbiddenReadDenied { Files.readString(newSecretInAllowedOldPath) }
 
             // Attempt to read allowed.txt in the renamed allowed directory (allowed_renamed/allowed.txt)
             // This MUST succeed because Landlock follows the inode, even though its path name was renamed.
@@ -629,9 +739,363 @@ class LandlockTest : BaseIntegrationTest() {
             if (Files.readString(allowedInRenamedPath) != "allowed") {
                 throw IllegalStateException("Failed to read allowed file after rename")
             }
-        }.get()
+            }
+        }.get(10, TimeUnit.SECONDS)
+        } finally {
+            executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
+        }
+    }
 
-        executor.shutdown()
+    @Test
+    fun `Future denial boundary rejects successful completion`() {
+        assertFailsWith<AssertionError> { assertFutureDenied { "unrestricted" } }
+    }
+
+    @Test
+    fun `Future denial boundary preserves unrelated failure identity`() {
+        val original = ExecutionException(IllegalStateException("unrelated Future failure"))
+        assertSame(original, assertFailsWith<ExecutionException> { assertFutureDenied { throw original } })
+    }
+
+    @Test
+    fun `Future denial boundary promotes fatal cause`() {
+        val fatal = LinkageError("fatal Future failure")
+        assertSame(fatal, assertFailsWith<LinkageError> { assertFutureDenied { throw ExecutionException(fatal) } })
+    }
+
+    @Test
+    fun `Future denial boundary preserves interruption`() {
+        val interrupted = InterruptedException("interrupted Future failure")
+        try {
+            assertSame(interrupted, assertFailsWith<InterruptedException> { assertFutureDenied { throw ExecutionException(interrupted) } })
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test
+    fun `Future denial boundary accepts typed containment denial`() {
+        assertFutureDenied { throw ExecutionException(AccessDeniedException("forbidden")) }
+    }
+
+    private fun assertFutureDenied(operation: () -> Any?) {
+        val result = try {
+            Result.success(operation())
+        } catch (failure: ExecutionException) {
+            Result.failure(failure)
+        } catch (failure: InterruptedException) {
+            Result.failure(failure)
+        }
+        val failure = result.exceptionOrNull()
+        assertNotNull(failure, "Should have failed")
+        promoteFatalOrInterruption(failure)
+        val cause = if (failure is ExecutionException) failure.cause else failure
+        if (!hasOperationPermissionEvidence(cause, allowLaunch = true)) {
+            throw failure
+        }
+    }
+
+    private fun hasOperationPermissionEvidence(
+        failure: Throwable?,
+        allowLaunch: Boolean,
+    ): Boolean {
+        val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+        var primary = failure
+        // Only containment translation wrappers may expose their original operation failure.
+        // Suppressed failures and unrelated wrapper types never authorize a denial.
+        while (primary is ContainmentViolationException) {
+            if (!seen.add(primary)) return false
+            val errno = primary.errno
+            if (errno != null) return errno == 1 || errno == 13
+            primary = primary.cause
+        }
+        if (primary is AccessDeniedException) return true
+        if (primary is java.nio.file.FileSystemException) {
+            return primary.reason in listOf("Permission denied", "Operation not permitted")
+        }
+        if (!allowLaunch || primary !is java.io.IOException) return false
+        val receipt = primary.cause as? java.io.IOException ?: return false
+        val receiptText = receipt.message ?: return false
+        if (receipt.cause != null ||
+            !Regex("Exec failed, error: (1 \\(Operation not permitted\\)|13 \\(Permission denied\\))").matches(receiptText.trimEnd(' ', '\t'))
+        ) {
+            return false
+        }
+        val launchText = primary.message ?: return false
+        return Regex(
+            "Cannot run program \"[^\\r\\n]*\"(?: \\(in directory \"[^\\r\\n]*\"\\))?: " + Regex.escape(receiptText),
+        ).matches(launchText)
+    }
+
+    private fun promoteFatalOrInterruption(failure: Throwable) {
+        val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+        val pending = java.util.ArrayDeque<Throwable>()
+        val failures = mutableListOf<Throwable>()
+        pending.add(failure)
+        while (pending.isNotEmpty()) {
+            val current = pending.removeFirst()
+            if (!seen.add(current)) continue
+            failures.add(current)
+            current.cause?.let { pending.add(it) }
+            current.suppressed.forEach { pending.add(it) }
+        }
+        failures.filterIsInstance<Error>().firstOrNull()?.let { throw it }
+        failures.filterIsInstance<InterruptedException>().firstOrNull()?.let {
+            Thread.currentThread().interrupt()
+            throw it
+        }
+    }
+
+    @Test
+    fun `F04 Future boundary accepts permission-specific structured denial`() {
+        for (errno in listOf(1, 13)) {
+            assertFutureDenied { throw ExecutionException(ContainmentViolationException("permission failure", errno = errno)) }
+        }
+    }
+
+    @Test
+    fun `F04 modeled classification accepts concrete translated operation denials`() {
+        for (operationFailure in listOf(
+            AccessDeniedException("modeled-path"),
+            java.nio.file.FileSystemException("modeled-path", null, "Permission denied"),
+        )) {
+            val translated = ContainmentViolationException("translated operation", operationFailure)
+            assertFutureDenied { throw ExecutionException(translated) }
+            assertForbiddenReadDenied { throw translated }
+        }
+        val receipt = java.io.IOException("Exec failed, error: 13 (Permission denied) ")
+        val launch = java.io.IOException("Cannot run program \"/bin/echo\": ${receipt.message}", receipt)
+        assertFutureDenied { throw ExecutionException(ContainmentViolationException("translated launch", launch)) }
+    }
+
+    @Test
+    fun `F04 modeled classification rejects filename programname and business-message spoofs`() {
+        val receipt = java.io.IOException("Exec failed, error: 22 (Invalid argument)")
+        val failures = listOf(
+            java.nio.file.FileSystemException("Permission denied", null, "Invalid argument"),
+            java.io.IOException("Permission denied"),
+            java.io.IOException("Cannot run program \"Permission denied\": ${receipt.message}", receipt),
+            java.io.IOException("Cannot run program \"Exec failed, error: 13 (Permission denied)\""),
+            IllegalStateException("unrelated primary", AccessDeniedException("modeled-path")),
+        )
+        for (operationFailure in failures) {
+            val translated = ContainmentViolationException("translated unknown failure", operationFailure)
+            val transport = ExecutionException(translated)
+            assertSame(transport, assertFailsWith<ExecutionException> { assertFutureDenied { throw transport } })
+            assertSame(translated, assertFailsWith<ContainmentViolationException> { assertForbiddenReadDenied { throw translated } })
+        }
+        val explicitInvalid = ContainmentViolationException("Permission denied", AccessDeniedException("modeled-path"), errno = 22)
+        val transport = ExecutionException(explicitInvalid)
+        assertSame(transport, assertFailsWith<ExecutionException> { assertFutureDenied { throw transport } })
+        assertSame(explicitInvalid, assertFailsWith<ContainmentViolationException> { assertForbiddenReadDenied { throw explicitInvalid } })
+    }
+
+    @Test
+    fun `F04 Future boundary rejects nonpermission and unknown structured failures`() {
+        for (errno in listOf(22, null)) {
+            val failure = ExecutionException(ContainmentViolationException("structured failure", errno = errno))
+            assertSame(failure, assertFailsWith<ExecutionException> { assertFutureDenied { throw failure } })
+        }
+    }
+
+    @Test
+    fun `F04 Future boundary rejects unrelated primary with suppressed denial`() {
+        val primary = ContainmentViolationException("unrelated primary", errno = 22)
+        primary.addSuppressed(AccessDeniedException("suppressed denial"))
+        val failure = ExecutionException(primary)
+        assertSame(failure, assertFailsWith<ExecutionException> { assertFutureDenied { throw failure } })
+    }
+
+    @Test
+    fun `F04 Future boundary preserves null cause and unrelated primary identity`() {
+        val unrelated = IllegalStateException("unrelated primary")
+        unrelated.addSuppressed(AccessDeniedException("suppressed denial"))
+        for (failure in listOf(ExecutionException(null as Throwable?), ExecutionException(unrelated))) {
+            assertSame(failure, assertFailsWith<ExecutionException> { assertFutureDenied { throw failure } })
+        }
+    }
+
+    @Test
+    fun `F04 Future boundary promotes fatal identity across denial causes and suppressed cycles`() {
+        for (suppressed in listOf(false, true)) {
+            val fatal = LinkageError("nested fatal")
+            val denial = AccessDeniedException("denial")
+            if (suppressed) denial.addSuppressed(fatal) else denial.initCause(fatal)
+            fatal.addSuppressed(denial)
+            assertSame(fatal, assertFailsWith<LinkageError> { assertFutureDenied { throw ExecutionException(denial) } })
+        }
+    }
+
+    @Test
+    fun `F04 Future boundary promotes interruption identity across denial causes and suppressed cycles`() {
+        for (suppressed in listOf(false, true)) {
+            val interrupted = InterruptedException("nested interruption")
+            val denial = AccessDeniedException("denial")
+            if (suppressed) denial.addSuppressed(interrupted) else denial.initCause(interrupted)
+            interrupted.addSuppressed(denial)
+            try {
+                assertSame(interrupted, assertFailsWith<InterruptedException> { assertFutureDenied { throw ExecutionException(denial) } })
+                assertTrue(Thread.currentThread().isInterrupted)
+            } finally {
+                Thread.interrupted()
+            }
+        }
+    }
+
+    @Test
+    fun `F04 Future boundary gives fatal precedence over interruption and denial`() {
+        val fatal = LinkageError("fatal alongside interruption")
+        val interrupted = InterruptedException("interruption alongside fatal")
+        val denial = AccessDeniedException("denial")
+        denial.initCause(interrupted)
+        denial.addSuppressed(fatal)
+        fatal.addSuppressed(denial)
+        assertSame(fatal, assertFailsWith<LinkageError> { assertFutureDenied { throw ExecutionException(denial) } })
+    }
+
+    @Test
+    fun `F04 read boundary promotes fatal identity across denial causes and suppressed cycles`() {
+        for (suppressed in listOf(false, true)) {
+            val fatal = LinkageError("read fatal")
+            val denial = AccessDeniedException("read denial")
+            if (suppressed) denial.addSuppressed(fatal) else denial.initCause(fatal)
+            fatal.addSuppressed(denial)
+            assertSame(fatal, assertFailsWith<LinkageError> { assertForbiddenReadDenied { throw denial } })
+        }
+    }
+
+    @Test
+    fun `F04 read boundary gives fatal precedence over interruption and denial`() {
+        val fatal = LinkageError("fatal read alongside interruption")
+        val interrupted = InterruptedException("read interruption")
+        val denial = AccessDeniedException("read denial")
+        denial.initCause(interrupted)
+        denial.addSuppressed(fatal)
+        fatal.addSuppressed(denial)
+        assertSame(fatal, assertFailsWith<LinkageError> { assertForbiddenReadDenied { throw denial } })
+    }
+
+    @Test
+    fun `F04 read boundary promotes interruption identity across denial causes and suppressed cycles`() {
+        for (suppressed in listOf(false, true)) {
+            val interrupted = InterruptedException("nested read interruption")
+            val denial = AccessDeniedException("read denial")
+            if (suppressed) denial.addSuppressed(interrupted) else denial.initCause(interrupted)
+            interrupted.addSuppressed(denial)
+            try {
+                assertSame(interrupted, assertFailsWith<InterruptedException> { assertForbiddenReadDenied { throw denial } })
+                assertTrue(Thread.currentThread().isInterrupted)
+            } finally {
+                Thread.interrupted()
+            }
+        }
+    }
+
+    @Test
+    fun `F04 read boundary restores cleared interruption on physical worker`() {
+        // Share the existing 120-second test budget; reserve its final 10 seconds for retirement.
+        val deadline = System.nanoTime() +
+            java.util.concurrent.TimeUnit.SECONDS
+            .toNanos(120)
+        val retirementReserve = java.util.concurrent.TimeUnit.SECONDS
+            .toNanos(10)
+        val task = java.util.concurrent.FutureTask {
+            val physicalWorker = Thread.currentThread()
+            assertTrue(!physicalWorker.isVirtual)
+            var original: InterruptedException? = null
+            val observed = assertFailsWith<InterruptedException> {
+                assertForbiddenReadDenied {
+                    physicalWorker.interrupt()
+                    try {
+                        java.util.concurrent
+                            .CountDownLatch(0)
+                            .await()
+                        error("Interrupted await unexpectedly returned")
+                    } catch (failure: InterruptedException) {
+                        original = failure
+                        assertTrue(!physicalWorker.isInterrupted, "Await must clear the worker flag before the boundary")
+                        throw failure
+                    }
+                }
+            }
+            assertSame(assertNotNull(original), observed)
+            assertTrue(physicalWorker.isInterrupted, "The read boundary must restore the physical worker flag")
+            physicalWorker
+        }
+        val worker = Thread.ofPlatform().unstarted(task)
+        worker.start()
+        try {
+            val outcomeWait = (deadline - System.nanoTime() - retirementReserve).coerceAtLeast(1L)
+            assertSame(worker, task.get(outcomeWait, java.util.concurrent.TimeUnit.NANOSECONDS))
+        } finally {
+            if (worker.isAlive) worker.interrupt()
+            var ownerInterrupted = Thread.interrupted()
+            try {
+                while (worker.isAlive) {
+                    val remaining = deadline - System.nanoTime()
+                    if (remaining <= 0L) break
+                    try {
+                        worker.join(java.time.Duration.ofNanos(remaining))
+                    } catch (_: InterruptedException) {
+                        ownerInterrupted = true
+                    }
+                }
+                assertTrue(!worker.isAlive, "Physical-worker retirement gap: acquired worker remains alive at the test deadline")
+            } finally {
+                if (ownerInterrupted) Thread.currentThread().interrupt()
+            }
+        }
+        assertTrue(!worker.isAlive, "The acquired physical worker must have retired")
+    }
+
+    private fun assertForbiddenReadDenied(read: () -> String) {
+        val result = runCatching { read() }
+        val failure = result.exceptionOrNull()
+        assertNotNull(failure, "Forbidden read unexpectedly succeeded")
+        promoteFatalOrInterruption(failure)
+        if (!hasOperationPermissionEvidence(failure, allowLaunch = false)) throw failure
+    }
+
+    @Test
+    fun `F04 read boundary rejects structured failure and unrelated primary with suppressed denial`() {
+        val unrelated = IllegalStateException("unrelated read primary")
+        unrelated.addSuppressed(AccessDeniedException("suppressed read denial"))
+        assertSame(unrelated, assertFailsWith<IllegalStateException> { assertForbiddenReadDenied { throw unrelated } })
+        for (errno in listOf(22, null)) {
+            val failure = ContainmentViolationException("structured read failure", errno = errno)
+            failure.addSuppressed(AccessDeniedException("suppressed read denial"))
+            assertSame(failure, assertFailsWith<ContainmentViolationException> { assertForbiddenReadDenied { throw failure } })
+        }
+    }
+
+    @Test
+    fun `forbidden read boundary rejects unrestricted success`() {
+        val file = Files.createTempFile("landlock-readable-control", ".txt")
+        try {
+            Files.writeString(file, "secret")
+            assertEquals("secret", Files.readString(file))
+            assertFailsWith<AssertionError> {
+                assertForbiddenReadDenied { Files.readString(file) }
+            }
+        } finally {
+            Files.delete(file)
+        }
+    }
+
+    @Test
+    fun `forbidden read boundary preserves unrelated failure`() {
+        val failure = IllegalStateException("unrelated read failure")
+        val observed = assertFailsWith<IllegalStateException> {
+            assertForbiddenReadDenied { throw failure }
+        }
+        assertSame(failure, observed)
+    }
+
+    @Test
+    fun `forbidden read boundary accepts filesystem denial`() {
+        assertForbiddenReadDenied { throw AccessDeniedException("forbidden-control") }
     }
 
     @Test

@@ -1,12 +1,66 @@
 package io.mazewall.profiler.iterative
-
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class IterativeProfilerStateMachineTest {
+    @Test
+    fun `read discovery preserves explicit runtime profiles and exec denials`() {
+        val originalExecutor = IterativeProfiler.taskExecutor
+        try {
+            for (profile in listOf(RuntimeProfile.HOTSPOT_JIT, RuntimeProfile.NATIVE_IMAGE)) {
+                val basePolicy = WorkerPolicyBuilder
+                    .denyList(profile)
+                    .block(Syscall.EXECVE, Syscall.EXECVEAT)
+                    .build()
+                val expectedMappings = profile == RuntimeProfile.HOTSPOT_JIT
+                val readPath = "/tmp/profile-read-discovery"
+                var calls = 0
+                IterativeProfiler.taskExecutor = object : IterativeTaskExecutor {
+                    override fun executeTask(
+                        currentPolicy: Policy<*, Uncompiled>,
+                        task: Runnable,
+                    ): Throwable? {
+                        assertEquals(expectedMappings, currentPolicy.allowMmapExec, "$profile mapping permission")
+                        for (syscall in listOf(Syscall.EXECVE, Syscall.EXECVEAT)) {
+                            assertEquals(basePolicy.syscallActions[syscall], currentPolicy.syscallActions[syscall])
+                            assertTrue(currentPolicy.syscallActions[syscall] is SeccompAction.ACT_ERRNO)
+                        }
+                        assertTrue(currentPolicy.allowedFsWritePaths.isEmpty())
+                        calls++
+                        return if (calls == 1) {
+                            assertTrue(currentPolicy.allowedFsReadPaths.isEmpty())
+                            java.nio.file.AccessDeniedException(readPath)
+                        } else {
+                            assertTrue(currentPolicy.allowedFsReadPaths.any { it.value == readPath })
+                            null
+                        }
+                    }
+                }
+                val grownPolicy = IterativeProfiler.profile(basePolicy) { }
+                assertEquals(2, calls, "Exactly one read-discovery transition for $profile")
+                assertEquals(expectedMappings, grownPolicy.allowMmapExec)
+                assertTrue(grownPolicy.allowedFsReadPaths.any { it.value == readPath })
+                assertTrue(grownPolicy.allowedFsWritePaths.isEmpty())
+                for (syscall in listOf(Syscall.EXECVE, Syscall.EXECVEAT)) {
+                    assertEquals(basePolicy.syscallActions[syscall], grownPolicy.syscallActions[syscall])
+                    assertTrue(grownPolicy.syscallActions[syscall] is SeccompAction.ACT_ERRNO)
+                }
+            }
+        } finally {
+            IterativeProfiler.taskExecutor = originalExecutor
+        }
+    }
+
     @Test
     fun `test IterativeProfiler state machine with custom taskExecutor`() {
         val originalExecutor = IterativeProfiler.taskExecutor

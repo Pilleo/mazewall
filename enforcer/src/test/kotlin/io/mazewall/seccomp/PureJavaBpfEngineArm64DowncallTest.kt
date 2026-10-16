@@ -1,13 +1,20 @@
 package io.mazewall.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.MockNativeProcess
-import io.mazewall.Policy
-import io.mazewall.compile
-import io.mazewall.core.Arch
-import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.enforcer.api.MockNativeProcess
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.compile
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Isolated
@@ -28,8 +35,8 @@ class PureJavaBpfEngineArm64DowncallTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
-        io.mazewall.PolicyCompilationCache.clear()
+        io.mazewall.enforcer.api.PolicyCompilationCache
+            .clear()
         // Restore the original os.arch property
         if (osArchOverridden) {
             if (savedOsArch != null) {
@@ -77,7 +84,7 @@ class PureJavaBpfEngineArm64DowncallTest {
             }
             LinuxNative.setEngine(mockEngine)
 
-            val policy = Policy.builder().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
             val compiled = policy.definition.compile(Arch.AARCH64)
 
             // This should trigger the downcall compilation path for ARM64
@@ -116,7 +123,7 @@ class PureJavaBpfEngineArm64DowncallTest {
             }
             LinuxNative.setEngine(mockEngine)
 
-            val policy = Policy.builder().build()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
             val compiled = policy.definition.compile(Arch.AARCH64)
 
             PureJavaBpfEngine.install(compiled)
@@ -152,7 +159,7 @@ class PureJavaBpfEngineArm64DowncallTest {
             LinuxNative.setEngine(mockEngine)
 
             // Directly call setNoNewPrivs to test downcall compilation
-            PureJavaBpfEngine.setNoNewPrivs()
+            PureJavaBpfEngine.lockNoNewPrivileges()
 
             assertTrue(setNoNewPrivsCalled, "setNoNewPrivs should be called")
             assertTrue(prctlCommand is PrctlCommand.SetNoNewPrivs, "Command should be SetNoNewPrivs")

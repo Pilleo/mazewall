@@ -1,0 +1,35 @@
+{
+  "kind": "tier_e_capture_profile_rootful_smoke",
+  "timestamp": "2026-09-19T19:12:58.936634197Z",
+  "commit": "091251cc",
+  "run_level": "smoke",
+  "artifact": "build/tier-e-capture-profile-rootful-smoke-fixed/results.jsonl",
+  "runner_events": "build/tier-e-capture-profile-rootful-smoke-fixed/runner-events.jsonl",
+  "marker_transport": "auto_selected_usdt",
+  "workload": "oracle",
+  "full": {
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE",
+    "median_batch_ns": 148794270,
+    "resolved": 57600,
+    "observed_loss": 0
+  },
+  "openat0": {
+    "workload_correctness": "PASS",
+    "whole_session_evidence": "COMPLETE",
+    "median_batch_ns": 106980506,
+    "resolved": 19200,
+    "observed_loss": 0
+  },
+  "paired_full_minus_openat0_median_ns": 41813764,
+  "capture_domain_validity": "complete",
+  "transport_completeness": "complete",
+  "attribution_coverage": "complete",
+  "dictionary_integrity": "complete",
+  "lifecycle_validity": "complete",
+  "runtime_overhead": "not_measured",
+  "evidence_integrity": "complete",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false,
+  "notes": "A one-fork smoke run proves correctness and rootful execution only. It is not a confidence-qualified performance decision."
+}

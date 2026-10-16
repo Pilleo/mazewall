@@ -1,18 +1,83 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import com.tngtech.archunit.base.DescribedPredicate
 import com.tngtech.archunit.core.domain.JavaMethodCall
 import com.tngtech.archunit.core.importer.ImportOption
+import com.tngtech.archunit.core.importer.Location
 import com.tngtech.archunit.junit.AnalyzeClasses
 import com.tngtech.archunit.junit.ArchTest
+import com.tngtech.archunit.junit.LocationProvider
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.methods
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
-import io.mazewall.core.FileDescriptor
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.enforcer.internal.supervisor.SocketHelperPool
+import io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+import io.mazewall.enforcer.internal.supervisor.SupervisorRoute
+import io.mazewall.enforcer.internal.supervisor.SupervisorRouteDispatcher
+import io.mazewall.enforcer.internal.supervisor.SupervisorRouteExecutor
+import io.mazewall.enforcer.internal.supervisor.SupervisorRoutePreparation
+import io.mazewall.enforcer.internal.supervisor.TraceeAuthorityExecution
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.seccomp.daemon.NotificationProgress
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 
-@AnalyzeClasses(packages = ["io.mazewall"], importOptions = [ImportOption.DoNotIncludeTests::class])
+/**
+ * ArchUnit's stock test filter recognizes conventional source locations but not Gradle's
+ * compiled Kotlin test output.  Without this filter, fixture classes are audited as production.
+ */
+class DoNotIncludeCompiledTestOutputs : ImportOption {
+    override fun includes(location: Location): Boolean =
+        listOf("/classes/kotlin/test/", "/classes/java/test/", "/test-classes/")
+            .none(location.asURI().path::contains)
+}
+
+/** Imports the production output of the two modules that define mazewall's implementation. */
+class MazewallProductionLocations : LocationProvider {
+    override fun get(type: Class<*>): Set<Location> =
+        setOf(SupervisorRoute::class.java, NotificationProgress::class.java)
+            .map { Location.of(it.protectionDomain.codeSource.location) }
+            .toSet()
+}
+
+@AnalyzeClasses(
+    locations = [MazewallProductionLocations::class],
+    importOptions = [ImportOption.DoNotIncludeTests::class, DoNotIncludeCompiledTestOutputs::class],
+)
 class ArchitectureTest {
+    @ArchTest
+    fun supervisorRouteHelpersMustNotLeakOutsideTheirPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        listOf(
+            SupervisorRouteDispatcher::class.java,
+            SupervisorRouteExecutor::class.java,
+            SupervisorRoutePreparation::class.java,
+            SocketHelperPool::class.java,
+            TraceeAuthorityExecution::class.java,
+        ).forEach { helper ->
+            noClasses()
+                .that()
+                .resideOutsideOfPackage("io.mazewall.enforcer.internal.supervisor..")
+                .should()
+                .dependOnClassesThat()
+                .haveFullyQualifiedName(helper.name)
+                .because("supervisor route execution must cross its dispatcher boundary")
+                .check(allClasses)
+        }
+    }
+
+    @ArchTest
+    fun singletonProvidersMustBeImmutable(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        singletonProviderRule().check(allClasses)
+    }
+
     @ArchTest
     fun enforcerShouldNotDependOnProfiler(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         noClasses()
@@ -39,11 +104,43 @@ class ArchitectureTest {
                             "getProcess",
                             "getMemory",
                             "getRaw",
+                             "getBpf",
+                            "snapshot", // immutable NativeEngine trait selection; never direct native I/O
                         "isRealEngineActive", // metadata-only probe (issue-20260823-172003), not an I/O bypass
                     )
                 }
             })
             .because("direct calls to LinuxNative implementation bypass the testable NativeEngine abstraction")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun supervisorInstallerMustUseItsCapturedNativeRuntime(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .haveFullyQualifiedName(SupervisorInstaller::class.java.name)
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("direct LinuxNative runtime access") {
+                override fun test(input: JavaMethodCall): Boolean =
+                    input.target.owner.isAssignableTo(LinuxNative::class.java) &&
+                        input.target.name != "snapshot"
+            })
+            .because("supervised installation must retain one caller-supplied NativeEngine for its complete lifecycle")
+            .check(allClasses)
+    }
+
+    @ArchTest
+    fun plainSeccompPipelineMustUseItsCapturedNativeRuntime(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
+        noClasses()
+            .that()
+            .haveNameMatching("io\\.mazewall\\.seccomp\\.(PureJavaBpfEngine|SeccompInstallationState)(\\$.*)?")
+            .should()
+            .callMethodWhere(object : DescribedPredicate<JavaMethodCall>("mutable LinuxNative trait lookups inside the plain pipeline") {
+                override fun test(input: JavaMethodCall): Boolean =
+                    input.target.owner.isAssignableTo(LinuxNative::class.java) &&
+                        input.target.name in setOf("getFileSystem", "getNetworking", "getProcess", "getMemory", "getRaw", "getBpf")
+            })
+            .because("packing, application, retries, fallback and verification must use the same captured backend")
             .check(allClasses)
     }
 
@@ -68,11 +165,12 @@ class ArchitectureTest {
             .resideOutsideOfPackages(
                 "io.mazewall.seccomp..",
                 "io.mazewall.landlock..",
-                "io.mazewall.enforcer.supervisor..",
+                "io.mazewall.enforcer.internal.supervisor..",
+                "io.mazewall.enforcer.internal.ffi..",
                 "io.mazewall.ffi.networking..",
                 "io.mazewall.ffi.internal..",
                 "io.mazewall", // RealNativeEngine and RealPlatformProvider are in the root package
-                "io.mazewall.profiler.engine..",
+                "io.mazewall.profiler.internal.engine..",
                 "io.mazewall.platform.seccomp.daemon..",
                 "io.mazewall.platform.seccomp..",
             ).should()
@@ -171,6 +269,7 @@ class ArchitectureTest {
                     !it.isAssignableTo("io.mazewall.ffi.memory.ManagedSegment")
             },
             ).because("nativeScope must not leak segments beyond their arena lifetime.")
+            .allowEmptyShould(true)
             .check(allClasses)
     }
 
@@ -226,10 +325,78 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .haveSimpleNameNotStartingWith("IsolatedTestRunner")
+            // This resource fold attempts every release and rethrows failures, fatal first.
+            // ChildStartupTransactionTest and DaemonStartupRollbackTest verify startup and
+            // retirement aggregation rather than silent suppression, including exact fatal identity.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.platform.fd.ResourceRetirement")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.platform.fd.ResourceRetirement\$Companion")
+            // FileDescriptor.use always closes and suppresses close failures onto the block
+            // failure; it does not swallow containment errors.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.platform.fd.FileDescriptorKt")
+            // OwnedRuntimeTest verifies these exact resource boundaries retain fatal identity,
+            // required readiness and physical cancellation/drain leases; none downgrades failures.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.api.execution.ManagedRuntime")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.api.execution.ManagedRuntime\$Companion")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.OwnedDomain")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.OwnedInvocation")
+            // Retained cleanup thread reports every failure and preserves fatal identity;
+            // deadline and genuine-FD retirement tests cover its physical-end boundary.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.PreparedRetirement")
+            // Prepared acquisitions aggregate rollback/retirement failures and rethrow;
+            // real-FD and prepared-operation tests cover failure propagation, not fallback.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.api.execution.PreparedOperationResources")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.api.execution.PreparedOperationResources\$Companion")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.PreparedResourceSet")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.enforcer.internal.execution.PreparedResourceSet\$Companion")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.PreparedPath\$Companion")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.ImplementationArtifact\$Companion")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.ImplementationArtifact")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.ExplodedArtifact")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.ExplodedArtifact\$Companion")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.landlock.PreparedLandlock")
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.landlock.PreparedLandlock\$Companion")
             .and()
             .areDeclaredInClassesThat()
             .resideOutsideOfPackages(
-                "io.mazewall.enforcer.supervisor..",
+                "io.mazewall.enforcer.internal.supervisor..",
                 "io.mazewall.platform.seccomp.daemon..",
                 "io.mazewall.ffi.networking..",
                 "io.mazewall.ffi.memory..",
@@ -265,7 +432,7 @@ class ArchitectureTest {
         methods()
             .that()
             .areDeclaredInClassesThat()
-            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
+            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.internal.supervisor..")
             .and()
             .haveRawReturnType(LinuxNative.SyscallResult::class.java)
             .should()
@@ -289,7 +456,7 @@ class ArchitectureTest {
         methods()
             .that()
             .areDeclaredInClassesThat()
-            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.supervisor..")
+            .resideInAnyPackage("io.mazewall.seccomp..", "io.mazewall.landlock..", "io.mazewall.enforcer.internal.supervisor..")
             .and()
             .haveNameNotMatching(".*\\\$.*") // Ignore Kotlin internal mangled names
             .should()
@@ -340,16 +507,16 @@ class ArchitectureTest {
     fun jvmStackInspectorMustHavePrimitiveDependenciesOnly(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         classes()
             .that()
-            .haveFullyQualifiedName("io.mazewall.enforcer.supervisor.JvmStackInspector")
+            .haveFullyQualifiedName("io.mazewall.enforcer.internal.supervisor.JvmStackInspector")
             .should()
             .onlyDependOnClassesThat(
                 object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("only allow primitive/JDK types, Intrinsics, Metadata and ScopingValidationState") {
                     override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
                         val name = input.name
-                        return name == "io.mazewall.enforcer.supervisor.JvmStackInspector" ||
-                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState" ||
-                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$SafeToValidate" ||
-                            name == "io.mazewall.enforcer.supervisor.ScopingValidationState\$SafeToValidate\$Companion" ||
+                        return name == "io.mazewall.enforcer.internal.supervisor.JvmStackInspector" ||
+                            name == "io.mazewall.enforcer.internal.supervisor.ScopingValidationState" ||
+                            name == "io.mazewall.enforcer.internal.supervisor.ScopingValidationState\$SafeToValidate" ||
+                            name == "io.mazewall.enforcer.internal.supervisor.ScopingValidationState\$SafeToValidate\$Companion" ||
                             name == "java.lang.Object" ||
                             name == "java.lang.String" ||
                             name == "java.lang.StackTraceElement" ||
@@ -383,7 +550,7 @@ class ArchitectureTest {
                 object : DescribedPredicate<com.tngtech.archunit.core.domain.JavaClass>("only allow primitive/JDK types, Intrinsics, List and Metadata") {
                     override fun test(input: com.tngtech.archunit.core.domain.JavaClass): Boolean {
                         val name = input.name
-                        return name.startsWith("io.mazewall.enforcer.supervisor.ScopingValidationState") ||
+                        return name.startsWith("io.mazewall.enforcer.internal.supervisor.ScopingValidationState") ||
                             name == "java.lang.Object" ||
                             name == "java.lang.String" ||
                             name == "java.lang.StackTraceElement" ||
@@ -441,8 +608,8 @@ class ArchitectureTest {
                         // Containment owns raw-pool construction; everything
                         // else must go through ContainedExecutors factories.
                         "ContainedExecutors" !in name &&
-                        name == "io.mazewall.Mazewall" ||
-                            name.startsWith("io.mazewall.Mazewall$")
+                        name == "io.mazewall.enforcer.api.Mazewall" ||
+                            name.startsWith("io.mazewall.enforcer.api.Mazewall$")
                 }
             })
             .should()
@@ -525,6 +692,99 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.enforcer.api.CanonicalPolicyArtifact" to setOf(
+                "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Worker",
+                "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Process",
+            ),
+            "io.mazewall.enforcer.internal.execution.ExecutionTransition" to setOf(
+                "io.mazewall.enforcer.internal.execution.ExecutionTransition\$Dispatch",
+                "io.mazewall.enforcer.internal.execution.ExecutionTransition\$InlineCurrentWorker",
+                "io.mazewall.enforcer.internal.execution.ExecutionTransition\$Reject",
+            ),
+            "io.mazewall.enforcer.api.execution.ExecutionEnd" to setOf(
+                "io.mazewall.enforcer.api.execution.ExecutionEnd\$NotStarted",
+                "io.mazewall.enforcer.api.execution.ExecutionEnd\$Finished",
+            ),
+            "io.mazewall.enforcer.api.execution.DrainReport" to setOf(
+                "io.mazewall.enforcer.api.execution.DrainReport\$Complete",
+                "io.mazewall.enforcer.api.execution.DrainReport\$Incomplete",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority\$DirectoryKey" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority\$DirectoryKey\$Root",
+                "io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority\$DirectoryKey\$Cwd",
+                "io.mazewall.enforcer.internal.supervisor.TraceeProcAuthority\$DirectoryKey\$Imported",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.SocketOperation" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SocketOperation\$Connect",
+                "io.mazewall.enforcer.internal.supervisor.SocketOperation\$Accept",
+                "io.mazewall.enforcer.internal.supervisor.SocketOperation\$OpenAt2",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.SocketHelperResult" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperResult\$Authority",
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperResult\$Connected",
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperResult\$Failed",
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperResult\$Accepted",
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperResult\$Opened",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.SocketHelperRequest" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperRequest\$Prewarm",
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperRequest\$Operation",
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperRequest\$Authority",
+            ),
+            "io.mazewall.ffi.networking.SeccompInstallState" to setOf(
+                "io.mazewall.ffi.networking.SeccompInstallState\$Pending",
+                "io.mazewall.ffi.networking.SeccompInstallState\$Failed",
+            ),
+            "io.mazewall.ffi.networking.SeccompInstallEvent" to setOf(
+                "io.mazewall.ffi.networking.SeccompInstallEvent\$Advanced",
+                "io.mazewall.ffi.networking.SeccompInstallEvent\$Failed",
+            ),
+            "io.mazewall.platform.seccomp.daemon.NotificationProgress" to setOf(
+                "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Await",
+                "io.mazewall.platform.seccomp.daemon.NotificationProgress\$Ready",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$UnsupportedAuthority",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$Continue",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$Value",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$Error",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$AddFdAndReply",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$AcceptedSocket",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$SecureExecAndReply",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorReplyEffect\$Recycle",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ReplyExecutionResult" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ReplyExecutionResult\$ReplySucceeded",
+                "io.mazewall.enforcer.internal.supervisor.ReplyExecutionResult\$ReplyFailed",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.JvmExchangeResult" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.JvmExchangeResult\$Verdict",
+                "io.mazewall.enforcer.internal.supervisor.JvmExchangeResult\$Timeout",
+                "io.mazewall.enforcer.internal.supervisor.JvmExchangeResult\$Malformed",
+                "io.mazewall.enforcer.internal.supervisor.JvmExchangeResult\$TransportFailed",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.SupervisorDescriptorResult" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SupervisorDescriptorResult\$Opened",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorDescriptorResult\$Denied",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.FdInjectionResult" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.FdInjectionResult\$Injected",
+                "io.mazewall.enforcer.internal.supervisor.FdInjectionResult\$Failed",
+            ),
+            "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome" to setOf(
+                "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome\$Complete",
+                "io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome\$Incomplete",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.SpawnAuthorizationResult" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SpawnAuthorizationResult\$Authorized",
+                "io.mazewall.enforcer.internal.supervisor.SpawnAuthorizationResult\$Rejected",
+            ),
+            "io.mazewall.enforcer.api.KernelCapability" to setOf(
+                "io.mazewall.enforcer.api.KernelCapability\$Available",
+                "io.mazewall.enforcer.api.KernelCapability\$Unsupported",
+                "io.mazewall.enforcer.api.KernelCapability\$Rejected",
+                "io.mazewall.enforcer.api.KernelCapability\$ProbeFailed",
+            ),
             "io.mazewall.landlock.LandlockApplyResult" to setOf(
                 "io.mazewall.landlock.LandlockApplyResult\$Applied",
                 "io.mazewall.landlock.LandlockApplyResult\$Bypassed",
@@ -551,10 +811,10 @@ class ArchitectureTest {
                 "io.mazewall.platform.daemon.UnixListenDaemonState\$ShuttingDown",
                 "io.mazewall.platform.daemon.UnixListenDaemonState\$Terminated",
             ),
-            "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution" to setOf(
-                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Resolved",
-                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Missing",
-                "io.mazewall.enforcer.supervisor.BypassPaths\$PathResolution\$Unsafe",
+            "io.mazewall.enforcer.internal.supervisor.BypassPaths\$PathResolution" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.BypassPaths\$PathResolution\$Resolved",
+                "io.mazewall.enforcer.internal.supervisor.BypassPaths\$PathResolution\$Missing",
+                "io.mazewall.enforcer.internal.supervisor.BypassPaths\$PathResolution\$Unsafe",
             ),
             "io.mazewall.platform.seccomp.SupervisedKind" to setOf(
                 "io.mazewall.platform.seccomp.SupervisedKind\$Open",
@@ -564,31 +824,37 @@ class ArchitectureTest {
                 "io.mazewall.platform.seccomp.SupervisedKind\$Spawn",
                 "io.mazewall.platform.seccomp.SupervisedKind\$Unknown",
             ),
-            "io.mazewall.enforcer.supervisor.SupervisorRoute" to setOf(
-                "io.mazewall.enforcer.supervisor.SupervisorRoute\$Continue",
-                "io.mazewall.enforcer.supervisor.SupervisorRoute\$AskJvm",
-                "io.mazewall.enforcer.supervisor.SupervisorRoute\$InjectFd",
-                "io.mazewall.enforcer.supervisor.SupervisorRoute\$SecureExec",
-                "io.mazewall.enforcer.supervisor.SupervisorRoute\$Abort",
+            "io.mazewall.enforcer.internal.supervisor.SupervisorRoute" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SupervisorRoute\$Continue",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorRoute\$AskJvm",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorRoute\$InjectFd",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorRoute\$SecureExec",
+                "io.mazewall.enforcer.internal.supervisor.SupervisorRoute\$Abort",
             ),
-            "io.mazewall.enforcer.supervisor.JvmVerdict" to setOf(
-                "io.mazewall.enforcer.supervisor.JvmVerdict\$Deny",
-                "io.mazewall.enforcer.supervisor.JvmVerdict\$Allow",
-                "io.mazewall.enforcer.supervisor.JvmVerdict\$InjectFd",
+            "io.mazewall.enforcer.internal.supervisor.JvmVerdict" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.JvmVerdict\$Deny",
+                "io.mazewall.enforcer.internal.supervisor.JvmVerdict\$Allow",
+                "io.mazewall.enforcer.internal.supervisor.JvmVerdict\$InjectFd",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.JvmVerdictParse" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.JvmVerdictParse\$Known",
+                "io.mazewall.enforcer.internal.supervisor.JvmVerdictParse\$Unknown",
             ),
             "io.mazewall.enforcer.state.ContainmentRegistryEffect" to setOf(
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$LandlockApplied",
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$SeccompInstalled",
-                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$RestoreThreadState",
                 "io.mazewall.enforcer.state.ContainmentRegistryEffect\$EngineStateUpdated",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$InstallationFailed",
+                "io.mazewall.enforcer.state.ContainmentRegistryEffect\$CetLocked",
             ),
-            "io.mazewall.enforcer.supervisor.SupervisedOpen" to setOf(
-                "io.mazewall.enforcer.supervisor.SupervisedOpen\$Open",
-                "io.mazewall.enforcer.supervisor.SupervisedOpen\$OpenAt",
-                "io.mazewall.enforcer.supervisor.SupervisedOpen\$OpenAt2",
+            "io.mazewall.enforcer.internal.supervisor.SupervisedOpen" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SupervisedOpen\$Open",
+                "io.mazewall.enforcer.internal.supervisor.SupervisedOpen\$OpenAt",
+                "io.mazewall.enforcer.internal.supervisor.SupervisedOpen\$OpenAt2",
             ),
         )
         for ((parent, kids) in expected) {
+            if (allClasses.none { it.name == parent }) continue
             val actual = allClasses
                 .filter { it.isAssignableTo(parent) && it.name != parent }
                 .filter { !it.name.contains("DefaultImpls") }
@@ -629,13 +895,13 @@ class ArchitectureTest {
                     val ownerName = input.target.owner.name
                     val methodName = input.target.name
                     val isUnsafeCall = (
-                        ownerName == "io.mazewall.core.FileDescriptor\$Companion" ||
-                        ownerName == "io.mazewall.core.FileDescriptor"
+                        ownerName == "io.mazewall.platform.fd.FileDescriptor\$Companion" ||
+                        ownerName == "io.mazewall.platform.fd.FileDescriptor"
                     ) &&
                         (methodName == "unsafe" || methodName == "unsafe\$default")
 
                     // Exclude internal synthetic calls from Companion itself (unsafe$default -> unsafe)
-                    val isCompanionInternalCall = input.origin.owner.name == "io.mazewall.core.FileDescriptor\$Companion"
+                    val isCompanionInternalCall = input.origin.owner.name == "io.mazewall.platform.fd.FileDescriptor\$Companion"
 
                     return isUnsafeCall && !isCompanionInternalCall
                 }

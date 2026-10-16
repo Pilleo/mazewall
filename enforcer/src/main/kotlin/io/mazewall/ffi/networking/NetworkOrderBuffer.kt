@@ -19,8 +19,8 @@ import java.lang.foreign.MemorySegment
  * This enforces endianness correctness at compile-time for socket communication payloads.
  */
 @JvmInline
-public value class NetworkOrderBuffer(
-    public val segment: MemorySegment,
+internal value class NetworkOrderBuffer(
+    val segment: MemorySegment,
 ) {
     public fun writeInt(
         offset: Long,

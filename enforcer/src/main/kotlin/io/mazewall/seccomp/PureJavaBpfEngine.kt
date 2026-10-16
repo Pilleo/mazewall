@@ -1,23 +1,24 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfNativeCache
 import io.mazewall.enforcer.api.*
+import io.mazewall.ffi.ScopedBpfProgram
 import io.mazewall.enforcer.state.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.*
 
-import io.mazewall.LinuxNative
-import io.mazewall.Platform
-import io.mazewall.PolicyDefinition
-import io.mazewall.CompiledSandbox
-import io.mazewall.UnsupportedKernelFeatureException
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.CompiledSandbox
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.ffi.memory.ConfinedSegment
 import io.mazewall.ffi.memory.ManagedSegment
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
-import io.mazewall.core.PrctlCommand
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.platform.syscall.PrctlCommand
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.ffi.NativeConstants
@@ -31,13 +32,6 @@ import java.util.logging.Level
 // @ref: docs/internals/designs/enforcer/containment-design.md — prctl/seccomp(2) install sequence, TSYNC flag semantics, FFM memory layout
 internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     private val logger = Logger.getLogger(PureJavaBpfEngine::class.java.name)
-
-    /**
-     * Clears the native filter cache. Used for testing.
-     */
-    internal fun clearCache() {
-        BpfNativeCache.clear()
-    }
 
     override val state: EngineState
         get() = when (ContainerState.resolveCurrentState().engineState) {
@@ -54,23 +48,38 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
     override val isSupported: Boolean
         get() = Platform.isSupported()
 
+    private class LoadedEngine(
+        private val delegate: PureJavaBpfEngine,
+    ) : SeccompEngine<EngineState.Loaded> {
+        override val state: EngineState.Loaded get() = EngineState.LoadedImpl
+        override val isSupported: Boolean get() = delegate.isSupported
+        override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> = delegate.install(policy)
+        override fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> = delegate.installOnProcess(policy)
+    }
+
     override fun install(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
         installInternal(policy, useTsync = false)
-        return this as SeccompEngine<EngineState.Loaded>
+        return LoadedEngine(this)
     }
 
     override fun installOnProcess(policy: CompiledSandbox<*>): SeccompEngine<EngineState.Loaded> {
-        if (!Platform.featureMatrix.seccompTsyncSupported) {
+        val native = LinuxNative.snapshot()
+        val platform = Platform.capture(native)
+        if (!platform.capabilities.matrix.seccompTsyncSupported) {
             throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
         }
-        installInternal(policy, useTsync = true)
-        return this as SeccompEngine<EngineState.Loaded>
+        installInternal(policy, useTsync = true, native = native, platform = platform)
+        return LoadedEngine(this)
     }
 
     private fun installInternal(
         policy: CompiledSandbox<*>,
         useTsync: Boolean,
+        native: NativeEngine = LinuxNative.snapshot(),
+        platform: CapturedPlatform = Platform.capture(native),
+        onApplied: () -> Unit = {},
     ) {
+        io.mazewall.enforcer.diagnostics.requirePlatformThread()
         // Pre-charge classloading of engine states to prevent deadlocks/failures under active filters
         EngineState.UnprivilegedImpl.toString()
         EngineState.LoadedImpl.toString()
@@ -82,22 +91,22 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         SeccompInstallationState.Verified.toString()
         SeccompInstallationState.FilterBuilt::class.java.name
         SeccompInstallationState.Failed::class.java.name
-        BpfNativeCache.toString()
 
         updateState(SeccompInstallationState.Uninitialized, useTsync)
         try {
             val arch = Arch.current()
             val filters = policy.compiledFilters
-            val cachedProg = BpfNativeCache.getOrCompute(filters)
-
-            val built = SeccompInstallationState.FilterBuilt(cachedProg)
-            updateState(built, useTsync)
-            val locked = built.lockPrivileges()
-            updateState(locked, useTsync)
-            val applied = locked.applyFilter(arch, useTsync)
-            updateState(applied, useTsync)
-            val verified = applied.verify(policy.definition)
-            updateState(verified, useTsync)
+            ScopedBpfProgram.withProgram(filters, native) { program ->
+                val built = SeccompInstallationState.FilterBuilt(program)
+                updateState(built, useTsync)
+                val locked = built.lockPrivileges(native, platform)
+                updateState(locked, useTsync)
+                val applied = locked.applyFilter(arch, useTsync, native)
+                onApplied()
+                updateState(applied, useTsync)
+                val verified = applied.verify(policy.definition, native)
+                updateState(verified, useTsync)
+            }
         } catch (expectedInstallFailure: Exception) {
             val stepName = getStepName()
             val errno = getErrno(expectedInstallFailure)
@@ -114,6 +123,20 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             updateState(SeccompInstallationState.Failed(stepName, errno, expectedFatalFailure), useTsync)
             throw expectedFatalFailure
         }
+    }
+
+    /** Publication occurs immediately after native success, before verification can fail. */
+    internal fun installWithPublication(
+        policy: CompiledSandbox<*>,
+        processWide: Boolean,
+        native: NativeEngine = LinuxNative.snapshot(),
+        platform: CapturedPlatform = Platform.capture(native),
+        onApplied: () -> Unit,
+    ) {
+        if (processWide && !platform.capabilities.matrix.seccompTsyncSupported) {
+            throw UnsupportedKernelFeatureException("Process-wide Seccomp synchronization (TSYNC) requires Linux 3.17+.")
+        }
+        installInternal(policy, processWide, native, platform, onApplied)
     }
 
     private fun getStepName(): String {
@@ -155,10 +178,10 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
      * interruptions (EINTR) robustly, ensuring that temporary interruptions do not
      * abort or bypass privilege locking.
      */
-    internal fun setNoNewPrivs() {
+    internal fun lockNoNewPrivileges(native: NativeEngine = LinuxNative.snapshot()) {
         // Step 1: Set no_new_privs (mandatory for non-root seccomp)
         while (true) {
-            val result = LinuxNative.process.prctl(PrctlCommand.SetNoNewPrivs(true))
+            val result = native.process.prctl(PrctlCommand.SetNoNewPrivs(true))
             if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) {
                 continue
             }
@@ -179,21 +202,22 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         arch: Arch,
         prog: ManagedSegment,
         useTsync: Boolean,
+        native: NativeEngine = LinuxNative.snapshot(),
     ): SeccompInstallationState.FilterApplied {
         val flags = if (useTsync) NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong() else 0L
         while (true) {
-            val result = LinuxNative.raw.syscall(
+            val result = native.raw.syscall(
                 arch.seccompSyscallNumber.toLong(),
-                io.mazewall.core.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
-                io.mazewall.core.NativeArg.LongArg(flags),
-                io.mazewall.core.NativeArg.MemoryArg(prog),
+                io.mazewall.platform.syscall.NativeArg.LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+                io.mazewall.platform.syscall.NativeArg.LongArg(flags),
+                io.mazewall.platform.syscall.NativeArg.MemoryArg(prog),
             )
             if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) {
                 continue
             }
             return when (result) {
                 is LinuxNative.SyscallResult.Success -> successfulSeccompInstall(result.value, useTsync)
-                is LinuxNative.SyscallResult.Error -> fallbackToPrctl(prog, useTsync, result.errno)
+                is LinuxNative.SyscallResult.Error -> fallbackToPrctl(prog, useTsync, result.errno, native)
             }
         }
     }
@@ -202,6 +226,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         prog: ManagedSegment,
         useTsync: Boolean,
         seccompErrno: Int,
+        native: NativeEngine,
     ): SeccompInstallationState.FilterApplied {
         if (useTsync) {
             throw IllegalStateException(
@@ -209,10 +234,10 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
             )
         }
         while (true) {
-            val result = LinuxNative.process.prctl(
+            val result = native.process.prctl(
                     PrctlCommand.SetSeccomp(
                         NativeConstants.SECCOMP_MODE_FILTER.toLong(),
-                        io.mazewall.core.NativeArg.MemoryArg(prog)
+                        io.mazewall.platform.syscall.NativeArg.MemoryArg(prog)
                     )
                 )
             if (result is LinuxNative.SyscallResult.Error && result.errno == NativeConstants.EINTR) continue
@@ -270,7 +295,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
      * Note: This invokes the PR_GET_SECCOMP prctl wrapped in a retry loop to robustly
      * handle signal interruptions (EINTR).
      */
-    internal fun verifyInstallation(definition: PolicyDefinition<*>) {
+    internal fun verifyInstallation(definition: PolicyDefinition<*>, native: NativeEngine = LinuxNative.snapshot()) {
         val currentState = ContainerState.resolveCurrentState()
         val canVerify = currentState.isSyscallAllowed(Syscall.PRCTL) &&
             definition.isSyscallAllowed(Syscall.PRCTL)
@@ -282,7 +307,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         // Verify filter is actually installed
         var verifyResult: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>
         while (true) {
-            verifyResult = LinuxNative.process.prctl(PrctlCommand.GetSeccomp)
+            verifyResult = native.process.prctl(PrctlCommand.GetSeccomp)
             if (verifyResult is LinuxNative.SyscallResult.Error && verifyResult.errno == NativeConstants.EINTR) {
                 continue
             }

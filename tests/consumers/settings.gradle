@@ -1,0 +1,23 @@
+pluginManagement {
+    plugins {
+        def consumerCompiler = providers.gradleProperty('consumerKotlinVersion').getOrElse('2.4.20')
+        if (!(consumerCompiler ==~ /\d+\.\d+\.\d+/)) {
+            throw new GradleException('Consumer compiler must be a pinned stable Kotlin release')
+        }
+        id 'org.jetbrains.kotlin.jvm' version consumerCompiler
+    }
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'mazewall-packaged-consumers'
+include 'java-api', 'kotlin-api'
+if (providers.gradleProperty('includeDocSnippets').getOrElse('false').toBoolean()) {
+    include 'doc-snippets'
+}

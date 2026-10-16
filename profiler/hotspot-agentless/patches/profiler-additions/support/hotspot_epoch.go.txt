@@ -1,0 +1,43 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package support
+
+import (
+	"fmt"
+	"github.com/cilium/ebpf/btf"
+	"unsafe"
+)
+
+// CheckHotSpotEpochABI checks embedded BTF before any object is accepted at startup.
+func CheckHotSpotEpochABI() error {
+	s, err := LoadCollectionSpec()
+	if err != nil {
+		return err
+	}
+	m := s.Maps["stack_cache2correlation_id"]
+	if m == nil || m.KeySize != 24+3072*8 || m.ValueSize != 8 || m.MaxEntries != 256 {
+		return fmt.Errorf("unsupported epoch producer cache ABI")
+	}
+	p := s.Maps["hotspot_procs"]
+	if p == nil || p.ValueSize != uint32(unsafe.Sizeof(HotspotProcInfo{})) {
+		return fmt.Errorf("unsupported epoch process ABI")
+	}
+	var trace *btf.Struct
+	if err := s.Types.TypeByName("Trace", &trace); err != nil {
+		return fmt.Errorf("trace ABI BTF: %w", err)
+	}
+	want := uint32(unsafe.Offsetof(Trace{}.Frame_data)) * 8
+	found := false
+	for _, member := range trace.Members {
+		if member.Name == "frame_data" {
+			found = true
+			if uint32(member.Offset) != want {
+				return fmt.Errorf("epoch trace header offset mismatch")
+			}
+		}
+	}
+	if !found {
+		return fmt.Errorf("epoch trace header absent")
+	}
+	return nil
+}

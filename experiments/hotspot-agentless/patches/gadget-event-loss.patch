@@ -1,0 +1,17 @@
+--- a/pkg/operators/ebpf/tracer.go
++++ b/pkg/operators/ebpf/tracer.go
+@@ -211,11 +211,9 @@
+ 
+ 		if lost > 0 {
+ 			gadgetCtx.Logger().Warnf("reading event: lost %d samples", lost)
+-			t.ds.ReportLostData(lost)
+-			continue
+-		}
+-
+-		if err := t.processEvent(gadgetCtx, sample); err != nil {
++		}
++
++		if err := t.processEventRead(gadgetCtx, sample, lost); err != nil {
+ 			gadgetCtx.Logger().Warnf("error processing event: %v", err)
+ 			continue
+ 		}

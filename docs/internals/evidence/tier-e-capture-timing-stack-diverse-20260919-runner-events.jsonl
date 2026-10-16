@@ -1,0 +1,8 @@
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:38:05Z","stage":"runner","state":"STARTED","message":"artifact_dir=/home/leanid/Documents/code/java/jseccomp/build/tier-e-capture-timing-stack_diverse-20260919-v2"}
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:38:06Z","stage":"bundle_build","state":"STARTED","message":""}
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:38:25Z","stage":"bundle_build","state":"COMPLETED","message":""}
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:38:25Z","stage":"bundle_verify","state":"STARTED","message":""}
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:38:25Z","stage":"bundle_verify","state":"COMPLETED","message":""}
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:38:25Z","stage":"benchmark","state":"STARTED","message":""}
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:40:31Z","stage":"benchmark","state":"COMPLETED","message":""}
+{"kind":"runner_stage","run_id":"tier-e-20260919T163805Z-999073","timestamp":"2026-09-19T16:40:31Z","stage":"runner","state":"PASSED","message":"benchmark artifact validated"}

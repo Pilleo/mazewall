@@ -1,6 +1,6 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.profiler.api.TraceEvent
 import kotlinx.coroutines.channels.Channel
 import java.util.concurrent.atomic.AtomicLong
 

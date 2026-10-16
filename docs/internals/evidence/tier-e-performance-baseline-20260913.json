@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "status": "verified_baseline",
+  "captured_at": "2026-09-13",
+  "workload": "Tier E native stack capture",
+  "modes": {
+    "full_stream": {
+      "measured": {
+        "get_stack_trace_ns": 1481686,
+        "raw_key_validation_ns": 289975,
+        "metadata_resolution_ns": 6484906,
+        "total_ns": 8256567,
+        "cache_hits": 0,
+        "cache_misses": 0,
+        "metadata_cache_hits": 8176,
+        "metadata_cache_misses": 68
+      },
+      "historical_uprobe_ns": 1324,
+      "historical_usdt_ns": 596,
+      "regression_threshold_percent": 25,
+      "performance_gate": "passed"
+    },
+    "unique_edge": {
+      "measured": {
+        "get_stack_trace_ns": 1429591,
+        "raw_key_validation_ns": 595868,
+        "metadata_resolution_ns": 375942,
+        "total_ns": 2401401,
+        "cache_hits": 503,
+        "cache_misses": 11,
+        "metadata_cache_hits": 139,
+        "metadata_cache_misses": 68
+      },
+      "historical_uprobe_ns": 1324,
+      "historical_usdt_ns": 596,
+      "regression_threshold_percent": 25,
+      "performance_gate": "passed"
+    }
+  },
+  "dimensions": {
+    "capture_domain_validity": "unverified",
+    "transport_completeness": "unverified",
+    "attribution_coverage": "unverified",
+    "dictionary_integrity": "unverified",
+    "lifecycle_validity": "unverified",
+    "runtime_overhead": "pass"
+  },
+  "policy_eligibility": false,
+  "renewal_requires_reason": true,
+  "measurement_command": "cmake --build /tmp/jseccomp-profiler-native-build -j2 && ctest --test-dir /tmp/jseccomp-profiler-native-build -V",
+  "native_ctest_result": "13/13 passed",
+  "rootful_gate_artifact": "docs/internals/evidence/tier-e-rootful-final-gate-20260913.json",
+  "measurement_method": "three-sample medians from the retained local rootful gate",
+  "note": "The latency values are host-specific baselines, not universal guarantees. The 25% threshold is a review trigger and requires renewal when hardware, JDK, kernel, or workload changes."
+}

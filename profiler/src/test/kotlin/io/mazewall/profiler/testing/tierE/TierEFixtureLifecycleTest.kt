@@ -1,0 +1,115 @@
+package io.mazewall.profiler.testing.tierE
+
+import io.mazewall.profiler.tierE.tools.controller.TierEContainerRun
+import io.mazewall.profiler.tierE.tools.controller.TierEFixtureLifecycle
+import io.mazewall.testing.containers.ContainerCommandResult
+import io.mazewall.testing.containers.ContainerEndpoint
+import io.mazewall.testing.containers.ContainerEngine
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.time.Duration
+
+class TierEFixtureLifecycleTest {
+    @Test
+    fun `settled fixture failure retains stopped source when recovery is requested`() {
+        val artifacts = Files.createTempDirectory("tier-e-retain-on-failure-")
+        val stopped = mutableSetOf<String>()
+        try {
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-retain-123", artifacts) { command, _, _ ->
+                val name = command.last()
+                when (command[1]) {
+                    "inspect" -> ContainerCommandResult(0, "exists")
+                    "stop" -> {
+                        stopped += name
+                        ContainerCommandResult(0, name)
+                    }
+                    else -> error("Failed fixture must not export/remove the only evidence: $command")
+                }
+            }
+            val original = assertThrows(IllegalStateException::class.java) {
+                TierEFixtureLifecycle(owner, artifacts.resolve("create.lock"), settle = { _, _ -> }, retainOnFailure = true)
+                    .run { error("original fixture failure") }
+            }
+            assertTrue(original.message!!.contains("original fixture failure"))
+            assertTrue(original.suppressed.isEmpty())
+            assertEquals(setOf("tier-e-retain-123-target", "tier-e-retain-123-collector"), stopped)
+        } finally {
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `interruption raised during controller wait is restored after sentinel cleanup`() {
+        val artifacts = Files.createTempDirectory("tier-e-wait-interrupt-")
+        try {
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-wait-123", artifacts) { command, _, _ ->
+                if (command[1] == "inspect") {
+                    ContainerCommandResult(1, "No such object")
+                } else {
+                    error("unsettled fixture cannot export")
+                }
+            }
+            var sentinelRemoved = false
+            val error = assertThrows(IllegalStateException::class.java) {
+                TierEFixtureLifecycle(
+                    owner,
+                    artifacts.resolve("creation.lock"),
+                    settle = { _, _ ->
+                        Thread.currentThread().interrupt()
+                        java.util.concurrent
+                            .CountDownLatch(1)
+                            .await()
+                    },
+                    extraCleanup = { sentinelRemoved = true },
+                ).run(start = { ProcessBuilder("bash", "-c", "exit 0").start() }) { error("original failure") }
+            }
+            assertTrue(error.suppressed.any { it is InterruptedException })
+            assertTrue(sentinelRemoved)
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `unresolved creation keeps source and scratch yet independently retires sentinel`() {
+        val artifacts = Files.createTempDirectory("tier-e-lifecycle-")
+        val runId = "tier-e-unresolved-123"
+        val scratch = Files.createTempDirectory("tier-e-owned-$runId-")
+        val commands = mutableListOf<String>()
+        try {
+            Files.writeString(artifacts.resolve("$runId.shared-path"), "${scratch.toRealPath()}\n")
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), runId, artifacts, ownedShared = scratch) { command, _, _ ->
+                commands += command[1]
+                when (command[1]) {
+                    "inspect" -> ContainerCommandResult(0, "exists")
+                    "stop" -> ContainerCommandResult(0, "stopped")
+                    else -> error("unsettled creation cannot remove or export: $command")
+                }
+            }
+            var sentinelRemoved = false
+            val original = assertThrows(IllegalStateException::class.java) {
+                TierEFixtureLifecycle(
+                    owner,
+                    artifacts.resolve("$runId.creation.lock"),
+                    settle = { _, _ -> error("creation never quiesced") },
+                    extraCleanup = { sentinelRemoved = true },
+                ).run(start = { ProcessBuilder("bash", "-c", "exit 0").start() }) {
+                    error("startup cancelled")
+                }
+            }
+            assertTrue(original.message!!.contains("startup cancelled"))
+            assertTrue(original.suppressed.any { it.message?.contains("creation never quiesced") == true })
+            assertTrue(sentinelRemoved)
+            assertEquals(listOf("inspect", "stop", "inspect", "stop"), commands)
+            assertTrue(Files.exists(scratch))
+        } finally {
+            scratch.toFile().deleteRecursively()
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+}

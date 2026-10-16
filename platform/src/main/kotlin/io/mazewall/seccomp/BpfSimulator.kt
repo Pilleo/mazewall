@@ -1,6 +1,6 @@
 package io.mazewall.seccomp
 
-import io.mazewall.core.Arch
+import io.mazewall.platform.syscall.Arch
 
 /**
  * Reference interpreter for compiled seccomp-BPF programs.
@@ -16,7 +16,7 @@ import io.mazewall.core.Arch
  * - `JA` jumps by **K** (NOT by jt — see issue-20260823-140500).
  * - `RET` returns the seccomp action.
  */
-public object BpfSimulator {
+internal object BpfSimulator {
     public const val SECCOMP_DATA_NR_OFFSET: Int = 0
     public const val SECCOMP_DATA_ARCH_OFFSET: Int = 4
 
@@ -104,7 +104,7 @@ public object BpfSimulator {
  * issue-20260823-172100). Shared by `:enforcer` kernel-differential tests and `:profiler`
  * verdict-mapping tests so both modules probe identical NRs.
  */
-public object SyscallProbeMatrix {
+internal object SyscallProbeMatrix {
     public data class Probe(
         val nr: Int,
         val label: String,

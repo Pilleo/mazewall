@@ -1,13 +1,13 @@
 package io.mazewall.seccomp
 
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
 
 /**
  * Context provided to [SyscallInspector]s to determine how to build their rules.

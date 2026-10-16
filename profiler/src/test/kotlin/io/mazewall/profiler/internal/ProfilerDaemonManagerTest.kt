@@ -1,15 +1,20 @@
 package io.mazewall.profiler.internal
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockProcess
-import io.mazewall.MockProcessLauncher
-import io.mazewall.MockSocketManager
-import io.mazewall.Platform
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.SocketManager
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockProcess
+import io.mazewall.enforcer.api.MockProcessLauncher
+import io.mazewall.enforcer.api.MockSocketManager
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -24,10 +29,49 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class ProfilerDaemonManagerTest {
     @Test
+    @io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+    @org.junit.jupiter.api.Timeout(15)
+    fun `actual shutdown hook retains the live daemon until its session lease retires`() {
+        val manager = ProfilerDaemonManager()
+        val context = manager.getOrSpawnSharedDaemon()
+        val lease = context.lifetime.acquire()
+        val finished = java.util.concurrent.CompletableFuture<Unit>()
+        val shutdown = Thread {
+            try {
+                context.shutdownHook.run()
+                finished.complete(Unit)
+            } catch (failure: Throwable) {
+                finished.completeExceptionally(failure)
+            }
+        }
+        shutdown.start()
+        try {
+            io.mazewall.testing.awaitCondition(description = "real child hook closes session admission") {
+                try {
+                    context.lifetime.acquire().close()
+                    false
+                } catch (_: IllegalStateException) {
+                    true
+                }
+            }
+            assertFalse(finished.isDone, "Child retirement must wait for the acquired session")
+            assertTrue(context.daemonProcess.isAlive)
+            lease.close()
+            finished.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertFalse(context.daemonProcess.isAlive)
+        } finally {
+            lease.close()
+            shutdown.join(5_000)
+            manager.stop()
+            assertFalse(shutdown.isAlive)
+        }
+    }
+
+    @Test
     fun `test daemon spawn and stop with mocks`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()
-        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")
+        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL + "\n")
         val mockSocket = MockSocketManager()
 
         val manager = ProfilerDaemonManager(mockEngine, mockSocket, mockLauncher)
@@ -86,7 +130,7 @@ class ProfilerDaemonManagerTest {
                     .get("/tmp/fallback-mock-profiler-dir")
             }
         }
-        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.engine.DAEMON_READY_SENTINEL + "\n")
+        mockLauncher.mockProcess = MockProcess(8888L, io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL + "\n")
         val mockSocket = MockSocketManager()
 
         val manager = ProfilerDaemonManager(mockEngine, mockSocket, mockLauncher)

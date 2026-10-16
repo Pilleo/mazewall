@@ -2,15 +2,23 @@ package io.mazewall.ffi.memory
 
 import io.kotest.core.spec.style.FreeSpec
 import io.kotest.matchers.shouldBe
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.engine.FilterInstallationPlanner
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.Layouts
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.ValueLayout
@@ -83,7 +91,7 @@ class ContainmentDesignSpec :
             }
 
             "a DENY_LIST policy with 127 blocked syscalls produces < 255 instructions between any two jump targets" {
-                val builder = Policy.builder().defaultAction(SeccompAction.ACT_ALLOW)
+                val builder = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).defaultAction(SeccompAction.ACT_ALLOW)
                 Syscall.entries.take(127).forEach {
                     builder.block(it)
                 }
@@ -124,8 +132,8 @@ class ContainmentDesignSpec :
             "futex, sched_yield, rt_sigreturn, rt_sigaction, madvise, gettid, close are always allowed by BpfFilter" {
                 // In a Whitelist policy (default action ACT_ERRNO), all JVM coordination syscalls
                 // are explicitly whitelisted and generated in the BpfFilter.
-                val whitelistPolicy = Policy
-                    .builder()
+                val whitelistPolicy = ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .defaultAction(SeccompAction.ACT_ERRNO())
                     .build()
 
@@ -154,7 +162,7 @@ class ContainmentDesignSpec :
             val arch = Arch.AMD64
 
             "BpfFilter always emits ENOSYS for clone3 regardless of policy mode" {
-                val policy = Policy.builder().defaultAction(SeccompAction.ACT_ALLOW).build()
+                val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).defaultAction(SeccompAction.ACT_ALLOW).build()
                 val filter = BpfFilter.build(arch, policy.definition).instructions
 
                 val clone3Nr = arch.clone3
@@ -175,35 +183,40 @@ class ContainmentDesignSpec :
         "Sandbox Cleanliness (designs/enforcer/containment-design.md)" -
             {
             "Pre-warmed JVM task runs successfully inside sandboxed executor without JIT crashes" {
-                val isSupported = io.mazewall.Platform.isSupported() &&
+                val isSupported = io.mazewall.enforcer.api.Platform
+                    .isSupported() &&
                     io.mazewall.landlock.Landlock
                         .isSupported() &&
                     try {
                     Arch.current()
                     true
                 } catch (e: java.lang.UnsupportedOperationException) {
+                    System.err.println("Unsupported containment architecture: $e")
                     false
                 }
                 if (isSupported) {
                     val executor = java.util.concurrent.Executors
                         .newSingleThreadExecutor()
-                    val safeExecutor = io.mazewall.enforcer.api.ContainedExecutors.wrap(
-                        executor,
-                        Policy.builder().build(),
-                    )
                     try {
-                        val result = safeExecutor
+                        val result = executor
                             .submit(
                                 java.util.concurrent.Callable {
-                                    val a = 1
-                                    val b = 2
-                                    a + b
+                                    ContainedExecutors
+                                        .installOnCurrentThread(
+                                            ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(),
+                                        ).use { receipt ->
+                                        receipt.requireInstalled()
+                                        val a = 1
+                                        val b = 2
+                                        a + b
+                                    }
                                 },
                             ).get(5, java.util.concurrent.TimeUnit.SECONDS)
 
                         result shouldBe 3
                     } finally {
                         executor.shutdown()
+                        executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
                     }
                 }
             }

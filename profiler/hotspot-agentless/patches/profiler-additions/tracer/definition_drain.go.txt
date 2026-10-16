@@ -1,0 +1,108 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
+)
+
+type definitionPerfControl interface {
+	Flush() error
+	Close() error
+}
+type definitionDrainControl struct {
+	reader         definitionPerfControl
+	wake           chan struct{}
+	requested      atomic.Bool
+	flushed        atomic.Bool
+	sourcesRetired atomic.Bool
+	mu             sync.Mutex
+	err            error
+	once           sync.Once
+}
+
+func newDefinitionDrainControl(r definitionPerfControl) *definitionDrainControl {
+	return &definitionDrainControl{reader: r, wake: make(chan struct{})}
+}
+func (c *definitionDrainControl) setError(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.err = errors.Join(c.err, err)
+}
+func (c *definitionDrainControl) result() error { c.mu.Lock(); defer c.mu.Unlock(); return c.err }
+func (t *Tracer) DrainTraceReader(ctx context.Context) error {
+	c := t.traceReaderCounters.drain
+	if !t.traceReaderCounters.ready.Load() || c == nil || !c.sourcesRetired.Load() {
+		return fmt.Errorf("definition reader/source quiescence not established")
+	}
+	c.once.Do(func() {
+		c.requested.Store(true)
+		go func() {
+			if err := c.reader.Flush(); err != nil {
+				c.setError(fmt.Errorf("flush owned definition perf reader: %w", err))
+			}
+			close(c.wake)
+		}()
+	})
+	select {
+	case <-c.wake:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if err := c.result(); err != nil {
+		return err
+	}
+	if err := t.WaitTraceReader(ctx); err != nil {
+		return err
+	}
+	if err := c.result(); err != nil {
+		return err
+	}
+	if !c.flushed.Load() {
+		return fmt.Errorf("definition reader stopped without explicit flush boundary")
+	}
+	return nil
+}
+func (t *Tracer) QuiesceDefinitionSources(ctx context.Context) error {
+	c := t.traceReaderCounters.drain
+	if c == nil {
+		return fmt.Errorf("owned definition reader not started")
+	}
+	if c.sourcesRetired.Load() {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	entries := t.perfEntrypoints.RLock()
+	hasSampling := len(*entries) != 0
+	t.perfEntrypoints.RUnlock(&entries)
+	if hasSampling {
+		return fmt.Errorf("owned definition drain refuses sampling entry sources")
+	}
+	for point, hook := range t.hooks {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := hook.Close(); err != nil {
+			return fmt.Errorf("retire definition hook %s/%s: %w", point.group, point.name, err)
+		}
+		delete(t.hooks, point)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.sourcesRetired.Store(true)
+	return nil
+}
+func (c *definitionDrainControl) closeReader() {
+	if err := c.reader.Close(); err != nil {
+		c.mu.Lock()
+		c.err = errors.Join(c.err, fmt.Errorf("retire definition perf reader: %w", err))
+		c.mu.Unlock()
+	}
+}

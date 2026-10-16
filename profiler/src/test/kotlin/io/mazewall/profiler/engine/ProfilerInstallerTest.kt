@@ -1,34 +1,36 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockPlatformProvider
-import io.mazewall.Platform
-import io.mazewall.Policy
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
+package io.mazewall.profiler.internal.engine
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
+import io.mazewall.testing.awaitCondition
+import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertTrue
 
 class ProfilerInstallerTest {
-    @BeforeEach
-    fun setUp() {
-        val mockEngine = MockNativeEngine()
-        mockEngine.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
-        LinuxNative.setEngine(mockEngine)
-
-        val mockPlatform = MockPlatformProvider()
-        mockPlatform.mockSeccompUserNotifSupported = true
-        Platform.setProvider(mockPlatform)
+    private val native = MockNativeEngine().apply {
+        syscallResult = LinuxNative.SyscallResult.Success(100L)
     }
 
-    @AfterEach
-    fun tearDown() {
-        LinuxNative.resetToDefault()
-        Platform.resetToDefault()
+    @Test
+    fun `installer accepts only an explicitly captured native context`() {
+        assertTrue(
+            ProfilerInstaller::class.java.declaredMethods
+                .filter { it.name == "installProfilingFilterForThread" }
+                .all { it.parameterTypes.firstOrNull() == ProfilerInstallationContext::class.java },
+            "ProfilerInstaller must not resolve a mutable LinuxNative singleton during installation",
+        )
     }
 
     @Test
@@ -42,6 +44,7 @@ class ProfilerInstallerTest {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
+                    context = ProfilerInstallationContext(native, userNotifSupported = true),
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
@@ -57,7 +60,7 @@ class ProfilerInstallerTest {
             }
         }
         thread.start()
-        thread.join()
+        awaitCondition(description = "coordinator connection failure reached installer") { !thread.isAlive }
 
         val ex = errorRef.get()
         assertTrue(ex is IllegalStateException)
@@ -69,20 +72,23 @@ class ProfilerInstallerTest {
         val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
         val errorRef = AtomicReference<Throwable?>(null)
-        val startTime = System.currentTimeMillis()
+        val coordinatorEntered = CountDownLatch(1)
+        val releaseCoordinator = CountDownLatch(1)
 
         // Run on a dedicated thread to avoid contaminating the main JUnit thread
         val thread = Thread {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
+                    context = ProfilerInstallationContext(native, userNotifSupported = true),
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
                     stackTracesMap = null,
                     pathCache = pathCache,
                     connectWithRetry = { _ ->
-                        Thread.sleep(500)
+                        coordinatorEntered.countDown()
+                        releaseCoordinator.awaitOrFail("test releases coordinator connection failure")
                         throw IllegalStateException("Delayed error")
                     },
                     startTraceListener = { _, _, _, _, latch -> latch.countDown() },
@@ -92,23 +98,25 @@ class ProfilerInstallerTest {
             }
         }
         thread.start()
-        thread.join()
-
-        val duration = System.currentTimeMillis() - startTime
+        try {
+            coordinatorEntered.awaitOrFail("coordinator entered connection attempt")
+            awaitCondition(description = "installer waits for coordinator completion") {
+                thread.state == Thread.State.TIMED_WAITING
+            }
+            assertTrue(errorRef.get() == null, "installer cannot complete while the coordinator is blocked")
+        } finally {
+            releaseCoordinator.countDown()
+            awaitCondition(description = "installer returns coordinator failure") { !thread.isAlive }
+        }
         val ex = errorRef.get()
 
-        // This assertion will fail if the race condition is present (duration will be < 500ms)
-        assertTrue(duration >= 500, "Main thread should have waited at least 500ms, but took $duration ms")
         assertTrue(ex is IllegalStateException)
         assertTrue(ex.message?.contains("Delayed error") == true)
     }
 
     @Test
     fun `test coordinator thread handles send descriptor failure`() {
-        val mock = MockNativeEngine()
-        mock.syscallResult = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(100)
-        mock.networking.sendmsgResult = LinuxNative.SyscallResult.Error(9, -1) // EBADF
-        LinuxNative.setEngine(mock)
+        native.networking.sendmsgResult = LinuxNative.SyscallResult.Error(9, -1) // EBADF
 
         val accumulatedLogs = CopyOnWriteArrayList<TraceEvent>()
         val pathCache = ConcurrentHashMap<String, Long>()
@@ -119,6 +127,7 @@ class ProfilerInstallerTest {
             try {
                 val currentThread = Thread.currentThread()
                 ProfilerInstaller.installProfilingFilterForThread(
+                    context = ProfilerInstallationContext(native, userNotifSupported = true),
                     socketPath = "/tmp/nonexistent-path.sock",
                     policy = Policy.PURE_COMPUTE_UNSAFE.definition,
                     accumulatedLogs = accumulatedLogs,
@@ -126,7 +135,8 @@ class ProfilerInstallerTest {
                     pathCache = pathCache,
                     connectWithRetry = { _ ->
                         // Return a dummy FD that will fail sendDescriptor
-                        999
+                        TestFileDescriptors
+                            .replace<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket>(999)
                     },
                     startTraceListener = { _, _, _, _, latch -> latch.countDown() },
                 )
@@ -135,7 +145,7 @@ class ProfilerInstallerTest {
             }
         }
         thread.start()
-        thread.join()
+        awaitCondition(description = "descriptor send failure reached installer") { !thread.isAlive }
 
         val ex = errorRef.get()
         assertTrue(ex is IllegalStateException)

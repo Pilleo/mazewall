@@ -1,0 +1,177 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"github.com/cilium/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
+	"time"
+)
+
+type nativeEventStopBackend struct{ instance *ebpfInstance }
+
+func (b nativeEventStopBackend) Quiesce() error {
+	i := b.instance
+	if len(i.links) > 1 || len(i.rawDetachers) != 0 || len(i.perfFds) != 0 {
+		return fmt.Errorf("event writer ownership changed")
+	}
+	for _, l := range i.links {
+		if l == nil {
+			return fmt.Errorf("unowned event producer link")
+		}
+		if err := l.Close(); err != nil {
+			return fmt.Errorf("retire owned openat link: %w", err)
+		}
+	}
+	i.links = nil
+	return nil
+}
+func (b nativeEventStopBackend) Flush() error {
+	for _, t := range b.instance.tracers {
+		if t.eventDrain == nil || t.ringbufReader == nil {
+			return fmt.Errorf("owned event reader not started")
+		}
+		t.eventDrain.flushing.Store(true)
+		if err := t.ringbufReader.Flush(); err != nil {
+			return fmt.Errorf("flush owned event ring: %w", err)
+		}
+	}
+	return nil
+}
+func (b nativeEventStopBackend) Join(ctx context.Context) error {
+	for _, t := range b.instance.tracers {
+		select {
+		case <-t.eventDrain.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if err := t.eventDrain.result(); err != nil {
+			return err
+		}
+	}
+	b.instance.wg.Wait()
+	if opts := b.instance.eventStopOptions; opts != nil && opts.StrictFull {
+		if opts.AfterReadout == nil {
+			return fmt.Errorf("strict definition finalization hook missing")
+		}
+		if err := opts.AfterReadout(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (b nativeEventStopBackend) Sample() (uint64, error) {
+	for _, t := range b.instance.tracers {
+		if t.lostSampleMap == nil {
+			return 0, fmt.Errorf("owned native reserve counter missing")
+		}
+		cpus, err := ebpf.PossibleCPU()
+		if err != nil {
+			return 0, err
+		}
+		counts := make([]uint64, cpus)
+		zero := uint32(0)
+		if err := t.lostSampleMap.Lookup(&zero, &counts); err != nil {
+			return 0, fmt.Errorf("sample quiescent reserve counters: %w", err)
+		}
+		sum, err := sumEventReserveFailures(counts)
+		if err != nil {
+			return 0, err
+		}
+		t.ds.ReportLostData(sum)
+		return sum, nil
+	}
+	return 0, fmt.Errorf("owned event tracer missing")
+}
+func closeEventCollection(i *ebpfInstance) error {
+	if i.collection == nil {
+		return nil
+	}
+	var errs []error
+	for _, p := range i.collection.Programs {
+		if err := p.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	for _, m := range i.collection.Maps {
+		if err := m.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("retire owned event collection: %w", err)
+	}
+	i.collection = nil
+	return nil
+}
+func (b nativeEventStopBackend) Retire() error {
+	for _, t := range b.instance.tracers {
+		if err := t.ringbufReader.Close(); err != nil {
+			return fmt.Errorf("retire owned event reader: %w", err)
+		}
+	}
+	return closeEventCollection(b.instance)
+}
+func (i *ebpfInstance) prepareEventFinalization(gc operators.GadgetContext, parameters map[string]*params.Param) error {
+	value, enabled := gc.GetVar(operators.EventFinalizationOptionsKey)
+	if !enabled {
+		return nil
+	}
+	opts, ok := value.(*operators.EventFinalizationOptions)
+	if !ok || opts == nil || opts.HardDeadline.IsZero() || time.Until(opts.HardDeadline) <= 0 || time.Until(opts.HardDeadline) > time.Minute {
+		return fmt.Errorf("invalid owned event finalization budget")
+	}
+	u, hasU := parameters["collect_ustack"]
+	o, hasO := parameters["collect_otel_stack"]
+	trace, hasTrace := parameters[ParamTraceKernel]
+	if !hasU || !hasO || !hasTrace || trace.AsBool() {
+		return fmt.Errorf("unsupported event finalization parameters")
+	}
+	if opts.StrictFull {
+		counter, hasCounter := parameters["target_safepoint_counter"]
+		if opts.AfterReadout == nil || !hasCounter || counter.AsUint64() == 0 {
+			return fmt.Errorf("strict full drain identity/handoff missing")
+		}
+	} else if opts.AfterReadout != nil {
+		return fmt.Errorf("event-only drain cannot own definitions")
+	}
+	if err := validateEventFinalizationProfile(i, u.AsBool(), o.AsBool(), opts.StrictFull); err != nil {
+		return err
+	}
+	copy := *opts
+	i.eventStopOptions = &copy
+	i.eventFinalizer = newEventStopOwner(nativeEventStopBackend{instance: i})
+	return nil
+}
+func (i *ebpfInstance) stopOwnedEvents() error {
+	deadline := time.Now().Add(2 * time.Second)
+	if i.eventStopOptions.HardDeadline.Before(deadline) {
+		deadline = i.eventStopOptions.HardDeadline
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	_, err := i.eventFinalizer.stop(ctx)
+	return err
+}
+func (i *ebpfInstance) closeOwnedEvents() error {
+	started := false
+	for _, t := range i.tracers {
+		if t.eventDrain != nil {
+			started = true
+		}
+	}
+	if !started && len(i.links) == 0 {
+		return closeEventCollection(i)
+	}
+	return i.stopOwnedEvents()
+}
+func (i *ebpfInstance) EventFinalization() (operators.EventFinalizationObservation, bool) {
+	if i.eventFinalizer == nil {
+		return operators.EventFinalizationObservation{}, false
+	}
+	return i.eventFinalizer.snapshot(), true
+}

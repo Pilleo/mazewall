@@ -1,0 +1,18 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symbolizer
+
+import "go.opentelemetry.io/ebpf-profiler/tracer"
+
+type TraceReaderHealthProvider interface {
+	TraceReaderHealth() (tracer.TraceReaderObservation, bool)
+}
+
+func (s *Symbolizer) TraceReaderHealth() (tracer.TraceReaderObservation, bool) {
+	for _, resolver := range s.resolvers {
+		if provider, ok := resolver.(TraceReaderHealthProvider); ok {
+			return provider.TraceReaderHealth()
+		}
+	}
+	return tracer.TraceReaderObservation{}, false
+}

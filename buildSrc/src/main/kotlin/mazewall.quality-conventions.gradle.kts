@@ -49,15 +49,17 @@ tasks.matching { it.name.startsWith("spotbugsTest") || it.name.startsWith("spotb
 
 if (project != rootProject) {
     val unitTest = tasks.named<Test>("test")
-    tasks.register("unitCheck") {
+    val unitCheck = if ("unitCheck" in tasks.names) tasks.named("unitCheck") else tasks.register("unitCheck")
+    unitCheck.configure {
         group = "verification"
         description = "Runs host-safe unit tests and enforces unit-only coverage."
         dependsOn(unitTest, "jacocoTestCoverageVerification")
     }
-    tasks.register("kernelCheck") {
+    val kernelCheck = if ("kernelCheck" in tasks.names) tasks.named("kernelCheck") else tasks.register("kernelCheck")
+    kernelCheck.configure {
         group = "verification"
         description = "Runs privileged kernel and fresh-JVM integration tests."
-        dependsOn(tasks.matching { it.name == "integrationTest" || it.name == "integrationTestFreshJvm" })
+        dependsOn(provider { tasks.names.filter { it == "integrationTest" || it == "integrationTestFreshJvm" }.map { tasks.named(it) } })
         dependsOn("jacocoKernelTestReport", "jacocoKernelCoverageVerification")
     }
     tasks.named("check") {

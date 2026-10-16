@@ -1,7 +1,7 @@
 package io.mazewall.enforcer.state
 
-import io.mazewall.core.Syscall
-import io.mazewall.core.threadLocal
+import io.mazewall.platform.lifecycle.threadLocal
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 import java.util.concurrent.atomic.AtomicReference
 
@@ -61,6 +61,16 @@ internal object ContainmentStateRegistry {
             h.cachedProcessState = null
         }
 
+    /** Captures the installing thread's holder before a coordinator is started. */
+    fun captureThreadPublication(next: ContainerState): () -> Unit {
+        val holder = threadHolder
+        return {
+            holder.state = next.withRetainedInstallationEvidence(holder.state.installationEvidence)
+            holder.cachedMergedState = null
+            holder.cachedProcessState = null
+        }
+    }
+
     // -------------------------------------------------------------------------
     // State Resolution
     // -------------------------------------------------------------------------
@@ -117,6 +127,7 @@ internal object ContainmentStateRegistry {
             allowsUnsafePrctl = ts.allowsUnsafePrctl && ps.allowsUnsafePrctl,
             landlockPolicy = ts.landlockPolicy ?: ps.landlockPolicy,
             engineState = mergedEngineState,
+            installationEvidence = InstallationEvidence(ts.installationFailure ?: ps.installationFailure, ts.installationEvidence.cet),
         )
     }
 

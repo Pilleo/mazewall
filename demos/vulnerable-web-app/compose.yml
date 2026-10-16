@@ -1,33 +1,79 @@
 services:
     unprotected:
-        image: vulnerable-web-app-unprotected:latest
+        image: ${MAZEWALL_IMAGE:?}
         build:
             context: .
             dockerfile: Containerfile
-            cache_from:
-                - vulnerable-web-app-unprotected:latest
+            args:
+                APP_JAR: ${APP_JAR:-build/libs/vulnerable-app.jar}
+                APP_JAR_SHA256: ${APP_JAR_SHA256:?}
         ports:
-            - "8082:8080"
+            - "127.0.0.1:${MAZEWALL_PORT_UNPROTECTED:-8082}:8080"
         environment:
             - MAZEWALL_ENABLED=false
+            - SERVER_ADDRESS=0.0.0.0
+            - SPRING_PROFILES_ACTIVE=${MAZEWALL_SPRING_PROFILES:-}
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/admin/log"]
+            interval: 10s
+            timeout: 3s
+            retries: 5
         annotations:
-            io.podman.annotations.seccomp: ${PWD}/../../infra/dev/podman-seccomp.json
+            io.podman.annotations.seccomp: ${MAZEWALL_SECCOMP_PROFILE:?}
 
     protected:
-        image: vulnerable-web-app-protected:latest
+        image: ${MAZEWALL_IMAGE:?}
         build:
             context: .
             dockerfile: Containerfile
-            cache_from:
-                - vulnerable-web-app-protected:latest
+            args:
+                APP_JAR: ${APP_JAR:-build/libs/vulnerable-app.jar}
+                APP_JAR_SHA256: ${APP_JAR_SHA256:?}
         ports:
-            - "8081:8081"
+            - "127.0.0.1:${MAZEWALL_PORT_PROTECTED:-8081}:8081"
         environment:
             - MAZEWALL_ENABLED=true
-            - MAZEWALL_PROFILE=true
+            - SERVER_ADDRESS=0.0.0.0
             - SERVER_PORT=8081
-            - JAVA_TOOL_OPTIONS=-Dmazewall.sbob.path=/app/output/sbob.json
+            - SPRING_PROFILES_ACTIVE=${MAZEWALL_SPRING_PROFILES:-}
+            - JAVA_TOOL_OPTIONS=-Dmazewall.sbob.path=/app/profiles/sbob.json
         volumes:
-            - ../output:/app/output:rw
+            - profile-artifacts:/app/profiles:ro
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8081/admin/log"]
+            interval: 10s
+            timeout: 3s
+            retries: 5
         annotations:
-            io.podman.annotations.seccomp: ${PWD}/../../infra/dev/podman-seccomp.json
+            io.podman.annotations.seccomp: ${MAZEWALL_SECCOMP_PROFILE:?}
+
+    profile:
+        image: ${MAZEWALL_IMAGE:?}
+        build:
+            context: .
+            dockerfile: Containerfile
+            args:
+                APP_JAR: ${APP_JAR:-build/libs/vulnerable-app.jar}
+                APP_JAR_SHA256: ${APP_JAR_SHA256:?}
+        ports:
+            - "127.0.0.1:${MAZEWALL_PORT_PROFILE:-8083}:8083"
+        environment:
+            - MAZEWALL_ENABLED=false
+            - MAZEWALL_PROFILE=true
+            - SERVER_ADDRESS=0.0.0.0
+            - SERVER_PORT=8083
+            - SPRING_PROFILES_ACTIVE=${MAZEWALL_SPRING_PROFILES:-}
+            - JAVA_TOOL_OPTIONS=-Dmazewall.sbob.path=/app/profiles/sbob.json
+        healthcheck:
+            test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8083/admin/log"]
+            interval: 10s
+            timeout: 3s
+            retries: 5
+        volumes:
+            - profile-artifacts:/app/profiles:rw
+        annotations:
+            io.podman.annotations.seccomp: ${MAZEWALL_SECCOMP_PROFILE:?}
+
+volumes:
+    profile-artifacts:
+        name: ${COMPOSE_PROJECT_NAME:?}_profile-artifacts

@@ -1,32 +1,25 @@
 package io.mazewall.profiler.triage
 
 import java.io.File
-import java.io.InputStream
-import java.nio.file.Files
-import java.nio.file.Paths
-import java.util.concurrent.Callable
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.TimeoutException
+import java.time.Duration
 
 /**
  * DiagnosticTriageRunner collects local, domain-specific telemetry for mazewall failures.
  * It focuses on extracting JVM thread coordination state and Linux kernel security logs
  * without using external SaaS tools, heavy frameworks, or custom serialization.
  */
-object DiagnosticTriageRunner {
+internal object DiagnosticTriageRunner {
     @JvmStatic
     fun main(args: Array<String>) {
         val options = parseOptions(args)
         println("==> Initiating mazewall local diagnostic triage...")
         val targetFile = options.output
-        targetFile.parentFile.mkdirs()
 
         // 1. Capture local kernel audit logs for blocked syscalls (SECCOMP/Landlock)
         val dmesgLogs = captureDmesg()
 
-        // 2. Capture local JVM thread states to locate deadlocks or virtual thread pinning
-        val jvmThreadDump = captureThreadDump()
+        // 2. Snapshot this collector JVM only, not a failed workload or a Gradle daemon.
+        val jvmThreadDump = SelfThreadSnapshot().capture()
 
         // 3. Attempt to parse syscall definitions from the local system headers
         val syscallMapping = parseLocalSyscalls()
@@ -37,32 +30,29 @@ object DiagnosticTriageRunner {
         // 5. Capture kernel security configurations
         val kernelConfig = captureKernelConfig()
 
-        // Write a simple JSON structure containing the raw diagnostic dumps
-        val jsonContent = """
-            {
-              "timestamp": ${System.currentTimeMillis()},
-              "failed_task": ${escapeJson(options.failedTask)},
-              "diagnostics": {
-                "dmesg_seccomp_logs": ${escapeJson(dmesgLogs)},
-                "jvm_thread_dump": ${escapeJson(jvmThreadDump)},
-                "system_syscall_definitions": ${escapeJson(syscallMapping)},
-                "hs_err_logs": ${escapeJson(hsErrLogs)},
-                "kernel_security_config": ${escapeJson(kernelConfig)}
-              }
-            }
-        """.trimIndent()
+        writeReport(
+            targetFile,
+            System.currentTimeMillis(),
+            mapOf(
+                "dmesg_seccomp_logs" to dmesgLogs,
+                "jvm_thread_dump" to jvmThreadDump,
+                "system_syscall_definitions" to syscallMapping,
+                "hs_err_logs" to hsErrLogs,
+                "kernel_security_config" to kernelConfig,
+            ),
+            options.failedTask,
+        )
 
-        targetFile.writeText(jsonContent)
         println("==> Local diagnostic triage complete. Report written to: ${targetFile.path}")
     }
 
     private data class Options(
-        val failedTask: String,
+        val failedTask: String?,
         val output: File,
     )
 
     private fun parseOptions(args: Array<String>): Options {
-        var failedTask = "unknown"
+        var failedTask: String? = null
         var output = File("build/triage_report.json")
         var index = 0
         while (index < args.size) {
@@ -77,37 +67,36 @@ object DiagnosticTriageRunner {
         return Options(failedTask, output)
     }
 
-    /** Upper bound for any single external process capture; diagnostics must never hang the caller. */
+    internal fun writeReport(
+        targetFile: File,
+        timestamp: Long,
+        diagnostics: Map<String, String>,
+        failedTask: String? = null,
+    ) {
+        targetFile.parentFile?.mkdirs()
+        targetFile.writeText(diagnosticReportJson(timestamp, diagnostics, failedTask))
+    }
+
+    /** Timeout for reading an owned external helper's stdout, not for self-snapshot acquisition. */
     private const val CAPTURE_TIMEOUT_SECONDS = 10L
 
     /**
-     * Reads [process]'s stdout with a hard time bound. External targets (dmesg, jcmd against a busy
-     * Gradle daemon) can block indefinitely; a timed-out capture degrades to a diagnostic string
-     * instead of hanging report generation.
+     * Reads an owned dmesg helper's stdout with a timeout. This does not bound the acquisition,
+     * allocation, or safepoint progress of the direct current-JVM thread snapshot.
      */
-    private fun readProcessOutputBounded(process: Process): String {
-        val executor = Executors.newSingleThreadExecutor { r -> Thread(r, "triage-capture").apply { isDaemon = true } }
-        return try {
-            val future = executor.submit(Callable { process.inputStream.bufferedReader().readText() })
-            try {
-                future.get(CAPTURE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            } catch (_: TimeoutException) {
-                future.cancel(true)
-                process.destroyForcibly()
-                "Capture timed out after ${CAPTURE_TIMEOUT_SECONDS}s."
-            }
-        } finally {
-            executor.shutdownNow()
-        }
-    }
+    private fun readProcessOutputBounded(capture: ManagedProcessCapture): String =
+        runCatching { capture.readStdout(Duration.ofSeconds(CAPTURE_TIMEOUT_SECONDS)) }
+            .getOrElse { "Capture timed out after ${CAPTURE_TIMEOUT_SECONDS}s." }
 
     private fun captureDmesg(): String {
         return captureOptional(
             onFailure = { "Unable to capture dmesg: ${it.message}" },
         ) {
-            val process = ProcessBuilder("dmesg").start()
-            readProcessOutputBounded(process)
-                .lineSequence()
+            ManagedProcessCapture
+                .start(ProcessBuilder("dmesg"))
+                .use { capture ->
+                readProcessOutputBounded(capture)
+            }.lineSequence()
                 .filter { line ->
                     line.contains("seccomp", ignoreCase = true) ||
                         line.contains("landlock", ignoreCase = true) ||
@@ -115,36 +104,6 @@ object DiagnosticTriageRunner {
                 }.take(100)
                 .joinToString("\n")
         }
-    }
-
-    private fun captureThreadDump(): String {
-        val selfPid = ProcessHandle.current().pid()
-        val pids = ProcessHandle
-            .allProcesses()
-            .toList()
-            .filter { ph ->
-                val command = ph.info().command().orElse("")
-                ph.pid() != selfPid && (command.contains("java") || command.contains("gradle"))
-            }.map { it.pid() }
-
-        if (pids.isEmpty()) {
-            return "No other active Java/Gradle processes found."
-        }
-
-        val sb = StringBuilder()
-        for (pid in pids) {
-            sb.append("=== JVM Thread Dump for PID $pid ===\n")
-            sb.append(
-                captureOptional(
-                    onFailure = { "Failed to capture thread dump for PID $pid: ${it.message}\n" },
-                ) {
-                val process = ProcessBuilder("jcmd", pid.toString(), "Thread.print").start()
-                    readProcessOutputBounded(process)
-                },
-            )
-            sb.append("\n")
-        }
-        return sb.toString()
     }
 
     private fun collectHsErrLogs(): String {
@@ -222,28 +181,105 @@ object DiagnosticTriageRunner {
         }
         return "Local unistd_64.h not found. Syscall mapping unavailable."
     }
+}
 
-    /**
-     * Host diagnostic collection is deliberately non-authoritative: a failed optional probe is
-     * rendered into the report while containment and policy decisions remain unaffected.
-     */
-    private inline fun captureOptional(
-        onFailure: (Exception) -> String,
-        action: () -> String,
-    ): String =
-        try {
-            action()
-        } catch (expectedOptionalFailure: Exception) {
-            onFailure(expectedOptionalFailure)
+/**
+ * Host diagnostic collection is deliberately non-authoritative: a failed optional probe is
+ * rendered into the report while containment and policy decisions remain unaffected.
+ * Shared by the self snapshot and existing probes; fatal JVM errors are never caught.
+ */
+private inline fun captureOptional(
+    onFailure: (Exception) -> String,
+    action: () -> String,
+): String =
+    try {
+        action()
+    } catch (expectedOptionalFailure: Exception) {
+        onFailure(expectedOptionalFailure)
+    }
+
+private const val MIN_SNAPSHOT_CHARACTERS = 256
+
+/** These limits bound rendered output only; acquiring all platform-thread stacks remains best-effort. */
+internal data class ThreadSnapshotLimits(
+    val threads: Int = 128,
+    val framesPerThread: Int = 64,
+    val characters: Int = 65_536,
+) {
+    init {
+        require(threads > 0)
+        require(framesPerThread > 0)
+        require(characters >= MIN_SNAPSHOT_CHARACTERS)
+    }
+}
+
+/**
+ * Direct current-JVM snapshot, excluding virtual threads and Thread.print monitor detail.
+ * Acquisition may allocate all stacks and wait for safepoints; output caps are not a deadline.
+ * Dependencies are captured per instance, never mutable singleton test hooks or external PIDs.
+ */
+internal class SelfThreadSnapshot(
+    private val acquire: () -> Map<Thread, Array<StackTraceElement>> = Thread::getAllStackTraces,
+    private val limits: ThreadSnapshotLimits = ThreadSnapshotLimits(),
+) {
+    fun capture(): String {
+        val output = SnapshotText(limits.characters)
+        output.append("=== Self snapshot: collector PID ${ProcessHandle.current().pid()}; current JVM only; platform threads; best-effort ===\n")
+        return captureOptional(
+            onFailure = {
+                output.append("Unable to capture self snapshot: ${it.javaClass.simpleName}: ${it.message}\n")
+                output.text()
+            },
+        ) {
+            render(acquire(), output)
+            output.text()
         }
+    }
 
-    private fun escapeJson(value: String): String {
-        return "\"" +
-            value
-                .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r") +
-            "\""
+    private fun render(
+        stacks: Map<Thread, Array<StackTraceElement>>,
+        output: SnapshotText,
+    ) {
+        val ordered = stacks.entries.sortedBy { it.key.threadId() }
+        if (ordered.isEmpty()) output.append("No platform-thread stacks available.\n")
+        for ((thread, frames) in ordered.take(limits.threads)) {
+            if (output.full) break
+            output.append("\"${thread.name}\" id=${thread.threadId()} state=${thread.state}\n")
+            for (frame in frames.take(limits.framesPerThread)) {
+                if (output.full) break
+                output.append("    at $frame\n")
+            }
+            if (frames.size > limits.framesPerThread) output.append("[truncated: frame limit]\n")
+        }
+        if (ordered.size > limits.threads) output.append("[truncated: thread limit]\n")
+    }
+}
+
+/** Reserve marker space so even truncation of the first long line is visible within the character cap. */
+private class SnapshotText(
+    private val limit: Int,
+) {
+    private val content = StringBuilder()
+    var full: Boolean = false
+        private set
+
+    fun append(text: String) {
+        if (full) return
+        val remaining = limit - content.length
+        if (text.length <= remaining) {
+            content.append(text)
+        } else {
+            val prefixLimit = limit - CHARACTER_MARKER.length
+            if (content.length > prefixLimit) content.setLength(prefixLimit)
+            content.append(text, 0, (prefixLimit - content.length).coerceAtLeast(0))
+            content.append(CHARACTER_MARKER)
+            full = true
+        }
+    }
+
+    fun text(): String = content.toString()
+
+    private companion object {
+        const val CHARACTER_MARKER = "[truncated: character limit]\n"
     }
 }

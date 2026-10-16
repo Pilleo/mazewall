@@ -1,11 +1,18 @@
 package io.mazewall.enforcer
 
-import io.mazewall.LinuxNative.SyscallResult
-import io.mazewall.Platform
-import io.mazewall.PlatformProvider
-import io.mazewall.SeccompMode
-import io.mazewall.YamaPtraceScope
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PlatformProvider
+import io.mazewall.enforcer.api.SeccompMode
+import io.mazewall.enforcer.api.YamaPtraceScope
 import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative.SyscallResult
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
@@ -29,7 +36,7 @@ class PlatformValidationTest {
 
             override fun getSeccompMode(): SeccompMode = SeccompMode.Disabled
 
-            override fun checkSeccompSanity(): SyscallResult<Long, io.mazewall.LinuxNative.SyscallHandledState.Unhandled> = SyscallResult.Error(38, -1)
+            override fun checkSeccompSanity(): SyscallResult<Long, io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled> = SyscallResult.Error(38, -1)
 
             override fun isNoNewPrivsEnabled(): Boolean = false
 

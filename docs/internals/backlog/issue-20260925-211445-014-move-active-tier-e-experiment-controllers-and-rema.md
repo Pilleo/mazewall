@@ -1,0 +1,418 @@
+---
+title: "Move active Tier E experiment controllers and remaining analysis to typed Kotlin tooling"
+severity: "MEDIUM"
+status: "open"
+priority: high
+dependencies: []
+component: "core"
+target_modules: ["profiler", "scripts", "buildSrc"]
+target_files:
+  - "docs/internals/designs/profiler/tier-e-legacy-script-retirement-20260929.md"
+  - "scripts/analyze_tier_e_perf_windows.py"
+  - "scripts/probe_tier_e_real_pid_reuse.py"
+  - "scripts/summarize_tier_e_hybrid_decision.mjs"
+  - "scripts/summarize_tier_e_long_matched_controls.mjs"
+  - "scripts/summarize_tier_e_split_fork.mjs"
+  - "scripts/summarize_tier_e_split_matched.mjs"
+  - "scripts/test_analyze_tier_e_perf_windows.py"
+  - "scripts/test_verify_tier_e_split_operations.mjs"
+  - "scripts/tests/test_probe_tier_e_real_pid_reuse.py"
+  - "scripts/tests/test_tier_e_split_source_fingerprint.py"
+  - "scripts/tests/test_verify_tier_e_long_matched_controls.py"
+  - "scripts/tests/tier_e_coverage_runner.test.mjs"
+  - "scripts/tests/tier_e_coverage_stack_identity.test.mjs"
+  - "scripts/tests/tier_e_coverage_summary.test.mjs"
+  - "scripts/tests/tier_e_hybrid_decision.test.mjs"
+  - "scripts/tests/tier_e_split_fork_parser.test.mjs"
+  - "scripts/tests/tier_e_split_matched_completeness.test.mjs"
+  - "scripts/tier_e_collector_cpu_sample.mjs"
+  - "scripts/tier_e_long_matched_row.mjs"
+  - "scripts/tier_e_split_fork_completeness.mjs"
+  - "scripts/tier_e_split_source_fingerprint.py"
+  - "scripts/tier_e_target_cpu_sample.mjs"
+  - "scripts/verify_tier_e_long_matched_controls.py"
+  - "scripts/verify_tier_e_split_coverage.mjs"
+  - "scripts/verify_tier_e_split_operations.mjs"
+  - "buildSrc/build.gradle"
+  - "buildSrc/src/main/java/io/mazewall/build/TierEPhaseReplayTask.java"
+  - "buildSrc/src/main/java/io/mazewall/build/TierENativeBuildTask.java"
+  - "buildSrc/src/test/java/io/mazewall/build/VerificationActionsTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/TierEPhaseReplayTaskFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/TierENativeBuildTaskFunctionalTest.java"
+  - "scripts/run_tier_e_split_privilege_fixture.sh"
+  - "scripts/run_tier_e_split_privilege_fixture_legacy.sh"
+  - "scripts/run_tier_e_split_coverage_matrix.sh"
+  - "scripts/run_tier_e_split_negative_matrix.sh"
+  - "scripts/run_tier_e_split_matched_benchmark.sh"
+  - "scripts/run_tier_e_hybrid_fault_matrix.sh"
+  - "scripts/run_tier_e_hybrid_live_comparison.sh"
+  - "scripts/run_tier_e_trustworthy_benchmark.sh"
+  - "scripts/run_tier_e_sustained_capacity.sh"
+  - "scripts/run_tier_e_coverage_benchmark.sh"
+  - "scripts/run_tier_e_node_noise_probe.sh"
+  - "scripts/run_tier_e_checks.sh"
+  - "scripts/run_tier_e_release_benchmark.sh"
+  - "scripts/run_tier_e_matched_flavour_benchmark.sh"
+  - "scripts/compare_tier_e_stack_transports.sh"
+  - "scripts/check_tier_e_benchmark.sh"
+  - "scripts/run_tier_e_mapped_drain_microbenchmark.sh"
+  - "scripts/run_tier_e_decoder_microbenchmark.sh"
+  - "scripts/build_tier_e_benchmark_bundle.sh"
+  - "scripts/tier_e_coverage_summary.mjs"
+  - "scripts/tier_e_coverage_stack_identity.mjs"
+  - "scripts/summarize_tier_e_coverage.mjs"
+  - "scripts/run_tier_e_rootful_gate.sh"
+  - "scripts/tier_e_tools"
+  - "profiler/build.gradle.kts"
+  - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/TierERootfulContainerEndpointIntegrationTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/EnabledIfTierERootfulAvailable.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierERunConfigurationTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/controller/TierEFixtureController.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEFixtureControllerTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/controller/TierEFixtureLifecycle.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/controller/TierEContainerRun.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/controller/TierENativeFixtureBuild.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/controller/TierESplitFixtureController.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierESplitFixtureControllerTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/testing/tierE/TierEFixtureLifecycleTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEFixtureVerdictTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEFixtureEnvelopeTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERealPidReuseProbeTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierESplitOperationVerifierTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierESplitForkRowTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEHybridFaultRowsTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEHybridLiveRowsTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierESplitMatchedSummaryTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERunConfiguration.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEExecutionProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageSummary.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageStackIdentity.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageReport.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleManifest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleFingerprint.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleBuilder.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEExperimentProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileJson.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileEndpoint.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEAllowedCpuVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEExperimentCapacityProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeArtifactPackage.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileExperimentRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettings.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestCommand.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyGuestMain.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyContainerOwner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettlement.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEAllocationProbe.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettlementTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEAllocationProbeTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustedArtifactExport.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyResultVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySourceState.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEPerfAnalysisPlan.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEPerfGuestMain.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyPerfEvidence.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthyAllocationEvidence.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulSourceTransfer.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateProfile.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseProbe.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseEvidence.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEPhaseReplayTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseReuse.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateResultVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkPhaseGate.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierESustainedCapacitySettings.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierESustainedCapacityStage.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierESustainedCapacityRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageExperiment.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseSample.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseTarget.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENodeNoiseProbe.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeScenarioSummary.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENativeScenarioRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERingMicrobenchmarkRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEChecksRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEActiveEntrypointPolicy.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleManifestTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleFingerprintTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleBuilderTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkBundleBootstrapTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateProfileTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulGateRunnerTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierERootfulPhaseReuseTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENativeArtifactPackageTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierENativeCompatibilityTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileLauncherTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEProfileEndpointTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEAllowedCpuVerifierTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierETrustworthySettingsTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageSummaryTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageStackIdentityTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageReportTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierECoverageMatrixRunner.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEFaultMatrix.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierELiveMatrix.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEMatchedMatrix.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEDirectContainerArm.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEArmAttempt.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkOperationAcceptance.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEMatrixTerminal.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEMatrixProvenance.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEMatchedMatrixTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEDirectContainerArmTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEArmAttemptTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEBenchmarkOperationAcceptanceTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEMatrixTerminalTest.kt"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/tools/TierEMatrixProvenanceTest.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierENegativeMatrix.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEFixtureVerdict.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEFixtureEnvelope.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierERealPidReuseProbe.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierESplitOperationVerifier.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierESplitForkRow.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEHybridFaultRows.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEHybridLiveRows.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierESplitMatchedSummary.kt"
+  - "profiler/src/tooling/kotlin/io/mazewall/profiler/tierE/tools/TierEToolsMain.kt"
+  - "src/sharedTest/kotlin/io/mazewall/testing/containers/ContainerEndpointDiscovery.kt"
+  - "src/sharedTest/kotlin/io/mazewall/testing/containers/EnabledIfRootfulContainerAvailable.kt"
+  - "src/test/kotlin/io/mazewall/testing/containers/ContainerEndpointDiscoveryTest.kt"
+  - "config/testing/tier-e/smoke.json"
+  - "config/testing/tier-e/coverage.json"
+  - "config/testing/tier-e/fault-recovery.json"
+  - "config/testing/tier-e/long-matched.json"
+  - "config/testing/tier-e/real-pid-reuse.json"
+  - "config/testing/tier-e/capacity.json"
+  - "config/testing/tier-e/node-noise.json"
+  - "config/testing/tier-e/trustworthy.json"
+  - "config/testing/tier-e/rootful-gate.json"
+  - "docs/internals/designs/profiler/tier-e-testing-migration.md"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/README.md"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-pinned-native-comparison-20260927/raw-ctest.tar.gz"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/README.md"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-pinned-rootful-gate-20260927/raw-gate.tar.gz"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/README.md"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-typed-capacity-20260927/raw-capacity.tar.gz"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/README.md"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-clean-node-noise-20260927/raw-diagnostics.tar.gz"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/README.md"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-separated-phase-gate-20260927/raw-receipts.tar.gz"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/README.md"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-gradle-portable-cache-20260927/raw-receipts.tar.gz"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/README.md"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/manifest.json"
+  - "docs/internals/evidence/tier-e-final-phase-stability-20260927/raw-phase.tar.gz"
+  - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-perf-allocation-20260926/manifest.json"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/manifest.json"
+  - "docs/internals/evidence/tier-e-kotlin-real-pid-reuse-20260926/raw-fixture.tar.gz"
+  - "docs/internals/designs/profiler/tier-e-design.md"
+  - "docs/internals/designs/profiler/tier-e-split-privilege-deployment.md"
+  - "docs/internals/evidence/tier-e-kotlin-config-transition-20260925/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-config-transition-20260925/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-config-transition-20260925/rootful-docker-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-config-transition-20260925/absent-podman-junit.xml"
+  - "docs/internals/evidence/tier-e-kotlin-config-transition-20260925/short-row-parity.json"
+  - "docs/internals/evidence/tier-e-kotlin-matrix-20260925/README.md"
+  - "docs/internals/evidence/tier-e-kotlin-matrix-20260925/SHA256SUMS"
+  - "docs/internals/evidence/tier-e-kotlin-matrix-20260925/parity.json"
+  - "docs/internals/evidence/tier-e-kotlin-matrix-20260925/rootful-docker-junit.xml"
+target_symbols:
+  - "TierERunConfiguration"
+open_questions: false
+---
+
+# 🟡 [Severity: MEDIUM]: Move active Tier E experiment controllers and remaining analysis to typed Kotlin tooling
+
+**Context:**
+Active Tier E Bash controllers and Node matrix summaries still interpret configuration, orchestrate privileged fixtures, and make evidence decisions; profile-based Kotlin configuration and helper migration is only a first slice.
+
+**Needed:**
+ 1. Complete Kotlin ownership of the split fixture's container/process lifecycle, registration, metadata, fault scenarios, and evidence export. The current JSON profiles and Kotlin verdict/probe/row tools are a first slice, not completion.
+ 2. Replace the active long/short/live/fault Bash experiment controllers, Node matrix summaries, and remaining active analysis paths with Kotlin. Keep paced long measurements explicit, outside the default build.
+ 3. Preserve all historical evidence and checksum ledgers. Retired Python/Node commands remain reproducible from pinned Git revision `07dcdb22` in an isolated historical checkout; they need not remain executable in current `scripts/`. Revalidate output and rejection parity against retained artifacts before switching an active caller.
+ 4. Qualify rootful Podman on a real endpoint. Until then mark runtime parity unverified; never claim policy eligibility or reverse REJECT_DEFAULT_PROMOTION.
+
+**2026-09-26 progress:** The active launchers, split fixture, matrices, bundle,
+capacity, coverage, rootful gate, and trustworthy perf/allocation controllers
+now delegate substantive decisions and lifecycle to Kotlin. Replayed historical
+rows, short rootful Docker tests, native phase v2, owned perf/allocation, and
+real disposable-guest host-PID reuse have retained evidence linked from the
+[migration design](../designs/profiler/tier-e-testing-migration.md). The
+Kotlin node-noise controller passed an opt-in-audited one-pair rootful diagnostic
+with exact accounting and an observed attachment identity; the unaudited
+multi-pair qualification remains `INCOMPLETE` because target controls also
+intermittently miss declared operations. See [the sealed diagnostic](../evidence/tier-e-kotlin-node-noise-diagnostic-20260926/README.md)
+and [the still-open pre-admission issue](issue-20260920-232238-326-diagnose-intermittent-tier-e-pre-admission-observa.md).
+Podman runtime parity is operator-deferred and **unverified**. Do not close this
+issue on the Docker-only migration receipts or treat the one-pair diagnostic
+as a decision-quality capacity/noise comparison.
+
+**Final rootful gate blocker:** The final diagnostics source revision
+`d82ca4b9` passed `./gradlew build` and its rootful Docker native/profiler
+checks, but two bounded complete rootful gate attempts rejected the unchanged
+historical `GetStackTrace` phase limit (4,676,424 ns, then 2,743,788 ns).
+Both retained stopped exact-name runners and volumes under
+`/tmp/tier-e-kotlin-final-rootful-gate-resumed-1790463269` and
+`/tmp/tier-e-kotlin-final-rootful-gate-retry-1790463583` with
+`INCOMPLETE`, policy-ineligible terminals and recovery receipts. The earlier
+sealed passing v2 sample is historical; a final passing clean gate is not
+claimed. Neither threshold nor baseline was changed to clear this blocker.
+
+**2026-09-27 execution improvements:** The rootful gate no longer passes
+`--rerun-tasks`; pure compilation/tooling output remains Gradle-cacheable,
+while live kernel integration tasks are explicitly non-cacheable. A phase-only
+Docker controller separates native build reuse from fresh CTest acquisition,
+records source/image/toolchain/binary identities, always samples both modes,
+and retains exact owned resources when a historical bound fails. A separate
+replay task verifies saved samples and was observed `UP-TO-DATE` on its second
+unchanged invocation. The second keyed native-only run reused the first run's
+exact binary SHA-256 while recording new run IDs and different medians; the
+source-dirty results are diagnostic only. Strict experiment JSON profiles
+replace active trustworthy and node-noise setting env-vars at the new Gradle
+entrypoints; historical env launchers remain. A predetermined, source-pinned,
+interleaved previous/current comparison and a passing final aggregate rootful
+gate are still required before unblocking the handoff.
+
+**2026-09-27 clean pinned follow-up:** The prior/current source-pinned,
+interleaved native comparison is retained at
+[pinned phase evidence](../evidence/tier-e-pinned-native-comparison-20260927/README.md).
+Every individual CTest passed and the two revisions used identical native
+agent/workload class bytes. Unrestricted placement also failed for the old
+revision; explicit CPUs `0,1` completed all six planned prior/current runs
+under the unchanged 125% historical bounds. The later clean committed
+`de268c9e` [full rootful receipt](../evidence/tier-e-pinned-rootful-gate-20260927/README.md)
+passed 39 native CTests, the profiler/rootful/fresh-JVM suites and both phase
+modes with `policy_eligibility=false`. That receipt predates the separate
+`b8901ed7` capacity-profile and bundle-cache isolation slice. New version-two
+JSON experiment profiles explicitly select Docker image and measured CPUs;
+the [bounded typed capacity smoke](../evidence/tier-e-typed-capacity-20260927/README.md)
+completed twice after separating the bundle bootstrap and nested Gradle
+project caches from the operator's locked checkout. The 1,000/s one-second
+pilot is not a decision ceiling. The clean `b8901ed7` default five-pair
+[node-noise attempt](../evidence/tier-e-clean-node-noise-20260927/README.md)
+stopped on pair 1 when unique mode missed five of 10,000 declared IDs; the
+same-source unaudited no-noise control and one-pair audit-enabled diagnostic
+completed, but neither upgrades the default `INCOMPLETE` result. The
+post-slice aggregate gate needs its own result. Podman remains
+operator-deferred and this issue stays open.
+
+**2026-09-27 final rootful split:** The first clean post-capacity gate timed
+out one five-second four-thread fresh-JVM test under whole-container CPU
+pinning; its identical retry passed the live JVM suite but failed both
+`GetStackTrace` bounds. A child-only phase-first attempt also rejected the
+unchanged historical phase bound. Each failure retained an exact stopped
+runner, volume, `INCOMPLETE` terminal and raw evidence. The new
+[source-bound separated phase receipt](../evidence/tier-e-separated-phase-gate-20260927/README.md)
+for clean committed `ae38c8ab` passed three fresh CTests per native mode.
+The full rootful gate admitted it only after matching revision/source digest,
+image, exact native agent and Java workload SHA-256s, compiler/JDK, CPUs and
+replaying all six raw samples. The separate full gate then passed 39 native
+CTests and all required live profiler/fresh-JVM suites with `COMPLETE`,
+`policy_eligibility=false`. This is not a Podman or unaudited multi-pair
+node-noise qualification, and `REJECT_DEFAULT_PROMOTION` remains in force.
+
+### 2026-09-27 remaining qualification matrix
+
+| Claim | Scope owner | Required receipt / stop rule |
+| --- | --- | --- |
+| Portable replay cache | This migration issue (`buildSrc`, `profiler`) | Same six file roles/baseline/verifier contract: local `UP-TO-DATE`, independent checkout `FROM-CACHE`, changed semantic input invalidates; a failure cannot leave stale PASS. |
+| Native Gradle build cache | This migration issue (`buildSrc`, `profiler-native` consumers) | Verified immutable native binary/workload artifact from a separate clean workspace, toolchain/image/option/source invalidation, fresh CTests; no CTest or phase output restored as new evidence. |
+| Default source-pinned five-pair node noise | Open pre-admission issue `issue-20260920-232238-326` | Original 10,000-operation full **and** unique denominators, audited overlap per claimed mode, zero unexplained missing IDs and five complete unaudited pairs; stop at first incomplete target. |
+| Native phase and rootful JVM gate | This migration issue | Predeclared complete timing series under unchanged baseline plus independently source/image/agent/class/toolchain/CPU-bound phase receipts and fresh 39 CTests/JVM suites. |
+| Podman parity and merge | Operator/orchestrator | Separate real endpoint evidence and approved orchestrator handoff; absent endpoint and local-only bundle leave status blocked. |
+
+The clean `ae38c8ab` split gate remains a historical PASS, not a new result
+for future code edits. Failed unpinned/whole-runner-pinned gates and the clean
+`b8901ed7` missing-operation run retain their evidence and original policy
+ineligibility.
+
+**Portable compilation and warm-cost receipt:** The
+[Gradle-native cache diagnostic](../evidence/tier-e-gradle-portable-cache-20260927/README.md)
+demonstrates a real `FROM-CACHE` 23-file native package across two clean
+checkouts, followed by fresh 39/39 native CTests using the restored binaries.
+Rootful/phase controllers and profile-selected trustworthy/capacity/noise
+paths validate and consume immutable package bytes while kernel and JVM tests
+still run fresh. Two source-matched, policy-ineligible seven-fork smokes took
+426.44s then 272.47s; measured bundle runtime preparation fell from
+171,916 ms to zero, while bootstrap and live workloads still dominated total
+wall time. Host Gradle 9.6.1 TestKit-worker startup required excluding only
+that buildSrc task in the **clean-checkout cache probe**; the buildSrc
+functional cache contracts ran separately on the current host wrapper.
+No saved measurement was admitted as a fresh run.
+
+**Current M4 timing blocker:** The [predeclared clean `75d68260` phase
+series](../evidence/tier-e-final-phase-stability-20260927/README.md)
+stopped after its first attempt. Full mode passed; unique mode had three
+fresh successful CTests but a `GetStackTrace` median 2,545,657 ns above the
+unchanged 2,307,381 ns bound. No subsequent sample was selected, no aggregate
+gate on this revision was reported passing, and exact stopped resources were
+retained. Earlier passing source-bound gates are historical. Native `.text`
+and Java workload class bytes matched the earlier passing receipt, but this
+does not prove why host timing changed. The baseline is immutable; any new
+gate contract requires an explicit operator decision and new controlled
+evidence. This issue remains open independently of the still-incomplete
+node-noise lane and deferred Podman runtime.
+
+**Profile-first follow-up:** The normal trustworthy/capacity/node-noise
+launchers select their checked-in JSON when no legacy settings are present;
+`--legacy-env` and the existing prefixed variables retain historical replay.
+An explicit profile now rejects ambient legacy experiment settings, duplicate
+or escaped-equivalent keys, quoted numeric/boolean values, unavailable local
+CPUs, conflicting endpoint aliases, and a native-image override at odds with
+the selected profile. The Gradle-native artifact and phase-only controller
+derive image/CPU placement from the same chosen profile. A typed capacity
+resolved snapshot includes the pilot/decision schedule. These validations
+are configuration contracts, not default node-noise qualification.
+
+**Bounded M3 result:** On clean committed `3899dc9b`, the predeclared
+control/noisy AB/BA series stopped at pair 3 with two complete pairs retained.
+Its third no-noise control passed, while the later noisy-target unique fork
+missed `1777`–`1778`; see the [unaudited series](../evidence/tier-e-clean-abba-pre-admission-20260927/README.md).
+The separate [instrumented audit](../evidence/tier-e-clean-admission-audit-20260927/README.md)
+also stopped on pair 3: 10,000 raw target syscalls but only 9,993 exact
+descriptor submissions in unique mode. Neither instrumented output nor the
+two prior complete default pairs repairs the default five-pair oracle.
+The pre-admission issue remains open for a proven main-program ingress or
+early-rejection cause; kernel BPF/filter design is not changed from this
+aggregate evidence. Podman and external orchestrator acceptance remain
+separate blocked/deferred steps.
+
+**2026-09-29 operator-approved legacy-script retirement:** The
+[scoped inventory](../designs/profiler/tier-e-legacy-script-retirement-20260929.md)
+finds no tracked TypeScript files. Twenty Tier E Node `.mjs` files and
+eight Tier E Python files (including their self-tests) had no active
+Gradle/CI/Tier E launcher callers; current launchers already use typed
+Kotlin. A standalone Python perf-window analyzer and the historical
+15-pair hybrid adoption calculator have no exact active Kotlin successor,
+so they were retired rather than recreated without users. The operator
+explicitly approved pinned-Git historical replay: all 28 exact files
+remain available at `07dcdb22` in an isolated checkout, while immutable
+measurement reports and hash ledgers are preserved as published.
+The 20 Node and eight Tier E Python files and their self-tests were
+removed from HEAD together; active Kotlin entrypoints remain. Hook,
+backlog, review-evidence and exploit-demo Python files are separate
+scope and were left intact. This does not qualify the newer source
+revision for the `07dcdb22` exact-environment acceptance receipt,
+enable a Tier E default, or change `policy_eligibility=false`.
+
+---
+<!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

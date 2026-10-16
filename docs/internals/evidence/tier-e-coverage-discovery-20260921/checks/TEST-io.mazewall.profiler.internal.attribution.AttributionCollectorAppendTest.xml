@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.internal.attribution.AttributionCollectorAppendTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-09-21T15:03:48.097Z" hostname="leanid-nitroanv1541" time="0.068">
+  <properties/>
+  <testcase name="append path preserves public collector evidence order()" classname="io.mazewall.profiler.internal.attribution.AttributionCollectorAppendTest" time="0.054"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,0 +1,3095 @@
+{
+  "policy_eligibility": false,
+  "run_completed": true,
+  "terminal_records": [
+    {
+      "kind": "terminal",
+      "timestamp": "2026-09-21T14:21:18.881775357Z",
+      "success": true,
+      "message": "completed",
+      "policy_eligibility": false
+    }
+  ],
+  "failures": [],
+  "source_revision": "e2167d60b3e42edf21c749049d60f64fbef7ac0f",
+  "metadata": {
+    "kind": "metadata",
+    "timestamp": "2026-09-21T14:20:49.678887113Z",
+    "iterations": 100,
+    "warmups": 3,
+    "batches": 24,
+    "forks": 1,
+    "capture_profile_id": "full-boundaries-v1",
+    "capture_profile_selector_digest": "30be6a4a755050d8886ec60975288811645d1e245dc126af7906a07f3c40711a",
+    "workload_cpu": "2",
+    "collector_cpu": "4",
+    "canonical_cache": "enabled",
+    "capture_profile": "full",
+    "capture_profile_strategy": "configured",
+    "scope": "tier-e-coverage-discovery",
+    "sustained_load": "below_capacity",
+    "sustained_rate_per_second": 1250,
+    "run_level": "custom",
+    "calibration_enabled": false,
+    "calibration_target": null,
+    "calibration_artifact": null,
+    "child_timeout_seconds": 180,
+    "fixture_child_termination_after_millis": 0,
+    "user_notif_worker_timeout_seconds": 480,
+    "user_notif_child_timeout_seconds": 540,
+    "workload": "oracle",
+    "workload_profile": "syscall_dense",
+    "source_revision": "e2167d60b3e42edf21c749049d60f64fbef7ac0f",
+    "source_dirty": "15",
+    "java_version": "25.0.4",
+    "os": "Linux 7.2.4-x64v3-xanmod1",
+    "policy_eligibility": false
+  },
+  "measurement_contract": {
+    "corpus": "72 declared Java call paths to openat; not all application behavior",
+    "workload_time": "paced at 1250 operations/s; not an unpaced application slowdown estimate",
+    "cpu": "benchmark child process only: workload JVM for baseline, collector JVM for Tier E; excludes Tier E workload child CPU",
+    "rss": "benchmark child process high-water RSS; not the shared retained-state budget or combined process-tree RSS",
+    "native_memory": "phases.native_retained_bytes and peak_retained_bytes are native accounting, not collector heap",
+    "discovery_time": "post-retention collector/report observation since gate; terminal fallback is an upper bound, not syscall entry time",
+    "closure": "runner completion does not imply a passing coverage or whole-session verdict"
+  },
+  "baseline": [
+    {
+      "fork": 1,
+      "coverage_verdict": "NOT_APPLICABLE",
+      "workload_correctness": "PASS",
+      "workload_total_ns": 1919866433,
+      "elapsed_ns": 3066617174,
+      "cpu_ns": 810000000,
+      "peak_rss_bytes": 79306752,
+      "missing_operations": 0,
+      "matched_operations": 0,
+      "expected_operations": 0,
+      "wrong_operations": 0,
+      "unresolved_operations": 0,
+      "acknowledged_operations": 0,
+      "suppressed_operations": 0,
+      "lost": 0,
+      "dropped": 0
+    }
+  ],
+  "paired_dictionary_resources": {
+    "cpu_ns": {
+      "pairs": [
+        {
+          "fork": 1,
+          "full_stream": 5920000000,
+          "unique_edge": 4900000000,
+          "change_percent": -17.229729729729726
+        }
+      ],
+      "mean_change_percent": -17.229729729729726,
+      "confidence_interval_95_percent": null,
+      "method": "paired unique/full percent change; deterministic 10000-resample percentile bootstrap with at least five complete pairs"
+    },
+    "peak_rss_bytes": {
+      "pairs": [
+        {
+          "fork": 1,
+          "full_stream": 246419456,
+          "unique_edge": 259129344,
+          "change_percent": 5.157826498894624
+        }
+      ],
+      "mean_change_percent": 5.157826498894624,
+      "confidence_interval_95_percent": null,
+      "method": "paired unique/full percent change; deterministic 10000-resample percentile bootstrap with at least five complete pairs"
+    },
+    "elapsed_ns": {
+      "pairs": [
+        {
+          "fork": 1,
+          "full_stream": 7670546552,
+          "unique_edge": 5512323309,
+          "change_percent": -28.136498857923886
+        }
+      ],
+      "mean_change_percent": -28.136498857923886,
+      "confidence_interval_95_percent": null,
+      "method": "paired unique/full percent change; deterministic 10000-resample percentile bootstrap with at least five complete pairs"
+    }
+  },
+  "variants": [
+    {
+      "variant": "dictionary_full_stream",
+      "forks": [
+        {
+          "fork": 1,
+          "seed": 1,
+          "coverage_verdict": "PASS",
+          "expected": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "recovered": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "missing": [],
+          "wrong_operation_ids": [],
+          "unexpected_operation_ids": [],
+          "recall": {
+            "common": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "infrequent": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "singleton": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            }
+          },
+          "discoveries": [
+            {
+              "path": 56,
+              "elapsed_ns": 3841961290,
+              "recovered": 1
+            },
+            {
+              "path": 15,
+              "elapsed_ns": 3853097370,
+              "recovered": 2
+            },
+            {
+              "path": 21,
+              "elapsed_ns": 3853263075,
+              "recovered": 3
+            },
+            {
+              "path": 11,
+              "elapsed_ns": 3853395536,
+              "recovered": 4
+            },
+            {
+              "path": 19,
+              "elapsed_ns": 3853666389,
+              "recovered": 5
+            },
+            {
+              "path": 46,
+              "elapsed_ns": 3853767173,
+              "recovered": 6
+            },
+            {
+              "path": 6,
+              "elapsed_ns": 3853874903,
+              "recovered": 7
+            },
+            {
+              "path": 18,
+              "elapsed_ns": 3853982869,
+              "recovered": 8
+            },
+            {
+              "path": 1,
+              "elapsed_ns": 3854108607,
+              "recovered": 9
+            },
+            {
+              "path": 0,
+              "elapsed_ns": 3854214395,
+              "recovered": 10
+            },
+            {
+              "path": 17,
+              "elapsed_ns": 3854327487,
+              "recovered": 11
+            },
+            {
+              "path": 3,
+              "elapsed_ns": 3854595188,
+              "recovered": 12
+            },
+            {
+              "path": 10,
+              "elapsed_ns": 3854800240,
+              "recovered": 13
+            },
+            {
+              "path": 9,
+              "elapsed_ns": 3855091338,
+              "recovered": 14
+            },
+            {
+              "path": 20,
+              "elapsed_ns": 3855200166,
+              "recovered": 15
+            },
+            {
+              "path": 12,
+              "elapsed_ns": 3855415211,
+              "recovered": 16
+            },
+            {
+              "path": 13,
+              "elapsed_ns": 3855514822,
+              "recovered": 17
+            },
+            {
+              "path": 22,
+              "elapsed_ns": 3855725049,
+              "recovered": 18
+            },
+            {
+              "path": 5,
+              "elapsed_ns": 3856139204,
+              "recovered": 19
+            },
+            {
+              "path": 4,
+              "elapsed_ns": 3856241515,
+              "recovered": 20
+            },
+            {
+              "path": 34,
+              "elapsed_ns": 3856342040,
+              "recovered": 21
+            },
+            {
+              "path": 2,
+              "elapsed_ns": 3856953004,
+              "recovered": 22
+            },
+            {
+              "path": 7,
+              "elapsed_ns": 3857054293,
+              "recovered": 23
+            },
+            {
+              "path": 23,
+              "elapsed_ns": 3857591122,
+              "recovered": 24
+            },
+            {
+              "path": 14,
+              "elapsed_ns": 3857916163,
+              "recovered": 25
+            },
+            {
+              "path": 41,
+              "elapsed_ns": 3859792683,
+              "recovered": 26
+            },
+            {
+              "path": 24,
+              "elapsed_ns": 3881763379,
+              "recovered": 27
+            },
+            {
+              "path": 29,
+              "elapsed_ns": 3882433839,
+              "recovered": 28
+            },
+            {
+              "path": 8,
+              "elapsed_ns": 3883468535,
+              "recovered": 29
+            },
+            {
+              "path": 16,
+              "elapsed_ns": 3883554043,
+              "recovered": 30
+            },
+            {
+              "path": 38,
+              "elapsed_ns": 3884843461,
+              "recovered": 31
+            },
+            {
+              "path": 65,
+              "elapsed_ns": 3885014907,
+              "recovered": 32
+            },
+            {
+              "path": 42,
+              "elapsed_ns": 3885981817,
+              "recovered": 33
+            },
+            {
+              "path": 32,
+              "elapsed_ns": 3901174302,
+              "recovered": 34
+            },
+            {
+              "path": 40,
+              "elapsed_ns": 3921036870,
+              "recovered": 35
+            },
+            {
+              "path": 50,
+              "elapsed_ns": 3921587639,
+              "recovered": 36
+            },
+            {
+              "path": 47,
+              "elapsed_ns": 3921819388,
+              "recovered": 37
+            },
+            {
+              "path": 28,
+              "elapsed_ns": 3935087837,
+              "recovered": 38
+            },
+            {
+              "path": 31,
+              "elapsed_ns": 3935419866,
+              "recovered": 39
+            },
+            {
+              "path": 25,
+              "elapsed_ns": 3937112765,
+              "recovered": 40
+            },
+            {
+              "path": 35,
+              "elapsed_ns": 3938606565,
+              "recovered": 41
+            },
+            {
+              "path": 53,
+              "elapsed_ns": 3961790184,
+              "recovered": 42
+            },
+            {
+              "path": 33,
+              "elapsed_ns": 3962696834,
+              "recovered": 43
+            },
+            {
+              "path": 44,
+              "elapsed_ns": 3964763016,
+              "recovered": 44
+            },
+            {
+              "path": 52,
+              "elapsed_ns": 3965790675,
+              "recovered": 45
+            },
+            {
+              "path": 48,
+              "elapsed_ns": 3985715360,
+              "recovered": 46
+            },
+            {
+              "path": 30,
+              "elapsed_ns": 3998716404,
+              "recovered": 47
+            },
+            {
+              "path": 60,
+              "elapsed_ns": 3999402174,
+              "recovered": 48
+            },
+            {
+              "path": 57,
+              "elapsed_ns": 4001243209,
+              "recovered": 49
+            },
+            {
+              "path": 51,
+              "elapsed_ns": 4015352954,
+              "recovered": 50
+            },
+            {
+              "path": 27,
+              "elapsed_ns": 4016580468,
+              "recovered": 51
+            },
+            {
+              "path": 61,
+              "elapsed_ns": 4016773388,
+              "recovered": 52
+            },
+            {
+              "path": 37,
+              "elapsed_ns": 4018105475,
+              "recovered": 53
+            },
+            {
+              "path": 71,
+              "elapsed_ns": 4018145720,
+              "recovered": 54
+            },
+            {
+              "path": 43,
+              "elapsed_ns": 4019139085,
+              "recovered": 55
+            },
+            {
+              "path": 63,
+              "elapsed_ns": 4019543375,
+              "recovered": 56
+            },
+            {
+              "path": 64,
+              "elapsed_ns": 4037355086,
+              "recovered": 57
+            },
+            {
+              "path": 70,
+              "elapsed_ns": 4038863153,
+              "recovered": 58
+            },
+            {
+              "path": 45,
+              "elapsed_ns": 4039270223,
+              "recovered": 59
+            },
+            {
+              "path": 58,
+              "elapsed_ns": 4040304235,
+              "recovered": 60
+            },
+            {
+              "path": 55,
+              "elapsed_ns": 4058088719,
+              "recovered": 61
+            },
+            {
+              "path": 67,
+              "elapsed_ns": 4059488375,
+              "recovered": 62
+            },
+            {
+              "path": 26,
+              "elapsed_ns": 4059543628,
+              "recovered": 63
+            },
+            {
+              "path": 69,
+              "elapsed_ns": 4060986839,
+              "recovered": 64
+            },
+            {
+              "path": 49,
+              "elapsed_ns": 4078667073,
+              "recovered": 65
+            },
+            {
+              "path": 39,
+              "elapsed_ns": 4079758601,
+              "recovered": 66
+            },
+            {
+              "path": 54,
+              "elapsed_ns": 4080222114,
+              "recovered": 67
+            },
+            {
+              "path": 36,
+              "elapsed_ns": 4080915389,
+              "recovered": 68
+            },
+            {
+              "path": 68,
+              "elapsed_ns": 4081693772,
+              "recovered": 69
+            },
+            {
+              "path": 66,
+              "elapsed_ns": 4096488917,
+              "recovered": 70
+            },
+            {
+              "path": 59,
+              "elapsed_ns": 4098118664,
+              "recovered": 71
+            },
+            {
+              "path": 62,
+              "elapsed_ns": 4100228849,
+              "recovered": 72
+            }
+          ],
+          "discovery_clock": "collector_elapsed_since_workload_gate",
+          "event_workload_correctness": "PASS",
+          "whole_session_evidence": "COMPLETE",
+          "workload_total_ns": 1919872312,
+          "elapsed_ns": 7670546552,
+          "cpu_ns": 5920000000,
+          "peak_rss_bytes": 246419456,
+          "missing_operations": 0,
+          "matched_operations": 2700,
+          "expected_operations": 2700,
+          "wrong_operations": 0,
+          "unresolved_operations": 0,
+          "acknowledged_operations": 0,
+          "suppressed_operations": 0,
+          "lost": 0,
+          "dropped": 0,
+          "phases": {
+            "get_stack_trace_ns": 69960043,
+            "raw_key_ns": 13958048,
+            "raw_hash_ns": 1579585,
+            "raw_equality_ns": 1473409,
+            "generation_validation_ns": 524770,
+            "guard_validation_ns": 5523650,
+            "canonical_cache_lock_wait_ns": 634484,
+            "logical_metadata_ns": 1817748,
+            "marker_set_ns": 8257841,
+            "marker_clear_ns": 35994478,
+            "marker_admission_clear_ns": 20814035,
+            "marker_exact_set_ns": 8257841,
+            "marker_exit_clear_ns": 7734167,
+            "marker_admission_clear_count": 16224,
+            "marker_exact_set_count": 16224,
+            "marker_exit_clear_count": 16224,
+            "ring_drain_ns": 340887121,
+            "ring_scan_ns": 0,
+            "ring_payload_slice_ns": 171061716,
+            "ring_decode_ns": 71934558,
+            "ring_append_ns": 0,
+            "ring_consumer_publish_ns": 0,
+            "ring_scanned_records": 0,
+            "ring_ready_records": 8100,
+            "ring_reader_initialization_ns": 0,
+            "collector_join_ns": 51091307,
+            "allocation_measurement_available": 0,
+            "ring_drain_allocated_bytes": 0,
+            "collector_join_allocated_bytes": 0,
+            "observation_conversion_allocated_bytes": 0,
+            "collector_resolution_allocated_bytes": 0,
+            "resolved_evidence_allocated_bytes": 0,
+            "joiner_enqueue_allocated_bytes": 0,
+            "joiner_take_ready_allocated_bytes": 0,
+            "unique_edge_gate_allocated_bytes": 0,
+            "unique_edge_suppression_diagnostic_allocated_bytes": 0,
+            "unique_edge_candidate_ownership_allocated_bytes": 0,
+            "unique_edge_candidate_diagnostic_allocated_bytes": 0,
+            "batch_freeze_allocated_bytes": 0,
+            "collector_polls": 36296,
+            "collector_loop_active_polls": 1597,
+            "collector_loop_idle_polls": 34698,
+            "collector_loop_parks": 0,
+            "collector_loop_parked_ns": 0,
+            "collector_loop_max_consecutive_idle_polls": 570,
+            "collector_readiness_waits": 0,
+            "collector_readiness_wakeups": 0,
+            "collector_readiness_timeouts": 0,
+            "collector_readiness_spurious_wakeups": 0,
+            "collector_readiness_waited_ns": 0,
+            "collector_receipt_samples": 8100,
+            "collector_receipt_min_ns": 4592,
+            "collector_receipt_mean_ns": 5545402,
+            "collector_receipt_max_ns": 54876038,
+            "collector_receipt_p50_upper_ns": 4194303,
+            "collector_receipt_p95_upper_ns": 33554431,
+            "collector_receipt_p99_upper_ns": 67108863,
+            "ring_records_copied": 0,
+            "ring_bytes_copied": 0,
+            "ring_busy_records": 0,
+            "ring_discarded_records": 0,
+            "ring_scan_passes": 0,
+            "ring_batches": 1597,
+            "ring_max_batch_records": 1074,
+            "ring_drain_p50_upper_records": 1,
+            "ring_drain_p95_upper_records": 31,
+            "ring_drain_p99_upper_records": 63,
+            "kernel_ring_loss": 0,
+            "retained_result_drops": 0,
+            "pending_observation_budget_drops": 0,
+            "pending_observation_queue_drops": 0,
+            "kernel_exact_admissions": 8100,
+            "kernel_marker_detached": 57,
+            "kernel_task_storage_unavailable": 442,
+            "kernel_stale_marker_generation": 0,
+            "serialization_ns": 951871,
+            "publication_bytes": 802483,
+            "publication_latency_ns": 1838113,
+            "lock_wait_ns": 178,
+            "peak_retained_bytes": 967019,
+            "native_retained_bytes": 1051975,
+            "native_retention_exhaustions": 0,
+            "publication_count": 1,
+            "coalesced_publications": 0,
+            "failed_publications": 0,
+            "cache_hits": 16138,
+            "cache_misses": 86
+          },
+          "publication_failures": [],
+          "effective_affinity": {
+            "workload": "2",
+            "collector": "4",
+            "workload_launched_pinned": true
+          },
+          "dimensions": {
+            "capture_domain_validity": "DECLARED_OPENAT_ONLY",
+            "transport_completeness": "COMPLETE",
+            "attribution_coverage": "PASS",
+            "dictionary_integrity": "COMPLETE",
+            "lifecycle_validity": "COMPLETE",
+            "runtime_overhead": "NOT_GATED"
+          }
+        }
+      ],
+      "cumulative_recovered": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "cumulative_recall": 1,
+      "all_forks_recover_all_paths": true
+    },
+    {
+      "variant": "dictionary_unique_edge",
+      "forks": [
+        {
+          "fork": 1,
+          "seed": 1,
+          "coverage_verdict": "PASS",
+          "expected": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "recovered": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "missing": [],
+          "wrong_operation_ids": [],
+          "unexpected_operation_ids": [],
+          "recall": {
+            "common": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "infrequent": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "singleton": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            }
+          },
+          "discoveries": [
+            {
+              "path": 56,
+              "elapsed_ns": 3194855291,
+              "recovered": 1
+            },
+            {
+              "path": 15,
+              "elapsed_ns": 3206324400,
+              "recovered": 2
+            },
+            {
+              "path": 21,
+              "elapsed_ns": 3206432091,
+              "recovered": 3
+            },
+            {
+              "path": 11,
+              "elapsed_ns": 3206515961,
+              "recovered": 4
+            },
+            {
+              "path": 19,
+              "elapsed_ns": 3206597146,
+              "recovered": 5
+            },
+            {
+              "path": 46,
+              "elapsed_ns": 3206677860,
+              "recovered": 6
+            },
+            {
+              "path": 6,
+              "elapsed_ns": 3206760008,
+              "recovered": 7
+            },
+            {
+              "path": 18,
+              "elapsed_ns": 3206860914,
+              "recovered": 8
+            },
+            {
+              "path": 1,
+              "elapsed_ns": 3206939789,
+              "recovered": 9
+            },
+            {
+              "path": 0,
+              "elapsed_ns": 3207028219,
+              "recovered": 10
+            },
+            {
+              "path": 17,
+              "elapsed_ns": 3207178438,
+              "recovered": 11
+            },
+            {
+              "path": 3,
+              "elapsed_ns": 3207271812,
+              "recovered": 12
+            },
+            {
+              "path": 10,
+              "elapsed_ns": 3207352961,
+              "recovered": 13
+            },
+            {
+              "path": 9,
+              "elapsed_ns": 3207432270,
+              "recovered": 14
+            },
+            {
+              "path": 20,
+              "elapsed_ns": 3207508906,
+              "recovered": 15
+            },
+            {
+              "path": 12,
+              "elapsed_ns": 3207596578,
+              "recovered": 16
+            },
+            {
+              "path": 13,
+              "elapsed_ns": 3207674701,
+              "recovered": 17
+            },
+            {
+              "path": 22,
+              "elapsed_ns": 3207751398,
+              "recovered": 18
+            },
+            {
+              "path": 5,
+              "elapsed_ns": 3207834639,
+              "recovered": 19
+            },
+            {
+              "path": 4,
+              "elapsed_ns": 3207912181,
+              "recovered": 20
+            },
+            {
+              "path": 34,
+              "elapsed_ns": 3207987529,
+              "recovered": 21
+            },
+            {
+              "path": 2,
+              "elapsed_ns": 3208075929,
+              "recovered": 22
+            },
+            {
+              "path": 7,
+              "elapsed_ns": 3208152688,
+              "recovered": 23
+            },
+            {
+              "path": 23,
+              "elapsed_ns": 3208236776,
+              "recovered": 24
+            },
+            {
+              "path": 14,
+              "elapsed_ns": 3208315106,
+              "recovered": 25
+            },
+            {
+              "path": 41,
+              "elapsed_ns": 3208397844,
+              "recovered": 26
+            },
+            {
+              "path": 24,
+              "elapsed_ns": 3208484233,
+              "recovered": 27
+            },
+            {
+              "path": 29,
+              "elapsed_ns": 3208561415,
+              "recovered": 28
+            },
+            {
+              "path": 8,
+              "elapsed_ns": 3208637051,
+              "recovered": 29
+            },
+            {
+              "path": 16,
+              "elapsed_ns": 3208716215,
+              "recovered": 30
+            },
+            {
+              "path": 38,
+              "elapsed_ns": 3208794482,
+              "recovered": 31
+            },
+            {
+              "path": 65,
+              "elapsed_ns": 3208877303,
+              "recovered": 32
+            },
+            {
+              "path": 42,
+              "elapsed_ns": 3208953979,
+              "recovered": 33
+            },
+            {
+              "path": 32,
+              "elapsed_ns": 3209028488,
+              "recovered": 34
+            },
+            {
+              "path": 40,
+              "elapsed_ns": 3209107348,
+              "recovered": 35
+            },
+            {
+              "path": 50,
+              "elapsed_ns": 3209185831,
+              "recovered": 36
+            },
+            {
+              "path": 47,
+              "elapsed_ns": 3209263507,
+              "recovered": 37
+            },
+            {
+              "path": 28,
+              "elapsed_ns": 3209340925,
+              "recovered": 38
+            },
+            {
+              "path": 31,
+              "elapsed_ns": 3209419897,
+              "recovered": 39
+            },
+            {
+              "path": 25,
+              "elapsed_ns": 3209497400,
+              "recovered": 40
+            },
+            {
+              "path": 35,
+              "elapsed_ns": 3209573699,
+              "recovered": 41
+            },
+            {
+              "path": 53,
+              "elapsed_ns": 3209649663,
+              "recovered": 42
+            },
+            {
+              "path": 33,
+              "elapsed_ns": 3209735717,
+              "recovered": 43
+            },
+            {
+              "path": 44,
+              "elapsed_ns": 3209813983,
+              "recovered": 44
+            },
+            {
+              "path": 52,
+              "elapsed_ns": 3209889783,
+              "recovered": 45
+            },
+            {
+              "path": 48,
+              "elapsed_ns": 3209979507,
+              "recovered": 46
+            },
+            {
+              "path": 30,
+              "elapsed_ns": 3210065948,
+              "recovered": 47
+            },
+            {
+              "path": 60,
+              "elapsed_ns": 3210145620,
+              "recovered": 48
+            },
+            {
+              "path": 57,
+              "elapsed_ns": 3210219781,
+              "recovered": 49
+            },
+            {
+              "path": 51,
+              "elapsed_ns": 3210301950,
+              "recovered": 50
+            },
+            {
+              "path": 27,
+              "elapsed_ns": 3210379849,
+              "recovered": 51
+            },
+            {
+              "path": 61,
+              "elapsed_ns": 3210458886,
+              "recovered": 52
+            },
+            {
+              "path": 37,
+              "elapsed_ns": 3210537240,
+              "recovered": 53
+            },
+            {
+              "path": 71,
+              "elapsed_ns": 3210615274,
+              "recovered": 54
+            },
+            {
+              "path": 43,
+              "elapsed_ns": 3210699506,
+              "recovered": 55
+            },
+            {
+              "path": 63,
+              "elapsed_ns": 3210777481,
+              "recovered": 56
+            },
+            {
+              "path": 64,
+              "elapsed_ns": 3210861103,
+              "recovered": 57
+            },
+            {
+              "path": 70,
+              "elapsed_ns": 3210939952,
+              "recovered": 58
+            },
+            {
+              "path": 45,
+              "elapsed_ns": 3211017808,
+              "recovered": 59
+            },
+            {
+              "path": 58,
+              "elapsed_ns": 3211094941,
+              "recovered": 60
+            },
+            {
+              "path": 55,
+              "elapsed_ns": 3211169126,
+              "recovered": 61
+            },
+            {
+              "path": 67,
+              "elapsed_ns": 3211246368,
+              "recovered": 62
+            },
+            {
+              "path": 26,
+              "elapsed_ns": 3211321412,
+              "recovered": 63
+            },
+            {
+              "path": 69,
+              "elapsed_ns": 3211420553,
+              "recovered": 64
+            },
+            {
+              "path": 49,
+              "elapsed_ns": 3211496981,
+              "recovered": 65
+            },
+            {
+              "path": 39,
+              "elapsed_ns": 3211571652,
+              "recovered": 66
+            },
+            {
+              "path": 54,
+              "elapsed_ns": 3211648917,
+              "recovered": 67
+            },
+            {
+              "path": 36,
+              "elapsed_ns": 3211724297,
+              "recovered": 68
+            },
+            {
+              "path": 68,
+              "elapsed_ns": 3211800244,
+              "recovered": 69
+            },
+            {
+              "path": 66,
+              "elapsed_ns": 3211877411,
+              "recovered": 70
+            },
+            {
+              "path": 59,
+              "elapsed_ns": 3211954439,
+              "recovered": 71
+            },
+            {
+              "path": 62,
+              "elapsed_ns": 3212031324,
+              "recovered": 72
+            }
+          ],
+          "discovery_clock": "collector_elapsed_since_workload_gate",
+          "event_workload_correctness": "PASS",
+          "whole_session_evidence": "COMPLETE",
+          "workload_total_ns": 1919928876,
+          "elapsed_ns": 5512323309,
+          "cpu_ns": 4900000000,
+          "peak_rss_bytes": 259129344,
+          "missing_operations": 0,
+          "matched_operations": 2700,
+          "expected_operations": 2700,
+          "wrong_operations": 0,
+          "unresolved_operations": 0,
+          "acknowledged_operations": 73,
+          "suppressed_operations": 2627,
+          "lost": 0,
+          "dropped": 0,
+          "phases": {
+            "get_stack_trace_ns": 77669366,
+            "raw_key_ns": 13917710,
+            "raw_hash_ns": 1709206,
+            "raw_equality_ns": 1579299,
+            "generation_validation_ns": 539651,
+            "guard_validation_ns": 5364350,
+            "canonical_cache_lock_wait_ns": 556577,
+            "logical_metadata_ns": 1496435,
+            "marker_set_ns": 5368460,
+            "marker_clear_ns": 20225819,
+            "marker_admission_clear_ns": 9873826,
+            "marker_exact_set_ns": 5368460,
+            "marker_exit_clear_ns": 4796175,
+            "marker_admission_clear_count": 16224,
+            "marker_exact_set_count": 16224,
+            "marker_exit_clear_count": 16224,
+            "ring_drain_ns": 212428322,
+            "ring_scan_ns": 0,
+            "ring_payload_slice_ns": 120651428,
+            "ring_decode_ns": 26239735,
+            "ring_append_ns": 0,
+            "ring_consumer_publish_ns": 0,
+            "ring_scanned_records": 0,
+            "ring_ready_records": 8100,
+            "ring_reader_initialization_ns": 0,
+            "collector_join_ns": 85533253,
+            "allocation_measurement_available": 0,
+            "ring_drain_allocated_bytes": 0,
+            "collector_join_allocated_bytes": 0,
+            "observation_conversion_allocated_bytes": 0,
+            "collector_resolution_allocated_bytes": 0,
+            "resolved_evidence_allocated_bytes": 0,
+            "joiner_enqueue_allocated_bytes": 0,
+            "joiner_take_ready_allocated_bytes": 0,
+            "unique_edge_gate_allocated_bytes": 0,
+            "unique_edge_suppression_diagnostic_allocated_bytes": 0,
+            "unique_edge_candidate_ownership_allocated_bytes": 0,
+            "unique_edge_candidate_diagnostic_allocated_bytes": 0,
+            "batch_freeze_allocated_bytes": 0,
+            "collector_polls": 91590,
+            "collector_loop_active_polls": 3151,
+            "collector_loop_idle_polls": 88438,
+            "collector_loop_parks": 0,
+            "collector_loop_parked_ns": 0,
+            "collector_loop_max_consecutive_idle_polls": 1315,
+            "collector_readiness_waits": 0,
+            "collector_readiness_wakeups": 0,
+            "collector_readiness_timeouts": 0,
+            "collector_readiness_spurious_wakeups": 0,
+            "collector_readiness_waited_ns": 0,
+            "collector_receipt_samples": 8100,
+            "collector_receipt_min_ns": 1143,
+            "collector_receipt_mean_ns": 2740012,
+            "collector_receipt_max_ns": 56417924,
+            "collector_receipt_p50_upper_ns": 524287,
+            "collector_receipt_p95_upper_ns": 16777215,
+            "collector_receipt_p99_upper_ns": 67108863,
+            "ring_records_copied": 0,
+            "ring_bytes_copied": 0,
+            "ring_busy_records": 0,
+            "ring_discarded_records": 0,
+            "ring_scan_passes": 0,
+            "ring_batches": 3151,
+            "ring_max_batch_records": 802,
+            "ring_drain_p50_upper_records": 1,
+            "ring_drain_p95_upper_records": 15,
+            "ring_drain_p99_upper_records": 31,
+            "kernel_ring_loss": 0,
+            "retained_result_drops": 0,
+            "pending_observation_budget_drops": 0,
+            "pending_observation_queue_drops": 0,
+            "kernel_exact_admissions": 8100,
+            "kernel_marker_detached": 33,
+            "kernel_task_storage_unavailable": 447,
+            "kernel_stale_marker_generation": 0,
+            "serialization_ns": 453844,
+            "publication_bytes": 802483,
+            "publication_latency_ns": 905631,
+            "lock_wait_ns": 31,
+            "peak_retained_bytes": 967019,
+            "native_retained_bytes": 1051975,
+            "native_retention_exhaustions": 0,
+            "publication_count": 1,
+            "coalesced_publications": 0,
+            "failed_publications": 0,
+            "cache_hits": 16138,
+            "cache_misses": 86
+          },
+          "publication_failures": [],
+          "effective_affinity": {
+            "workload": "2",
+            "collector": "4",
+            "workload_launched_pinned": true
+          },
+          "dimensions": {
+            "capture_domain_validity": "DECLARED_OPENAT_ONLY",
+            "transport_completeness": "COMPLETE",
+            "attribution_coverage": "PASS",
+            "dictionary_integrity": "COMPLETE",
+            "lifecycle_validity": "COMPLETE",
+            "runtime_overhead": "NOT_GATED"
+          }
+        }
+      ],
+      "cumulative_recovered": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "cumulative_recall": 1,
+      "all_forks_recover_all_paths": true
+    },
+    {
+      "variant": "inline_full_stream",
+      "forks": [
+        {
+          "fork": 1,
+          "seed": 1,
+          "coverage_verdict": "PASS",
+          "expected": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "recovered": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "missing": [],
+          "wrong_operation_ids": [],
+          "unexpected_operation_ids": [],
+          "recall": {
+            "common": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "infrequent": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "singleton": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            }
+          },
+          "discoveries": [
+            {
+              "path": 56,
+              "elapsed_ns": 3764795465,
+              "recovered": 1
+            },
+            {
+              "path": 15,
+              "elapsed_ns": 3777552429,
+              "recovered": 2
+            },
+            {
+              "path": 21,
+              "elapsed_ns": 3777642080,
+              "recovered": 3
+            },
+            {
+              "path": 11,
+              "elapsed_ns": 3777720783,
+              "recovered": 4
+            },
+            {
+              "path": 19,
+              "elapsed_ns": 3777889398,
+              "recovered": 5
+            },
+            {
+              "path": 46,
+              "elapsed_ns": 3777968767,
+              "recovered": 6
+            },
+            {
+              "path": 6,
+              "elapsed_ns": 3778049130,
+              "recovered": 7
+            },
+            {
+              "path": 18,
+              "elapsed_ns": 3778124206,
+              "recovered": 8
+            },
+            {
+              "path": 1,
+              "elapsed_ns": 3778210363,
+              "recovered": 9
+            },
+            {
+              "path": 0,
+              "elapsed_ns": 3778290795,
+              "recovered": 10
+            },
+            {
+              "path": 17,
+              "elapsed_ns": 3778372315,
+              "recovered": 11
+            },
+            {
+              "path": 3,
+              "elapsed_ns": 3778521888,
+              "recovered": 12
+            },
+            {
+              "path": 10,
+              "elapsed_ns": 3778677480,
+              "recovered": 13
+            },
+            {
+              "path": 9,
+              "elapsed_ns": 3778900367,
+              "recovered": 14
+            },
+            {
+              "path": 20,
+              "elapsed_ns": 3778980911,
+              "recovered": 15
+            },
+            {
+              "path": 12,
+              "elapsed_ns": 3779141250,
+              "recovered": 16
+            },
+            {
+              "path": 13,
+              "elapsed_ns": 3779217611,
+              "recovered": 17
+            },
+            {
+              "path": 22,
+              "elapsed_ns": 3779372829,
+              "recovered": 18
+            },
+            {
+              "path": 5,
+              "elapsed_ns": 3779682302,
+              "recovered": 19
+            },
+            {
+              "path": 4,
+              "elapsed_ns": 3779760019,
+              "recovered": 20
+            },
+            {
+              "path": 34,
+              "elapsed_ns": 3779835701,
+              "recovered": 21
+            },
+            {
+              "path": 2,
+              "elapsed_ns": 3780290286,
+              "recovered": 22
+            },
+            {
+              "path": 7,
+              "elapsed_ns": 3780368446,
+              "recovered": 23
+            },
+            {
+              "path": 23,
+              "elapsed_ns": 3780756511,
+              "recovered": 24
+            },
+            {
+              "path": 14,
+              "elapsed_ns": 3781003216,
+              "recovered": 25
+            },
+            {
+              "path": 41,
+              "elapsed_ns": 3790059334,
+              "recovered": 26
+            },
+            {
+              "path": 24,
+              "elapsed_ns": 3790318015,
+              "recovered": 27
+            },
+            {
+              "path": 29,
+              "elapsed_ns": 3790762181,
+              "recovered": 28
+            },
+            {
+              "path": 8,
+              "elapsed_ns": 3791545086,
+              "recovered": 29
+            },
+            {
+              "path": 16,
+              "elapsed_ns": 3791609948,
+              "recovered": 30
+            },
+            {
+              "path": 38,
+              "elapsed_ns": 3792610326,
+              "recovered": 31
+            },
+            {
+              "path": 65,
+              "elapsed_ns": 3792737124,
+              "recovered": 32
+            },
+            {
+              "path": 42,
+              "elapsed_ns": 3793410789,
+              "recovered": 33
+            },
+            {
+              "path": 32,
+              "elapsed_ns": 3796341050,
+              "recovered": 34
+            },
+            {
+              "path": 40,
+              "elapsed_ns": 3809514689,
+              "recovered": 35
+            },
+            {
+              "path": 50,
+              "elapsed_ns": 3809942929,
+              "recovered": 36
+            },
+            {
+              "path": 47,
+              "elapsed_ns": 3810129224,
+              "recovered": 37
+            },
+            {
+              "path": 28,
+              "elapsed_ns": 3810841236,
+              "recovered": 38
+            },
+            {
+              "path": 31,
+              "elapsed_ns": 3811211645,
+              "recovered": 39
+            },
+            {
+              "path": 25,
+              "elapsed_ns": 3813042852,
+              "recovered": 40
+            },
+            {
+              "path": 35,
+              "elapsed_ns": 3825157189,
+              "recovered": 41
+            },
+            {
+              "path": 53,
+              "elapsed_ns": 3826591964,
+              "recovered": 42
+            },
+            {
+              "path": 33,
+              "elapsed_ns": 3827673410,
+              "recovered": 43
+            },
+            {
+              "path": 44,
+              "elapsed_ns": 3851700160,
+              "recovered": 44
+            },
+            {
+              "path": 52,
+              "elapsed_ns": 3852479851,
+              "recovered": 45
+            },
+            {
+              "path": 48,
+              "elapsed_ns": 3855441595,
+              "recovered": 46
+            },
+            {
+              "path": 30,
+              "elapsed_ns": 3868080096,
+              "recovered": 47
+            },
+            {
+              "path": 60,
+              "elapsed_ns": 3868720819,
+              "recovered": 48
+            },
+            {
+              "path": 57,
+              "elapsed_ns": 3870652362,
+              "recovered": 49
+            },
+            {
+              "path": 51,
+              "elapsed_ns": 3883718690,
+              "recovered": 50
+            },
+            {
+              "path": 27,
+              "elapsed_ns": 3884958926,
+              "recovered": 51
+            },
+            {
+              "path": 61,
+              "elapsed_ns": 3885171653,
+              "recovered": 52
+            },
+            {
+              "path": 37,
+              "elapsed_ns": 3886627975,
+              "recovered": 53
+            },
+            {
+              "path": 71,
+              "elapsed_ns": 3886672161,
+              "recovered": 54
+            },
+            {
+              "path": 43,
+              "elapsed_ns": 3887683890,
+              "recovered": 55
+            },
+            {
+              "path": 63,
+              "elapsed_ns": 3899371636,
+              "recovered": 56
+            },
+            {
+              "path": 64,
+              "elapsed_ns": 3901073799,
+              "recovered": 57
+            },
+            {
+              "path": 70,
+              "elapsed_ns": 3902468046,
+              "recovered": 58
+            },
+            {
+              "path": 45,
+              "elapsed_ns": 3902865599,
+              "recovered": 59
+            },
+            {
+              "path": 58,
+              "elapsed_ns": 3903874526,
+              "recovered": 60
+            },
+            {
+              "path": 55,
+              "elapsed_ns": 3916192758,
+              "recovered": 61
+            },
+            {
+              "path": 67,
+              "elapsed_ns": 3917413102,
+              "recovered": 62
+            },
+            {
+              "path": 26,
+              "elapsed_ns": 3917459983,
+              "recovered": 63
+            },
+            {
+              "path": 69,
+              "elapsed_ns": 3918512329,
+              "recovered": 64
+            },
+            {
+              "path": 49,
+              "elapsed_ns": 3919578787,
+              "recovered": 65
+            },
+            {
+              "path": 39,
+              "elapsed_ns": 3931497025,
+              "recovered": 66
+            },
+            {
+              "path": 54,
+              "elapsed_ns": 3931860713,
+              "recovered": 67
+            },
+            {
+              "path": 36,
+              "elapsed_ns": 3932411723,
+              "recovered": 68
+            },
+            {
+              "path": 68,
+              "elapsed_ns": 3933006863,
+              "recovered": 69
+            },
+            {
+              "path": 66,
+              "elapsed_ns": 3934154706,
+              "recovered": 70
+            },
+            {
+              "path": 59,
+              "elapsed_ns": 3935291209,
+              "recovered": 71
+            },
+            {
+              "path": 62,
+              "elapsed_ns": 3943410791,
+              "recovered": 72
+            }
+          ],
+          "discovery_clock": "collector_elapsed_since_workload_gate",
+          "event_workload_correctness": "PASS",
+          "whole_session_evidence": "COMPLETE",
+          "workload_total_ns": 1918194295,
+          "elapsed_ns": 6572126500,
+          "cpu_ns": 6000000000,
+          "peak_rss_bytes": 809549824,
+          "missing_operations": 0,
+          "matched_operations": 2700,
+          "expected_operations": 2700,
+          "wrong_operations": 0,
+          "unresolved_operations": 0,
+          "acknowledged_operations": 0,
+          "suppressed_operations": 0,
+          "lost": 0,
+          "dropped": 0,
+          "phases": {
+            "get_stack_trace_ns": 53273023,
+            "raw_key_ns": 11129770,
+            "raw_hash_ns": 1233096,
+            "raw_equality_ns": 1256379,
+            "generation_validation_ns": 388061,
+            "guard_validation_ns": 4524725,
+            "canonical_cache_lock_wait_ns": 463484,
+            "logical_metadata_ns": 1358605,
+            "marker_set_ns": 5163317,
+            "marker_clear_ns": 24435320,
+            "marker_admission_clear_ns": 8781693,
+            "marker_exact_set_ns": 5163317,
+            "marker_exit_clear_ns": 5229624,
+            "marker_admission_clear_count": 16224,
+            "marker_exact_set_count": 16224,
+            "marker_exit_clear_count": 16224,
+            "ring_drain_ns": 268915445,
+            "ring_scan_ns": 0,
+            "ring_payload_slice_ns": 108407043,
+            "ring_decode_ns": 45678982,
+            "ring_append_ns": 0,
+            "ring_consumer_publish_ns": 0,
+            "ring_scanned_records": 0,
+            "ring_ready_records": 8100,
+            "ring_reader_initialization_ns": 0,
+            "collector_join_ns": 50180144,
+            "allocation_measurement_available": 0,
+            "ring_drain_allocated_bytes": 0,
+            "collector_join_allocated_bytes": 0,
+            "observation_conversion_allocated_bytes": 0,
+            "collector_resolution_allocated_bytes": 0,
+            "resolved_evidence_allocated_bytes": 0,
+            "joiner_enqueue_allocated_bytes": 0,
+            "joiner_take_ready_allocated_bytes": 0,
+            "unique_edge_gate_allocated_bytes": 0,
+            "unique_edge_suppression_diagnostic_allocated_bytes": 0,
+            "unique_edge_candidate_ownership_allocated_bytes": 0,
+            "unique_edge_candidate_diagnostic_allocated_bytes": 0,
+            "batch_freeze_allocated_bytes": 0,
+            "collector_polls": 117845,
+            "collector_loop_active_polls": 3890,
+            "collector_loop_idle_polls": 113954,
+            "collector_loop_parks": 0,
+            "collector_loop_parked_ns": 0,
+            "collector_loop_max_consecutive_idle_polls": 5253,
+            "collector_readiness_waits": 0,
+            "collector_readiness_wakeups": 0,
+            "collector_readiness_timeouts": 0,
+            "collector_readiness_spurious_wakeups": 0,
+            "collector_readiness_waited_ns": 0,
+            "collector_receipt_samples": 8100,
+            "collector_receipt_min_ns": 826,
+            "collector_receipt_mean_ns": 2253406,
+            "collector_receipt_max_ns": 57619254,
+            "collector_receipt_p50_upper_ns": 65535,
+            "collector_receipt_p95_upper_ns": 16777215,
+            "collector_receipt_p99_upper_ns": 33554431,
+            "ring_records_copied": 0,
+            "ring_bytes_copied": 0,
+            "ring_busy_records": 0,
+            "ring_discarded_records": 0,
+            "ring_scan_passes": 0,
+            "ring_batches": 3890,
+            "ring_max_batch_records": 463,
+            "ring_drain_p50_upper_records": 1,
+            "ring_drain_p95_upper_records": 3,
+            "ring_drain_p99_upper_records": 31,
+            "kernel_ring_loss": 0,
+            "retained_result_drops": 0,
+            "pending_observation_budget_drops": 0,
+            "pending_observation_queue_drops": 0,
+            "kernel_exact_admissions": 8100,
+            "kernel_marker_detached": 51,
+            "kernel_task_storage_unavailable": 428,
+            "kernel_stale_marker_generation": 0,
+            "serialization_ns": 17567719,
+            "publication_bytes": 33670587,
+            "publication_latency_ns": 22359608,
+            "lock_wait_ns": 160,
+            "peak_retained_bytes": 967019,
+            "native_retained_bytes": 1051975,
+            "native_retention_exhaustions": 0,
+            "publication_count": 1,
+            "coalesced_publications": 0,
+            "failed_publications": 0,
+            "cache_hits": 16138,
+            "cache_misses": 86
+          },
+          "publication_failures": [],
+          "effective_affinity": {
+            "workload": "2",
+            "collector": "4",
+            "workload_launched_pinned": true
+          },
+          "dimensions": {
+            "capture_domain_validity": "DECLARED_OPENAT_ONLY",
+            "transport_completeness": "COMPLETE",
+            "attribution_coverage": "PASS",
+            "dictionary_integrity": "COMPLETE",
+            "lifecycle_validity": "COMPLETE",
+            "runtime_overhead": "NOT_GATED"
+          }
+        }
+      ],
+      "cumulative_recovered": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "cumulative_recall": 1,
+      "all_forks_recover_all_paths": true
+    },
+    {
+      "variant": "inline_unique_edge",
+      "forks": [
+        {
+          "fork": 1,
+          "seed": 1,
+          "coverage_verdict": "PASS",
+          "expected": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "recovered": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71
+          ],
+          "missing": [],
+          "wrong_operation_ids": [],
+          "unexpected_operation_ids": [],
+          "recall": {
+            "common": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "infrequent": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            },
+            "singleton": {
+              "expected": 24,
+              "recovered": 24,
+              "recall": 1
+            }
+          },
+          "discoveries": [
+            {
+              "path": 56,
+              "elapsed_ns": 3790278149,
+              "recovered": 1
+            },
+            {
+              "path": 15,
+              "elapsed_ns": 3798787503,
+              "recovered": 2
+            },
+            {
+              "path": 21,
+              "elapsed_ns": 3798882200,
+              "recovered": 3
+            },
+            {
+              "path": 11,
+              "elapsed_ns": 3798962984,
+              "recovered": 4
+            },
+            {
+              "path": 19,
+              "elapsed_ns": 3799039997,
+              "recovered": 5
+            },
+            {
+              "path": 46,
+              "elapsed_ns": 3799116303,
+              "recovered": 6
+            },
+            {
+              "path": 6,
+              "elapsed_ns": 3799191327,
+              "recovered": 7
+            },
+            {
+              "path": 18,
+              "elapsed_ns": 3799272632,
+              "recovered": 8
+            },
+            {
+              "path": 1,
+              "elapsed_ns": 3799345908,
+              "recovered": 9
+            },
+            {
+              "path": 0,
+              "elapsed_ns": 3799426546,
+              "recovered": 10
+            },
+            {
+              "path": 17,
+              "elapsed_ns": 3799500967,
+              "recovered": 11
+            },
+            {
+              "path": 3,
+              "elapsed_ns": 3799579859,
+              "recovered": 12
+            },
+            {
+              "path": 10,
+              "elapsed_ns": 3799654091,
+              "recovered": 13
+            },
+            {
+              "path": 9,
+              "elapsed_ns": 3799727972,
+              "recovered": 14
+            },
+            {
+              "path": 20,
+              "elapsed_ns": 3799802725,
+              "recovered": 15
+            },
+            {
+              "path": 12,
+              "elapsed_ns": 3799883723,
+              "recovered": 16
+            },
+            {
+              "path": 13,
+              "elapsed_ns": 3799958095,
+              "recovered": 17
+            },
+            {
+              "path": 22,
+              "elapsed_ns": 3800032257,
+              "recovered": 18
+            },
+            {
+              "path": 5,
+              "elapsed_ns": 3800105351,
+              "recovered": 19
+            },
+            {
+              "path": 4,
+              "elapsed_ns": 3800182798,
+              "recovered": 20
+            },
+            {
+              "path": 34,
+              "elapsed_ns": 3800256971,
+              "recovered": 21
+            },
+            {
+              "path": 2,
+              "elapsed_ns": 3800343391,
+              "recovered": 22
+            },
+            {
+              "path": 7,
+              "elapsed_ns": 3800416786,
+              "recovered": 23
+            },
+            {
+              "path": 23,
+              "elapsed_ns": 3800499311,
+              "recovered": 24
+            },
+            {
+              "path": 14,
+              "elapsed_ns": 3800571753,
+              "recovered": 25
+            },
+            {
+              "path": 41,
+              "elapsed_ns": 3800650152,
+              "recovered": 26
+            },
+            {
+              "path": 24,
+              "elapsed_ns": 3800727255,
+              "recovered": 27
+            },
+            {
+              "path": 29,
+              "elapsed_ns": 3800802617,
+              "recovered": 28
+            },
+            {
+              "path": 8,
+              "elapsed_ns": 3800875838,
+              "recovered": 29
+            },
+            {
+              "path": 16,
+              "elapsed_ns": 3800950518,
+              "recovered": 30
+            },
+            {
+              "path": 38,
+              "elapsed_ns": 3801024605,
+              "recovered": 31
+            },
+            {
+              "path": 65,
+              "elapsed_ns": 3801104502,
+              "recovered": 32
+            },
+            {
+              "path": 42,
+              "elapsed_ns": 3801178179,
+              "recovered": 33
+            },
+            {
+              "path": 32,
+              "elapsed_ns": 3801251889,
+              "recovered": 34
+            },
+            {
+              "path": 40,
+              "elapsed_ns": 3801328064,
+              "recovered": 35
+            },
+            {
+              "path": 50,
+              "elapsed_ns": 3801418117,
+              "recovered": 36
+            },
+            {
+              "path": 47,
+              "elapsed_ns": 3810638554,
+              "recovered": 37
+            },
+            {
+              "path": 28,
+              "elapsed_ns": 3810740134,
+              "recovered": 38
+            },
+            {
+              "path": 31,
+              "elapsed_ns": 3810830712,
+              "recovered": 39
+            },
+            {
+              "path": 25,
+              "elapsed_ns": 3810902512,
+              "recovered": 40
+            },
+            {
+              "path": 35,
+              "elapsed_ns": 3810972080,
+              "recovered": 41
+            },
+            {
+              "path": 53,
+              "elapsed_ns": 3811040237,
+              "recovered": 42
+            },
+            {
+              "path": 33,
+              "elapsed_ns": 3811120152,
+              "recovered": 43
+            },
+            {
+              "path": 44,
+              "elapsed_ns": 3811192102,
+              "recovered": 44
+            },
+            {
+              "path": 52,
+              "elapsed_ns": 3811261835,
+              "recovered": 45
+            },
+            {
+              "path": 48,
+              "elapsed_ns": 3811342701,
+              "recovered": 46
+            },
+            {
+              "path": 30,
+              "elapsed_ns": 3811413365,
+              "recovered": 47
+            },
+            {
+              "path": 60,
+              "elapsed_ns": 3811489105,
+              "recovered": 48
+            },
+            {
+              "path": 57,
+              "elapsed_ns": 3811558150,
+              "recovered": 49
+            },
+            {
+              "path": 51,
+              "elapsed_ns": 3811627863,
+              "recovered": 50
+            },
+            {
+              "path": 27,
+              "elapsed_ns": 3811696004,
+              "recovered": 51
+            },
+            {
+              "path": 61,
+              "elapsed_ns": 3811766350,
+              "recovered": 52
+            },
+            {
+              "path": 37,
+              "elapsed_ns": 3811835090,
+              "recovered": 53
+            },
+            {
+              "path": 71,
+              "elapsed_ns": 3811903725,
+              "recovered": 54
+            },
+            {
+              "path": 43,
+              "elapsed_ns": 3811983353,
+              "recovered": 55
+            },
+            {
+              "path": 63,
+              "elapsed_ns": 3812051714,
+              "recovered": 56
+            },
+            {
+              "path": 64,
+              "elapsed_ns": 3812119555,
+              "recovered": 57
+            },
+            {
+              "path": 70,
+              "elapsed_ns": 3812248890,
+              "recovered": 58
+            },
+            {
+              "path": 45,
+              "elapsed_ns": 3812319987,
+              "recovered": 59
+            },
+            {
+              "path": 58,
+              "elapsed_ns": 3812386487,
+              "recovered": 60
+            },
+            {
+              "path": 55,
+              "elapsed_ns": 3812453943,
+              "recovered": 61
+            },
+            {
+              "path": 67,
+              "elapsed_ns": 3812522450,
+              "recovered": 62
+            },
+            {
+              "path": 26,
+              "elapsed_ns": 3812590140,
+              "recovered": 63
+            },
+            {
+              "path": 69,
+              "elapsed_ns": 3812683316,
+              "recovered": 64
+            },
+            {
+              "path": 49,
+              "elapsed_ns": 3812752360,
+              "recovered": 65
+            },
+            {
+              "path": 39,
+              "elapsed_ns": 3812820325,
+              "recovered": 66
+            },
+            {
+              "path": 54,
+              "elapsed_ns": 3812887869,
+              "recovered": 67
+            },
+            {
+              "path": 36,
+              "elapsed_ns": 3812954823,
+              "recovered": 68
+            },
+            {
+              "path": 68,
+              "elapsed_ns": 3813022455,
+              "recovered": 69
+            },
+            {
+              "path": 66,
+              "elapsed_ns": 3813090206,
+              "recovered": 70
+            },
+            {
+              "path": 59,
+              "elapsed_ns": 3813159987,
+              "recovered": 71
+            },
+            {
+              "path": 62,
+              "elapsed_ns": 3813227947,
+              "recovered": 72
+            }
+          ],
+          "discovery_clock": "collector_elapsed_since_workload_gate",
+          "event_workload_correctness": "PASS",
+          "whole_session_evidence": "COMPLETE",
+          "workload_total_ns": 1919913134,
+          "elapsed_ns": 6007441929,
+          "cpu_ns": 5420000000,
+          "peak_rss_bytes": 868249600,
+          "missing_operations": 0,
+          "matched_operations": 2700,
+          "expected_operations": 2700,
+          "wrong_operations": 0,
+          "unresolved_operations": 0,
+          "acknowledged_operations": 73,
+          "suppressed_operations": 2627,
+          "lost": 0,
+          "dropped": 0,
+          "phases": {
+            "get_stack_trace_ns": 52147984,
+            "raw_key_ns": 11394658,
+            "raw_hash_ns": 1356170,
+            "raw_equality_ns": 1314303,
+            "generation_validation_ns": 383577,
+            "guard_validation_ns": 4622783,
+            "canonical_cache_lock_wait_ns": 457983,
+            "logical_metadata_ns": 1386463,
+            "marker_set_ns": 5059792,
+            "marker_clear_ns": 18382838,
+            "marker_admission_clear_ns": 9327878,
+            "marker_exact_set_ns": 5059792,
+            "marker_exit_clear_ns": 4750088,
+            "marker_admission_clear_count": 16224,
+            "marker_exact_set_count": 16224,
+            "marker_exit_clear_count": 16224,
+            "ring_drain_ns": 243420933,
+            "ring_scan_ns": 0,
+            "ring_payload_slice_ns": 136028271,
+            "ring_decode_ns": 23737495,
+            "ring_append_ns": 0,
+            "ring_consumer_publish_ns": 0,
+            "ring_scanned_records": 0,
+            "ring_ready_records": 8100,
+            "ring_reader_initialization_ns": 0,
+            "collector_join_ns": 39742029,
+            "allocation_measurement_available": 0,
+            "ring_drain_allocated_bytes": 0,
+            "collector_join_allocated_bytes": 0,
+            "observation_conversion_allocated_bytes": 0,
+            "collector_resolution_allocated_bytes": 0,
+            "resolved_evidence_allocated_bytes": 0,
+            "joiner_enqueue_allocated_bytes": 0,
+            "joiner_take_ready_allocated_bytes": 0,
+            "unique_edge_gate_allocated_bytes": 0,
+            "unique_edge_suppression_diagnostic_allocated_bytes": 0,
+            "unique_edge_candidate_ownership_allocated_bytes": 0,
+            "unique_edge_candidate_diagnostic_allocated_bytes": 0,
+            "batch_freeze_allocated_bytes": 0,
+            "collector_polls": 138287,
+            "collector_loop_active_polls": 4176,
+            "collector_loop_idle_polls": 134110,
+            "collector_loop_parks": 0,
+            "collector_loop_parked_ns": 0,
+            "collector_loop_max_consecutive_idle_polls": 3052,
+            "collector_readiness_waits": 0,
+            "collector_readiness_wakeups": 0,
+            "collector_readiness_timeouts": 0,
+            "collector_readiness_spurious_wakeups": 0,
+            "collector_readiness_waited_ns": 0,
+            "collector_receipt_samples": 8100,
+            "collector_receipt_min_ns": 899,
+            "collector_receipt_mean_ns": 2117260,
+            "collector_receipt_max_ns": 49097628,
+            "collector_receipt_p50_upper_ns": 65535,
+            "collector_receipt_p95_upper_ns": 8388607,
+            "collector_receipt_p99_upper_ns": 33554431,
+            "ring_records_copied": 0,
+            "ring_bytes_copied": 0,
+            "ring_busy_records": 0,
+            "ring_discarded_records": 0,
+            "ring_scan_passes": 0,
+            "ring_batches": 4176,
+            "ring_max_batch_records": 792,
+            "ring_drain_p50_upper_records": 1,
+            "ring_drain_p95_upper_records": 3,
+            "ring_drain_p99_upper_records": 31,
+            "kernel_ring_loss": 0,
+            "retained_result_drops": 0,
+            "pending_observation_budget_drops": 0,
+            "pending_observation_queue_drops": 0,
+            "kernel_exact_admissions": 8100,
+            "kernel_marker_detached": 48,
+            "kernel_task_storage_unavailable": 432,
+            "kernel_stale_marker_generation": 0,
+            "serialization_ns": 19029154,
+            "publication_bytes": 33670587,
+            "publication_latency_ns": 24632631,
+            "lock_wait_ns": 126,
+            "peak_retained_bytes": 967019,
+            "native_retained_bytes": 1051975,
+            "native_retention_exhaustions": 0,
+            "publication_count": 1,
+            "coalesced_publications": 0,
+            "failed_publications": 0,
+            "cache_hits": 16138,
+            "cache_misses": 86
+          },
+          "publication_failures": [],
+          "effective_affinity": {
+            "workload": "2",
+            "collector": "4",
+            "workload_launched_pinned": true
+          },
+          "dimensions": {
+            "capture_domain_validity": "DECLARED_OPENAT_ONLY",
+            "transport_completeness": "COMPLETE",
+            "attribution_coverage": "PASS",
+            "dictionary_integrity": "COMPLETE",
+            "lifecycle_validity": "COMPLETE",
+            "runtime_overhead": "NOT_GATED"
+          }
+        }
+      ],
+      "cumulative_recovered": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71
+      ],
+      "cumulative_recall": 1,
+      "all_forks_recover_all_paths": true
+    }
+  ],
+  "performance_gate": "not_measured_against_comparable_baseline",
+  "full_stack_comparison": [
+    {
+      "variant": "dictionary_full_stream",
+      "fork": 1,
+      "shared_paths": 72,
+      "mismatches": [],
+      "status": "PASS",
+      "qualification": "same_immutable_bundle_and_JDK_no_redefinition_workload"
+    },
+    {
+      "variant": "dictionary_unique_edge",
+      "fork": 1,
+      "shared_paths": 72,
+      "mismatches": [],
+      "status": "PASS",
+      "qualification": "same_immutable_bundle_and_JDK_no_redefinition_workload"
+    },
+    {
+      "variant": "inline_full_stream",
+      "fork": 1,
+      "shared_paths": 72,
+      "mismatches": [],
+      "status": "PASS",
+      "qualification": "same_immutable_bundle_and_JDK_no_redefinition_workload"
+    },
+    {
+      "variant": "inline_unique_edge",
+      "fork": 1,
+      "shared_paths": 72,
+      "mismatches": [],
+      "status": "PASS",
+      "qualification": "same_immutable_bundle_and_JDK_no_redefinition_workload"
+    }
+  ]
+}

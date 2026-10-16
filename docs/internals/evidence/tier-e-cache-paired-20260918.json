@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_paired_cache_measurement",
+  "timestamp": "2026-09-18T14:34:57.098376443Z",
+  "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+  "source_dirty_file_count": 26,
+  "environment": {
+    "java_version": "25.0.4",
+    "kernel": "Linux 7.2.4-x64v3-xanmod1",
+    "workload_cpu": 0,
+    "collector_cpu": 2,
+    "rootful_docker": true
+  },
+  "methodology": {
+    "scope": "tier-e-cache-paired",
+    "workload": "oracle",
+    "workload_profile": "syscall_dense",
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "rotated_forks": 5,
+    "operations_per_batch": 100,
+    "sample_count": 450,
+    "paired_statistic": "disabled_minus_enabled median batch workload time",
+    "bootstrap_resamples": 1000
+  },
+  "workload_correctness": "PASS",
+  "whole_session_evidence": "COMPLETE for every Tier E variant",
+  "paired_cache_effects_ns": {
+    "dictionary_full_stream": {
+      "median": 543922,
+      "bootstrap_95_ci": [491356, 763823],
+      "pairs": 5
+    },
+    "dictionary_unique_edge": {
+      "median": 452900,
+      "bootstrap_95_ci": [262254, 597345],
+      "pairs": 5
+    },
+    "inline_full_stream": {
+      "median": 566456,
+      "bootstrap_95_ci": [333647, 686062],
+      "pairs": 5
+    },
+    "inline_unique_edge": {
+      "median": 599337,
+      "bootstrap_95_ci": [429760, 1359954],
+      "pairs": 5
+    }
+  },
+  "decision": {
+    "canonical_cache": "accepted",
+    "reason": "Every paired confidence interval excludes zero in favour of enabled cache while workload correctness and complete Tier E evidence are retained.",
+    "policy_eligibility": false
+  },
+  "artifacts": {
+    "results_jsonl": "build/tier-e-cache-paired-20260918/results.jsonl",
+    "manifest": "build/tier-e-cache-paired-20260918/manifest.json",
+    "runner_log": "/tmp/tier-e-cache-paired-20260918.log"
+  }
+}

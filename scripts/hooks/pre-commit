@@ -61,29 +61,43 @@ fi
 CORE_FILES=$(git diff --cached --name-only | grep -E 'BpfFilter\.kt|LinuxNative\.kt' || true)
 if [ -n "$CORE_FILES" ]; then
   echo "WARNING: Modifications to core security engine files detected: $CORE_FILES"
-  echo "Please ensure these changes are fully validated through './scripts/run_tests.sh'."
+  echo "Please ensure these changes are fully validated through './gradlew build'."
 fi
 
 # 3. Run host unit tests to verify no structural/logic breakages
 # Full log kept at /tmp/mazewall-precommit-test.log: intermittent failures have occurred that
 # leave no trace in result XMLs (issue-20260823-172001 watch item) — always capture the run.
 
-# Portal tests are part of the commit gate when :portal participates in the build.
+# Portal tests are part of the commit gate when :portals:runtime participates in the build.
 # Inclusion is read directly from settings.gradle.kts: probing via './gradlew projects'
 # would cost two full Gradle configuration passes per commit for statically known facts.
 TEST_TASKS=("test")
-if grep -Eq '^[[:space:]]*include\(":portal"\)' settings.gradle.kts; then
-  TEST_TASKS+=(":portal:integrationTest" ":portal:test")
+if grep -Eq '^[[:space:]]*include\(":portals:runtime"\)' settings.gradle.kts; then
+  TEST_TASKS+=(":portals:runtime:integrationTest" ":portals:runtime:test")
 else
   # Explicit operator exclusion (like :tools:orchestrator) must stay visible,
   # never silent: skipping the gate segment without notice is a bypass.
-  echo "!!! GATE DEGRADED: ':portal' is not included in settings.gradle.kts."
-  echo "!!! Committing WITHOUT :portal integration tests. Re-include before merging."
+  echo "!!! GATE DEGRADED: ':portals:runtime' is not included in settings.gradle.kts."
+  echo "!!! Committing WITHOUT :portals:runtime integration tests. Re-include before merging."
 fi
 
 echo "==> Running host unit tests and portal integration tests..."
 echo "==> Test tasks to run: ${TEST_TASKS[*]}"
-if ! ./gradlew "${TEST_TASKS[@]}" -x check --no-configuration-cache > /tmp/mazewall-precommit-test.log 2>&1; then
+# Gradle test workers write module-local binary result files.  Concurrent commit hooks
+# in this checkout can otherwise race on those files and surface as EOF/missing-result
+# failures unrelated to either change.  Serialize only this shared-output gate.
+PRECOMMIT_TEST_LOCK=/tmp/mazewall-precommit-test.lock
+if ! (
+  # Audits above need the committing repository's Git context. Gradle tests may
+  # operate on foreign repositories, so drop only Git's repository-local names
+  # in this subprocess; preserve the hook context and all other environment.
+  GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars) || exit $?
+  for name in $GIT_LOCAL_ENV_VARS; do
+    unset "$name" || exit $?
+  done
+  flock -w 900 "$PRECOMMIT_TEST_LOCK" \
+    ./gradlew "${TEST_TASKS[@]}" -x check --no-configuration-cache --no-parallel
+) > /tmp/mazewall-precommit-test.log 2>&1; then
   echo "--- Failing tests ---"
   grep -E "FAILED$|FAILED |e: " /tmp/mazewall-precommit-test.log | head -20 || true
   echo "-------------------"

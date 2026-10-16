@@ -1,6 +1,7 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.profiler.engine.TraceEvent
+import io.mazewall.platform.seccomp.daemon.SeccompStreamEnd
+import io.mazewall.profiler.api.TraceEvent
 
 /**
  * States representing the parser progress of a profiler trace listener reading from Unix socket.
@@ -34,4 +35,17 @@ internal sealed interface TraceListenerState {
 
     /** The listener socket connection was terminated or closed. */
     data object Disconnected : TraceListenerState
+
+    /** The daemon explicitly confirmed the normal end of the logical stream. */
+    data class Drained(
+        val reason: SeccompStreamEnd,
+    ) : TraceListenerState
+
+    /** The daemon did not prove it accepted the listener FD; no event stream is trusted. */
+    data object HandshakeRejected : TraceListenerState
+
+    /** Invalid parser progress or frame identity; close preserves this terminal diagnostic. */
+    data class ProtocolViolation(
+        val reason: String,
+    ) : TraceListenerState
 }

@@ -1,0 +1,29 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"fmt"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+func (t *Tracer) auxiliaryContext(ctx context.Context) context.Context {
+	if t.auxiliaryScope != nil {
+		return t.auxiliaryScope.Context()
+	}
+	return ctx
+}
+func (t *Tracer) StopAuxiliary(ctx context.Context) error {
+	if t.auxiliaryScope == nil {
+		return fmt.Errorf("owned auxiliary scope not initialized")
+	}
+	return t.auxiliaryScope.Stop(ctx)
+}
+func newAuxiliaryContext(ctx context.Context, cfg *Config) (context.Context, *periodiccaller.OwnedScope) {
+	if cfg.HotSpotEpochTarget.PID == 0 {
+		return ctx, nil
+	}
+	s := periodiccaller.NewOwnedScope(ctx, cfg.OnHotSpotFatal)
+	return s.Context(), s
+}

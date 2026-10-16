@@ -1,0 +1,54 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import (
+	"encoding/binary"
+	"fmt"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+// selectScopePC preserves the provider's greatest-preceding/first-exact rule.
+func selectScopePC(scopes []byte, stride, pcOffset, scopeOffset uint, ripDelta int32) (uint32, libpf.HotSpotScopeLookup, error) {
+	if stride == 0 || pcOffset > stride || stride-pcOffset < 4 || scopeOffset > stride || stride-scopeOffset < 4 || uint(len(scopes))%stride != 0 {
+		return 0, libpf.HotSpotScopeUnknown, fmt.Errorf("invalid HotSpot PC descriptor layout")
+	}
+	best := int32(-2)
+	var scope uint32
+	mode := libpf.HotSpotScopeMethodOnly
+	for i := uint(0); i < uint(len(scopes)); i += stride {
+		pc := int32(binary.LittleEndian.Uint32(scopes[i+pcOffset : i+pcOffset+4]))
+		if pc >= best && pc <= ripDelta {
+			best = pc
+			scope = binary.LittleEndian.Uint32(scopes[i+scopeOffset : i+scopeOffset+4])
+			mode = libpf.HotSpotScopePrecedingPC
+			if pc == ripDelta {
+				mode = libpf.HotSpotScopeExactPC
+				break
+			}
+		}
+	}
+	if scope == 0 {
+		mode = libpf.HotSpotScopeMethodOnly
+	}
+	return scope, mode, nil
+}
+
+// Reintern value copies only; never mutate an interned frame or shared slice.
+func finishScopeQuality(frames *libpf.Frames, start int, err error) {
+	for i := start; i < len(*frames); i++ {
+		f := (*frames)[i].Value()
+		q := &f.HotSpotQuality
+		if q.ScopeLookup != libpf.HotSpotScopeExactPC && q.ScopeLookup != libpf.HotSpotScopePrecedingPC {
+			continue
+		}
+		q.ScopeWalk = libpf.HotSpotScopeWalkReturned
+		if err != nil {
+			q.ScopeWalk = libpf.HotSpotScopeWalkPartial
+			q.Diagnostic = libpf.Intern(err.Error())
+		}
+		var copy libpf.Frames
+		copy.Append(&f)
+		(*frames)[i] = copy[0]
+	}
+}

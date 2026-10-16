@@ -1,0 +1,6 @@
+// Scoped publication only; coordinator owns root settings inclusion.
+settingsEvaluated { settings ->
+    if (new File(settings.settingsDir, 'enforcer/build.gradle.kts').isFile()) {
+        settings.include(':integrations:spring:mazewall-spring-boot-starter')
+    }
+}

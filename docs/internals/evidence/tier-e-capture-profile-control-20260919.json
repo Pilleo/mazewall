@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_capture_domain_paired_control",
+  "run_date": "2026-09-19",
+  "artifact": {
+    "directory": "build/tier-e-capture-profile-control-20260919",
+    "manifest_sha256": "429233cfb5721d706394094491f2b9c6eff6ceabd2e414f16c791721690804f0",
+    "results_sha256": "264cbf6d942401005a013f790c372473f5d611b8d3092ade18fb4b63598d7622",
+    "benchmark_log_sha256": "8498e061b1b83d83213717c7c4e3f9034f5698f3c03fdf7af353d4daf9918a03"
+  },
+  "method": {
+    "execution": "rootful Docker",
+    "scope": "tier-e-capture-profile",
+    "comparison": "full exact capture versus validated jdk25-unix-openat0 capture domain",
+    "forks": 5,
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "operations_per_worker": 1000
+  },
+  "result": {
+    "workload_correctness": "PASS",
+    "tier_e_evidence": "COMPLETE",
+    "policy_eligibility": false,
+    "full_minus_narrowed_median_ns_per_100_operation_batch": 350642,
+    "paired_95_percent_interval_ns": [123379, 566421],
+    "interval_excludes_zero": true
+  },
+  "native_phase_diagnostics": {
+    "full": {
+      "cache_admissions": 39080,
+      "get_stack_trace_ns": 140643930,
+      "raw_key_ns": 12703422,
+      "logical_metadata_ns": 1078067,
+      "marker_set_ns": 62918500,
+      "get_stack_trace_ns_per_cache_admission": 3599.9
+    },
+    "jdk25_unix_openat0": {
+      "cache_admissions": 13000,
+      "get_stack_trace_ns": 37855509,
+      "raw_key_ns": 4284503,
+      "logical_metadata_ns": 296525,
+      "marker_set_ns": 23553704,
+      "get_stack_trace_ns_per_cache_admission": 2912.0
+    }
+  },
+  "interpretation": "Capture-domain breadth has a supported cost in this workload. Native phase counters directly identify GetStackTrace as an exact-capture CPU component: full capture adds 26,080 cache admissions and 102.8 ms of GetStackTrace time over the narrowed profile. Collector cadence remains a separate end-to-end wall-time aggregate, so this does not claim that all residual overhead is unavoidable stack walking.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "partially_attributed"
+  }
+}

@@ -1,18 +1,27 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.LinuxNative
-import io.mazewall.Policy
-import io.mazewall.core.NativeArg
-import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
 import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.containmentFailureForCaller
 import io.mazewall.ffi.memory.nativeScope
 import io.mazewall.ffi.memory.readString
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.NativeArg
+import io.mazewall.platform.syscall.PrctlCommand
 import org.junit.jupiter.api.Test
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
@@ -34,11 +43,13 @@ class PrctlProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
     fun `prctl PR_SET_NAME is allowed under default strict policy`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
 
         try {
-            safeExecutor
+            executor
                 .submit {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
                     nativeScope {
                         val nameSeg = allocateFrom("test-thread-name")
                         val res =
@@ -48,9 +59,11 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         ).getOrThrow("prctl(PR_SET_NAME)")
                         assertEquals(0, res)
                     }
-                }.get()
+                    }
+                }.get(10, TimeUnit.SECONDS)
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -58,11 +71,13 @@ class PrctlProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
     fun `prctl PR_GET_NAME is allowed under default strict policy`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
 
         try {
-            safeExecutor
+            executor
                 .submit {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
                     nativeScope {
                         val nameBuffer = allocate(16)
                         val res =
@@ -75,9 +90,11 @@ class PrctlProtectionTest : BaseIntegrationTest() {
                         val name = nameBuffer.readString(0L)
                         assertTrue(name.isNotEmpty(), "Expected non-empty thread name")
                     }
-                }.get()
+                    }
+                }.get(10, TimeUnit.SECONDS)
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -85,19 +102,24 @@ class PrctlProtectionTest : BaseIntegrationTest() {
     @EnabledIfLinuxAndSupported
     fun `unsafe prctl options are blocked by default strict policy`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
 
         try {
             assertFailsWith<ExecutionException> {
-                safeExecutor
+                executor
                     .submit {
+                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                        receipt.requireInstalled()
+                        runCatching {
                         // Option 25 is PR_SET_MM (hazardous process memory manipulation), which is blocked
 
 LinuxNative.process
     .prctl(
     PrctlCommand.SetMm(25),
 ).getOrThrow("prctl(PR_SET_MM)")
-                    }.get()
+                        }.getOrElse { throw containmentFailureForCaller(it) }
+                        }
+                     }.get(10, TimeUnit.SECONDS)
             }.let { e ->
                 assertTrue(
                     e.cause is ContainmentViolationException,
@@ -106,6 +128,7 @@ LinuxNative.process
             }
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 
@@ -113,11 +136,13 @@ LinuxNative.process
     @EnabledIfLinuxAndSupported
     fun `unsafe prctl options are allowed when allowUnsafePrctl is explicitly set`() {
         val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().allowUnsafePrctl().build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowUnsafePrctl().build()
 
         try {
-            safeExecutor
+            executor
                 .submit {
+                    ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
                     // Option 25 is PR_SET_MM. Without BPF blocking, it will not be blocked by seccomp
                     // (though the kernel might return EINVAL/EPERM based on standard kernel capabilities,
                     // it won't be blocked by seccomp BPF with EPERM, so it won't trigger ContainmentViolationException).
@@ -132,9 +157,11 @@ LinuxNative.process
                         res is LinuxNative.SyscallResult.Error && res.errno != 1,
                         "Expected prctl(25) to not be blocked by seccomp (errno != EPERM, got $res)",
                     )
-                }.get()
+                    }
+                }.get(10, TimeUnit.SECONDS)
         } finally {
             executor.shutdown()
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS))
         }
     }
 }

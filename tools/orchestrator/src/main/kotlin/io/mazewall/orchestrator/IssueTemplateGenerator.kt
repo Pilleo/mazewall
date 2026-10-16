@@ -162,9 +162,9 @@ class IssueTemplateGenerator(
         ":profiler" -> "profiler/src/main/kotlin/io/mazewall/profiler/Profiler.kt"
         ":platform" -> "platform/src/main/kotlin/io/mazewall/core/Syscall.kt"
         ":tools:orchestrator" -> "tools/orchestrator/src/main/kotlin/io/mazewall/orchestrator/BacklogParser.kt"
-        ":portal" -> "portal/build.gradle.kts"
-        ":portal-codegen" -> "portal-codegen/build.gradle.kts"
-        ":portal-worker" -> "portal-worker/build.gradle.kts"
+        ":portals:runtime" -> "portal/build.gradle.kts"
+        ":portals:codegen" -> "portals/codegen/build.gradle.kts"
+        ":portals:worker" -> "portals/worker/build.gradle.kts"
         ":demos:cli-demo" -> "demos/cli-demo/build.gradle.kts"
         ":demos:vulnerable-web-app" -> "demos/vulnerable-web-app/build.gradle.kts"
         ":demos:agent-sandbox-demo" -> "demos/agent-sandbox-demo/build.gradle.kts"
@@ -195,9 +195,9 @@ class IssueTemplateGenerator(
             ":platform",
             ":enforcer",
             ":profiler",
-            ":portal",
-            ":portal-codegen",
-            ":portal-worker",
+            ":portals:runtime",
+            ":portals:codegen",
+            ":portals:worker",
             ":demos:cli-demo",
             ":demos:vulnerable-web-app",
             ":demos:agent-sandbox-demo",

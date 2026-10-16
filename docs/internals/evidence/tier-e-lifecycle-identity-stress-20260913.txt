@@ -1,0 +1,26 @@
+Tier E lifecycle identity stress evidence
+Date: 2026-09-13
+Commit: bd8b3966
+Fixture: lifecycle_identity_stress_fixture
+
+Command:
+cmake -S profiler-native -B /tmp/tier-e-generation-build
+cmake --build /tmp/tier-e-generation-build -j2
+ctest --test-dir /tmp/tier-e-generation-build --output-on-failure
+
+Result:
+100% tests passed, 0 tests failed out of 13
+Total Test time (real) =   0.78 sec
+lifecycle_identity_stress_fixture: cycles=12 status=PASS
+
+Contract checks:
+- fork/exec identity transition: PASS
+- old exact invocation without validated re-entry: REJECTED
+- validated re-entry: ACCEPTED
+- detached old context: REJECTED
+- stale replacement identity: REJECTED
+
+This fixture is native lifecycle evidence only. Capture-domain, transport,
+dictionary, and runtime-overhead dimensions are covered by their separate
+Tier E artifacts and are intentionally marked INCOMPLETE in the companion
+machine-readable record for this fixture.

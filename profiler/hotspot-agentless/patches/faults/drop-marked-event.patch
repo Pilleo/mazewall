@@ -1,0 +1,20 @@
+--- a/program.bpf.c
++++ b/program.bpf.c
+@@ -106,6 +106,17 @@
++	// Isolated test image only: discard operation 42 after occurrence allocation.
++	// The normal gadget has no runtime fault switch or injection code.
++	if (event->argument_read == 45 && event->filename[0] == '/' &&
++	    event->filename[9] == 'm' && event->filename[10] == 'w' &&
++	    event->filename[11] == '-' && event->filename[12] == 'b' &&
++	    event->filename[34] == '-' && event->filename[35] == '0' &&
++	    event->filename[36] == '0' && event->filename[37] == '0' &&
++	    event->filename[38] == '0' && event->filename[39] == '4' && event->filename[40] == '2') {
++		gadget_discard_buf(event);
++		return 0;
++	}
+ 	// The upstream entry can exit during process discovery without producing a
+ 	// reference. Never inherit the previous event's per-CPU return value.
+ 	struct generic_param *params = bpf_map_lookup_elem(&otel_generic_params, &zero);
+ 	if (params)
+ 		params->correlation_id = 0;
+ 	__u64 epoch_before = 0;

@@ -1,0 +1,35 @@
+{
+  "kind": "tier_e_exec_transition_lifecycle_evidence",
+  "date": "2026-09-18",
+  "environment": "rootful Docker, privileged, pinned benchmark CPUs",
+  "command": "MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-marker-transport-comparable MAZEWALL_TIER_E_LIFECYCLE_SCENARIO=exec_transition MAZEWALL_TIER_E_FORKS=1 MAZEWALL_TIER_E_WARMUPS=0 MAZEWALL_TIER_E_BATCHES=1 MAZEWALL_TIER_E_ITERATIONS=100 scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-usdt-exec-lifecycle-20260918",
+  "artifact": "build/tier-e-usdt-exec-lifecycle-20260918/results.jsonl",
+  "fast_validation_scope": {
+    "scope": "tier-e-lifecycle",
+    "artifact": "build/tier-e-lifecycle-fast-retry-20260918/results.jsonl",
+    "arms": 4,
+    "result": "PASS: dictionary full/unique crossed with Uprobe/USDT; excludes baseline and USER_NOTIF because lifecycle proof does not require performance controls."
+  },
+  "result": "PASS",
+  "transport_selection": {
+    "production_auto": "USDT when the versioned note validates",
+    "compatibility_fallback": "Uprobe only when AUTO cannot validate the note",
+    "explicit_usdt": "fail_closed_on_note_validation_failure"
+  },
+  "tier_e_variants": {
+    "dictionary_full_stream_marker_uprobe": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "resolved": 0, "ambient_inactive": 220 },
+    "dictionary_full_stream_marker_usdt": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "resolved": 0, "ambient_inactive": 214 },
+    "dictionary_unique_edge_marker_uprobe": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "resolved": 0, "ambient_inactive": 206 },
+    "dictionary_unique_edge_marker_usdt": { "workload_correctness": "PASS", "whole_session_evidence": "INCOMPLETE", "resolved": 0, "ambient_inactive": 208 }
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "incomplete",
+    "attribution_coverage": "incomplete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "not_measured",
+    "policy_eligibility": false
+  },
+  "interpretation": "A successful exec clears the 24-byte task-storage marker after sched_process_exec. The replaced JVM cannot contribute exact attribution, so incomplete evidence and explicit inactive observations are required outcomes; no performance statistic is emitted for the intentionally replaced JVM."
+}

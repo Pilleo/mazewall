@@ -1,0 +1,45 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"fmt"
+	"github.com/cilium/ebpf"
+	"math"
+)
+
+func validateEventFinalizationScope(i *ebpfInstance, ustack, otel bool) error {
+	if ustack || otel || i.collectionSpec == nil || len(i.collectionSpec.Programs) != 1 || len(i.tracers) != 1 || len(i.rawDetachers) != 0 || len(i.perfFds) != 0 || len(i.networkTracers) != 0 || len(i.tcHandlers) != 0 || len(i.uprobeTracers) != 0 || len(i.iterators) != 0 || len(i.mapIters) != 0 {
+		return fmt.Errorf("unsupported event finalization writer scope")
+	}
+	p := i.collectionSpec.Programs["capture_openat"]
+	m := i.collectionSpec.Maps["events"]
+	counter := i.collectionSpec.Maps["events_lost_samples"]
+	t := i.tracers["openat"]
+	if p == nil || p.Type != ebpf.Kprobe || p.SectionName != "kprobe/__x64_sys_openat" || m == nil || m.Type != ebpf.RingBuf || t == nil || t.mapName != "events" {
+		return fmt.Errorf("event finalization requires the single openat event ring")
+	}
+	if counter == nil || counter.Type != ebpf.PerCPUArray || counter.KeySize != 4 || counter.ValueSize != 8 || counter.MaxEntries != 1 {
+		return fmt.Errorf("owned event reserve counter layout unsupported")
+	}
+	return nil
+}
+func validateEventFinalizationProfile(i *ebpfInstance, ustack, otel, strictFull bool) error {
+	if strictFull {
+		if !ustack || !otel {
+			return fmt.Errorf("strict full drain requires both owned stack helpers")
+		}
+		return validateEventFinalizationScope(i, false, false)
+	}
+	return validateEventFinalizationScope(i, ustack, otel)
+}
+func sumEventReserveFailures(counts []uint64) (uint64, error) {
+	var sum uint64
+	for _, count := range counts {
+		if count > math.MaxUint64-sum {
+			return 0, fmt.Errorf("native reserve failure counter sum overflow")
+		}
+		sum += count
+	}
+	return sum, nil
+}

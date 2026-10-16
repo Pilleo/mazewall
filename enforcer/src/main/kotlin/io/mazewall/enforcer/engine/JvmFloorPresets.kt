@@ -1,6 +1,6 @@
 package io.mazewall.enforcer.engine
 
-import io.mazewall.core.Syscall
+import io.mazewall.platform.syscall.Syscall
 
 /**
  * The minimal ALLOW_LIST syscall set required by ANY policy that permits post-install execution
@@ -15,7 +15,7 @@ import io.mazewall.core.Syscall
  * Operators extending or trimming these sets MUST re-run the differential suite with runtime
  * self-verification enabled (`-Dio.mazewall.selfVerify=true`) before shipping narrower floors.
  */
-public object JvmFloorPresets {
+internal object JvmFloorPresets {
     /** Syscalls the JVM needs to lazily read and define classes after containment is active. */
     public val BOOTSTRAP_READ_CLOSURE: Array<Syscall> = arrayOf(
         Syscall.READ,

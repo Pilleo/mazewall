@@ -11,8 +11,8 @@ import java.util.logging.Logger
 /**
  * Strategy interface for identifying containment violations from exceptions.
  */
-fun interface ViolationMatcher {
-    fun matches(t: Throwable): Boolean
+public fun interface ViolationMatcher {
+    public fun matches(t: Throwable): Boolean
 }
 
 /**
@@ -22,13 +22,13 @@ fun interface ViolationMatcher {
  * resembles a permission failure. Callers must not treat inferred evidence as proof of a kernel
  * decision.
  */
-data class ContainmentDiagnostic(
-    val cause: Throwable,
-    val evidence: ContainmentViolationEvidence,
-    val violation: ContainmentViolationException? = null,
+public data class ContainmentDiagnostic(
+    public val cause: Throwable,
+    public val evidence: ContainmentViolationEvidence,
+    public val violation: ContainmentViolationException? = null,
 )
 
-class ContainmentViolationDetector
+public class ContainmentViolationDetector
     @JvmOverloads
     constructor(
     private val customMatchers: List<ViolationMatcher> = emptyList(),
@@ -112,27 +112,27 @@ class ContainmentViolationDetector
     /**
      * Registers a custom violation matcher.
      */
-    fun registerMatcher(matcher: ViolationMatcher) {
+    public fun registerMatcher(matcher: ViolationMatcher) {
         MATCHERS.add(matcher)
     }
 
     /**
      * Registers a custom violation phrase (matched with word boundaries, case-insensitive).
      */
-    fun registerPhrase(phrase: String) {
+    public fun registerPhrase(phrase: String) {
         customPhrases.add(phrase)
     }
 
     /**
      * Registers a custom violation regex.
      */
-    fun registerRegex(regex: Regex) {
+    public fun registerRegex(regex: Regex) {
         customRegexes.add(regex)
     }
 
-    fun getRegisteredPhrases(): List<String> = customPhrases.toList()
+    public fun getRegisteredPhrases(): List<String> = customPhrases.toList()
 
-    fun getRegisteredRegexes(): List<Regex> = customRegexes.toList()
+    public fun getRegisteredRegexes(): List<Regex> = customRegexes.toList()
 
     private fun getCustomPhrasesRegex(): Regex? {
         val phrases = customPhrases.toList()
@@ -144,7 +144,7 @@ class ContainmentViolationDetector
     /**
      * Resets matchers to default ones. Useful for testing.
      */
-    fun resetToDefaults() {
+    public fun resetToDefaults() {
         customPhrases.clear()
         customPhrases.addAll(initialCustomPhrases)
         customRegexes.clear()
@@ -179,7 +179,7 @@ class ContainmentViolationDetector
      * Finds the ranges of all violation "reason" phrases in the message.
      * This intentionally excludes generic "Cannot run" prefixes to aid in path extraction.
      */
-    fun findViolationRanges(msg: String): Sequence<IntRange> {
+    public fun findViolationRanges(msg: String): Sequence<IntRange> {
         val defaultRanges = REASON_PHRASES_REGEX.findAll(msg).map { it.range }
         val customPhrasesRegex = getCustomPhrasesRegex()
         val customPhrasesRanges = if (customPhrasesRegex != null) {
@@ -194,7 +194,7 @@ class ContainmentViolationDetector
             .sortedWith(compareBy({ it.first }, { it.last }))
     }
 
-    fun isContainmentViolation(t: Throwable): Boolean {
+    public fun isContainmentViolation(t: Throwable): Boolean {
         return diagnose(t)?.evidence == ContainmentViolationEvidence.OBSERVED_POLICY_DENIAL
     }
 
@@ -202,7 +202,7 @@ class ContainmentViolationDetector
      * Diagnoses [t] across its causes and suppressed exceptions without relying on message parsing
      * for confirmed-denial semantics. Structured violations are preferred over inferred matches.
      */
-    fun diagnose(t: Throwable): ContainmentDiagnostic? {
+    public fun diagnose(t: Throwable): ContainmentDiagnostic? {
         val structured = findStructuredViolation(t, identitySet())
         if (structured != null) {
             return ContainmentDiagnostic(structured, structured.evidence, structured)
@@ -211,12 +211,12 @@ class ContainmentViolationDetector
         return ContainmentDiagnostic(inferred, ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE)
     }
 
-    fun findViolationCause(t: Throwable): Throwable? {
+    public fun findViolationCause(t: Throwable): Throwable? {
         return diagnose(t)?.cause
     }
 
     /** Returns the most useful structured violation across causes before suppressed failures. */
-    fun findStructuredViolation(t: Throwable): ContainmentViolationException? = findStructuredViolation(t, identitySet())
+    public fun findStructuredViolation(t: Throwable): ContainmentViolationException? = findStructuredViolation(t, identitySet())
 
     private fun findStructuredViolation(
         t: Throwable?,
@@ -246,10 +246,10 @@ class ContainmentViolationDetector
         return MATCHERS.any { it.matches(t) }
     }
 
-    companion object {
+    public companion object {
         private val ERRNO_VIOLATION_REGEX = Regex("""\b(error|errno)[=:]?\s*(1|13|22)\b""", RegexOption.IGNORE_CASE)
 
-        val DENIED_PHRASES = arrayOf(
+        public val DENIED_PHRASES: Array<String> = arrayOf(
             "Operation not permitted",
             "Permission denied",
             "refusé",
@@ -280,26 +280,26 @@ class ContainmentViolationDetector
 
         private val defaultInstance = ContainmentViolationDetector()
 
-        fun isContainmentViolation(t: Throwable): Boolean = defaultInstance.isContainmentViolation(t)
+        public fun isContainmentViolation(t: Throwable): Boolean = defaultInstance.isContainmentViolation(t)
 
-        fun diagnose(t: Throwable): ContainmentDiagnostic? = defaultInstance.diagnose(t)
+        public fun diagnose(t: Throwable): ContainmentDiagnostic? = defaultInstance.diagnose(t)
 
-        fun findViolationCause(t: Throwable): Throwable? = defaultInstance.findViolationCause(t)
+        public fun findViolationCause(t: Throwable): Throwable? = defaultInstance.findViolationCause(t)
 
-        fun findStructuredViolation(t: Throwable): ContainmentViolationException? = defaultInstance.findStructuredViolation(t)
+        public fun findStructuredViolation(t: Throwable): ContainmentViolationException? = defaultInstance.findStructuredViolation(t)
 
-        fun findViolationRanges(msg: String): Sequence<IntRange> = defaultInstance.findViolationRanges(msg)
+        public fun findViolationRanges(msg: String): Sequence<IntRange> = defaultInstance.findViolationRanges(msg)
 
-        fun registerMatcher(matcher: ViolationMatcher) = defaultInstance.registerMatcher(matcher)
+        public fun registerMatcher(matcher: ViolationMatcher): Unit = defaultInstance.registerMatcher(matcher)
 
-        fun registerPhrase(phrase: String) = defaultInstance.registerPhrase(phrase)
+        public fun registerPhrase(phrase: String): Unit = defaultInstance.registerPhrase(phrase)
 
-        fun registerRegex(regex: Regex) = defaultInstance.registerRegex(regex)
+        public fun registerRegex(regex: Regex): Unit = defaultInstance.registerRegex(regex)
 
-        fun getRegisteredPhrases(): List<String> = defaultInstance.getRegisteredPhrases()
+        public fun getRegisteredPhrases(): List<String> = defaultInstance.getRegisteredPhrases()
 
-        fun getRegisteredRegexes(): List<Regex> = defaultInstance.getRegisteredRegexes()
+        public fun getRegisteredRegexes(): List<Regex> = defaultInstance.getRegisteredRegexes()
 
-        fun resetToDefaults() = defaultInstance.resetToDefaults()
+        public fun resetToDefaults(): Unit = defaultInstance.resetToDefaults()
     }
 }

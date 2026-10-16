@@ -1,0 +1,2 @@
+Premain-Class: RedefinitionAgent
+Can-Retransform-Classes: true

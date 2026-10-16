@@ -1,0 +1,120 @@
+//go:build mw_kernel
+
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"go.opentelemetry.io/ebpf-profiler/kallsyms"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestKernelDefinitionPerfDrainAuxiliaryHeldCallback(t *testing.T) {
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.PerfEventArray, KeySize: 4, ValueSize: 4, MaxEntries: uint32(cpus)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer events.Close()
+	payload, err := ebpf.NewMap(&ebpf.MapSpec{Type: ebpf.Array, KeySize: 4, ValueSize: 8, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer payload.Close()
+	program, err := ebpf.NewProgram(&ebpf.ProgramSpec{Type: ebpf.XDP, License: "GPL", Instructions: asm.Instructions{
+		asm.Mov.Reg(asm.R6, asm.R1), asm.StoreImm(asm.R10, -4, 0, asm.Word), asm.LoadMapPtr(asm.R1, payload.FD()), asm.Mov.Reg(asm.R2, asm.R10), asm.Add.Imm(asm.R2, -4), asm.FnMapLookupElem.Call(), asm.JEq.Imm(asm.R0, 0, "exit"), asm.Mov.Reg(asm.R4, asm.R0), asm.Mov.Reg(asm.R1, asm.R6), asm.LoadMapPtr(asm.R2, events.FD()), asm.LoadImm(asm.R3, 0xffffffff, asm.DWord), asm.Mov.Imm(asm.R5, 8), asm.FnPerfEventOutput.Call(), asm.JEq.Imm(asm.R0, 0, "ok"), asm.Mov.Imm(asm.R0, 0).WithSymbol("exit"), asm.Return(), asm.Mov.Imm(asm.R0, 2).WithSymbol("ok"), asm.Return(),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer program.Close()
+	definitionCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scope := periodiccaller.NewOwnedScope(definitionCtx, nil)
+	tr := &Tracer{auxiliaryScope: scope}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	metrics := startPerfEventMonitor(scope.Context(), events, func(data []byte) {
+		close(entered)
+		<-release
+		if binary.LittleEndian.Uint64(data) != 42 {
+			t.Error("native callback payload invalid after reader retirement")
+		}
+	}, 4096)
+	readerClosed := make(chan struct{})
+	if err := scope.AddCloser(func() error { close(readerClosed); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	zero := uint32(0)
+	packet := make([]byte, 8)
+	binary.LittleEndian.PutUint64(packet, 42)
+	if err := payload.Update(&zero, packet, ebpf.UpdateAny); err != nil {
+		t.Fatal(err)
+	}
+	ret, _, err := program.Test(make([]byte, 64))
+	if err != nil || ret != 2 {
+		t.Fatal("native auxiliary publication failed", ret, err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("native callback missing")
+	}
+	expired, stop := context.WithCancel(context.Background())
+	stop()
+	if err := tr.StopAuxiliary(expired); !errors.Is(err, context.Canceled) || scope.Joined() {
+		t.Fatal("held native callback allowed retirement", err)
+	}
+	select {
+	case <-readerClosed:
+	case <-time.After(time.Second):
+		t.Fatal("native reader did not close/wake")
+	}
+	if definitionCtx.Err() != nil {
+		t.Fatal("definition/enrichment context canceled by auxiliary stop")
+	}
+	if _, err := events.Info(); err != nil {
+		t.Fatal("borrowed event map retired under active callback", err)
+	}
+	unblock()
+	ctx, deadline := context.WithTimeout(context.Background(), time.Second)
+	defer deadline()
+	if err := tr.StopAuxiliary(ctx); err != nil || !scope.Joined() {
+		t.Fatal("native readout not woken/joined", err)
+	}
+	lost, empty, readErr := metrics()
+	if lost != 0 || empty != 0 || readErr != 0 {
+		t.Fatal("expected reader wake misreported", lost, empty, readErr)
+	}
+	t.Log("real auxiliary perf reader woken and joined; held callback retained borrowed map; definition context remained live")
+}
+
+func TestKernelDefinitionPerfDrainAuxiliaryIdleNetlink(t *testing.T) {
+	symbols, err := kallsyms.NewSymbolizer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	if err := symbols.StartMonitor(scope.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := scope.Stop(ctx); err != nil || !scope.Joined() {
+		t.Fatal("idle native kobject poller failed checked wake/join", err)
+	}
+	t.Log("idle native kobject poller joined after deadline wake; socket retired after worker completion")
+}

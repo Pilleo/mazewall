@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_ring_argument_view_paired_control",
+  "run_date": "2026-09-19",
+  "artifact": "build/tier-e-ring-argument-view-20260919/results.jsonl",
+  "artifact_sha256": "2d03cfb7407eb2a5ea4f75034b2cae29a45dc2aa72e164b1ed95f3dc0c2fd18d",
+  "benchmark_log_sha256": "f9bf04060d9227485a89efc281d970840766620ddb5c25b1fc2b3c039ad774da",
+  "environment": {
+    "execution": "rootful Docker with pinned distinct physical CPUs",
+    "scope": "tier-e-ring-argument-view",
+    "workload": "syscall_dense oracle",
+    "marker_transport": "AUTO; validated USDT selected",
+    "ring_decode": "direct",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "correctness": {
+    "baseline_outputs": 5,
+    "lazy_outputs": 5,
+    "eager_outputs": 5,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "excluded_pairs": 0,
+    "policy_eligibility": false
+  },
+  "median_ring_drain_allocation_bytes_per_ready_record": {
+    "lazy": 407.31,
+    "eager_control": 441.04,
+    "lazy_saved": 33.73
+  },
+  "median_collector_join_allocation_bytes_per_ready_record": {
+    "lazy": 590.02,
+    "eager_control": 593.02
+  },
+  "paired_workload_effect_ns": {
+    "eager_minus_lazy_median": -13613,
+    "ci_95_low": -56092,
+    "ci_95_high": 108002,
+    "pairs": 5
+  },
+  "decision": "Lazy compatibility-view construction is accepted as an allocation reduction because it preserves complete exact evidence and saves 33.73 bytes per ready record. The paired workload interval includes zero, so no application-latency improvement is claimed.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "incomplete"
+  }
+}

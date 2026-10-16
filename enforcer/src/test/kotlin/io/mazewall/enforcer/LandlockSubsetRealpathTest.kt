@@ -1,15 +1,22 @@
 package io.mazewall.enforcer
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Platform
-import io.mazewall.PlatformProvider
-import io.mazewall.Policy
-import io.mazewall.RealPlatformProvider
-import io.mazewall.core.SandboxedPath
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.PlatformProvider
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -38,14 +45,18 @@ class LandlockSubsetRealpathTest {
 
             override fun getLandlockAbiVersion(): Int = 5
 
+            override fun getLandlockCapability(): io.mazewall.enforcer.api.KernelCapability<Int> =
+                io.mazewall.enforcer.api.KernelCapability
+                .Available(5)
+
             override fun hasKernelSeccompSupport(): Boolean = true
 
             override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1)
         }
         Platform.setProvider(mockPlatform)
-        val mockProcess = object : io.mazewall.MockNativeProcess() {
-            override fun prctl(command: io.mazewall.core.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-                if (command is io.mazewall.core.PrctlCommand.GetSeccomp) {
+        val mockProcess = object : io.mazewall.enforcer.api.MockNativeProcess() {
+            override fun prctl(command: io.mazewall.platform.syscall.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (command is io.mazewall.platform.syscall.PrctlCommand.GetSeccomp) {
                     return LinuxNative.SyscallResult.Success(2L)
                 }
                 return super.prctl(command)
@@ -62,12 +73,12 @@ class LandlockSubsetRealpathTest {
         Files.createSymbolicLink(link, realDir)
 
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(realDir.toString()).build(),
+            WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(realDir.toString()).build(),
         )
 
         // Same dentry spelled through the symlink: must NOT be treated as permission expansion.
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(link.toString()).build(),
+            WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(link.toString()).build(),
         )
     }
 
@@ -77,12 +88,12 @@ class LandlockSubsetRealpathTest {
         val allowed = Files.createDirectories(tempDir.resolve("allowed"))
 
         ContainedExecutors.installOnCurrentThread(
-            Policy.threadLocalBuilder().allowFsRead(allowed.toString()).build(),
+            WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(allowed.toString()).build(),
         )
 
         val expansion = assertFailsWith<IllegalStateException> {
             ContainedExecutors.installOnCurrentThread(
-                Policy.threadLocalBuilder().allowFsRead(tempDir.toString()).build(),
+                WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(tempDir.toString()).build(),
             )
         }
         assert(expansion.message!!.contains("Cannot expand"))

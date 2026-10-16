@@ -38,7 +38,7 @@ public object PathNormalizer {
      * @param baseCwd The base directory to resolve relative paths against.
      * @return A set of resolved, absolute, and pruned path strings.
      */
-    fun normalizeAndPrune(
+    public fun normalizeAndPrune(
         paths: Set<String>,
         baseCwd: Path?,
     ): Set<String> {

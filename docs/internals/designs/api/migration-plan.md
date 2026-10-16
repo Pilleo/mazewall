@@ -11,30 +11,34 @@ keywords: ["public-api", "migration", "compatibility", "deprecation"]
 
 # Public API Migration Plan
 
-## Constraint
+## Cutover decision
 
-Implementation includes breaking API changes and therefore requires explicit maintainer approval under repository rules. Documentation and additive facade work may proceed first.
+Maintainer approval authorizes `0.1.0-SNAPSHOT` as the first supported breaking
+API baseline. There is no compatibility window for direct native, platform,
+protocol, BPF, FFM, daemon, attribution, replay, or collector imports.
 
-## Phase 1: Additive Facade
+## Supported facade
 
-1. Add `Mazewall`, explicit runtime profiles, and assessment/receipt types. Do **not** add owned contained executors (issue 032520 is deferred; high maintenance risk).
-2. Add `MazewallProfiler`, session types and coverage metadata.
-3. Add Java-first factories and builders.
-4. Keep current APIs operational while marking unsafe lifecycle behavior in KDoc.
+1. `Mazewall`, policies, containment, assessment, receipts, diagnostics and
+   violations are the enforcer contract.
+2. `MazewallProfiler`, sessions, options, results, evidence and coverage are
+   the profiler contract.
+3. Java-facing factories and builders remain supported only when their parameter
+   and return types are themselves part of those facades.
 
-## Phase 2: Deprecation
+## Removed surface
 
-Deprecate arbitrary executor wrapping, containment `AutoCloseable`, global profiler shutdown/state, ambiguous policy composition, duplicate builders and direct application access to low-level types. Every deprecation message must point to an executable replacement example.
-
-## Phase 3: Surface Reduction
-
-After a documented compatibility window, remove deprecated APIs and move low-level functionality behind `internal`, an unstable SPI, or a separate low-level artifact. Generate and version an API signature dump so accidental public declarations fail CI.
+Legacy wrappers that existed only to preserve pre-cutover access are removed.
+Implementation code is Kotlin `internal`; the repository uses explicitly scoped
+friend paths only where a direct implementation module needs it. No unstable
+artifact is published.
 
 ## Compatibility Verification
 
-- Kotlin compile tests for all documented happy paths.
-- Java compile tests without Kotlin-specific invocation patterns.
-- Binary/source compatibility validation for the supported transition window.
+- Kotlin and Java facade compile tests for documented happy paths.
+- Kotlin ABI snapshots for every production library.
+- `verifySupportedApiSurface` in the normal build gate, rejecting forbidden
+  implementation packages from published snapshots.
 - Do not add owned-executor tests unless 032520 is un-deferred.
 - Tests proving receipts and `close()` never imply kernel rollback.
 - Golden tests keeping README snippets and serialized `BillOfBehavior` schemas synchronized.

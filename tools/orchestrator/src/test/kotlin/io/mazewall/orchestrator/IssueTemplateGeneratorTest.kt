@@ -66,9 +66,9 @@ class IssueTemplateGeneratorTest {
 
     @Test
     fun infersPortalCodegenModuleBeforePortalPrefix() {
-        assertEquals(":portal-codegen", PathModules.moduleFor("portal-codegen/src/main/kotlin/X.kt"))
-        assertEquals(":portal-worker", PathModules.moduleFor("portal-worker/src/main/kotlin/X.kt"))
-        assertEquals(":portal", PathModules.moduleFor("portal/src/main/kotlin/X.kt"))
+        assertEquals(":portals:codegen", PathModules.moduleFor("portals/codegen/src/main/kotlin/X.kt"))
+        assertEquals(":portals:worker", PathModules.moduleFor("portals/worker/src/main/kotlin/X.kt"))
+        assertEquals(":portals:runtime", PathModules.moduleFor("portals/runtime/src/main/kotlin/X.kt"))
         assertEquals(":tools:orchestrator", PathModules.moduleFor("tools/orchestrator/src/main/kotlin/X.kt"))
         assertEquals(":demos:cli-demo", PathModules.moduleFor("demos/cli-demo/src/main/kotlin/X.kt"))
         assertEquals(null, PathModules.moduleFor("docs/internals/designs/core/architectural-map.md"))

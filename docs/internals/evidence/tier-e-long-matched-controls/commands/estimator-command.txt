@@ -1,0 +1,13 @@
+# final run (governing decision.json)
+command: node scripts/summarize_tier_e_long_matched_controls.mjs /home/ubuntu/mazewall-long-matched/build/decision-75000-15fork/fork-results.jsonl /home/ubuntu/mazewall-long-matched/build/decision-75000-15fork/decision.json
+cwd: /home/ubuntu/mazewall-long-matched (guest mazewall-pidtest)
+git_head: 0958f74c test(tier-e): separate paired long matched CPU metrics per emission mode
+input_fork_results_sha256: 8079df002b729468658370562c6ccc33e4c2d92653bdbea94f4cd868c525d896
+exit: 0
+stdout: {"metrics_status":"COMPLETE","incomplete":[]}
+stderr: (empty)
+
+# initial run at 978bb68d (superseded, kept for audit trail)
+observation: full-stream and unique-edge medians were bit-identical although the raw rows differ
+root cause: validateFork() keyed combined CPU only by variant, so the emission loop overwrote with unique-edge rows
+resolution: fixed in 0958f74c with regression test "paired CPU metrics are separated per emission mode"; raw JSONL unchanged (sha256 above); derived output regenerated and superseded output discarded

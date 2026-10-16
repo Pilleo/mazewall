@@ -1,7 +1,14 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -16,6 +23,71 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 
 class SbobParserTest {
+    @Test
+    fun `a base read root cannot become a write root through pruning`(
+        @TempDir root: Path,
+    ) {
+        val base = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(root.toString()).build()
+        val child = root.resolve("learned.txt")
+        val learned = SbobParser.parseJsonToPolicy("""{"fsWritePaths":["$child"]}""", base)
+        assertEquals(setOf(child.toString()), learned.allowedFsWritePaths.map { it.value }.toSet())
+        assertFalse(learned.allowedFsWritePaths.any { it.value == root.toString() })
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `pruning preserves a learned symlink target and a ceiling excludes outside authority`(
+        @TempDir root: Path,
+    ) {
+        val approved = Files.createDirectory(root.resolve("approved"))
+        val outside = Files.writeString(root.resolve("outside.txt"), "owned outside canary")
+        val alias = Files.createSymbolicLink(approved.resolve("alias"), outside)
+        val base = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(approved.toString()).build()
+        val learned = SbobParser.parseJsonToPolicy("""{"opens":["$alias"]}""", base)
+        assertTrue(learned.allowedFsReadPaths.any { it.value == outside.toRealPath().toString() })
+        val restricted = learned.restrictFurtherWith(base)
+        assertFalse(restricted.allowedFsReadPaths.any { it.value == outside.toString() })
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `pruning learned paths never discards an invalid explicitly requested base resource`(
+        @TempDir root: Path,
+    ) {
+        val missing = root.resolve("explicitly-required.txt")
+        val base = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .allowFsRead(root.toString())
+            .allowFsRead(SandboxedPath.of(missing.toString(), allowNonExistent = true))
+            .build()
+        val learned = SbobParser.parseJsonToPolicy("{}", base)
+        assertFailsWith<java.nio.file.NoSuchFileException> {
+            io.mazewall.enforcer.internal.execution.PreparedResourceSet
+            .capture(learned.definition, LinuxNative.snapshot())
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `learned children already covered by explicit base roots do not require stale files`(
+        @TempDir root: Path,
+    ) {
+        val base = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .allowFsRead(root.toString())
+            .allowFsWrite(root.toString())
+            .build()
+        val child = root.resolve("absent-next-run.txt")
+        val json = """{"opens":["$child"],"fsWritePaths":["$child"],"syscalls":["OPENAT"]}"""
+        val learned = SbobParser.parseJsonToPolicy(json, base)
+        io.mazewall.enforcer.internal.execution.PreparedResourceSet
+            .capture(learned.definition, LinuxNative.snapshot())
+            .use { }
+        assertFalse(Files.exists(child), "Policy preparation must not create the learned file")
+        assertEquals(setOf(root.toRealPath().toString()), learned.allowedFsReadPaths.map { it.value }.toSet())
+        assertEquals(setOf(root.toRealPath().toString()), learned.allowedFsWritePaths.map { it.value }.toSet())
+    }
+
     @Test
     fun `test parsing simple sbob json`() {
         val json =
@@ -77,8 +149,8 @@ class SbobParserTest {
     fun `test parsing with allow list base`() {
         val json = "{\"syscalls\": [\"OPEN\", \"READ\"]}"
         val base =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_ERRNO())
                 .allow(Syscall.WRITE)
                 .build()
@@ -152,8 +224,8 @@ class SbobParserTest {
 
     @Test
     fun `SBoB removes an observed syscall from an allow-by-default blacklist`() {
-        val blacklist = Policy
-            .builder()
+        val blacklist = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .block(Syscall.EXECVE)
             .build()
@@ -232,7 +304,7 @@ class SbobParserTest {
             rootDir = rootDir.parentFile
         }
 
-        val sbobParserFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/SbobParser.kt")
+        val sbobParserFile = java.io.File(rootDir, "enforcer/src/main/kotlin/io/mazewall/enforcer/api/SbobParser.kt")
         assertTrue(sbobParserFile.exists(), "SbobParser.kt should be found at ${sbobParserFile.absolutePath}")
 
         val content = sbobParserFile.readText()

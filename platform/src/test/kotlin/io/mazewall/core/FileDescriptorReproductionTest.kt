@@ -1,8 +1,16 @@
-package io.mazewall.core
+package io.mazewall.platform.lifecycle
 
-import io.mazewall.LinuxNative
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.openPath
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import kotlin.test.*
 
@@ -25,9 +33,10 @@ class FileDescriptorReproductionTest {
     }
 
     @Test
-    fun `file descriptor is strictly immutable and returns closed type`() =
+    fun `file descriptor is strictly immutable and returns closed type`(): Unit =
         withArena {
-        val fd = FileDescriptor.adopt(realFd(), FileDescriptorRole.Generic)
+        val fd = TestFileDescriptors
+            .adopt(realFd(), FileDescriptorRole.Generic)
         val value = fd.value
 
         val isAutoCloseable = fd as? AutoCloseable
@@ -42,10 +51,11 @@ class FileDescriptorReproductionTest {
     }
 
     @Test
-    fun `leftover Open token cannot reach the kernel after close or reuse`() =
+    fun `leftover Open token cannot reach the kernel after close or reuse`(): Unit =
         withArena {
         val first = realFd()
-        val leftover = FileDescriptor.adopt(first, FileDescriptorRole.Generic)
+        val leftover = TestFileDescriptors
+            .adopt(first, FileDescriptorRole.Generic)
         leftover.close()
 
         val denied = leftover.ebadfUnlessLive()
@@ -56,7 +66,8 @@ class FileDescriptorReproductionTest {
         // The kernel hands back the just-closed lowest integer; adopting it proves
         // generation separation between the leftover token and the new owner.
         val reusedInt = realFd()
-        val reused = FileDescriptor.adopt(reusedInt, FileDescriptorRole.Generic)
+        val reused = TestFileDescriptors
+            .adopt(reusedInt, FileDescriptorRole.Generic)
         assertTrue(reused.isLiveForIo())
         assertFalse(leftover.isLiveForIo())
         assertNull(reused.ebadfUnlessLive())

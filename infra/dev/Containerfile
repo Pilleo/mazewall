@@ -7,9 +7,16 @@ WORKDIR /workspace
 RUN apt-get update && apt-get install -y \
     curl \
     git \
+    linux-perf \
     strace \
     unzip \
     maven \
+    cmake \
+    build-essential \
+    systemtap-sdt-dev \
+    pkg-config \
+    clang \
+    llvm \
     zsh \
     && rm -rf /var/lib/apt/lists/*
 

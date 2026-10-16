@@ -1,0 +1,206 @@
+package io.mazewall.enforcer.internal.ffi
+
+import io.mazewall.enforcer.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.diagnostics.*
+import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.state.*
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.landlock.LandlockCapabilityProbe
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.syscall.PrctlCommand
+import java.io.File
+
+internal object RealPlatformProvider : PlatformProvider by NativePlatformProvider(LinuxNative, { RealPlatformProvider.yamaPath }) {
+    @JvmField
+    internal var yamaPath: String = "/proc/sys/kernel/yama/ptrace_scope"
+
+    internal fun capture(native: NativeEngine): PlatformProvider {
+        val path = yamaPath
+        return NativePlatformProvider(native) { path }
+    }
+}
+
+/** Probe implementation shared by live diagnostics and immutable installation selection. */
+private class NativePlatformProvider(
+    private val native: NativeEngine,
+    private val yamaPath: () -> String,
+) : PlatformProvider {
+    override fun getOsName(): String = System.getProperty("os.name") ?: "Unknown"
+
+    override fun getOsVersion(): String = System.getProperty("os.version") ?: "Unknown"
+
+    override fun getOsArch(): String = System.getProperty("os.arch") ?: "Unknown"
+
+    override fun hasKernelSeccompSupport(): Boolean =
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            false
+        } else {
+            native.process.prctl(PrctlCommand.GetSeccomp) is LinuxNative.SyscallResult.Success
+        }
+
+    override fun getSeccompMode(): SeccompMode =
+        try {
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            SeccompMode.Disabled
+        } else {
+            val seccompVal = native.process.prctl(PrctlCommand.GetSeccomp)
+            when (seccompVal) {
+                is LinuxNative.SyscallResult.Error -> SeccompMode.Error(seccompVal.errno)
+                is LinuxNative.SyscallResult.Success -> {
+                    when (seccompVal.value) {
+                        0L -> SeccompMode.Disabled
+                        1L -> SeccompMode.Strict
+                        2L -> SeccompMode.Filter
+                        else -> SeccompMode.Error(-1)
+                    }
+                }
+            }
+        }
+    } catch (_: IllegalStateException) {
+        SeccompMode.Error(-1)
+    }
+
+    override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            LinuxNative.SyscallResult.Error(NativeConstants.ENOSYS, -1L)
+        } else {
+            native.process.prctl(PrctlCommand.SetSeccomp(-1L))
+        }
+
+    override fun isNoNewPrivsEnabled(): Boolean =
+        try {
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            false
+        } else {
+            val nnpVal = native.process.prctl(PrctlCommand.GetNoNewPrivs)
+            if (nnpVal is LinuxNative.SyscallResult.Success) {
+                nnpVal.value == 1L
+            } else {
+                false
+            }
+        }
+    } catch (_: IllegalStateException) {
+        false
+    }
+
+    override fun getYamaPtraceScope(): YamaPtraceScope {
+        if (!getOsName().equals("Linux", ignoreCase = true)) return YamaPtraceScope.Unavailable
+        val file = File(yamaPath())
+        if (!file.exists()) return YamaPtraceScope.Unavailable
+        return try {
+            val content = file.readText().trim()
+            val intVal = content.toIntOrNull() ?: return YamaPtraceScope.Unavailable
+            when (intVal) {
+                0 -> YamaPtraceScope.Classic
+                1 -> YamaPtraceScope.Restricted
+                2 -> YamaPtraceScope.AdminOnly
+                3 -> YamaPtraceScope.Disabled
+                else -> YamaPtraceScope.Unknown(intVal)
+            }
+        } catch (_: java.io.IOException) {
+            YamaPtraceScope.Unavailable
+        } catch (_: SecurityException) {
+            YamaPtraceScope.Unavailable
+        }
+    }
+
+    override fun getLandlockCapability(): KernelCapability<Int> =
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            KernelCapability.Unsupported
+        } else {
+            LandlockCapabilityProbe.probeCapability(native)
+        }
+
+    override fun getLandlockAbiVersion(): Int = getLandlockCapability().availableValueOrZero()
+
+    override fun probeSeccompTsync(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_TSYNC.toLong())
+
+    override fun probeSeccompUserNotif(): Boolean = probeSeccompFlag(NativeConstants.SECCOMP_FILTER_FLAG_NEW_LISTENER)
+
+    override fun probeCetSupported(): Boolean {
+        if (!getOsName().equals("Linux", ignoreCase = true)) {
+            return Platform.isCpuCetSupportedOverride ?: false
+        }
+        // Check CPU flags via /proc/cpuinfo for CET Shadow Stack support (shstk)
+        val cpuSupported = try {
+            val file = java.io.File("/proc/cpuinfo")
+            if (file.exists()) {
+                file.useLines { lines ->
+                    lines.any { line ->
+                        line.startsWith("flags") && line.split("\\s+".toRegex()).any { it.equals("shstk", ignoreCase = true) }
+                    }
+                }
+            } else {
+                false
+            }
+        } catch (_: java.io.IOException) {
+            false
+        } catch (_: SecurityException) {
+            false
+        }
+
+        // Check kernel support via arch_prctl
+        // Also respect the override if set (for testing)
+        return (
+            cpuSupported &&
+            Platform.isKernelCetSupported(
+                native,
+                platformEligible =
+                getOsName().equals("Linux", ignoreCase = true) &&
+                    io.mazewall.platform.syscall.Arch
+                    .current() == io.mazewall.platform.syscall.Arch.AMD64,
+            )
+        ) ||
+               (Platform.isCpuCetSupportedOverride ?: false)
+    }
+
+    /**
+     * Probes for a seccomp flag by performing a dry-run call with a NULL pointer.
+     * If the kernel recognizes the flag, it returns EFAULT (Bad Address) because it
+     * tries to read the filter program. If it doesn't recognize the flag, it returns EINVAL.
+     */
+    private fun probeSeccompFlag(flag: Long): Boolean {
+        if (!getOsName().equals("Linux", ignoreCase = true)) return false
+        val arch = try {
+            io.mazewall.platform.syscall.Arch
+                .current()
+        } catch (_: UnsupportedOperationException) {
+            return false
+        }
+        val res = native.raw.syscall(
+            arch.seccompSyscallNumber.toLong(),
+            io.mazewall.platform.syscall.NativeArg
+                .LongArg(NativeConstants.SECCOMP_SET_MODE_FILTER.toLong()),
+            io.mazewall.platform.syscall.NativeArg
+                .LongArg(flag),
+            io.mazewall.platform.syscall.NativeArg.NullArg, // Trigger EFAULT on valid flags
+        )
+        // EFAULT (14) means the kernel recognized the flag and tried to read the NULL program.
+        return res is LinuxNative.SyscallResult.Error && res.errno == NativeConstants.EFAULT
+    }
+
+    override fun isContainer(): Boolean {
+        var isContainer = File("/.dockerenv").exists() ||
+            File("/run/secrets/kubernetes.io").exists()
+
+        if (!isContainer) {
+            try {
+                val cgroup = File("/proc/1/cgroup")
+                if (cgroup.exists()) {
+                    val content = cgroup.readText()
+                    isContainer = content.contains("docker") ||
+                        content.contains("podman") ||
+                        content.contains("kubepods") ||
+                        content.contains("containerd")
+                }
+            } catch (_: java.io.IOException) {
+                // Ignore
+            } catch (_: SecurityException) {
+                // Ignore
+            }
+        }
+        return isContainer
+    }
+}

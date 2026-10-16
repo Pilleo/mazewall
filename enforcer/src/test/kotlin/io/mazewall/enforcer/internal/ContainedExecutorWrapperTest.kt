@@ -1,9 +1,16 @@
 package io.mazewall.enforcer.internal
 
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.PolicyDefinition
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.nio.file.AccessDeniedException
@@ -13,7 +20,7 @@ import java.util.concurrent.TimeUnit
 
 @EnabledIfLinuxAndSupported
 class ContainedExecutorWrapperTest {
-    val policyDefinition = PolicyDefinition<io.mazewall.PolicyScope.ProcessWideSafe>()
+    val policyDefinition = PolicyDefinition<io.mazewall.enforcer.api.PolicyScope.ProcessWideSafe>()
 
     @Test
     fun `test execute wrapper success`() {

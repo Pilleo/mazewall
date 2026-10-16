@@ -12,7 +12,7 @@ import java.lang.foreign.ValueLayout
  * improving safety for coding agents and developers. Always use the `byteOffset()`
  * method on these layouts to resolve member positions.
  */
-object Layouts {
+internal object Layouts {
     private val NATIVE_SHORT = ValueLayout.JAVA_SHORT.withOrder(java.nio.ByteOrder.nativeOrder())
     private val NATIVE_INT = ValueLayout.JAVA_INT.withOrder(java.nio.ByteOrder.nativeOrder())
     private val NATIVE_LONG = ValueLayout.JAVA_LONG.withOrder(java.nio.ByteOrder.nativeOrder())

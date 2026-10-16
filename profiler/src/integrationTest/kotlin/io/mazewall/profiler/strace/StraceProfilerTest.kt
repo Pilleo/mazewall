@@ -1,7 +1,7 @@
 package io.mazewall.profiler.strace
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.core.Syscall
-import io.mazewall.profiler.TraceableWorkload
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.TraceableWorkload
 import org.junit.jupiter.api.Test
 import java.io.File
 import java.net.ServerSocket
@@ -103,7 +103,7 @@ class StraceProfilerTest : BaseIntegrationTest() {
     fun `test strace profiling explicit baseline path filtering`() {
         val bob = StraceProfiler.profile(FileReadWorkload::class.java)
 
-        val baseline = io.mazewall.profiler.JvmBaselineProfiles
+        val baseline = io.mazewall.profiler.api.JvmBaselineProfiles
             .jvmBootstrapNoise()
         val hasNoise = bob.opens.any { baseline.matches(it) }
         assertTrue(hasNoise, "Raw BillOfBehavior should capture JVM/system noise. Observed: ${bob.opens}")

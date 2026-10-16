@@ -1,10 +1,17 @@
 package io.mazewall.enforcer
 
-import io.mazewall.Policy
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.engine.FilterInstallationPlanner
 import io.mazewall.enforcer.state.ContainerState
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -38,8 +45,8 @@ class FilterInstallationPlannerTest {
 
     @Test
     fun `identical whitelist does not require another filter`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_KILL_PROCESS)
             .allow(Syscall.READ, Syscall.WRITE)
             .build()
@@ -63,8 +70,8 @@ class FilterInstallationPlannerTest {
 
     @Test
     fun `stricter syscall action creates an installation block`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .addAction(SeccompAction.ACT_KILL_PROCESS, Syscall.EXECVE)
             .build()
@@ -95,7 +102,7 @@ class FilterInstallationPlannerTest {
         allowUnsafePrctl: Boolean,
         expectedNewFilter: Boolean,
     ) {
-        val builder = Policy.builder()
+        val builder = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
         if (allowMmapExec) builder.allowMmapExec()
         if (allowNonThreadClone) builder.allowNonThreadClone()
         if (allowUnsafePrctl) builder.allowUnsafePrctl()
@@ -115,8 +122,8 @@ class FilterInstallationPlannerTest {
 
     @Test
     fun `restrictive default re-installs the policy when an existing whitelist is narrowed`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ERRNO())
             .allow(Syscall.READ)
             .build()

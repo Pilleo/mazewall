@@ -1,0 +1,175 @@
+{
+  "title": "Tier E calibrated readiness decision and exact-capture attribution",
+  "date": "2026-09-19",
+  "status": "complete",
+  "policy_eligibility": false,
+  "environment": {
+    "kernel": "7.2.4-x64v3-xanmod1",
+    "image": "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+    "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+    "cpu_set": "0,2",
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 42,
+    "readiness_source_fingerprint": "58b235b9b48e76ef25ae93f0ed3ba46db095aec89a5fdde7f13af6e016c43d2d",
+    "capture_source_fingerprint": "2a7d989f56d8756b32c3cbc7a9f409ee4ab9101a4fb314d36018a8ba11d4a941",
+    "marker_request": "AUTO",
+    "selected_marker_backend": "usdt",
+    "rootful": true,
+    "rootless_podman": "INCOMPLETE"
+  },
+  "calibration": {
+    "pilot_operations": 100,
+    "maximum_operations": 65536,
+    "target_fastest_batch_ns": 100000000,
+    "maximum_slowest_batch_ns": 15000000000,
+    "retained_byte_limit": 50331648,
+    "retained_record_limit": 75000,
+    "selected_operations": 1600,
+    "target": "unmet",
+    "reason": "The largest doubled operation count that stayed below both 75 percent retention limits did not make the fastest batch reach 100 ms. The count was frozen before decision forks and was not shortened silently."
+  },
+  "readiness_decision": {
+    "run_level": "decision",
+    "forks": 15,
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "fork_outputs": 75,
+    "correctness_failures": 0,
+    "ring_loss": 0,
+    "decision": "rejected_as_production_default",
+    "production_default": "continuous",
+    "experimental_policy": "readiness-driven, 10 ms maximum wait",
+    "dictionary_full_stream": {
+      "admitted_pairs": 15,
+      "cpu_improvement_median_percent": 11.34,
+      "cpu_improvement_bootstrap_95_ci_percent": [9.42, 14.39],
+      "candidate_minus_continuous_workload_median_ns": -29779975,
+      "candidate_minus_continuous_workload_bootstrap_95_ci_ns": [-34488641, -27646999],
+      "candidate_minus_continuous_receipt_p99_bootstrap_95_ci_high_ns": 0,
+      "receipt_p99_allowance_ns": 6710886,
+      "peak_retained_bytes": 4082963,
+      "failed_gates": ["collector_cpu_improvement"]
+    },
+    "dictionary_unique_edge": {
+      "admitted_pairs": 15,
+      "cpu_improvement_median_percent": 12.53,
+      "cpu_improvement_bootstrap_95_ci_percent": [7.57, 16.34],
+      "candidate_minus_continuous_workload_median_ns": -32243493,
+      "candidate_minus_continuous_workload_bootstrap_95_ci_ns": [-36006899, -20756954],
+      "candidate_minus_continuous_receipt_p99_bootstrap_95_ci_high_ns": 33554432,
+      "receipt_p99_allowance_ns": 6710886,
+      "peak_retained_bytes": 4082963,
+      "failed_gates": ["collector_cpu_improvement", "receipt_p99"]
+    }
+  },
+  "capture_timing": {
+    "run_level": "development",
+    "forks_per_workload": 5,
+    "warmups_per_fork": 3,
+    "measured_batches_per_fork": 10,
+    "correctness_failures": 0,
+    "ring_loss": 0,
+    "instrumentation_control": "Each dictionary/full-stream fork is paired with native phase timing enabled and disabled. Disabled mode omits all profiler-owned phase clock reads and atomic counter updates.",
+    "optimization_decision": "No native exact-capture optimization was accepted. Every paired workload interval included zero. Conditional timing is retained as measurement-correctness behavior, not as a claimed application-speed improvement.",
+    "syscall_dense": {
+      "timing_enabled_minus_disabled_workload_median_ns": 4118553,
+      "workload_bootstrap_95_ci_ns": [-3933936, 12453000],
+      "timing_enabled_minus_disabled_cpu_median_ns": -300000000,
+      "cpu_bootstrap_95_ci_ns": [-1680000000, 260000000],
+      "phase_medians_ns": {
+        "get_stack_trace": 491198153,
+        "raw_key_total": 139582505,
+        "raw_hash": 8038082,
+        "raw_equality": 4736396,
+        "generation_validation": 2162785,
+        "weak_guard_validation": 61035790,
+        "canonical_cache_lock_wait": 3213014,
+        "logical_metadata": 238029,
+        "marker_set": 135011767,
+        "marker_clear": 344283604,
+        "collector_join": 45600921,
+        "ring_drain": 227683629
+      },
+      "cache_hits": 124822,
+      "cache_misses": 14
+    },
+    "stack_diverse": {
+      "timing_enabled_minus_disabled_workload_median_ns": -498755,
+      "workload_bootstrap_95_ci_ns": [-6708432, 14977883],
+      "timing_enabled_minus_disabled_cpu_median_ns": 270000000,
+      "cpu_bootstrap_95_ci_ns": [-350000000, 660000000],
+      "phase_medians_ns": {
+        "get_stack_trace": 495835585,
+        "raw_key_total": 153607887,
+        "raw_hash": 9002670,
+        "raw_equality": 5971268,
+        "generation_validation": 2264840,
+        "weak_guard_validation": 79754344,
+        "canonical_cache_lock_wait": 3164946,
+        "logical_metadata": 294503,
+        "marker_set": 94018674,
+        "marker_clear": 282380142,
+        "collector_join": 61030514,
+        "ring_drain": 231720956
+      },
+      "cache_hits": 124807,
+      "cache_misses": 29
+    },
+    "class_churn": {
+      "timing_enabled_minus_disabled_workload_median_ns": 1808348,
+      "workload_bootstrap_95_ci_ns": [-44396142, 26867327],
+      "timing_enabled_minus_disabled_cpu_median_ns": 0,
+      "cpu_bootstrap_95_ci_ns": [-770000000, 580000000],
+      "phase_medians_ns": {
+        "get_stack_trace": 498881676,
+        "raw_key_total": 183894987,
+        "raw_hash": 10865707,
+        "raw_equality": 28417455,
+        "generation_validation": 2330962,
+        "weak_guard_validation": 69991322,
+        "canonical_cache_lock_wait": 3648922,
+        "logical_metadata": 5893019,
+        "marker_set": 96159242,
+        "marker_clear": 268076436,
+        "collector_join": 30493318,
+        "ring_drain": 265514917
+      },
+      "cache_hits": 124497,
+      "cache_misses": 339
+    }
+  },
+  "artifacts": {
+    "readiness_results": {
+      "path": "docs/internals/evidence/tier-e-readiness-decision-20260919.jsonl",
+      "sha256": "904455b0e4c02aa2d58bc54d122668aada7caa75237e22b60d05652990e9ba0e"
+    },
+    "readiness_manifest": {
+      "path": "docs/internals/evidence/tier-e-readiness-decision-20260919-manifest.json",
+      "sha256": "a4d6d04cc31d76e5577594af9e1bc29aae4f83dc9bf4ca6d0c48e7d555a1b84f"
+    },
+    "syscall_dense_results": {
+      "path": "docs/internals/evidence/tier-e-capture-timing-syscall-dense-20260919.jsonl",
+      "sha256": "e64c8f8393eb748d77befe0a70a2242e62463faa20597fec979751ed01bf250c"
+    },
+    "stack_diverse_results": {
+      "path": "docs/internals/evidence/tier-e-capture-timing-stack-diverse-20260919.jsonl",
+      "sha256": "702466816ad28f7aef853d998bed1bda395148fafa878d355c51a6498fe0330b"
+    },
+    "class_churn_results": {
+      "path": "docs/internals/evidence/tier-e-capture-timing-class-churn-20260919.jsonl",
+      "sha256": "71d15beab11a5f03b72d9f86b9045fb06e8a526be0627998967567296ea61ab9"
+    },
+    "additional_retained_files": "Each run also retains its manifest, calibration JSONL, runner-events JSONL, and raw benchmark log beside the results file."
+  },
+  "verdict_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "failed",
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "measured; readiness and native optimization candidates rejected by predeclared confidence gates",
+    "policy_eligibility": false
+  }
+}

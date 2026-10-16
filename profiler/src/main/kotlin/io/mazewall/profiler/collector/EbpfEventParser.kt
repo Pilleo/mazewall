@@ -1,10 +1,10 @@
 package io.mazewall.profiler.collector
 
-import io.mazewall.core.Tid
-import io.mazewall.profiler.NetworkEndpoint
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.ProfileObservation
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.profiler.api.NetworkEndpoint
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.ProfileObservation
 
 /**
  * Sidecar-neutral eBPF event text.
@@ -15,12 +15,14 @@ import io.mazewall.profiler.ProfileObservation
  * Example:
  * `kind=uring tid=12 tgid=10 ktime=99 opcode=IORING_OP_OPENAT path=/tmp/x`
  */
-public data class EbpfParseResult(
-    val observations: List<ProfileObservation>,
-    val droppedLines: Int,
-)
+internal class EbpfParseResult(
+    observations: List<ProfileObservation>,
+    public val droppedLines: Int,
+) {
+    public val observations: List<ProfileObservation> = java.util.List.copyOf(observations)
+}
 
-public object EbpfEventParser {
+internal object EbpfEventParser {
     public fun parse(log: String): EbpfParseResult {
         val observations = mutableListOf<ProfileObservation>()
         var dropped = 0

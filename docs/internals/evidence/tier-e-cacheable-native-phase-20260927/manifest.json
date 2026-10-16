@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "policy_eligibility": false,
+  "qualification": "diagnostic_only_source_dirty",
+  "runs": [
+    {
+      "artifact": "tier-e-phase-toolchain-a-1790466009",
+      "identity": {
+        "source_digest": "cd08698eac1a9e5b3f99177ab589bc9edbb3232566b4e97656c7dbbfebd303c9",
+        "image_id": "sha256:06650964cc3cbadceb07954247e610920e09e3d15940548f54cfa1c75d31ba91",
+        "agent_sha256": "effc146ebc2bebf0857148bd76861d855bf19450c064334f3bec74a157d0bcaf",
+        "native_build_key": "1ffa2f742115b8e2445e60fd7dc1f63dbb805b66031fb244e0b209b0e75e3fa7",
+        "compiler": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS, mixed mode, sharing)",
+        "native_build_cache": "mazewall-tier-e-phase-build-1ffa2f742115b8e2445e60fd",
+        "run_id": "tier-e-phase-8562bbc0-75c3-44ed-af08-ee4721e1450d",
+        "policy_eligibility": false
+      },
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "full": {
+        "mode": "full",
+        "status": "PASS",
+        "reason": "complete",
+        "phase_contract_version": 2,
+        "get_stack_trace_ns": 1454485,
+        "raw_key_ns": 11504,
+        "canonical_cache_lookup_ns": 604099,
+        "logical_metadata_ns": 399358,
+        "key_lookup_logical_total_ns": 1014961,
+        "historical_total_ns": 10730232,
+        "historical_total_limit_ns": 13412790,
+        "policy_eligibility": false
+      },
+      "unique": {
+        "mode": "unique",
+        "status": "PASS",
+        "reason": "complete",
+        "phase_contract_version": 2,
+        "get_stack_trace_ns": 1374592,
+        "raw_key_ns": 10723,
+        "canonical_cache_lookup_ns": 564152,
+        "logical_metadata_ns": 387429,
+        "key_lookup_logical_total_ns": 962304,
+        "historical_total_ns": 1695220,
+        "historical_total_limit_ns": 2119025,
+        "policy_eligibility": false
+      }
+    },
+    {
+      "artifact": "tier-e-phase-toolchain-b-1790466042",
+      "identity": {
+        "source_digest": "cd08698eac1a9e5b3f99177ab589bc9edbb3232566b4e97656c7dbbfebd303c9",
+        "image_id": "sha256:06650964cc3cbadceb07954247e610920e09e3d15940548f54cfa1c75d31ba91",
+        "agent_sha256": "effc146ebc2bebf0857148bd76861d855bf19450c064334f3bec74a157d0bcaf",
+        "native_build_key": "1ffa2f742115b8e2445e60fd7dc1f63dbb805b66031fb244e0b209b0e75e3fa7",
+        "compiler": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+        "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS, mixed mode, sharing)",
+        "native_build_cache": "mazewall-tier-e-phase-build-1ffa2f742115b8e2445e60fd",
+        "run_id": "tier-e-phase-e1e2bcee-7755-411d-adf1-22399fb1efad",
+        "policy_eligibility": false
+      },
+      "terminal": {
+        "schema_version": 1,
+        "success": true,
+        "reason": "COMPLETE",
+        "policy_eligibility": false
+      },
+      "full": {
+        "mode": "full",
+        "status": "PASS",
+        "reason": "complete",
+        "phase_contract_version": 2,
+        "get_stack_trace_ns": 1503952,
+        "raw_key_ns": 11136,
+        "canonical_cache_lookup_ns": 561392,
+        "logical_metadata_ns": 484102,
+        "key_lookup_logical_total_ns": 1039972,
+        "historical_total_ns": 10730232,
+        "historical_total_limit_ns": 13412790,
+        "policy_eligibility": false
+      },
+      "unique": {
+        "mode": "unique",
+        "status": "PASS",
+        "reason": "complete",
+        "phase_contract_version": 2,
+        "get_stack_trace_ns": 2098993,
+        "raw_key_ns": 12841,
+        "canonical_cache_lookup_ns": 663890,
+        "logical_metadata_ns": 654974,
+        "key_lookup_logical_total_ns": 1331705,
+        "historical_total_ns": 1695220,
+        "historical_total_limit_ns": 2119025,
+        "policy_eligibility": false
+      }
+    },
+    {
+      "artifact": "tier-e-phase-only-verified-1790465479",
+      "identity": {
+        "source_digest": "ef9811b2db1a1295b8685a9b0b3d2b37a3c8f147d789311363f52b6a192a7dde",
+        "image_id": "sha256:06650964cc3cbadceb07954247e610920e09e3d15940548f54cfa1c75d31ba91",
+        "agent_sha256": "315c2ee3a1d5ff314471c4f12daf0eb3d4c1f88d0254b6761664b5d601091bb8",
+        "run_id": "tier-e-phase-1ca9b0ab-829e-4fce-ac2b-03e317bc51cf",
+        "policy_eligibility": false
+      },
+      "terminal": {
+        "schema_version": 1,
+        "success": false,
+        "reason": "INCOMPLETE",
+        "policy_eligibility": false
+      },
+      "full": {
+        "mode": "full",
+        "status": "INCOMPLETE",
+        "reason": "GetStackTrace phase exceeds unchanged historical limit: 2997699",
+        "policy_eligibility": false
+      },
+      "unique": {
+        "mode": "unique",
+        "status": "INCOMPLETE",
+        "reason": "GetStackTrace phase exceeds unchanged historical limit: 2405471",
+        "policy_eligibility": false
+      }
+    }
+  ]
+}

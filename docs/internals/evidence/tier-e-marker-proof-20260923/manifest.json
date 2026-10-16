@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source_revision": "0e56a47d2be2b96b176f26c178590342fa7b1083",
+  "dirty_source_diff_sha256": "a24b93c3f7b4a2d62bd8afce7250ba37f854208c99c649e3a30f79e1ae99c427",
+  "kernel": "7.2.4-x64v3-xanmod1",
+  "image_id": "sha256:8906c49166cbc9571cecd307f08c8f356b432988ee602e6191543bea1005c611",
+  "native_default_sha256": "7d6459afeaa340b3a53510709946c6333d9d6d4e662a299d8ce0ec265af9ed5d",
+  "native_usdt_sha256": "d52efab37e15343da3c569dc3eb5424d36ca66a47edf01387a57f7151d591e32",
+  "daemon_jar_sha256": "dbb43793fd8cdd5bb1cf4792a938c3e88dcc3d1d3e917c37d63cc8f45acc9837",
+  "scenarios": [
+    "v2 uprobe 72-path positive",
+    "v2 USDT fault 72-path",
+    "v1-emitting agent/v2 collector pre-admission rejection",
+    "missing proof pre-admission rejection",
+    "v1 marker/registration positive"
+  ],
+  "policy_eligibility": false
+}

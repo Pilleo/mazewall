@@ -28,6 +28,12 @@ class MockAttackLlm(private val attackScenario: String) : ChatLanguageModel {
                 .arguments("{\"filename\":\"../passwd\"}")
                 .build()
 
+            "file_legit" -> ToolExecutionRequest.builder()
+                .id("call_file_1")
+                .name("analyzeUserFile")
+                .arguments("{\"filename\":\"secret.txt\"}")
+                .build()
+
             "rce_legit" -> ToolExecutionRequest.builder()
                 .id("call_rce_1")
                 .name("executeDataAnalysis")

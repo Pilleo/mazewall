@@ -1,9 +1,12 @@
 package io.mazewall.profiler.tierE.daemon
 
-import io.mazewall.profiler.attribution.TierEEmissionMode
+import io.mazewall.profiler.internal.attribution.TierEEmissionMode
+
+/** Version of the line-oriented control contract represented by golden fixtures. */
+internal const val TIER_E_CONTROL_PROTOCOL_VERSION: Int = 1
 
 /** Line commands accepted on the control socket (WP-04 wire contract). */
-public sealed interface ControlCommand {
+internal sealed interface ControlCommand {
     public data class Attach(
         public val pid: Int,
         public val mode: AttachMode,
@@ -25,10 +28,10 @@ public sealed interface ControlCommand {
     ) : ControlCommand
 }
 
-public enum class AttachMode { UPROBE, USDT }
+internal enum class AttachMode { AUTO, UPROBE, USDT }
 
 /** Single-line replies; `ok` mirrors the OK/ERR prefix contract. */
-public data class ControlReply(
+internal data class ControlReply(
     public val ok: Boolean,
     public val text: String,
 ) {
@@ -42,10 +45,10 @@ public data class ControlReply(
 }
 
 private val USAGE_ERR =
-    "USAGE: ATTACH <pid> <uprobe|usdt> <agent.so> <marker-offset> <session-tag-hex> [full-stream|unique-stack-syscall] | DETACH | STATUS | SHUTDOWN"
+    "USAGE: ATTACH <pid> <auto|uprobe|usdt> <agent.so> <marker-offset> <session-tag-hex> [full-stream|unique-stack-syscall] | DETACH | STATUS | SHUTDOWN"
 
 /** A reply required before an unrecognized command reaches daemon execution. */
-public fun ControlCommand.rejectionReply(): ControlReply? =
+internal fun ControlCommand.rejectionReply(): ControlReply? =
     when (this) {
         is ControlCommand.Attach,
         ControlCommand.Detach,
@@ -56,7 +59,7 @@ public fun ControlCommand.rejectionReply(): ControlReply? =
         is ControlCommand.Unknown -> ControlReply.err(USAGE_ERR)
     }
 
-public fun parseControlCommand(line: String): Either<ControlCommand, ControlReply> {
+internal fun parseControlCommand(line: String): Either<ControlCommand, ControlReply> {
     val tokens = line.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
     if (tokens.isEmpty()) return Either.Right(ControlReply.err("EMPTY_COMMAND"))
     return when (tokens[0].uppercase()) {
@@ -65,6 +68,7 @@ public fun parseControlCommand(line: String): Either<ControlCommand, ControlRepl
             val pid = tokens[1].toIntOrNull()
             if (pid == null || pid <= 0) return Either.Right(ControlReply.err("BAD_PID"))
             val mode = when (tokens[2].lowercase()) {
+                "auto" -> AttachMode.AUTO
                 "uprobe" -> AttachMode.UPROBE
                 "usdt" -> AttachMode.USDT
                 else -> return Either.Right(ControlReply.err("BAD_MODE"))
@@ -102,7 +106,7 @@ public fun parseControlCommand(line: String): Either<ControlCommand, ControlRepl
 }
 
 /** Minimal right/left to keep the parser dependency-free. */
-public sealed interface Either<L, R> {
+internal sealed interface Either<L, R> {
     public data class Left<L, R>(
         public val value: L,
     ) : Either<L, R>

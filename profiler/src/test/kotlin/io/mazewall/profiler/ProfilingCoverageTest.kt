@@ -1,5 +1,11 @@
 package io.mazewall.profiler
 
+import io.mazewall.profiler.api.PathResolutionQuality
+import io.mazewall.profiler.api.ProfileEvidence
+import io.mazewall.profiler.api.ProfileIntegrity
+import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.StackAttribution
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
@@ -8,10 +14,10 @@ import kotlin.test.assertSame
 class ProfilingCoverageTest {
     @Test
     fun `evidence reports complete and incomplete profiles honestly`() {
-        val complete = ProfilingCoverage.absent().copy(complete = true, warnings = emptyList())
+        val complete = ProfilingCoverage.absent().copy(integrity = ProfileIntegrity(true))
         assertSame(ProfileEvidence.Complete, complete.evidence())
 
-        val incomplete = ProfilingCoverage.absent().copy(warnings = emptyList())
+        val incomplete = ProfilingCoverage.absent().copy(integrity = ProfileIntegrity(false))
         val evidence = assertIs<ProfileEvidence.Incomplete>(incomplete.evidence())
         assertEquals(listOf("profile is incomplete"), evidence.reasons)
     }
@@ -20,8 +26,7 @@ class ProfilingCoverageTest {
     fun `prior failed path resolution makes a complete profile incomplete`() {
         val current = ProfilingCoverage.absent().copy(
             pathResolution = PathResolutionQuality.RESOLVED,
-            complete = true,
-            warnings = emptyList(),
+            integrity = ProfileIntegrity(true),
         )
         val prior = ProfilingCoverage.absent().copy(pathResolution = PathResolutionQuality.FAILED)
 
@@ -33,11 +38,11 @@ class ProfilingCoverageTest {
     }
 
     @Test
-    fun `already stricter path resolution keeps the original coverage instance`() {
+    fun `already stricter path resolution retains the original coverage dimensions`() {
         val current = ProfilingCoverage.absent().copy(pathResolution = PathResolutionQuality.MIXED)
         val prior = ProfilingCoverage.absent().copy(pathResolution = PathResolutionQuality.RESOLVED)
 
-        assertSame(current, current.retainStricterPathResolution(prior))
+        assertEquals(current, current.retainStricterPathResolution(prior))
     }
 
     @Test

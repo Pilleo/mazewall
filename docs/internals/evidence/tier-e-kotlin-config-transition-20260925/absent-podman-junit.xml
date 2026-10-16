@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" tests="8" skipped="8" failures="0" errors="0" timestamp="2026-09-25T21:16:42.409Z" hostname="leanid-nitroanv1541" time="0.006">
+  <properties/>
+  <testcase name="timeout retires only its own privileged container(ContainerEndpoint)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="killed fixture controller cannot leave its privileged collector running(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="startup cancellation settles an in flight real Docker creation before cleanup(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="failed real log export retains stopped container and its recoverable logs(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="rootful endpoint executes the Tier E image(ContainerEndpoint)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="interrupted fixture teardown still reaps unrelated sentinel(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="privileged failure exports caller-owned artifacts(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="non-root coverage target and privileged collector recover the exact 72 paths(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.0">
+    <skipped/>
+  </testcase>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

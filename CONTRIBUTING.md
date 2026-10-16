@@ -34,29 +34,47 @@ mazewall has two production modules: **`:enforcer`** (zero-dependency production
 2. **TDD:** Reproduce bugs with a failing test before fixing. New features get tests before implementation.
 3. **Log issues:** Any kernel behavior discovery, JVM quirk, or security nuance you find goes in the [`docs/internals/backlog/`](docs/internals/backlog/README.md) directory.
 4. **Discuss major changes:** Open a GitHub issue before starting large architectural or API changes.
-5. **Code style:** Kotlin idiomatic style, Detekt clean, ktlint clean (`./scripts/lint.sh`).
+5. **Code quality:** Follow [the code-quality standards](.agents/CODE_QUALITY.md): sealed states/outcomes, enums for finite choices, exhaustive branches, strict domain types, pure decisions, and minimum visibility. Formatting, lint/static analysis, tests, and configured coverage thresholds are part of `./gradlew build`.
 
 ---
 
 ## Development Setup
 
-You need a **Linux host or container with kernel ≥ 6.2** for integration tests. Unit tests run on any host.
+You need a **Linux host or container with kernel ≥ 6.2** for integration tests. Host-safe unit tests do not require containment privileges, but the build still requires its native toolchain: Linux headers, a C compiler, clang with a BPF backend, and LLVM tools. See [the testing strategy](docs/internals/designs/core/testing-strategy.md) for prerequisites.
 
 ### Option A: Run directly on a Linux host
 
 ```bash
-# Host-safe unit tests and unit-only coverage (fast, no kernel interaction)
+# Focused iteration: host-safe unit tests and unit-only coverage
 ./gradlew unitCheck
 
-# Privileged kernel and fresh-JVM contract tests
+# Focused kernel iteration on a suitable host
 ./gradlew kernelCheck
 
-# Full integration suite
+# Alternative containerized test runner
 ./scripts/run_tests.sh
 
-# Lint
-./scripts/lint.sh
+# Completion gate: formatting, lint, tests, and configured coverage thresholds
+./gradlew build
 ```
+
+The full build already selects kernel and fresh-JVM suites for included modules; equivalent iteration commands need not be repeated after that gate. For orchestrator work, use `./gradlew build -PincludeOrchestrator=true`. Documentation-only changes use reference/link checks, `git diff --check`, and backlog validation.
+
+### Optional architecture report
+
+RefactorFirst is intentionally not part of `build`, `check`, `unitCheck`, or `kernelCheck`.
+Generate its informational report explicitly when planning architectural work:
+
+```bash
+./gradlew refactorFirstReport
+```
+
+The task analyzes committed production sources from `platform`, `enforcer`, `profiler`,
+`portal`, `portal-codegen`, and `portal-worker`. It rejects uncommitted changes in those
+source roots, builds an isolated sparse snapshot so linked worktrees and unrelated modules
+cannot leak into the analysis, and writes
+`build/reports/refactorFirst/refactor-first-report.html`. Use `--rerun-tasks` to regenerate
+the report for an unchanged commit.
 
 ### Option B: Isolated Podman environment (recommended)
 

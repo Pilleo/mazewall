@@ -1,6 +1,12 @@
 package io.mazewall.profiler.iterative
-
-import io.mazewall.Policy
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -84,8 +90,8 @@ class IterativeProfilerParsingTest {
 
     @Test
     fun `test extractViolationPath with policy specific custom phrase`() {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .customViolationPhrase("Blocked by sandbox")
             .build()
         val t = IOException("/tmp/custom-file Blocked by sandbox")
@@ -103,8 +109,8 @@ class IterativeProfilerParsingTest {
 
     @Test
     fun `test extractViolationPath with policy specific custom regex`() {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .customViolationRegex(Regex("""restricted: \d+"""))
             .build()
         val t = IOException("/tmp/regex-file restricted: 999")

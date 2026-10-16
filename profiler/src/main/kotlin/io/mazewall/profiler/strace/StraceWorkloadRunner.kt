@@ -1,13 +1,13 @@
 package io.mazewall.profiler.strace
 
-import io.mazewall.profiler.TraceableWorkload
+import io.mazewall.profiler.api.TraceableWorkload
 
 /**
  * Subprocess entry point for the [StraceProfiler].
  * It receives the target workload class name as the first argument,
  * instantiates it via reflection using a no-arg constructor, and executes it.
  */
-object StraceWorkloadRunner {
+internal object StraceWorkloadRunner {
     @JvmStatic
     fun main(args: Array<String>) {
         val className = args.getOrNull(0) ?: throw IllegalArgumentException("Missing workload class name")

@@ -1,0 +1,54 @@
+--- a/processmanager/processinfo.go
++++ b/processmanager/processinfo.go
+@@ -751,34 +751,5 @@
+ func (pm *ProcessManager) ProcessedUntil(traceCaptureKTime times.KTime) {
+-	var err error
+-	defer func() {
+-		if err != nil {
+-			log.Error(err)
+-		}
+-	}()
+-	pm.mu.Lock()
+-	defer pm.mu.Unlock()
+-
+-	nowKTime := times.GetKTime()
+-	log.Debugf("ProcessedUntil captureKT: %v latency: %v ms",
+-		traceCaptureKTime, (nowKTime-traceCaptureKTime)/1e6)
+-
+-	for pid, pidExitKTime := range pm.exitEvents {
+-		if pidExitKTime > traceCaptureKTime {
+-			continue
+-		}
+-
+-		log.Debugf("PID %v deleted", pid)
+-		delete(pm.pidToProcessInfo, pid)
+-
+-		for _, instance := range pm.interpreters[pid] {
+-			if err2 := instance.Detach(pm.ebpf, pid); err2 != nil {
+-				err = errors.Join(err,
+-					fmt.Errorf("failed to handle interpreted process exit for PID %d: %v",
+-						pid, err2))
+-			}
+-		}
+-		delete(pm.interpreters, pid)
+-		delete(pm.exitEvents, pid)
+-		log.Debugf("PID %v exit latency %v ms", pid, (nowKTime-pidExitKTime)/1e6)
++	if err := pm.ProcessedUntilChecked(traceCaptureKTime); err != nil {
++		log.Error(err)
+ 	}
+ }
+--- a/tracer/events.go
++++ b/tracer/events.go
+@@ -296,2 +296,5 @@
+-					t.processManager.ProcessedUntil(times.KTime(minKTime))
++					if err := t.processManager.ProcessedUntilChecked(times.KTime(minKTime)); err != nil {
++						t.traceReaderCounters.drain.setError(err)
++						return
++					}
+ 					minKTime = 0
+@@ -299,1 +302,4 @@
+-					t.processManager.ProcessedUntil(times.KTime(oldKTime))
++					if err := t.processManager.ProcessedUntilChecked(times.KTime(oldKTime)); err != nil {
++						t.traceReaderCounters.drain.setError(err)
++						return
++					}

@@ -1,0 +1,291 @@
+package io.mazewall.platform.native
+
+import io.mazewall.platform.fd.*
+
+import io.mazewall.platform.fd.FdOwnership
+
+
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.internal.RealNativeEngine
+import kotlin.contracts.ExperimentalContracts
+import kotlin.contracts.InvocationKind
+import kotlin.contracts.contract
+
+/**
+ * Entry point for all native Linux interactions.
+ *
+ * DESIGN INVARIANT: This entry point is completely decoupled from implicit [nativeScope] or
+ * raw FFM [Arena] allocations. All wrappers require pre-allocated [ManagedSegment]s,
+ * shifting transient memory lifecycle management entirely to the caller.
+ */
+
+internal object LinuxNative : NativeEngine {
+    @Volatile
+    private var engine: NativeEngine = RealNativeEngine
+
+    /**
+     * Identity of the currently active engine. Callers that cache engine-produced artifacts
+     * (e.g. native memory segments) MUST include this in their cache key: segments produced by a
+     * mock engine are not valid when the real engine (or another mock) becomes active.
+     */
+    val engineIdentity: Any
+        get() = engine
+
+    /**
+     * Captures every native capability from one engine identity for a logical operation.
+     * A later test-engine replacement cannot mix implementations into this snapshot.
+     */
+    public fun snapshot(): RuntimeSnapshot = RuntimeSnapshot(engine)
+
+    /**
+     * True when the active engine is the production [RealNativeEngine]. Metadata probe used by
+     * runtime self-verification gates (see io.mazewall.seccomp.InstallSelfVerifier).
+     */
+    fun isRealEngineActive(): Boolean = engine === RealNativeEngine
+
+    /**
+     * Swaps the active native engine. Used for testing and fault injection.
+     */
+    fun setEngine(newEngine: NativeEngine) {
+        engine = newEngine
+    }
+
+    /**
+     * Restores the default RealNativeEngine.
+     */
+    fun resetToDefault() {
+        engine = RealNativeEngine
+    }
+
+    override val fileSystem: NativeFileSystem get() = engine.fileSystem
+    override val networking: NativeNetworking get() = engine.networking
+    override val process: NativeProcess get() = engine.process
+    override val memory: NativeMemory get() = engine.memory
+    override val raw: RawSyscallOperations get() = engine.raw
+    override val bpf: NativeBpf get() = engine.bpf
+
+    /** Kernel-backed liveness probe kept behind the native facade. */
+    internal fun isDescriptorLive(fd: Int): Boolean =
+        fd >= 0 &&
+        raw.fcntl(
+            FileDescriptor.generic(fd),
+            NativeConstants.F_GETFD,
+            0L,
+        ) is SyscallResult.Success
+
+    /**
+     * Marker interface for system call handling states.
+     */
+    public sealed interface SyscallHandledState {
+        public interface Handled : SyscallHandledState
+        public interface Unhandled : SyscallHandledState
+    }
+
+    /**
+     * Represents the result of a native Linux system call.
+     *
+     * @param T The type of the value returned on success.
+     */
+    public sealed interface SyscallResult<out T, out Handled : SyscallHandledState> {
+        /** The call succeeded. */
+        public data class Success<out T, out Handled : SyscallHandledState>(
+            val value: T,
+            @PublishedApi
+            @get:JvmSynthetic
+            @set:JvmSynthetic
+            internal var descriptorReceipts: List<io.mazewall.platform.fd.NativeDescriptorReceipt> = emptyList(),
+            @PublishedApi
+            @get:JvmSynthetic
+            @set:JvmSynthetic
+            internal var nextDescriptorReceipt: Int = 0,
+        ) : SyscallResult<T, Handled> {
+            @JvmSynthetic
+            @Synchronized
+            internal fun takeDescriptorReceipt(): io.mazewall.platform.fd.NativeDescriptorReceipt {
+                check(nextDescriptorReceipt < descriptorReceipts.size) { "Result has no unconsumed native descriptor acquisition receipt" }
+                return descriptorReceipts[nextDescriptorReceipt++]
+            }
+        }
+
+        /** The call failed with a specific Linux [errno]. */
+        public data class Error<out Handled : SyscallHandledState>(val errno: Int, val rawValue: Long) : SyscallResult<Nothing, Handled> {
+            /** Throws an [IllegalStateException] with the given [context]. */
+            public fun throwErrno(context: String): Nothing {
+                val message = appendErrno(StringBuilder().append(context).append(" failed with errno="))
+                    .append(" (raw return=").append(rawValue).append(')').toString()
+                throw IllegalStateException(message)
+            }
+
+            override fun toString(): String = appendErrno(StringBuilder().append("Error(errno="))
+                .append(", rawValue=").append(rawValue).append(')').toString()
+
+            // Cold concat bootstraps may commit executable JVM code on an already restricted thread.
+            private fun appendErrno(message: StringBuilder): StringBuilder {
+                val symbol = io.mazewall.platform.syscall.ErrnoMapping.getSymbolicName(errno)
+                message.append(errno)
+                if (symbol != null) message.append(" (").append(symbol).append(')')
+                return message
+            }
+        }
+
+        /**
+         * Returns the success value or throws an exception if the call failed.
+         */
+        public fun getOrThrow(context: String): T =
+            when (this) {
+                is Success -> value
+                is Error -> throwErrno(context)
+            }
+
+        /**
+         * Returns the success value or null if the call failed.
+         */
+        public fun getOrNull(): T? =
+            when (this) {
+                is Success -> value
+                is Error -> null
+            }
+    }
+}
+
+/** Immutable view of one [NativeEngine] selected by [LinuxNative.snapshot]. */
+internal class RuntimeSnapshot internal constructor(
+    private val engine: NativeEngine,
+) : NativeEngine by engine {
+    public val engineIdentity: Any get() = engine
+    public val isRealEngine: Boolean get() = engine === RealNativeEngine
+}
+
+@OptIn(ExperimentalContracts::class)
+internal fun <T, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.isSuccess(): Boolean {
+    contract {
+        returns(true) implies (this@isSuccess is LinuxNative.SyscallResult.Success<T, H>)
+    }
+    return this is LinuxNative.SyscallResult.Success
+}
+
+@OptIn(ExperimentalContracts::class)
+internal fun <T, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.isFailure(): Boolean {
+    contract {
+        returns(true) implies (this@isFailure is LinuxNative.SyscallResult.Error<H>)
+    }
+    return this is LinuxNative.SyscallResult.Error
+}
+
+/**
+ * Transforms the success value using [transform].
+ */
+@OptIn(ExperimentalContracts::class)
+internal inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.map(transform: (T) -> R): LinuxNative.SyscallResult<R, H> {
+    contract {
+        callsInPlace(transform, InvocationKind.AT_MOST_ONCE)
+    }
+    return when (this) {
+        is LinuxNative.SyscallResult.Success -> LinuxNative.SyscallResult.Success(
+            transform(value),
+            descriptorReceipts = descriptorReceipts,
+            nextDescriptorReceipt = nextDescriptorReceipt,
+        )
+        is LinuxNative.SyscallResult.Error -> this
+    }
+}
+
+/**
+ * Transforms the success value using [transform] which returns another [LinuxNative.SyscallResult].
+ */
+@OptIn(ExperimentalContracts::class)
+internal inline fun <T, R, H : LinuxNative.SyscallHandledState> LinuxNative.SyscallResult<T, H>.flatMap(
+    transform: (T) -> LinuxNative.SyscallResult<R, H>
+): LinuxNative.SyscallResult<R, H> {
+    contract {
+        callsInPlace(transform, InvocationKind.AT_MOST_ONCE)
+    }
+    return when (this) {
+        is LinuxNative.SyscallResult.Success -> transform(value)
+        is LinuxNative.SyscallResult.Error -> this
+    }
+}
+
+/**
+ * Executes [action] if the call succeeded.
+ */
+
+@OptIn(ExperimentalContracts::class)
+internal inline fun <T> LinuxNative.SyscallResult<T, *>.onSuccess(action: (T) -> Unit): LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled> {
+    contract {
+        callsInPlace(action, InvocationKind.AT_MOST_ONCE)
+    }
+    if (this is LinuxNative.SyscallResult.Success) action(value)
+    return this as LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled>
+}
+
+/**
+ * Executes [action] if the call failed.
+ */
+
+@OptIn(ExperimentalContracts::class)
+internal inline fun <T> LinuxNative.SyscallResult<T, *>.onFailure(
+    action: (errno: Int, rawValue: Long) -> Unit
+): LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled> {
+    contract {
+        callsInPlace(action, InvocationKind.AT_MOST_ONCE)
+    }
+    if (this is LinuxNative.SyscallResult.Error) action(errno, rawValue)
+    return this as LinuxNative.SyscallResult<T, LinuxNative.SyscallHandledState.Handled>
+}
+
+/**
+ * Recovers from an error by applying [transform].
+ */
+@OptIn(ExperimentalContracts::class)
+internal inline fun <T> LinuxNative.SyscallResult<T, *>.recover(
+    transform: (errno: Int, rawValue: Long) -> @UnsafeVariance T
+): T {
+    contract {
+        callsInPlace(transform, InvocationKind.AT_MOST_ONCE)
+    }
+    return when (this) {
+        is LinuxNative.SyscallResult.Success -> value
+        is LinuxNative.SyscallResult.Error -> transform(errno, rawValue)
+    }
+}
+
+/**
+ * Extension properties for [LinuxNative.SyscallResult] of [Long] to provide
+ * convenience conversions for common native result types.
+ */
+internal fun LinuxNative.SyscallResult.Success<Long, *>.asLong(): Long = value
+
+/**
+ * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic].
+ */
+internal fun LinuxNative.SyscallResult.Success<Long, *>.asFd(): FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned> =
+    getFdOrThrow("asFd")
+
+/**
+ * Convenience extension for [LinuxNative.SyscallResult] of [Long].
+ */
+internal fun LinuxNative.SyscallResult<Long, *>.asInt(): Int =
+    when (this) {
+        is LinuxNative.SyscallResult.Success -> value.toInt()
+        is LinuxNative.SyscallResult.Error -> throwErrno("asInt")
+    }
+
+/**
+ * Returns the success value as a [FileDescriptor] of [FileDescriptorRole.Generic] or throws.
+ */
+internal fun LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String): FileDescriptor<FileDescriptorRole.Generic, FdState.Open, FdOwnership.Owned> =
+    when (this) {
+        is LinuxNative.SyscallResult.Success -> takeDescriptorReceipt().consume(FileDescriptorRole.Generic)
+        is LinuxNative.SyscallResult.Error -> throwErrno(context)
+    }
+
+/** Consumes native acquisition evidence while preserving the requested descriptor role. */
+internal fun <R : FileDescriptorRole> LinuxNative.SyscallResult<Long, *>.getFdOrThrow(context: String, role: R): FileDescriptor<R, FdState.Open, FdOwnership.Owned> =
+    when (this) {
+        is LinuxNative.SyscallResult.Success -> takeDescriptorReceipt().consume(role)
+        is LinuxNative.SyscallResult.Error -> throwErrno(context)
+    }

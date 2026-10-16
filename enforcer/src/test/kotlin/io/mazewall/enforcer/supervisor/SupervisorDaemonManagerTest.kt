@@ -1,19 +1,26 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockProcess
-import io.mazewall.MockProcessLauncher
-import io.mazewall.MockSocketManager
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.SocketManager
-import io.mazewall.core.Tid
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockProcess
+import io.mazewall.enforcer.api.MockProcessLauncher
+import io.mazewall.enforcer.api.MockSocketManager
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.memory.readByte
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
 import io.mazewall.seccomp.SeccompInstallationState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -30,6 +37,132 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class SupervisorDaemonManagerTest {
+    @Test
+    fun `default shutdown transport remains bound to lifecycle owner`() {
+        val owner = MockNativeEngine()
+        val ownedOpens = AtomicInteger()
+        val ownedCloses = AtomicInteger()
+        owner.networking.onSocket = { _, _, _ ->
+            ownedOpens.incrementAndGet()
+            LinuxNative.SyscallResult.Success(1000L)
+        }
+        owner.fileSystem.onClose = {
+            ownedCloses.incrementAndGet()
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        val manager = SupervisorDaemonManager(
+            engine = owner,
+            processLauncher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")),
+        )
+        val foreignCalls = AtomicInteger()
+        val foreign = MockNativeEngine().apply {
+            networking.onSocket = { _, _, _ ->
+                foreignCalls.incrementAndGet()
+                LinuxNative.SyscallResult.Error(13, -1L)
+            }
+        }
+        try {
+            manager.getOrSpawnSharedDaemon()
+            LinuxNative.setEngine(foreign)
+            manager.stop()
+            assertEquals(0, foreignCalls.get())
+            assertEquals(1, ownedOpens.get())
+            assertEquals(1, ownedCloses.get())
+        } finally {
+            manager.stop()
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `default lifecycle owner survives global replacement before startup`() {
+        val owner = MockNativeEngine()
+        LinuxNative.setEngine(owner)
+        val manager = SupervisorDaemonManager(
+            socketManager = MockSocketManager(),
+            processLauncher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")),
+        )
+        val foreignCalls = AtomicInteger()
+        LinuxNative.setEngine(
+            MockNativeEngine().apply {
+            process.onPrctl = {
+                foreignCalls.incrementAndGet()
+                LinuxNative.SyscallResult.Error(1, -1L)
+            }
+        },
+        )
+        try {
+            assertEquals(9999L, manager.getOrSpawnSharedDaemon().daemonProcess.pid())
+            manager.stop()
+            assertEquals(0, foreignCalls.get())
+        } finally {
+            manager.stop()
+            LinuxNative.resetToDefault()
+        }
+    }
+
+    @Test
+    fun `cached daemon reacquires ptrace authority after another daemon took it`() {
+        val engine = MockNativeEngine()
+        val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))
+        val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
+        var ptracer = 0L
+        engine.process.onPrctl = { command ->
+            if (command is io.mazewall.platform.syscall.PrctlCommand.SetPtracer) ptracer = command.tracerPid
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        try {
+            val original = manager.getOrSpawnSharedDaemon()
+            io.mazewall.platform.process.DaemonPtracer
+                .authorize(engine, MockProcess(12345L))
+            val reused = manager.getOrSpawnSharedDaemon()
+            assertEquals(original, reused)
+            assertEquals(9999L, ptracer, "cached supervisor must regain authority before use")
+        } finally {
+            manager.stop()
+        }
+    }
+
+    @Test
+    fun `cached daemon is not returned when restoring ptrace authority fails`() {
+        val engine = MockNativeEngine()
+        val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))
+        val manager = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
+        manager.getOrSpawnSharedDaemon()
+        io.mazewall.platform.process.DaemonPtracer
+            .authorize(engine, MockProcess(12345L))
+        engine.process.onPrctl = { LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L) }
+        try {
+            val failure = assertThrows<IllegalStateException> { manager.getOrSpawnSharedDaemon() }
+            assertTrue(failure.message!!.contains("errno=1"))
+        } finally {
+            manager.stop()
+        }
+    }
+
+    @Test
+    fun `cached daemon authorizes supplied caller authority without using lifecycle backend`() {
+        val owner = MockNativeEngine()
+        val launcher = MockProcessLauncher(MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n"))
+        val manager = SupervisorDaemonManager(owner, MockSocketManager(), launcher)
+        val caller = MockNativeEngine()
+        var authorized = 0L
+        caller.process.onPrctl = { command ->
+            if (command is io.mazewall.platform.syscall.PrctlCommand.SetPtracer) authorized = command.tracerPid
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        try {
+            val original = manager.getOrSpawnSharedDaemon()
+            owner.process.onPrctl = { LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L) }
+            val reused = manager.getOrSpawnSharedDaemon(caller)
+            assertEquals(original, reused)
+            assertEquals(9999L, authorized)
+        } finally {
+            owner.process.onPrctl = { LinuxNative.SyscallResult.Success(0L) }
+            manager.stop()
+        }
+    }
+
     @AfterEach
     fun resetContainmentState() {
         ContainmentStateRegistry.processState = ContainerState()
@@ -77,7 +210,7 @@ class SupervisorDaemonManagerTest {
 
         var prctlCalled = false
         mockEngine.process.onPrctl = { command ->
-            if (command is io.mazewall.core.PrctlCommand.SetPtracer && command.tracerPid == 9999L) {
+            if (command is io.mazewall.platform.syscall.PrctlCommand.SetPtracer && command.tracerPid == 9999L) {
                 prctlCalled = true
             }
             LinuxNative.SyscallResult.Success(0L)
@@ -123,7 +256,20 @@ class SupervisorDaemonManagerTest {
     fun `detects unexpected daemon exit and invokes handler`() {
         val mockEngine = MockNativeEngine()
         val mockLauncher = MockProcessLauncher()
-        val mockProcess = MockProcess(9999L, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n", exitVal = 42, alive = false)
+        val output = java.io.PipedInputStream()
+        val writer = java.io.PipedOutputStream(output)
+        writer.write((SupervisorDaemon.DAEMON_READY_SENTINEL + "\n").toByteArray())
+        val exitWaitEntered = CountDownLatch(1)
+        val exited = CountDownLatch(1)
+        val mockProcess = object : MockProcess(9999L, exitVal = 42) {
+            override fun getInputStream(): java.io.InputStream = output
+
+            override fun waitFor(): Int {
+                exitWaitEntered.countDown()
+                exited.await()
+                return 42
+            }
+        }
         mockLauncher.mockProcess = mockProcess
         val mockSocket = MockSocketManager()
 
@@ -139,10 +285,18 @@ class SupervisorDaemonManagerTest {
 
         val context = manager.getOrSpawnSharedDaemon()
         assertNotNull(context)
+        writer.close()
+        try {
+            assertTrue(exitWaitEntered.await(2, TimeUnit.SECONDS), "Output EOF must still observe later process death")
+        } finally {
+            mockProcess.setAlive(false)
+            exited.countDown()
+        }
 
         val completed = exitLatch.await(5, TimeUnit.SECONDS)
         assertTrue(completed, "Expected unexpected exit handler to be invoked")
         assertEquals(42, exitCodeReceived.get())
+        manager.stop()
     }
 
     @Test

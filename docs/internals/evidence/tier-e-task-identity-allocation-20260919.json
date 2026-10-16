@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_task_identity_allocation_ab",
+  "run_date": "2026-09-19",
+  "artifact": {
+    "path": "build/tier-e-task-identity-20260919/results.jsonl",
+    "sha256": "9e5e860d48e76dc8a24c7fdb4389bc64231e9bffeefb3e54b21cf2f9c41faf9c"
+  },
+  "environment": {
+    "execution": "rootful Docker",
+    "scope": "tier-e-task-identity",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "variants": {
+    "per_event": {
+      "resolved_records": 32690,
+      "complete_sessions": 5,
+      "observation_conversion_bytes_per_ring_ready_record": 219.25897828081983
+    },
+    "reuse_consecutive": {
+      "resolved_records": 32690,
+      "complete_sessions": 5,
+      "observation_conversion_bytes_per_ring_ready_record": 186.68828387886202,
+      "allocation_reduction_percent": 14.86
+    }
+  },
+  "decision": "Validated existing production default. Reusing an immutable TaskIdentity only for consecutive records with the same TID reduces conversion allocation without changing retained record count or session completeness. This benchmark intentionally has no independent operation oracle, so it is allocation evidence only and does not independently establish end-to-end workload correctness.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  }
+}

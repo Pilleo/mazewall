@@ -1,7 +1,15 @@
 package io.mazewall
 
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.params.ParameterizedTest
@@ -183,5 +191,24 @@ class SyscallTest {
                 syscall.numberFor(currentArch)
             }
         }
+    }
+
+    @ParameterizedTest(name = "Checking for duplicate syscall numbers on {0}")
+    @MethodSource("architectures")
+    fun `no syscall number duplicates on any architecture`(arch: Arch) {
+        val numbersToSyscalls = mutableMapOf<Int, MutableList<Syscall>>()
+        for (syscall in Syscall.entries) {
+            val nr = syscall.numberFor(arch)
+            if (nr != -1) {
+                numbersToSyscalls.computeIfAbsent(nr) { mutableListOf() }.add(syscall)
+            }
+        }
+
+        val duplicates = numbersToSyscalls.filter { it.value.size > 1 }
+        assertEquals(
+            emptyMap<Int, List<Syscall>>(),
+            duplicates,
+            "Duplicate syscall numbers found on ${arch.name}: $duplicates",
+        )
     }
 }

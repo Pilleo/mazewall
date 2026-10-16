@@ -1,0 +1,23 @@
+{
+  "schema_version": 4,
+  "status": "INCOMPLETE_INSTRUMENTATION_DEFECT",
+  "policy_eligibility": false,
+  "default_promotion": "REJECT_DEFAULT_PROMOTION",
+  "source_revision": "87e8743597b04b790d2b92a80776cbff59c5cfaa",
+  "source_dirty": true,
+  "failed_mode": "dictionary_full_stream",
+  "raw_declared": 10000,
+  "main_pre_session_declared": 10000,
+  "raw_pre_session_declared": 10000,
+  "raw_after_session_declared": 10000,
+  "main_after_session_declared": 32847,
+  "main_exact_submissions": 30000,
+  "early_raw_target_openat": 10002,
+  "early_main_target_openat": 10002,
+  "kernel_ring_loss": 0,
+  "instrumentation_defect": "v4 pre-gate helper left r5 nonzero before legacy exact-audit eligibility initialization; a focused red/green generated-bytecode regression covers the explicit reset",
+  "runner": "tier-e-trustworthy-943f384c-f38a-4485-9239-aa401ae8063d-runner",
+  "volume": "tier-e-trustworthy-943f384c-f38a-4485-9239-aa401ae8063d-artifacts",
+  "resource_state": "RETAINED_FOR_RECOVERY",
+  "host_local_artifacts": "/tmp/tier-e-v4-verifier-1790546496*"
+}

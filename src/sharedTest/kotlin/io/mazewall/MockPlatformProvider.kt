@@ -1,9 +1,13 @@
-package io.mazewall
+package io.mazewall.enforcer.api
+
+import io.mazewall.platform.native.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 
 /**
  * A mock implementation of [PlatformProvider] for deterministic unit testing.
  */
-public open class MockPlatformProvider : PlatformProvider {
+internal open class MockPlatformProvider : PlatformProvider {
     public var mockOsName: String = "Linux"
     public var mockOsVersion: String = "6.8.0"
     public var mockOsArch: String = "amd64"

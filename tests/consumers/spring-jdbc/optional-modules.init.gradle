@@ -1,0 +1,6 @@
+// Task-owned focused fixture inclusion; root settings remain coordinator-owned.
+settingsEvaluated { settings ->
+    if (new File(settings.settingsDir, 'enforcer/build.gradle.kts').isFile()) {
+        settings.include(':integrations:spring:mazewall-spring-boot-starter')
+    }
+}

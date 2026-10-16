@@ -1,0 +1,45 @@
+{
+  "kind": "tier_e_capture_profile_loopback_rejection",
+  "timestamp": "2026-09-20",
+  "environment": {
+    "runner": "local rootful Docker",
+    "source_dirty": true,
+    "run_level": "smoke",
+    "forks": 1,
+    "warmups": 3,
+    "measured_batches_per_fork": 3,
+    "workload": "loopback_socket"
+  },
+  "command": "MAZEWALL_TIER_E_BENCHMARK_SCOPE=tier-e-capture-profile MAZEWALL_TIER_E_BENCHMARK_WORKLOAD=loopback_socket MAZEWALL_TIER_E_RUN_LEVEL=smoke MAZEWALL_TIER_E_CALIBRATION=false bash scripts/run_tier_e_trustworthy_benchmark.sh build/tier-e-capture-profile-loopback-semantic-fixed-20260920",
+  "artifact": "build/tier-e-capture-profile-loopback-semantic-fixed-20260920/results.jsonl",
+  "terminal": "success",
+  "profiles": {
+    "full": {
+      "admitted_boundaries": 4230,
+      "excluded_boundaries": 0,
+      "semantic_stack_digest": "370abdfcae6b22bd7022a529cda00df525c2043708dff77ff02e97e6dec1b172"
+    },
+    "network_io": {
+      "admitted_boundaries": 4206,
+      "excluded_boundaries": 24,
+      "semantic_stack_digest": "d7e0d532545b0791683839b318d232c5b23a5327ee353227f4876b6a1c0da53f"
+    }
+  },
+  "decision": {
+    "selected_profile_promoted": false,
+    "reason": "logical_stack_content_mismatch",
+    "admission_reduction_fraction": 0.005673758865248227,
+    "interpretation": "Both declared domains completed with zero reported loss. The normalized decoded logical-stack digests differ after selecting the canonical network binding set, so the narrowed profile is not semantically equivalent and must not be promoted."
+  },
+  "dimensions": {
+    "capture_domain_validity": "complete_for_each_declared_domain",
+    "transport_completeness": "complete",
+    "attribution_coverage": "not_equivalent_across_profiles",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "not_measured_for_promotion"
+  },
+  "evidence_integrity": "complete",
+  "performance_gate": "not_measured",
+  "policy_eligibility": false
+}

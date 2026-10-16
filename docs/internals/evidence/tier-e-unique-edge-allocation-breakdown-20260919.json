@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_unique_edge_collector_allocation_breakdown",
+  "run_date": "2026-09-19",
+  "environment": {
+    "execution": "rootful Docker",
+    "scope": "tier-e-collector-append",
+    "workload": "syscall_dense",
+    "warmups": 3,
+    "measured_batches": 10,
+    "rotated_forks": 5
+  },
+  "instrumented_artifact": {
+    "path": "build/tier-e-unique-edge-allocation-20260919/results.jsonl",
+    "sha256": "1d83aed77c3424bd442b8b41f919c534f4dbdbcb00e370dcf2e1e5cc23154ccc",
+    "manifest_sha256": "bb7b18b5f08d657670c936d82646f3f3da7ed0fbf7a592b2c6e68def85b62798",
+    "benchmark_log_sha256": "b74737fd7a94ba2d6f71afcfa1add9cbaeb0c5b11570e70506ee775c377c40fe"
+  },
+  "correctness": {
+    "outputs": 20,
+    "workload_correctness": "PASS",
+    "tier_e_session_evidence": "COMPLETE",
+    "policy_eligibility": false
+  },
+  "append_target_bytes_per_ring_ready_record": {
+    "collector_resolution": 234.96,
+    "unique_edge_gate_check": 92.13,
+    "suppressed_decision_observer": 117.13,
+    "candidate_token_ownership": 10.03,
+    "candidate_decision_observer": 13.54,
+    "immutable_resolved_evidence_counter": 12.25
+  },
+  "interpretation": "The first four unique-edge buckets account for 232.83 bytes per ring-ready record of the 234.96-byte collector-resolution total. The immutable ResolvedSyscall counter is a nested construction counter and is not additive. The two decision-observer buckets are incurred by TierEKernelSmoke's benchmark correctness oracle, not by a normal collector constructed without an observer. Production collector overhead therefore requires a separately retained observer-free measurement before it can be classified as unavoidable.",
+  "rejected_probe": {
+    "artifact": "build/tier-e-unique-edge-probe-20260919/results.jsonl",
+    "artifact_sha256": "de2e0c49826485fa3b8e1d15bf50a1b28cf7316a1de3ad23f834234d6aa405fe",
+    "manifest_sha256": "bb706747c760b324fd3c738f410ac9ec258508de2ed32d3c014abb7d8e192588",
+    "result": "rejected",
+    "reason": "A thread-local equality-compatible lookup probe lowered its own gate bucket from 92.13 to 56.99 bytes per ring-ready record, but append-target collector-resolution allocation remained unchanged at 234.96 bytes per ring-ready record. The change moved allocation between accounting boundaries rather than delivering a supported end-to-end improvement."
+  },
+  "next_required_measurement": "Superseded by tier-e-unique-edge-observer-accounting-20260919. The paired production lane proved that observer diagnostics do not explain aggregate collector-resolution allocation. Classify the remaining production allocation after edge-gate and candidate-token ownership before accepting another unique-edge optimization.",
+  "verdict_dimensions": {
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  }
+}

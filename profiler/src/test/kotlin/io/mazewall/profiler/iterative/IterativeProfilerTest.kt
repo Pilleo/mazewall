@@ -1,17 +1,35 @@
 package io.mazewall.profiler.iterative
-
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
-import io.mazewall.UnsupportedKernelFeatureException
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.io.File
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 @EnabledIfLinuxAndSupported
 class IterativeProfilerTest {
+    companion object {
+        @org.junit.jupiter.api.BeforeAll
+        @JvmStatic
+        fun preloadClockWrappers() {
+            // The first interpreted native call can allocate executable CodeHeap memory.
+            // Prime these test clocks while no iterative worker has a restrictive filter.
+            System.currentTimeMillis()
+            System.nanoTime()
+        }
+    }
+
     private fun runPlatformTest(block: () -> Unit) {
         try {
             block()
@@ -27,8 +45,8 @@ class IterativeProfilerTest {
 
             // Use a base policy that allows OPEN syscalls but has NO allowed paths (denies all by default in Landlock)
             val basePolicy =
-                Policy
-                    .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                     .build()
 
@@ -50,8 +68,8 @@ class IterativeProfilerTest {
 
             // Base policy allows write/open syscalls but has NO allowed paths
             val basePolicy =
-                Policy
-                    .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .unblock(
                         Syscall.OPEN,
                         Syscall.OPENAT,
@@ -155,8 +173,8 @@ class IterativeProfilerTest {
 
             try {
                 val basePolicy =
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .unblock(
                             Syscall.OPEN,
                             Syscall.OPENAT,
@@ -192,8 +210,8 @@ class IterativeProfilerTest {
 
             try {
                 val basePolicy =
-                    Policy
-                        .builder()
+                    WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.NATIVE_IMAGE)
                         .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                         .allowFsRead(allowedDir.absolutePath)
                         .build()
@@ -250,20 +268,25 @@ class IterativeProfilerTest {
             target.writeText("content")
 
             val basePolicy =
-                Policy
-                    .builder()
+                WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.HOTSPOT_JIT)
                     .unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                     .build()
 
+            assertTrue(basePolicy.allowMmapExec, "This contained read runs on HotSpot and requires executable mappings")
+            var readContent: String? = null
             val compiledPolicy =
                 IterativeProfiler.profile(basePolicy) {
                     // Use a relative path to read the file
                     val relativePath = java.nio.file.Paths
                         .get("build/tmp/iterative-relative-test.txt")
-                    java.nio.file.Files
+                    readContent = java.nio.file.Files
                         .readString(relativePath)
                 }
 
+            assertEquals("content", readContent, "A contained read must succeed, not merely exhaust discovery retries")
+            assertTrue(compiledPolicy.allowedFsWritePaths.isEmpty(), "Read discovery must not grant write access")
+            assertEquals(basePolicy.allowMmapExec, compiledPolicy.allowMmapExec)
             assertTrue(
                 compiledPolicy.allowedFsReadPaths.any { it.value == target.absolutePath },
                 "Should allow read access to absolute path of target: ${target.absolutePath}",
@@ -276,7 +299,10 @@ class IterativeProfilerTest {
     @Test
     fun `test IterativeProfiler resolves simple AccessDeniedException`() {
         runPlatformTest {
-            assumeTrue(io.mazewall.Platform.isSupported())
+            assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
 
             val testRunnable = object : Runnable {
                 var attempt = 0
@@ -289,7 +315,7 @@ class IterativeProfilerTest {
                 }
             }
 
-            val finalPolicy = IterativeProfiler.profile(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
+            val finalPolicy = IterativeProfiler.profile(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
 
             assertTrue(finalPolicy.allowedFsReadPaths.any { it.value == "/tmp/iterative-test" })
         }
@@ -298,7 +324,10 @@ class IterativeProfilerTest {
     @Test
     fun `test IterativeProfiler fails if max retries exceeded`() {
         runPlatformTest {
-            assumeTrue(io.mazewall.Platform.isSupported())
+            assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
 
             val testRunnable = object : Runnable {
                 override fun run() {
@@ -307,7 +336,7 @@ class IterativeProfilerTest {
             }
 
             try {
-                IterativeProfiler.profile(io.mazewall.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
+                IterativeProfiler.profile(io.mazewall.enforcer.api.Policy.PURE_COMPUTE_UNSAFE, testRunnable)
             } catch (e: Exception) {
                 assertTrue(e is java.nio.file.AccessDeniedException)
             }
@@ -317,13 +346,16 @@ class IterativeProfilerTest {
     @Test
     fun `test iterative profiling path matching avoids naive prefix collision`() {
         runPlatformTest {
-            assumeTrue(io.mazewall.Platform.isSupported())
+            assumeTrue(
+                io.mazewall.enforcer.api.Platform
+                .isSupported(),
+            )
 
             // Start with a policy that allows reading "/tmp/prefix" (so "/tmp/prefix" is in allowedFsReadPaths)
-            val initialPolicy = Policy
-                .builder()
+            val initialPolicy = WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead(
-                    io.mazewall.core.SandboxedPath
+                    io.mazewall.platform.lifecycle.SandboxedPath
                     .of("/tmp/prefix", allowNonExistent = true),
                 ).unblock(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                 .build()

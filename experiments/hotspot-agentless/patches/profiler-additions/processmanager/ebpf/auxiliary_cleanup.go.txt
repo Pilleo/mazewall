@@ -1,0 +1,19 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpf
+
+import (
+	"context"
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/internal/log"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+func closeRejectedInner(ctx context.Context, inner *cebpf.Map) {
+	if inner == nil {
+		return
+	}
+	if err := inner.Close(); err != nil && !periodiccaller.ReportOwnedError(ctx, err) {
+		log.Errorf("retire rejected async inner map: %v", err)
+	}
+}

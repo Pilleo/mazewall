@@ -1,34 +1,51 @@
-package io.mazewall.enforcer.supervisor
+package io.mazewall.enforcer.internal.supervisor
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
-import io.mazewall.core.SocketManager
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.enforcer.api.MockNativeNetworking
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
-import org.junit.jupiter.api.AfterEach
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.platform.syscall.*
+import io.mazewall.testing.awaitCondition
+import io.mazewall.testing.awaitOrFail
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.parallel.Isolated
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
+@Isolated
 class SupervisorDaemonEngineTest {
-    @AfterEach
-    fun tearDown() {
-        LinuxNative.resetToDefault()
-    }
-
     @Test
     fun `processConnectionStep retries on EINTR during ACK write`() {
+        val originalEngine = LinuxNative.engineIdentity
         var writeCalls = 0
         val mockEngine = MockNativeEngine()
         mockEngine.memory.onWrite = { _, _, _ ->
+            assertSame(originalEngine, LinuxNative.engineIdentity, "ACK fixture must preserve the process native engine")
             writeCalls++
             if (writeCalls == 1) {
                 LinuxNative.SyscallResult.Error(NativeConstants.EINTR, -1L)
@@ -37,20 +54,40 @@ class SupervisorDaemonEngineTest {
             }
         }
 
-        LinuxNative.setEngine(mockEngine)
-        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
-        val socketFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(10)
-        val listenerFd = FileDescriptor.replace<FileDescriptorRole.SeccompNotif>(11)
-        val connection = io.mazewall.ffi.networking.SeccompConnection
-            .FdAttached(socketFd, listenerFd)
-        io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
-            val pollFd = PollFdSegment.of(arena.allocate(8))
-            mockEngine.onPoll = { _, _, _ -> LinuxNative.SyscallResult.Success(1L) }
+        val (socketFd, listenerFd) = NativeArena.ofConfined().use { arena ->
+            with(arena) {
+                val path = arena.allocateFrom("/dev/null")
+                val socket = (RealNativeEngine.fileSystem.open(path, OpenFlags.RDONLY) as LinuxNative.SyscallResult.Success).value.toInt()
+                val listener = (RealNativeEngine.fileSystem.open(path, OpenFlags.RDONLY) as LinuxNative.SyscallResult.Success).value.toInt()
+                TestFileDescriptors
+                    .adopt(socket, FileDescriptorRole.UnixSocket) to
+                    TestFileDescriptors
+                        .adopt(listener, FileDescriptorRole.SeccompNotif)
+            }
+        }
+        try {
+            assertEquals("/dev/null", Files.readSymbolicLink(Path.of("/proc/self/fd/${socketFd.value}")).toString())
+            assertEquals("/dev/null", Files.readSymbolicLink(Path.of("/proc/self/fd/${listenerFd.value}")).toString())
+            val socketManager = TestSocketManager()
+            val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = socketManager)
+            val connection = io.mazewall.ffi.networking.SeccompConnection
+                .FdAttached(socketFd, listenerFd)
+                .also { it.socketManager = socketManager }
+            NativeArena.ofConfined().use { arena ->
+                val pollFd = PollFdSegment.of(arena.allocate(8))
+                mockEngine.onPoll = { fds, _, _ ->
+                    PollFdSegment.of(fds).setRevents(NativeConstants.POLLOUT)
+                    LinuxNative.SyscallResult.Success(1L)
+                }
 
-            val result = engine.processConnectionStep(arena, connection, socketFd, pollFd.managed)
+                val result = engine.processConnectionStep(arena, connection, socketFd, pollFd.managed)
 
-            assertNotNull(result, "processConnectionStep should return non-null on successful retry")
-            assertEquals(2, writeCalls)
+                assertNotNull(result, "processConnectionStep should return non-null on successful retry")
+                assertEquals(1, writeCalls)
+            }
+        } finally {
+            assertTrue(RealNativeEngine.fileSystem.close(socketFd) is LinuxNative.SyscallResult.Success, "owned ACK socket closed")
+            assertTrue(RealNativeEngine.fileSystem.close(listenerFd) is LinuxNative.SyscallResult.Success, "owned ACK listener closed")
         }
     }
 
@@ -78,7 +115,8 @@ class SupervisorDaemonEngineTest {
             }
         }
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = socketManager)
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -103,8 +141,9 @@ class SupervisorDaemonEngineTest {
             LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
         }
 
-        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine)
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = TestSocketManager())
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -126,11 +165,13 @@ class SupervisorDaemonEngineTest {
                 serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
             ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
                 fallbackAcceptCalls++
-                return FileDescriptor.replace(11)
+                return TestFileDescriptors
+                    .replace(11)
             }
         }
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         engine.handleNewConnection(serverFd)
 
@@ -152,7 +193,8 @@ class SupervisorDaemonEngineTest {
 
         val mockSocket = object : TestSocketManager(5) {}
         val engine = SupervisorDaemonEngine("/tmp/test.sock", engine = mockEngine, socketManager = mockSocket)
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(5)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(5)
 
         // Reflection to inject throwing ExecutorService
         val delegateField = SupervisorDaemonEngine::class.java.getDeclaredField("delegate")
@@ -227,17 +269,22 @@ class SupervisorDaemonEngineTest {
         assertEquals(0, engine.clientSockets.size, "Client socket should be removed from tracking list")
     }
 
-    open class TestSocketManager(
+    internal open class TestSocketManager(
         val serverFdVal: Int = 5,
     ) : SocketManager {
         val closedFds = CopyOnWriteArrayList<Int>()
 
-        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(serverFdVal)
+        override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(serverFdVal)
 
         override fun accept(serverFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
-            FileDescriptor.replace(11)
+            TestFileDescriptors
+                .replace(11)
 
-        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> = FileDescriptor.replace(12)
+        override fun connect(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
+            TestFileDescriptors
+            .replace(12)
 
         override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
             closedFds.add(fd.value)
@@ -245,7 +292,9 @@ class SupervisorDaemonEngineTest {
 
         override fun recvDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
-        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? = FileDescriptor.replace(20)
+        ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? =
+            TestFileDescriptors
+            .replace(20)
 
         override fun sendDescriptor(
             socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
@@ -287,7 +336,7 @@ class SupervisorDaemonEngineTest {
                 LinuxNative.SyscallResult.Success(1L)
             } else {
                 // Throw to break the loop on second iteration
-                throw RuntimeException("Simulated loop interrupt")
+                throw IllegalStateException("Simulated loop interrupt")
             }
         }
 
@@ -311,6 +360,7 @@ class SupervisorDaemonEngineTest {
         val client1Finished = CountDownLatch(1)
         val client2Accepted = CountDownLatch(1)
         val client2Finished = CountDownLatch(1)
+        val shutdownAllowed = CountDownLatch(1)
 
         val mockEngine = MockNativeEngine()
         val mockSocket = object : TestSocketManager(5) {
@@ -318,9 +368,11 @@ class SupervisorDaemonEngineTest {
                 socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
             ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? {
                 return if (socketFd.value == 12) {
-                    FileDescriptor.replace(20)
+                    TestFileDescriptors
+                        .replace(20)
                 } else if (socketFd.value == 13) {
-                    FileDescriptor.replace(21)
+                    TestFileDescriptors
+                        .replace(21)
                 } else {
                     null
                 }
@@ -366,9 +418,13 @@ class SupervisorDaemonEngineTest {
 
             when {
                 firstFd == 5 && nfds == 1L -> {
-                    // Outer poll, only server — set POLLIN to trigger accept
-                    PollFdSegment.of(fds).setRevents(NativeConstants.POLLIN)
-                    LinuxNative.SyscallResult.Success(1L)
+                    if (acceptCount < 2) {
+                        PollFdSegment.of(fds).setRevents(NativeConstants.POLLIN)
+                        LinuxNative.SyscallResult.Success(1L)
+                    } else {
+                        shutdownAllowed.awaitOrFail("test releases idle reactor after both clients finish")
+                        LinuxNative.SyscallResult.Success(0L)
+                    }
                 }
                 firstFd == 5 && nfds == 2L -> {
                     // Outer poll, server + active client: set POLLIN only on CLIENT slot so connection advances
@@ -377,8 +433,11 @@ class SupervisorDaemonEngineTest {
                     LinuxNative.SyscallResult.Success(1L)
                 }
                 (firstFd == 12 || firstFd == 13) && nfds == 1L -> {
-                    // INNER poll inside processConnectionStep(Accepted) — client is ready
-                    PollFdSegment.of(fds).setRevents(NativeConstants.POLLIN)
+                    // Accepted connections wait for POLLIN; attached handshakes wait for POLLOUT.
+                    val requested = PollFdSegment.of(fds).getEvents().toInt()
+                    PollFdSegment.of(fds).setRevents(
+                        if ((requested and NativeConstants.POLLOUT.toInt()) != 0) NativeConstants.POLLOUT else NativeConstants.POLLIN,
+                    )
                     LinuxNative.SyscallResult.Success(1L)
                 }
                 (firstFd == 20 || firstFd == 21) && nfds == 2L -> {
@@ -387,8 +446,7 @@ class SupervisorDaemonEngineTest {
                     LinuxNative.SyscallResult.Success(1L)
                 }
                 else -> {
-                    Thread.sleep(10)
-                    LinuxNative.SyscallResult.Success(0L)
+                    error("Unexpected reactor poll: firstFd=$firstFd, nfds=$nfds")
                 }
             }
         }
@@ -396,10 +454,12 @@ class SupervisorDaemonEngineTest {
         val engine = SupervisorDaemonEngine("/tmp/test_resilient.sock", engine = mockEngine, socketManager = mockSocket)
 
         // Run the engine in a background thread
+        val failure = AtomicReference<Throwable?>()
         val engineThread = Thread {
             try {
                 engine.run()
-            } catch (ignored: Exception) {
+            } catch (caught: Throwable) {
+                failure.set(caught)
                 }
         }.apply {
             name = "test-supervisor-engine"
@@ -415,8 +475,10 @@ class SupervisorDaemonEngineTest {
             assertTrue(client2Finished.await(5, TimeUnit.SECONDS), "Client 2 session should finish and close socket")
         } finally {
             engine.triggerGlobalShutdown("test teardown")
-            engineThread.join(5000)
+            shutdownAllowed.countDown()
+            awaitCondition(description = "supervisor reactor terminated after shutdown") { !engineThread.isAlive }
         }
+        failure.get()?.let { throw it }
 
         // Verify both sockets and their listeners were closed
         assertTrue(mockSocket.closedFds.contains(12), "Client socket 12 should be closed")

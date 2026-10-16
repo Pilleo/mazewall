@@ -1,0 +1,96 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package processmanager
+
+import (
+	"errors"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/times"
+	"go.opentelemetry.io/ebpf-profiler/util"
+)
+
+type metadataRetirementInstance struct {
+	interpreter.InstanceStubs
+	err   error
+	calls int
+}
+
+func TestHotSpotEpochMetadataRetirementCheckedReturnAndProcessInfo(t *testing.T) {
+	i := &metadataRetirementInstance{err: syscall.EPERM}
+	key := util.OnDiskFileIdentifier{}
+	info := &processInfo{}
+	pm := &ProcessManager{interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{123: {key: i}}, exitEvents: map[libpf.PID]times.KTime{123: 10}, pidToProcessInfo: map[libpf.PID]*processInfo{123: info}}
+	if err := pm.ProcessedUntilChecked(10); !errors.Is(err, syscall.EPERM) {
+		t.Fatal("checked API lost native cause", err)
+	}
+	if pm.pidToProcessInfo[123] != info {
+		t.Fatal("failed process metadata owner discarded")
+	}
+	i.err = nil
+	if err := pm.ProcessedUntilChecked(10); err != nil {
+		t.Fatal(err)
+	}
+	if len(pm.pidToProcessInfo) != 0 {
+		t.Fatal("successful process metadata not retired")
+	}
+}
+
+func (i *metadataRetirementInstance) Detach(interpreter.EbpfHandler, libpf.PID) error {
+	i.calls++
+	return i.err
+}
+
+func TestHotSpotEpochMetadataRetirementPreservesFailedOwnership(t *testing.T) {
+	for _, cause := range []error{syscall.EPERM, syscall.EACCES} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			i := &metadataRetirementInstance{err: cause}
+			key := util.OnDiskFileIdentifier{}
+			pm := &ProcessManager{interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{123: {key: i}}, exitEvents: map[libpf.PID]times.KTime{123: 10}}
+			var fatal error
+			pm.epochFatal = func(err error) { fatal = err }
+			pm.ProcessedUntil(9)
+			if i.calls != 0 {
+				t.Fatal("future metadata retired before watermark")
+			}
+			pm.ProcessedUntil(10)
+			if !errors.Is(fatal, cause) {
+				t.Fatalf("native cleanup failure hidden: %v", fatal)
+			}
+			if pm.interpreters[123][key] != i || pm.exitEvents[123] != 10 {
+				t.Fatal("failed ownership discarded")
+			}
+			i.err = nil
+			pm.ProcessedUntil(10)
+			if i.calls != 2 || len(pm.interpreters) != 0 || len(pm.exitEvents) != 0 {
+				t.Fatal("successful retry not retired", i.calls)
+			}
+		})
+	}
+}
+
+func TestHotSpotEpochMetadataRetirementRetriesOnlyFailedInstances(t *testing.T) {
+	good := &metadataRetirementInstance{}
+	denied := &metadataRetirementInstance{err: syscall.EACCES}
+	blocked := &metadataRetirementInstance{err: syscall.EPERM}
+	a, b, c := util.OnDiskFileIdentifier{InodeNum: 1}, util.OnDiskFileIdentifier{InodeNum: 2}, util.OnDiskFileIdentifier{InodeNum: 3}
+	pm := &ProcessManager{interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{123: {a: good, b: denied, c: blocked}}, exitEvents: map[libpf.PID]times.KTime{123: 10}}
+	var fatal error
+	pm.epochFatal = func(err error) { fatal = err; pm.mu.Lock(); pm.mu.Unlock() }
+	pm.ProcessedUntil(10)
+	if !errors.Is(fatal, syscall.EPERM) || !errors.Is(fatal, syscall.EACCES) {
+		t.Fatal("native cleanup causes lost", fatal)
+	}
+	if len(pm.interpreters[123]) != 2 || pm.interpreters[123][a] != nil {
+		t.Fatal("partial ownership not retained")
+	}
+	denied.err = nil
+	blocked.err = nil
+	pm.ProcessedUntil(10)
+	if good.calls != 1 || denied.calls != 2 || blocked.calls != 2 || len(pm.interpreters) != 0 || len(pm.exitEvents) != 0 {
+		t.Fatal("already retired instance detached twice", good.calls, denied.calls, blocked.calls)
+	}
+}

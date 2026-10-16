@@ -1,6 +1,19 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues/>
+  <!-- Reviewed native/helper boundaries only; see native-helper-exceptions.md. -->
+  <ManuallySuppressedIssues>
+    <ID>CyclomaticComplexMethod:TraceeAuthorityNotificationWork.kt:TraceeAuthorityNotificationWork$context(arena: NativeArena) override fun poll: NotificationProgress</ID>
+    <ID>LoopWithTooManyJumpStatements:TraceeProcAuthority.kt:TraceeProcAuthority$for</ID>
+    <ID>NestedBlockDepth:SeccompInstallTransport.kt:SeccompInstallTransport$@Suppress("TooGenericExceptionCaught") fun connect: FileDescriptor&lt;FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned&gt;</ID>
+    <ID>NestedBlockDepth:TraceeAuthorityHelper.kt:TraceeAuthorityHelper$fun serve</ID>
+    <ID>ReturnCount:SupervisorNotificationWork.kt:SupervisorNotificationWork$context(arena: NativeArena) override fun poll: NotificationProgress</ID>
+    <ID>ReturnCount:TraceeAuthorityNotificationWork.kt:TraceeAuthorityNotificationWork$context(arena: NativeArena) override fun poll: NotificationProgress</ID>
+    <ID>ThrowsCount:SocketHelperMain.kt:SocketHelperMain$private fun sendResult</ID>
+    <ID>ThrowsCount:SocketHelperProcess.kt:SocketHelperProcess$override fun executeAuthority: SupervisorReplyEffect</ID>
+    <ID>ThrowsCount:SupervisorSeccompNotifInstaller.kt:SupervisorSeccompNotifInstaller$@io.mazewall.MazewallInternal // SUPPRESSION-RATIONALE: Platform support, irreversible installation and bounded handshake failures retain distinct throw sites and explicit partial-installation evidence. public fun installOwned</ID>
+    <ID>ThrowsCount:TraceeAuthorityProtocol.kt:TraceeAuthorityProtocol$fun readRequest: Pair&lt;SeccompNotification, List&lt;String&gt;&gt;</ID>
+    <ID>ThrowsCount:TraceeProcAuthority.kt:TraceeProcAuthority$context(arena: NativeArena) private fun readable</ID>
+  </ManuallySuppressedIssues>
   <CurrentIssues>
     <ID>ConstructorParameterNaming:Arch.kt:Arch$val clock_gettime: Int</ID>
     <ID>ConstructorParameterNaming:Arch.kt:Arch$val exit_group: Int</ID>

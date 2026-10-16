@@ -1,9 +1,17 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfFilter
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
 import org.junit.jupiter.api.Test
 import kotlin.test.assertTrue
 
@@ -14,10 +22,10 @@ class BpfOverflowFixTest {
         val blocked = IntArray(100) { it + 1000 } // Use numbers that won't clash with preamble
 
         val actions = blocked.associateWith {
-            io.mazewall.core.SeccompAction
+            io.mazewall.platform.syscall.SeccompAction
             .ACT_ERRNO()
         }
-        val program = BpfFilter.buildFromActions(arch, actions, io.mazewall.core.SeccompAction.ACT_ALLOW, DefaultSyscallInspectionPipeline(emptyList()))
+        val program = BpfFilter.buildFromActions(arch, actions, io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW, DefaultSyscallInspectionPipeline(emptyList()))
         val filters = program.instructions
 
         assertTrue(filters.isNotEmpty())

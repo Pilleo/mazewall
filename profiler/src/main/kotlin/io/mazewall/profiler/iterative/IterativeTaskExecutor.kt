@@ -1,32 +1,35 @@
 package io.mazewall.profiler.iterative
 
-import io.mazewall.Policy
-import io.mazewall.Uncompiled
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.Uncompiled
 import io.mazewall.landlock.Landlock
 
-public interface IterativeTaskExecutor {
+internal interface IterativeTaskExecutor {
     fun executeTask(
         currentPolicy: Policy<*, Uncompiled>,
         task: Runnable,
     ): Throwable?
 }
 
-public class RealIterativeTaskExecutor(
+internal class RealIterativeTaskExecutor internal constructor(
     /**
      * Upper bound for one profiling iteration. A workload that deadlocks under containment must
      * not hang the profiler forever (issue-20260823-172000); the timeout surfaces as a distinct
      * [IterativeTaskTimeoutException].
      */
-    public val iterationTimeoutMs: Long = DEFAULT_ITERATION_TIMEOUT_MS,
+    public val iterationTimeoutMs: Long,
+    private val clockPreloader: () -> Unit,
 ) : IterativeTaskExecutor {
-    public constructor() : this(DEFAULT_ITERATION_TIMEOUT_MS)
+    public constructor() : this(DEFAULT_ITERATION_TIMEOUT_MS, ::preloadNativeClockWrappers)
+
+    public constructor(iterationTimeoutMs: Long) : this(iterationTimeoutMs, ::preloadNativeClockWrappers)
 
     private val taskCounter = java.util.concurrent.atomic
         .AtomicLong()
 
     /** Thrown when a contained iteration exceeds [iterationTimeoutMs]. */
-    public class IterativeTaskTimeoutException(
+    class IterativeTaskTimeoutException(
         timeoutMs: Long,
     ) : IllegalStateException("Profiling iteration exceeded ${timeoutMs}ms and was interrupted")
 
@@ -34,6 +37,9 @@ public class RealIterativeTaskExecutor(
         currentPolicy: Policy<*, Uncompiled>,
         task: Runnable,
     ): Throwable? {
+        // First-use HotSpot wrappers can allocate executable CodeHeap memory. Prime the
+        // clock wrappers before the fresh worker installs its restrictive policy.
+        clockPreloader()
         var error: Throwable? = null
         // NOTE: A fresh thread per iteration is REQUIRED, not incidental: seccomp filters are
         // permanent for the OS thread's lifetime, so a less-restrictive next iteration can never
@@ -70,5 +76,10 @@ public class RealIterativeTaskExecutor(
     public companion object {
         public const val DEFAULT_ITERATION_TIMEOUT_MS: Long = 120_000L
         private const val GRACE_PERIOD_MS: Long = 5_000L
+
+        private fun preloadNativeClockWrappers() {
+            System.currentTimeMillis()
+            System.nanoTime()
+        }
     }
 }

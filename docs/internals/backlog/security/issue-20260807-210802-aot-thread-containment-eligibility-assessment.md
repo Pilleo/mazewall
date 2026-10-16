@@ -2,7 +2,7 @@
 title: "Add AOT Reachability Assessment for Thread-Containment Eligibility"
 severity: "ENHANCEMENT"
 status: "open"
-priority: medium
+priority: low
 dependencies: []
 component: "enforcer"
 target_modules:
@@ -12,8 +12,8 @@ target_files:
 effort: "large"
 autonomy: "autonomous"
 open_questions: false
-paperclip_issue_id: 868f07a7-dae3-4f48-9a19-490b6116638a
-paperclip_identifier: MAZ-748
+paperclip_issue_id: "8e14384a-180c-4386-955a-d789a32002ac"
+paperclip_identifier: "MAZ-1490"
 ---
 
 # 🔵 [Severity: ENHANCEMENT]: Add AOT Reachability Assessment for Thread-Containment Eligibility

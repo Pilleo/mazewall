@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_calibrated_cross_backend_matrix",
+  "date": "2026-09-18",
+  "decision": "dictionary_full_stream_remains_default",
+  "decision_reason": "The calibrated host workload shows lower USER_NOTIF workload time, but it does not measure an application-wide slowdown or supersede Tier E's asynchronous attribution and delivery contract. The two dictionary emission modes are statistically indistinguishable on this workload.",
+  "provenance": {
+    "source_revision": "4aa176289f880e40a0002feb6204d66c04a6b9b0",
+    "source_dirty_count": 31,
+    "image": "mazewall-tier-e-rootful:perf-20260916",
+    "image_id": "sha256:6c6a570f7a849a5ce61c7d9371990680e6cc67826887cefa52bbb76dc63496b8",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "workload": "calibration_cpu",
+    "workload_contract": "Each verified shared-openat operation performs 1,500,000 deterministic CPU rounds after the syscall.",
+    "warmups": 3,
+    "measured_batches_per_fork": 10,
+    "rotated_forks": 5,
+    "operations_per_batch": 1000,
+    "modes": ["baseline", "dictionary_full_stream", "dictionary_unique_edge", "user_notif_no_stack", "user_notif"]
+  },
+  "quality": {
+    "profiled_forks": 20,
+    "measured_operations_per_mode": 50000,
+    "invalid_workload_forks": 0,
+    "incomplete_evidence_forks": 0,
+    "oracle_mismatch_forks": 0,
+    "policy_eligible_records": 0
+  },
+  "paired_effects_ns_per_1000_operations": {
+    "dictionary_full_stream_minus_baseline": {"median": 148120052, "bootstrap_95_ci": [146946170, 152502506]},
+    "dictionary_unique_edge_minus_baseline": {"median": 146448995, "bootstrap_95_ci": [142126421, 161006884]},
+    "user_notif_no_stack_minus_baseline": {"median": 117961291, "bootstrap_95_ci": [115138611, 133182960]},
+    "user_notif_stack_minus_baseline": {"median": 120062339, "bootstrap_95_ci": [118657317, 146017464]},
+    "unique_edge_minus_full_stream": {"median": -1781237, "bootstrap_95_ci": [-5370830, 12207082]},
+    "user_notif_no_stack_minus_dictionary_full_stream": {"median": -28984879, "bootstrap_95_ci": [-36425178, -14314291]},
+    "user_notif_stack_minus_dictionary_full_stream": {"median": -28229654, "bootstrap_95_ci": [-28737463, -6485042]},
+    "user_notif_no_stack_minus_dictionary_unique_edge": {"median": -31129553, "bootstrap_95_ci": [-37213998, -8943461]},
+    "user_notif_stack_minus_dictionary_unique_edge": {"median": -22858824, "bootstrap_95_ci": [-40944545, -1189417]},
+    "user_notif_stack_minus_no_stack": {"median": 696026, "bootstrap_95_ci": [-13915363, 29940136]}
+  },
+  "interpretation": {
+    "dictionary_mode_selection": "No measured winner: unique-edge minus full-stream crosses zero.",
+    "cross_backend_result": "Both USER_NOTIF variants are faster than both dictionary modes in this calibrated host workload; all four direct intervals exclude zero.",
+    "user_notif_stack_result": "The stack-enabled minus no-stack USER_NOTIF interval crosses zero, so this workload cannot isolate a reliable added stack-retrieval cost.",
+    "inline_status": "Excluded from this long-run matrix because its terminal inline snapshot exceeds the independently enforced 64 MiB retained-state cap; that is an explicit incomplete outcome, not a performance observation.",
+    "scope_limit": "These are workload-batch effects on one host, kernel, JDK, image, and pinned CPU pair. They are not whole-application slowdown estimates."
+  },
+  "evidence_dimensions": {
+    "evidence_integrity": "complete",
+    "performance_gate": "not_measured",
+    "policy_eligibility": false,
+    "capture_domain_validity": "complete",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "complete"
+  },
+  "raw_artifacts": {
+    "results_path": "build/tier-e-comparable-paired-decision-20260918/results.jsonl",
+    "results_sha256": "816fbeef049d1df84f4ffdeda6bc0e56692f9e1229da38dec8fcab5a0dc575f3",
+    "manifest_path": "build/tier-e-comparable-paired-decision-20260918/manifest.json",
+    "manifest_sha256": "c3edb6bfe80d01ade56257dc542c8af7df7f93144e66bcec48d02c007a2f487c"
+  }
+}

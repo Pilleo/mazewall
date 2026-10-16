@@ -1,0 +1,65 @@
+--- a/tracer/events.go
++++ b/tracer/events.go
+@@ -160,14 +160,16 @@
+ 	readErrorCount := &t.traceReaderCounters.readError
+ 	noDataCount := &t.traceReaderCounters.noData
+ 	t.traceReaderCounters.done = make(chan struct{})
++	t.traceReaderCounters.drain = newDefinitionDrainControl(eventReader)
+ 	t.traceReaderCounters.bufferBytesPerCPU = eventReader.BufferSize()
+ 	t.traceReaderCounters.ready.Store(true)
+ 	go func() {
+ 		defer close(t.traceReaderCounters.done)
+-		defer eventReader.Close()
++		defer t.traceReaderCounters.drain.closeReader()
+ 		var data perf.Record
+ 		var oldKTime, minKTime int64
+ 		var eventCount int
++		var flushBoundary bool
+ 
+ 		pollTicker := time.NewTicker(t.intervals.TracePollInterval())
+ 		defer pollTicker.Stop()
+@@ -187,6 +189,8 @@
+ 			// This context cancellation check may not execute in timely manner
+ 			case <-ctx.Done():
+ 				break PollLoop
++			case <-t.traceReaderCounters.drain.wake:
++				// Requested drain bypasses polling latency.
+ 			case <-pollTicker.C:
+ 				// Continue execution below
+ 			}
+@@ -197,6 +201,8 @@
+ 			// Eagerly read events until the buffer is exhausted or we reach maxEvents
+ 			for {
+ 				if err = eventReader.ReadInto(&data); err != nil {
++					if errors.Is(err, perf.ErrFlushed) && t.traceReaderCounters.drain.requested.Load() { flushBoundary = true; break }
++					if t.traceReaderCounters.drain.requested.Load() && !errors.Is(err, os.ErrDeadlineExceeded) { t.traceReaderCounters.drain.setError(err); return }
+ 					if !errors.Is(err, os.ErrDeadlineExceeded) {
+ 						readErrorCount.Add(1)
+ 					}
+@@ -237,9 +243,11 @@
+ 					continue
+ 				case errors.Is(err, errRecordTooSmall), errors.Is(err, errRecordUnexpectedSize):
+ 					log.Errorf("stop receiving traces: %v", err)
++					t.traceReaderCounters.drain.setError(err)
+ 					// TODO: trigger a graceful shutdown
+ 					return
+ 				default:
++					if t.traceReaderCounters.drain.requested.Load() { t.traceReaderCounters.drain.setError(err); return }
+ 					log.Warnf("unexpected error handling trace: %v", err)
+ 					continue
+ 				}
+@@ -291,8 +299,14 @@
+ 					t.processManager.ProcessedUntil(times.KTime(oldKTime))
+ 				}
+ 			}
+ 			oldKTime = minKTime
++			if flushBoundary {
++				if !sendTrace(ctx, traceOutChan, nil) { t.traceReaderCounters.drain.setError(ctx.Err()); return }
++				t.traceReaderCounters.drain.flushed.Store(true)
++				close(traceOutChan)
++				return
++			}
+ 		}
+ 	}()
+ 
+ 	return func() []metrics.Metric {

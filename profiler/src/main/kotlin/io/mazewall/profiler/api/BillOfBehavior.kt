@@ -1,0 +1,552 @@
+@file:Suppress("UseOrEmpty")
+
+package io.mazewall.profiler.api
+
+import io.mazewall.enforcer.api.BillOfBehaviorDto
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.StackFrameDto
+import io.mazewall.enforcer.api.StackProfileEntryDto
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.syscall.Syscall
+import io.mazewall.profiler.api.TraceEvent
+import io.mazewall.profiler.internal.engine.TraceEventKey
+import io.mazewall.profiler.internal.engine.behavioralKey
+import io.mazewall.sbob.PathNormalizer
+import kotlinx.serialization.json.Json
+import java.io.InputStream
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+
+private val jsonSerializer = Json {
+    prettyPrint = true
+    ignoreUnknownKeys = true
+}
+
+/**
+ * An immutable record of what kernel-level operations were observed during a
+ * profiling run. This is the raw output of the [Profiler] — completely decoupled
+ * from any [io.mazewall.enforcer.api.Policy].
+ */
+public class BillOfBehavior(
+    opens: Set<String> = emptySet(),
+    fsWritePaths: Set<String> = emptySet(),
+    syscalls: Set<Syscall> = emptySet(),
+    execs: Set<String> = emptySet(),
+    connects: Set<NetworkEndpoint> = emptySet(),
+    ioUringOps: Set<String> = emptySet(),
+    /**
+     * Keyed by [TraceEvent] identity; multiple events for the same syscall name
+     * may produce different stack entries if triggered from different call sites.
+     */
+    stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = emptyMap(),
+) {
+    public val opens: Set<String> = java.util.Set.copyOf(opens)
+    public val fsWritePaths: Set<String> = java.util.Set.copyOf(fsWritePaths)
+    public val syscalls: Set<Syscall> = java.util.Set.copyOf(syscalls)
+    public val execs: Set<String> = java.util.Set.copyOf(execs)
+    public val connects: Set<NetworkEndpoint> = java.util.Set.copyOf(connects)
+    public val ioUringOps: Set<String> = java.util.Set.copyOf(ioUringOps)
+    private val stackProfileStorage = ImmutableStackProfile.copyOf(stackProfile)
+    public val stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>>
+        get() = stackProfileStorage.snapshot()
+
+    public fun copy(
+        opens: Set<String> = this.opens,
+        fsWritePaths: Set<String> = this.fsWritePaths,
+        syscalls: Set<Syscall> = this.syscalls,
+        execs: Set<String> = this.execs,
+        connects: Set<NetworkEndpoint> = this.connects,
+        ioUringOps: Set<String> = this.ioUringOps,
+        stackProfile: Map<TraceEvent, List<Array<StackTraceElement>>> = this.stackProfile,
+    ): BillOfBehavior = BillOfBehavior(opens, fsWritePaths, syscalls, execs, connects, ioUringOps, stackProfile)
+
+    override fun equals(other: Any?): Boolean =
+        other is BillOfBehavior &&
+            opens == other.opens &&
+            fsWritePaths == other.fsWritePaths &&
+            syscalls == other.syscalls &&
+            execs == other.execs &&
+            connects == other.connects &&
+            ioUringOps == other.ioUringOps &&
+        stackProfileStorage == other.stackProfileStorage
+
+    override fun hashCode(): Int =
+        listOf(opens, fsWritePaths, syscalls, execs, connects, ioUringOps).hashCode() *
+            31 +
+            stackProfileStorage.hashCode()
+
+    /**
+     * Compiles this bill of behavior into a [io.mazewall.enforcer.api.Policy] starting from [base].
+     * Relative paths in the BoB are resolved against [baseCwd].
+     */
+    @JvmOverloads
+    public fun toPolicy(
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
+        coverage: ProfilingCoverage? = null,
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = compilePolicy(base, baseCwd, coverage, allowIncomplete = false)
+
+    /** Test/demo seam. Production compilers must not use this. */
+    @JvmName("toPolicyAllowingIncomplete")
+    internal fun toPolicyAllowingIncomplete(
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
+        coverage: ProfilingCoverage? = null,
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = compilePolicy(base, baseCwd, coverage, allowIncomplete = true)
+
+    private fun compilePolicy(
+        base: Policy<*, Uncompiled>,
+        baseCwd: Path?,
+        coverage: ProfilingCoverage?,
+        allowIncomplete: Boolean,
+    ): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> {
+        val evidence = coverage ?: ProfilingCoverage.absent()
+        requirePolicyCoverage(evidence, allowIncomplete)
+
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).base(base as Policy<PolicyScope.ThreadLocalOnly, *>)
+        if (base.defaultAction == io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW) {
+            val toUnblock = syscalls.filter { !base.isSyscallAllowed(it) }
+            builder.unblock(*toUnblock.toTypedArray())
+        } else {
+            builder.allow(*syscalls.toTypedArray())
+        }
+        val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
+        val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
+        for (path in pOpens) {
+            builder.allowFsRead(
+                io.mazewall.platform.lifecycle.SandboxedPath
+            .of(path, allowNonExistent = true),
+            )
+        }
+        for (path in pWrites) {
+            builder.allowFsWrite(
+                io.mazewall.platform.lifecycle.SandboxedPath
+            .of(path, allowNonExistent = true),
+            )
+        }
+        return builder.build()
+    }
+
+    /**
+     * Emits a copy-pasteable Kotlin DSL snippet that reproduces the compiled policy.
+     * Relative paths in the BoB are resolved against [baseCwd].
+     */
+    @JvmOverloads
+    public fun toDsl(
+        basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
+        coverage: ProfilingCoverage = ProfilingCoverage.absent(),
+    ): String = compileDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete = false)
+
+    @JvmName("toDslAllowingIncomplete")
+    internal fun toDslAllowingIncomplete(
+        basePolicyName: String = "Policy.PURE_COMPUTE_UNSAFE",
+        base: Policy<*, Uncompiled> = Policy.PURE_COMPUTE_UNSAFE,
+        baseCwd: Path? = null,
+        coverage: ProfilingCoverage = ProfilingCoverage.absent(),
+    ): String = compileDsl(basePolicyName, base, baseCwd, coverage, allowIncomplete = true)
+
+    private fun compileDsl(
+        basePolicyName: String,
+        base: Policy<*, Uncompiled>,
+        baseCwd: Path?,
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ): String {
+        requireDslCoverage(coverage, allowIncomplete)
+
+        val sb = StringBuilder()
+        val pOpens = PathNormalizer.normalizeAndPrune(opens, baseCwd)
+        val pWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, baseCwd)
+        val runtimeName = if (base.allowMmapExec) "HOTSPOT_JIT" else "NATIVE_IMAGE"
+        val builderCall = "WorkerPolicyBuilder.denyList(RuntimeProfile.$runtimeName)"
+        sb.append("val policy = $builderCall\n")
+        sb.append("    .base($basePolicyName)\n")
+
+        val (methodName, list) =
+            if (base.defaultAction == io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW) {
+                ".unblock" to syscalls.filter { !base.isSyscallAllowed(it) }.sortedBy { it.name }
+            } else {
+                ".allow" to syscalls.sortedBy { it.name }
+            }
+
+        if (list.isNotEmpty()) {
+            sb.append("    $methodName(\n")
+            sb.append(list.joinToString(",\n") { "        Syscall.${it.name}" })
+            sb.append("\n    )\n")
+        }
+        for (path in pOpens.sorted()) sb.append("    .allowFsRead(\"$path\")\n")
+        for (path in pWrites.sorted()) sb.append("    .allowFsWrite(\"$path\")\n")
+
+        // Emit warning comment if incomplete coverage is allowed
+        if (allowIncomplete && (execs.isNotEmpty() || connects.isNotEmpty())) {
+            sb.append("    // WARNING: destinations not enforced - ")
+            val warnings = mutableListOf<String>()
+            if (execs.isNotEmpty()) warnings.add("exec")
+            if (connects.isNotEmpty()) warnings.add("connect")
+            sb.append(warnings.joinToString(", "))
+            sb.append(" destinations were observed but cannot be enforced\n")
+        }
+
+        sb.append("    .build()")
+        return sb.toString()
+    }
+
+    private fun requirePolicyCoverage(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        rejectPolicyConnects(evidence, allowIncomplete)
+        rejectPolicyExecs(evidence, allowIncomplete)
+        rejectPolicyUnenforceableIoUring(evidence, allowIncomplete)
+        requireComplete(evidence, allowIncomplete)
+    }
+
+    private fun rejectPolicyConnects(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (connects.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                evidence.withWarnings(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "connect destinations were observed but cannot be enforced; toPolicy() only unblocks SOCKET/CONNECT",
+                ),
+            )
+        }
+    }
+
+    private fun rejectPolicyExecs(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (execs.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                evidence.withWarnings(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "exec destinations were observed but cannot be enforced; toPolicy() only unblocks EXECVE",
+                ),
+            )
+        }
+    }
+
+    private fun rejectPolicyUnenforceableIoUring(
+        evidence: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        val unenforceable = unenforceableIoUringOps()
+        if (unenforceable.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                evidence.withWarnings(
+                    complete = false,
+                    warnings = evidence.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceable.joinToString(",")}",
+                ),
+            )
+        }
+    }
+
+    private fun requireDslCoverage(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        requireComplete(coverage, allowIncomplete)
+        rejectDslConnects(coverage, allowIncomplete)
+        rejectDslExecs(coverage, allowIncomplete)
+        rejectDslUnenforceableIoUring(coverage, allowIncomplete)
+    }
+
+    private fun rejectDslConnects(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (connects.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.withWarnings(
+                    complete = false,
+                    warnings = listOf("connect destinations were observed but cannot be enforced; toDsl() only unblocks SOCKET/CONNECT"),
+                ),
+            )
+        }
+    }
+
+    private fun rejectDslExecs(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        if (execs.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.withWarnings(
+                    complete = false,
+                    warnings = listOf("exec destinations were observed but cannot be enforced; toDsl() only unblocks EXECVE"),
+                ),
+            )
+        }
+    }
+
+    private fun rejectDslUnenforceableIoUring(
+        coverage: ProfilingCoverage,
+        allowIncomplete: Boolean,
+    ) {
+        val unenforceable = unenforceableIoUringOps()
+        if (unenforceable.isNotEmpty() && !allowIncomplete) {
+            throw IncompleteProfileException(
+                coverage.withWarnings(
+                    complete = false,
+                    warnings = coverage.warnings +
+                        "io_uring opcodes were observed that cannot be enforced by Landlock: ${unenforceable.joinToString(",")}",
+                ),
+            )
+        }
+    }
+
+    private fun unenforceableIoUringOps(): List<String> = ioUringOps.filter { op -> FsEffect.ofUring(UringOp.parse(op), emptyList()) is FsEffect.Unenforceable }
+
+    /**
+     * Merges two bills of behavior (union of all observations).
+     */
+    public operator fun plus(other: BillOfBehavior): BillOfBehavior {
+        val mergedStackProfile = linkedMapOf<TraceEventKey, Pair<TraceEvent, MutableList<Array<StackTraceElement>>>>()
+
+        fun merge(profile: Map<TraceEvent, List<Array<StackTraceElement>>>) {
+            for ((event, traces) in profile) {
+                val entry = mergedStackProfile.getOrPut(event.behavioralKey()) { event to mutableListOf() }
+                for (trace in traces) {
+                    if (entry.second.none { it.contentEquals(trace) }) entry.second += trace
+                }
+            }
+        }
+        merge(stackProfile)
+        merge(other.stackProfile)
+
+        return BillOfBehavior(
+            opens = opens + other.opens,
+            fsWritePaths = fsWritePaths + other.fsWritePaths,
+            syscalls = syscalls + other.syscalls,
+            execs = execs + other.execs,
+            connects = connects + other.connects,
+            ioUringOps = ioUringOps + other.ioUringOps,
+            stackProfile = mergedStackProfile.values.associate { (event, traces) -> event to traces },
+        )
+    }
+
+    /**
+     * Returns a new [BillOfBehavior] where paths matching the given [BaselinePathProfile]
+     * are excluded from [opens], [fsWritePaths], and [execs].
+     */
+    public fun filterPaths(profile: BaselinePathProfile): BillOfBehavior {
+        return BillOfBehavior(
+            opens = opens.filterNot { profile.matches(it) }.toSet(),
+            fsWritePaths = fsWritePaths.filterNot { profile.matches(it) }.toSet(),
+            syscalls = syscalls,
+            execs = execs.filterNot { profile.matches(it) }.toSet(),
+            connects = connects,
+            ioUringOps = ioUringOps,
+            stackProfile = stackProfile.filterKeys { event ->
+                event.paths.none { profile.matches(it) }
+            },
+        )
+    }
+
+    /**
+     * Serializes this Bill of Behavior into a clean SBoB JSON string.
+     */
+    public fun toJson(): String {
+        val prunedOpens = PathNormalizer.normalizeAndPrune(opens, null).sorted().toSet()
+        val prunedWrites = PathNormalizer.normalizeAndPrune(fsWritePaths, null).sorted().toSet()
+        val sortedSyscalls = syscalls.sortedBy { it.name }.map { it.name }.toSet()
+        val sortedExecs = execs.sorted().toSet()
+
+        val stackEntries = stackProfile.entries.sortedBy { it.key.syscallName }
+        val stackProfileDtos = stackEntries.flatMap { (event, tracesList) ->
+            tracesList.map { frames ->
+                StackProfileEntryDto(
+                    syscall = event.syscallName,
+                    paths = event.paths,
+                    args = if (event is TraceEvent.Generic) event.args else emptyList(),
+                    openFlagsEvidenceValue = (event as? TraceEvent.Open)?.openFlagsEvidence?.value,
+                    openFlagsUnknownSymbols = ((event as? TraceEvent.Open)?.openFlagsEvidence as? OpenFlagsEvidence.Incomplete)?.unknownSymbols ?: emptySet(),
+                    stackTrace = frames.map { frame ->
+                        StackFrameDto(
+                            classLoader = frame.classLoaderName,
+                            module = frame.moduleName,
+                            moduleVersion = frame.moduleVersion,
+                            className = frame.className,
+                            methodName = frame.methodName,
+                            fileName = frame.fileName,
+                            lineNumber = frame.lineNumber,
+                        )
+                    },
+                )
+            }
+        }
+
+        val dto = BillOfBehaviorDto(
+            opens = prunedOpens,
+            fsWritePaths = prunedWrites,
+            syscalls = sortedSyscalls,
+            execs = sortedExecs,
+            connects = connects.map { it.toString() }.toSet(),
+            ioUringOps = ioUringOps.sorted().toSet(),
+            stackProfile = stackProfileDtos,
+        )
+
+        return jsonSerializer.encodeToString(BillOfBehaviorDto.serializer(), dto)
+    }
+
+    /**
+     * Serializes only the stackTrace data into a beautifully formatted JSON array.
+     */
+    public fun toStackTracesJson(): String {
+        val stackEntries = stackProfile.entries.sortedBy { it.key.syscallName }
+        val stackProfileDtos = stackEntries.flatMap { (event, tracesList) ->
+            tracesList.map { frames ->
+                StackProfileEntryDto(
+                    syscall = event.syscallName,
+                    paths = event.paths,
+                    args = if (event is TraceEvent.Generic) event.args else emptyList(),
+                    stackTrace = frames.map { frame ->
+                        StackFrameDto(
+                            classLoader = frame.classLoaderName,
+                            module = frame.moduleName,
+                            moduleVersion = frame.moduleVersion,
+                            className = frame.className,
+                            methodName = frame.methodName,
+                            fileName = frame.fileName,
+                            lineNumber = frame.lineNumber,
+                        )
+                    },
+                )
+            }
+        }
+        return jsonSerializer.encodeToString(kotlinx.serialization.builtins.ListSerializer(StackProfileEntryDto.serializer()), stackProfileDtos)
+    }
+
+    public companion object {
+        /**
+         * Monoid identity for formal composition (issue-018): an empty SBoB that leaves any
+         * other profile unchanged under [plus].
+         */
+        @JvmField
+        public val EMPTY: BillOfBehavior = BillOfBehavior()
+
+        @JvmStatic
+        public fun empty(): BillOfBehavior = EMPTY
+
+        @JvmStatic
+        public fun fromFile(path: Path): BillOfBehavior {
+            return fromJson(Files.readString(path))
+        }
+
+        @JvmStatic
+        public fun fromStream(stream: InputStream): BillOfBehavior {
+            val content = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            return fromJson(content)
+        }
+
+        private fun parseEndpoint(raw: String): NetworkEndpoint {
+            if (raw.startsWith("[")) {
+                val close = raw.indexOf(']')
+                if (close > 1) {
+                    val host = raw.substring(1, close)
+                    val rest = raw.substring(close + 1)
+                    val port = if (rest.startsWith(":")) rest.substring(1).toIntOrNull() else null
+                    return NetworkEndpoint(host, port)
+                }
+            }
+            if (raw.count { it == ':' } == 1) {
+                val split = raw.lastIndexOf(':')
+                val port = raw.substring(split + 1).toIntOrNull()
+                if (port != null) return NetworkEndpoint(raw.substring(0, split), port)
+            }
+            return NetworkEndpoint(raw, null)
+        }
+
+        @JvmStatic
+        public fun fromJson(json: String): BillOfBehavior {
+            val dto = jsonSerializer.decodeFromString(BillOfBehaviorDto.serializer(), json)
+
+            val mappedSyscalls = dto.syscalls
+                .mapNotNull { name ->
+                    try {
+                        Syscall.valueOf(name.uppercase())
+                    } catch (ignored: Exception) {
+                        null
+                    }
+                }.toSet()
+
+            val stackProfile = mutableMapOf<TraceEvent, MutableList<Array<StackTraceElement>>>()
+            for (entry in dto.stackProfile) {
+                val event = TraceEvent(
+                    tidValue = 0,
+                    syscallName = entry.syscall,
+                    args = entry.args.toLongArray(),
+                    paths = entry.paths,
+                ).let { legacy ->
+                    val evidenceValue = entry.openFlagsEvidenceValue
+                    if (legacy is TraceEvent.Open && evidenceValue != null) {
+                        TraceEvent.Open(
+                            tid = legacy.tid,
+                            syscallName = legacy.syscallName,
+                            path = legacy.path,
+                            flags = evidenceValue,
+                            mode = legacy.mode,
+                            openFlagsEvidence = if (entry.openFlagsUnknownSymbols.isEmpty()) {
+                                OpenFlagsEvidence.Complete(evidenceValue)
+                            } else {
+                                OpenFlagsEvidence.Incomplete(evidenceValue, entry.openFlagsUnknownSymbols)
+                            },
+                        )
+                    } else {
+                        legacy
+                    }
+                }
+                val frames = entry.stackTrace
+                    .map { frameDto ->
+                    StackTraceElement(
+                        frameDto.classLoader ?: "<unknown>",
+                        frameDto.module ?: "<unknown>",
+                        frameDto.moduleVersion ?: "<unknown>",
+                        frameDto.className,
+                        frameDto.methodName,
+                        frameDto.fileName ?: "<unknown>",
+                        frameDto.lineNumber,
+                    )
+                }.toTypedArray()
+                stackProfile.getOrPut(event) { mutableListOf() }.add(frames)
+            }
+
+            return BillOfBehavior(
+                opens = dto.opens,
+                fsWritePaths = dto.fsWritePaths,
+                syscalls = mappedSyscalls,
+                execs = dto.execs,
+                connects = dto.connects.map { parseEndpoint(it) }.toSet(),
+                ioUringOps = dto.ioUringOps,
+                stackProfile = stackProfile,
+            )
+        }
+    }
+}
+
+private fun requireComplete(
+    coverage: ProfilingCoverage,
+    allowIncomplete: Boolean,
+) {
+    when (coverage.evidence()) {
+        is ProfileEvidence.Complete -> {}
+        is ProfileEvidence.Incomplete -> {
+            if (!allowIncomplete) {
+                throw IncompleteProfileException(coverage)
+            }
+        }
+    }
+}

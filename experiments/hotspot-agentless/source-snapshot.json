@@ -1,0 +1,53 @@
+{
+  "sourceRevision": "96789e513136948338870ce7255fdec14e22c162",
+  "sourceRoot": "profiler/hotspot-agentless",
+  "snapshotKind": "original materialization baseline; local native tooling updates are recorded below",
+  "materializedLinks": 13,
+  "materializedFiles": 145,
+  "materializedBytes": 452652,
+  "copiedFilesIncludingPreparation": 147,
+  "copiedBytesIncludingPreparation": 465351,
+  "copiedTreeSha256": "a4509b080eb8513b7c6508a002a8bbcb1dc45294ae2699b82015ebb4e845f3f4",
+  "digestEncoding": "sorted repository-relative destination path + NUL + Git mode + NUL + file SHA256 + LF, for the 13 mappings and two preparation scripts",
+  "mappings": {
+    "cmd/mw-gadget-build": "cmd/mw-gadget-build",
+    "cmd/mw-hotspot-demo": "cmd/mw-hotspot-collector",
+    "dependencies.lock.json": "dependencies.lock.json",
+    "gadgets": "gadgets",
+    "go.mod": "go.mod",
+    "go.sum": "go.sum",
+    "internal/capture": "internal/capture",
+    "internal/identity": "internal/identity",
+    "internal/model": "internal/model",
+    "internal/output": "internal/output",
+    "internal/preflight": "internal/preflight",
+    "internal/quality": "internal/quality",
+    "patches": "patches"
+  },
+  "preparationScripts": {
+    "scripts/rebuild-profiler-ebpf.sh": {
+      "source": "scripts/rebuild-profiler-ebpf.sh",
+      "mode": "100644",
+      "sha256": "aafece37d107e24313321eb1c3baf1c1d4bcc5ae6c460a220162b05893a8b19a"
+    },
+    "scripts/prepare-gadget.py": {
+      "status": "retired after Go preparation acceptance",
+      "source": "scripts/prepare-gadget.py",
+      "mode": "100644",
+      "sha256": "b872946b094d454498096766fd944f14ce5cc72aa66103b50aca9977c298cc0b"
+    }
+  },
+  "localToolingFiles": {
+    "internal/tooling/assets.go": "e41708aab0347fd52850b1bb334d16c49c68c02e00453a98d551aeac86286edf",
+    "internal/tooling/assets_test.go": "265e9ff1d5a0ea55f0eaba5f66fecfb67161443789283f09ad3e9beb1260597b",
+    "internal/tooling/cli.go": "6a091e23002432c1a4c9ed8cc982385e0249cd30ccb99e9193c93f9589742492",
+    "internal/tooling/distribution.go": "c58a92186b349cd9d11c39b29e6b0638f93f99b842ead7222d34dcf86f053e22",
+    "internal/tooling/distribution_test.go": "c7fa308a144432dc49f0624543fbda6388fa0248b148244975442f7c2df380fe",
+    "internal/tooling/footprint.go": "ff4c8d28d543009b15602a3fe8215ef991a64d580cee9f44350cd6df0a3dd4a7",
+    "internal/tooling/footprint_test.go": "f9d9452164f3293957e0640194182484d31ed3d40baf4553d283e620393b33e7",
+    "internal/tooling/prepare.go": "9ebd939a14c252010e75a65db2db797aa546d80b62f849a04c34ca477a390a25",
+    "internal/tooling/prepare_test.go": "46b764f7632521d71c7d53f0d17e5ae3c12e4c6633ed67eb56da59e937ff4cd2",
+    "scripts/rebuild-profiler-ebpf.sh": "573ebce7d1bc4bff97ff62845b67a3ca3c2ffccf838f2849e506dbf1de260a90",
+    "cmd/mw-collector-tools/main.go": "4d8759f41e97be9babb99e414612309abf9c57a6c617695d05eaefc8b5922f26"
+  }
+}

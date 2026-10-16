@@ -1,150 +1,143 @@
 package demo.vulnapp.config
 
 import demo.vulnapp.service.*
-import io.mazewall.Policy
-import io.mazewall.PolicyScope
-import io.mazewall.SbobParser
-import io.mazewall.Uncompiled
-import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.FileSystemPolicy
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.RuntimeProfile
+import io.mazewall.enforcer.api.SbobParser
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.WorkerPolicyBuilder
+import io.mazewall.enforcer.api.restrictFurtherWith
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.multipart.MultipartFile
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-
-import org.springframework.boot.context.event.ApplicationReadyEvent
-import org.springframework.context.event.EventListener
-import java.util.logging.Logger
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.logging.Logger
 
 @Configuration
-@ConditionalOnProperty(name = ["mazewall.enabled"], havingValue = "true")
-class MazewallConfig {
+@ConditionalOnProperty(name = [MazewallProtectionBootstrap.RESOLVED_PROPERTY], havingValue = "true")
+internal class MazewallConfig(
+    private val executorOwner: ServiceExecutorOwner,
+    private val resources: ServiceResourceBindings,
+) {
     private val logger = Logger.getLogger(MazewallConfig::class.java.name)
-    private val executors = java.util.concurrent.CopyOnWriteArrayList<ExecutorService>()
 
-    private fun wrapExecutor(delegate: ExecutorService, basePolicy: Policy<*, Uncompiled>): ExecutorService {
-        executors.add(delegate)
+    private fun prepareOperation(basePolicy: Policy<PolicyScope.ThreadLocalOnly, Uncompiled>): OwnedServiceOperation {
         val sbobPath = System.getProperty("mazewall.sbob.path") ?: "/app/sbob.json"
         val bobFile = Paths.get(sbobPath)
-        val finalPolicy = if (Files.exists(bobFile)) {
-            logger.info("Engaging SBoB ENFORCEMENT mode. Loading ruleset from: $sbobPath")
-            SbobParser.parseToPolicy(bobFile, basePolicy)
-        } else {
-            logger.warning("SBoB file not found at $sbobPath. Falling back to default static policy.")
-            basePolicy
+        check(Files.isRegularFile(bobFile)) {
+            "Required profile evidence is missing at $sbobPath. Complete profiling and orderly shutdown before enforcement."
         }
+        val evidenceFile = ProfileArtifactPublisher.resolveEvidencePath(bobFile)
+        logger.info("Engaging SBoB ENFORCEMENT mode. Loading ruleset from: $sbobPath")
+        val finalPolicy = SbobParser.parseToPolicy(evidenceFile, basePolicy).restrictFurtherWith(basePolicy)
 
-        return ContainedExecutors.wrap(delegate, finalPolicy as Policy<*, Uncompiled>)
-    }
-
-    @jakarta.annotation.PreDestroy
-    fun onDestroy() {
-        logger.info("Spring context shutting down. Terminating Mazewall protected executors...")
-        for (executor in executors) {
-            try {
-                executor.shutdown()
-            } catch (e: Exception) {
-                // Suppress shutdown exception to avoid interrupting other PreDestroy hooks
-            }
-        }
+        return executorOwner.prepare(finalPolicy)
     }
 
     @Bean
     fun adminService(): AdminService {
         val realService = DefaultAdminService()
-        val basePolicy = Policy.threadLocalBuilder().base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>).allowMmapExec().build()
-        val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
+            .filesystem(FileSystemPolicy.DenyAll)
+            .allowJvmClasspath()
+            .allowMmapExec()
+            .build()
+        val executor = prepareOperation(basePolicy)
         return object : AdminService {
-            override fun logMessage(apiVersion: String) =
-                executor.submit<String> { realService.logMessage(apiVersion) }.get()
+            override fun logMessage(apiVersion: String) = executor.call { realService.logMessage(apiVersion) }
         }
     }
 
     @Bean
     fun proxyService(): ProxyService {
         val realService = DefaultProxyService()
-        val basePolicy = Policy.threadLocalBuilder().base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>).allowMmapExec().build()
-        val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
+            .filesystem(FileSystemPolicy.DenyAll)
+            .allowJvmClasspath()
+            .allowMmapExec()
+            .build()
+        val executor = prepareOperation(basePolicy)
         return object : ProxyService {
-            override fun fetchUrl(url: String) =
-                executor.submit<String> { realService.fetchUrl(url) }.get()
+            override fun fetchUrl(url: String) = executor.call { realService.fetchUrl(url) }
         }
     }
 
     @Bean
     fun xmlImportService(): XmlImportService {
         val realService = DefaultXmlImportService()
-        val basePolicy = Policy.threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/data")
+            .allowFsRead(resources.data.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : XmlImportService {
-            override fun importXStream(xmlContent: String) =
-                executor.submit<String> { realService.importXStream(xmlContent) }.get()
+            override fun importXStream(xmlContent: String) = executor.call { realService.importXStream(xmlContent) }
 
-            override fun importXXE(xmlContent: String) =
-                executor.submit<String> { realService.importXXE(xmlContent) }.get()
+            override fun importXXE(xmlContent: String) = executor.call { realService.importXXE(xmlContent) }
         }
     }
 
     @Bean
     fun yamlImportService(): YamlImportService {
         val realService = DefaultYamlImportService()
-        val basePolicy = Policy.threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_NETWORK as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/data")
+            .allowFsRead(resources.data.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : YamlImportService {
-            override fun importYaml(yamlContent: String) =
-                executor.submit<String> { realService.importYaml(yamlContent) }.get()
+            override fun importYaml(yamlContent: String) = executor.call { realService.importYaml(yamlContent) }
         }
     }
 
     @Bean
     fun fileService(): FileService {
-        val realService = DefaultFileService()
-        val basePolicy = Policy.threadLocalBuilder()
+        val realService = DefaultFileService(resources.uploads.toFile())
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.NO_EXEC as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/uploads")
-            .allowFsWrite("/app/uploads")
+            .allowFsRead(resources.uploads.toString())
+            .allowFsWrite(resources.uploads.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : FileService {
-            override fun extractZip(file: MultipartFile) =
-                executor.submit<String> { realService.extractZip(file) }.get()
+            override fun extractZip(file: MultipartFile) = executor.call { realService.extractZip(file) }
 
-            override fun runCommand(cmd: String) =
-                executor.submit<String> { realService.runCommand(cmd) }.get()
+            override fun runCommand(cmd: String) = executor.call { realService.runCommand(cmd) }
         }
     }
 
     @Bean
     fun deserializationService(): DeserializationService {
         val realService = DefaultDeserializationService()
-        val basePolicy = Policy.threadLocalBuilder()
+        val basePolicy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
             .base(Policy.PURE_COMPUTE as Policy<PolicyScope.ThreadLocalOnly, *>)
             .allowMmapExec()
-            .allowFsRead("/app/data")
+            .allowFsRead(resources.data.toString())
             .allowJvmClasspath()
             .build()
-        val executor = wrapExecutor(Executors.newFixedThreadPool(4), basePolicy)
+        val executor = prepareOperation(basePolicy)
         return object : DeserializationService {
-            override fun importJackson(jsonContent: String) =
-                executor.submit<String> { realService.importJackson(jsonContent) }.get()
+            override fun importJackson(jsonContent: String) = executor.call { realService.importJackson(jsonContent) }
 
-            override fun importJava(bytes: ByteArray) =
-                executor.submit<String> { realService.importJava(bytes) }.get()
+            override fun importJava(bytes: ByteArray) = executor.call { realService.importJava(bytes) }
         }
     }
 }

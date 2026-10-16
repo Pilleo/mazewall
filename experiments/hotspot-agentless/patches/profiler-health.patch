@@ -1,0 +1,24 @@
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -76,6 +76,7 @@
+ type Tracer struct {
++	traceReaderCounters traceReaderCounters
+ 	// ebpfMaps holds the currently loaded eBPF maps.
+ 	ebpfMaps map[string]*cebpf.Map
+ 	// ebpfProgs holds the currently loaded eBPF programs.
+ 	ebpfProgs map[string]*cebpf.Program
+ 
+--- a/tracer/events.go
++++ b/tracer/events.go
+@@ -157,6 +157,10 @@
+ 	eventReader.SetDeadline(time.Unix(1, 0))
+ 
+-	var lostEventsCount, readErrorCount, noDataCount atomic.Uint64
++	lostEventsCount := &t.traceReaderCounters.lost
++	readErrorCount := &t.traceReaderCounters.readError
++	noDataCount := &t.traceReaderCounters.noData
++	t.traceReaderCounters.bufferBytesPerCPU = eventReader.BufferSize()
++	t.traceReaderCounters.ready.Store(true)
+ 	go func() {
+ 		var data perf.Record
+ 		var oldKTime, minKTime int64

@@ -1,19 +1,38 @@
 plugins {
-    id("mazewall.test-conventions")
+    id("mazewall.quality-conventions")
     alias(libs.plugins.kotlinPluginSpring)
     alias(libs.plugins.springBoot)
     id("jacoco")
 }
 
-
 configurations.all {
     exclude(group = "org.springframework.boot", module = "spring-boot-starter-logging")
     resolutionStrategy {
-        force(libs.vulnerable.log4j.api.get().toString())
-        force(libs.vulnerable.log4j.core.get().toString())
-        force(libs.vulnerable.log4j.jul.get().toString())
-        force(libs.vulnerable.log4j.slf4j.get().toString())
-        force(libs.vulnerable.xstream.get().toString())
+        force(
+            libs.vulnerable.log4j.api
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.log4j.core
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.log4j.jul
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.log4j.slf4j
+                .get()
+                .toString(),
+        )
+        force(
+            libs.vulnerable.xstream
+                .get()
+                .toString(),
+        )
     }
 }
 
@@ -22,7 +41,7 @@ dependencies {
     implementation(platform(libs.spring.boot.bom))
 
     implementation(project(":enforcer"))
-    testImplementation(project(":profiler"))
+    implementation(project(":profiler"))
 
     // Spring Boot Starters
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -44,6 +63,8 @@ dependencies {
     implementation(libs.vulnerable.xstream)
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation(kotlin("test"))
+    testImplementation(rootProject.sourceSets["sharedTest"].output)
     testRuntimeOnly(libs.junit.platform.launcher)
 }
 
@@ -52,31 +73,90 @@ tasks.withType<Test> {
     dependsOn(tasks.named("bootJar"))
 }
 
-// Disable static analysis for this deliberately vulnerable demo app
+// Analyze the application lifecycle and containment configuration while excluding only
+// the controllers and services that intentionally retain vulnerable demo behavior.
+detekt {
+    source.setFrom(
+        files(
+            "src/main/kotlin/demo/vulnapp/config",
+            "src/main/kotlin/demo/vulnapp/VulnAppApplication.kt",
+        ),
+    )
+    config.setFrom(files("$rootDir/config/detekt/detekt.yml"))
+    failOnSeverity = dev.detekt.gradle.extensions.FailOnSeverity.Error
+}
+
+ktlint {
+    version.set("1.7.0")
+    filter {
+        exclude("**/demo/vulnapp/controller/**")
+        exclude("**/demo/vulnapp/service/**")
+    }
+}
+
+tasks.withType<dev.detekt.gradle.Detekt>().configureEach {
+    setSource(
+        files(
+            "src/main/kotlin/demo/vulnapp/config",
+            "src/main/kotlin/demo/vulnapp/VulnAppApplication.kt",
+        ),
+    )
+}
+
+spotbugs {
+    ignoreFailures.set(false)
+    onlyAnalyze.set(listOf("demo.vulnapp.config.*", "demo.vulnapp.VulnAppApplication*"))
+    excludeFilter.set(file("$rootDir/config/spotbugs/exclude.xml"))
+}
 
 tasks.configureEach {
     if (name.contains("detekt", ignoreCase = true) ||
         name.contains("spotbugs", ignoreCase = true) ||
         name.contains("ktlint", ignoreCase = true)
     ) {
-        enabled = false
+        enabled = true
     }
 }
+
+tasks.matching { it.name.startsWith("spotbugsTest") }.configureEach { enabled = false }
 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
     mainClass.set("demo.vulnapp.VulnAppApplicationKt")
     archiveFileName.set("vulnerable-app.jar")
 }
 
-val extractJacocoAgent = tasks.register<Copy>("extractJacocoAgent") {
-    // org.jacoco.agent is a wrapper jar containing jacocoagent.jar inside.
-    // Extract it once so bootRun can reference it as a -javaagent.
-    val jacocoAgent = configurations.named("jacocoAgent")
-    from(jacocoAgent.map { zipTree(it.singleFile) }) {
-        include("jacocoagent.jar")
+// Executable deserialization fixtures never enter the ordinary application artifact.
+val vulnerableFixture =
+    sourceSets.create("vulnerableFixture") {
+        compileClasspath += sourceSets.main.get().output
+        runtimeClasspath += sourceSets.main.get().output
     }
-    into(layout.buildDirectory.dir("jacoco"))
+configurations[vulnerableFixture.implementationConfigurationName].extendsFrom(configurations.implementation.get())
+configurations[vulnerableFixture.runtimeOnlyConfigurationName].extendsFrom(configurations.runtimeOnly.get())
+dependencies {
+    // Verify profile gating in tests without placing fixture classes in the main artifact.
+    testImplementation(vulnerableFixture.output)
 }
+
+tasks.register<org.springframework.boot.gradle.tasks.bundling.BootJar>("isolatedVulnerableFixtureJar") {
+    group = "build"
+    description = "Builds an executable attack fixture for isolated disposable environments only."
+    mainClass.set("demo.vulnapp.VulnAppApplicationKt")
+    targetJavaVersion.set(JavaVersion.VERSION_25)
+    archiveFileName.set("isolated-vulnerable-fixture.jar")
+    classpath(vulnerableFixture.runtimeClasspath)
+}
+
+val extractJacocoAgent =
+    tasks.register<Copy>("extractJacocoAgent") {
+        // org.jacoco.agent is a wrapper jar containing jacocoagent.jar inside.
+        // Extract it once so bootRun can reference it as a -javaagent.
+        val jacocoAgent = configurations.named("jacocoAgent")
+        from(providers.provider { zipTree(jacocoAgent.get().singleFile) }) {
+            include("jacocoagent.jar")
+        }
+        into(layout.buildDirectory.dir("jacoco"))
+    }
 
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     mainClass.set("demo.vulnapp.VulnAppApplicationKt")
@@ -96,12 +176,14 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
             "-javaagent:${agentFile.absolutePath}" +
                 "=destfile=${execFile.absolutePath}" +
                 ",includes=demo.vulnapp.*" +
-                ",output=file"
+                ",output=file",
         )
     }
 }
 
-
+jacoco {
+    toolVersion = "0.8.14"
+}
 
 tasks.named<org.gradle.testing.jacoco.tasks.JacocoReport>("jacocoTestReport") {
     executionData.setFrom(layout.buildDirectory.file("jacoco/bootRun.exec"))

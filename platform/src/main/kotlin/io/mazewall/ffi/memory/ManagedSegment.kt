@@ -10,7 +10,7 @@ import java.lang.foreign.ValueLayout
  * and scope-aware. It prevents passing segments with incorrect layouts or invalid
  * lifecycles to native system calls, mitigating memory corruption risks at the JVM boundary.
  */
-public sealed interface ManagedSegment {
+internal sealed interface ManagedSegment {
     /**
      * Returns the raw native address of this segment.
      */
@@ -75,7 +75,7 @@ public sealed interface ManagedSegment {
  * A segment that is confined to a single thread and a deterministic lifecycle ([Arena]).
  */
 @JvmInline
-public value class ConfinedSegment(
+internal value class ConfinedSegment(
     internal val native: MemorySegment,
 ) : ManagedSegment {
     override fun address(): Long = native.address()
@@ -92,7 +92,7 @@ public value class ConfinedSegment(
  * A segment that can be shared across multiple threads.
  */
 @JvmInline
-public value class SharedSegment(
+internal value class SharedSegment(
     internal val native: MemorySegment,
 ) : ManagedSegment {
     override fun address(): Long = native.address()
@@ -108,60 +108,60 @@ public value class SharedSegment(
 /**
  * Internal access to the raw FFM segment for use within the FFI boundary.
  */
-public val ManagedSegment.native: MemorySegment
+internal val ManagedSegment.native: MemorySegment
     get() = when (this) {
         is ConfinedSegment -> this.native
         is SharedSegment -> this.native
     }
 
-public fun ManagedSegment.readByte(offset: Long): Byte = this.native.readByte(offset)
+internal fun ManagedSegment.readByte(offset: Long): Byte = this.native.readByte(offset)
 
-public fun ManagedSegment.writeByte(
+internal fun ManagedSegment.writeByte(
     offset: Long,
     value: Byte,
 ): Unit = this.native.writeByte(offset, value)
 
-public fun ManagedSegment.readShort(offset: Long): Short = this.native.readShort(offset)
+internal fun ManagedSegment.readShort(offset: Long): Short = this.native.readShort(offset)
 
-public fun ManagedSegment.writeShort(
+internal fun ManagedSegment.writeShort(
     offset: Long,
     value: Short,
 ): Unit = this.native.writeShort(offset, value)
 
-public fun ManagedSegment.readInt(offset: Long): Int = this.native.readInt(offset)
+internal fun ManagedSegment.readInt(offset: Long): Int = this.native.readInt(offset)
 
-public fun ManagedSegment.writeInt(
+internal fun ManagedSegment.writeInt(
     offset: Long,
     value: Int,
 ): Unit = this.native.writeInt(offset, value)
 
-public fun ManagedSegment.readIntUnaligned(offset: Long): Int = this.native.readIntUnaligned(offset)
+internal fun ManagedSegment.readIntUnaligned(offset: Long): Int = this.native.readIntUnaligned(offset)
 
-public fun ManagedSegment.writeIntUnaligned(
+internal fun ManagedSegment.writeIntUnaligned(
     offset: Long,
     value: Int,
 ): Unit = this.native.writeIntUnaligned(offset, value)
 
-public fun ManagedSegment.readLong(offset: Long): Long = this.native.readLong(offset)
+internal fun ManagedSegment.readLong(offset: Long): Long = this.native.readLong(offset)
 
-public fun ManagedSegment.writeLong(
+internal fun ManagedSegment.writeLong(
     offset: Long,
     value: Long,
 ): Unit = this.native.writeLong(offset, value)
 
-public fun ManagedSegment.readLongUnaligned(offset: Long): Long = this.native.readLongUnaligned(offset)
+internal fun ManagedSegment.readLongUnaligned(offset: Long): Long = this.native.readLongUnaligned(offset)
 
-public fun ManagedSegment.writeLongUnaligned(
+internal fun ManagedSegment.writeLongUnaligned(
     offset: Long,
     value: Long,
 ): Unit = this.native.writeLongUnaligned(offset, value)
 
-public fun ManagedSegment.fill(value: Byte) {
+internal fun ManagedSegment.fill(value: Byte) {
     this.native.fill(value)
 }
 
-public val NativeArena.unwrap: java.lang.foreign.Arena get() = this.arena
+internal val NativeArena.unwrap: java.lang.foreign.Arena get() = this.arena
 
-public val ManagedSegment.unwrap: java.lang.foreign.MemorySegment get() = this.native
+internal val ManagedSegment.unwrap: java.lang.foreign.MemorySegment get() = this.native
 
-public fun ManagedSegment.readString(offset: Long): String = this.native.getString(offset)
+internal fun ManagedSegment.readString(offset: Long): String = this.native.getString(offset)

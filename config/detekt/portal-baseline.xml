@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <!-- Reviewed portal worker-lifecycle boundary; see native-helper-exceptions.md. -->
+  <ManuallySuppressedIssues>
+    <ID>TooManyFunctions:ProcessBroker.kt:ProcessBroker : AutoCloseable</ID>
+  </ManuallySuppressedIssues>
+  <CurrentIssues/>
+</SmellBaseline>

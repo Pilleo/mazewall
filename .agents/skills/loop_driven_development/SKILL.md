@@ -9,7 +9,7 @@ description: >
 
 # Skill: Loop-Driven Development (LDD) for mazewall
 
-This skill instructs autonomous agents on how to execute closed-loop development loops (Maker -> Checker -> Triager) when implementing features or bugfixes in `mazewall`. Jules: the backlog markdown **is** the spec — execute **Needed**, honor **Investigation** / **Side effects**, then this loop.
+Use the backlog/work package as the task contract: execute **Needed** and honor **Investigation** / **Side effects**. Implementation, verification, and diagnosis are phases of this loop; use separate agents only when the runner actually delegates them.
 
 ---
 
@@ -18,7 +18,7 @@ This skill instructs autonomous agents on how to execute closed-loop development
 ```
     +---------------------------------------------------+
     |                   Maker Agent                     |
-    |      (Generates code + test cases from Spec)      |
+    |   (Generates code + tests from work package)     |
     +---------------------------------------------------+
                               |
                               v
@@ -46,16 +46,18 @@ This skill instructs autonomous agents on how to execute closed-loop development
 ### Step 1: Maker (Implementation Phase)
 *   **Action**: Generate code changes and companion test cases.
 *   **Rules**:
-    *   Do not modify files without an accompanying test that reproduces the expected behavior.
+    *   Reproduce bugs and verify non-trivial executable changes with meaningful tests. Documentation-only changes use reference/link checks, `git diff --check`, and backlog validation.
+    *   Follow `.agents/CODE_QUALITY.md`: sealed states/outcomes, enums, exhaustive branches, strict domain types, pure decisions, and minimum visibility.
     *   Verify FFM layouts align with target sizes.
 
 ### Step 2: Checker (Verification Phase)
 *   **Action**: Start with the cheapest verification that covers the work package.
 *   **Commands**:
     *   Inner loop: `./gradlew :<module>:compileKotlin` and `./gradlew :<module>:test --tests <TestClass>`.
-    *   Module gate: `./gradlew :<module>:test` before review.
-    *   Kernel behavior: `./gradlew integrationTest` or `./scripts/run_tests.sh` only when the backlog item declares `needs_kernel: true` or the change installs seccomp, Landlock, or USER_NOTIF behavior.
-    *   Merge gate: `./gradlew build` once after the focused checks pass.
+    *   Module tests: `./gradlew :<module>:test` when broader module evidence is needed.
+    *   Kernel iteration: select the owning module's `integrationTest`/`integrationTestFreshJvm`, or use `./scripts/run_tests.sh` in the configured container environment.
+    *   Completion gate: `./gradlew build` once after focused checks pass. It includes formatting, lint/static analysis, tests, and configured coverage thresholds. Equivalent test commands are alternatives, not cumulative gates.
+    *   Orchestrator changes: `./gradlew build -PincludeOrchestrator=true`.
 *   **Coordination**: Maker, Checker, and Triager are separate agents only when the runner actually spawns them. A single agent follows the same cheap-first sequence itself.
 
 ### Step 3: Triager (Diagnostics Phase)
@@ -64,4 +66,4 @@ This skill instructs autonomous agents on how to execute closed-loop development
     *   **`EPERM` / `EACCES`**: The Seccomp filter or Landlock ruleset blocked a required JVM system call (e.g., GC thread coordination).
         *   *Action*: Correlate the blocked syscall number found in `dmesg_audit` with `Syscall.kt` to identify which rule needs to be added.
     *   **JVM Deadlock / Freeze**: A coordination system call (like `futex` or `sched_yield`) was blocked, stalling the JVM safepoint loop.
-        *   *Action*: Review the thread dump in `jvm_thread_dump` to identify blocked JVM runtime threads.
+        *   *Action*: Read the collector PID/scope in `jvm_thread_dump`: it is a best-effort current-JVM platform-thread snapshot only. Gradle's `runTriage` finalizer launches a separate collector JVM, so its stacks do not identify blocked threads in the failed workload JVM. Virtual threads, `Thread.print` monitor detail, and pinning evidence are absent. Thread/frame/character rendering caps bound output, not snapshot acquisition/allocation, safepoint progress, or a hard deadline. Never enumerate host processes, attach, or send diagnostic signals based on `java`/`gradle` pathname matches; pathnames are not target authority.

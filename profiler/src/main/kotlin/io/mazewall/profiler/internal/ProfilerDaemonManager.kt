@@ -1,37 +1,38 @@
 package io.mazewall.profiler.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.NativeEngine
-import io.mazewall.core.JavaAgentSelection
-import io.mazewall.core.JvmChildProcess
-import io.mazewall.core.JvmChildSpec
-import io.mazewall.core.PrivateUnixEndpoint
-import io.mazewall.core.ProcessLauncher
-import io.mazewall.core.RealProcessLauncher
-import io.mazewall.core.RealSocketManager
-import io.mazewall.core.SocketManager
-import io.mazewall.ffi.memory.ConfinedSegment
-import io.mazewall.getFdOrThrow
-import java.io.IOException
-import java.lang.foreign.Arena
-import java.lang.foreign.ValueLayout
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.getFdOrThrow
+import io.mazewall.platform.process.ChildProcessResources
+import io.mazewall.platform.process.ChildStartupTransaction
+import io.mazewall.platform.process.DaemonPtracer
+import io.mazewall.platform.process.JavaAgentSelection
+import io.mazewall.platform.process.JvmChildProcess
+import io.mazewall.platform.process.JvmChildSpec
+import io.mazewall.platform.process.ProcessLauncher
+import io.mazewall.platform.process.RealProcessLauncher
+import io.mazewall.platform.socket.RealSocketManager
+import io.mazewall.platform.socket.SocketManager
+import io.mazewall.profiler.ffi.ProfilerNativeCommandWriter
 import java.nio.file.Path
+import java.time.Duration
 import java.util.logging.Logger
 
 /**
  * Context for a running Profiler Daemon.
  */
-public data class DaemonContext(
+internal data class DaemonContext(
     val socketPath: String,
     val socketDir: Path,
     val daemonProcess: Process,
     val shutdownHook: Thread,
+    val lifetime: ProfilerDaemonLifetime = ProfilerDaemonLifetime(),
 )
 
 /**
  * Manages the lifecycle of the shared Profiler Daemon.
  */
-public class ProfilerDaemonManager(
+internal class ProfilerDaemonManager(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = RealSocketManager,
     private val processLauncher: ProcessLauncher = RealProcessLauncher,
@@ -39,10 +40,15 @@ public class ProfilerDaemonManager(
     private val logger = Logger.getLogger(ProfilerDaemonManager::class.java.name)
     private val daemonLock = Any()
     private var sharedDaemonContext: DaemonContext? = null
+    private var ownedResources: ChildProcessResources? = null
+    private var pendingStartup: ChildStartupTransaction? = null
 
     public companion object {
         private const val SHUTDOWN_COMMAND_BYTE = 0x53.toByte() // 'S'
         private const val SHUTDOWN_WAIT_MS = 100L
+        private const val SHUTDOWN_POLL_INTERVAL_MS = 10L
+        private const val LATCH_TIMEOUT_SECONDS = 30L
+        private const val SESSION_SHUTDOWN_GRACE_SECONDS = 30L
         private val INSTANCE_DEFAULT = ProfilerDaemonManager()
 
         @JvmStatic
@@ -54,15 +60,14 @@ public class ProfilerDaemonManager(
      */
     public fun getOrSpawnSharedDaemon(): DaemonContext {
         synchronized(daemonLock) {
+            retirePendingStartup()
             val existing = sharedDaemonContext
-            if (existing != null && existing.daemonProcess.isAlive) {
-                engine.process.prctl(
-                    io.mazewall.core.PrctlCommand
-                        .SetPtracer(existing.daemonProcess.pid()),
-                )
+            if (existing != null && existing.daemonProcess.isAlive && ownedResources?.isClosed != true) {
+                DaemonPtracer.authorize(engine, existing.daemonProcess)
 
                 return existing
             }
+            existing?.let { cleanupDaemon(it) }
             val newContext = spawnDaemon()
             sharedDaemonContext = newContext
             return newContext
@@ -74,6 +79,7 @@ public class ProfilerDaemonManager(
      */
     public fun stop() {
         synchronized(daemonLock) {
+            retirePendingStartup()
             sharedDaemonContext?.let {
                 cleanupDaemon(it)
                 sharedDaemonContext = null
@@ -82,38 +88,39 @@ public class ProfilerDaemonManager(
     }
 
     public fun cleanupDaemon(context: DaemonContext) {
-        try {
-            processLauncher.removeShutdownHook(context.shutdownHook)
-        } catch (e: IllegalStateException) {
-            // Shutdown already in progress - ignore
-            logger.log(java.util.logging.Level.FINE, "Shutdown hook removal skipped: shutdown in progress", e)
-        } catch (e: SecurityException) {
-            logger.log(java.util.logging.Level.WARNING, "Failed to remove shutdown hook", e)
-        }
-        triggerDaemonShutdown(context.socketPath, context.daemonProcess)
-        context.daemonProcess.destroyForcibly()
-        context.daemonProcess.waitFor()
-        try {
-            processLauncher.deleteIfExists(context.socketDir.resolve("profiler.sock"))
-            processLauncher.deleteIfExists(context.socketDir)
-        } catch (e: IOException) {
-            logger.log(
-                java.util.logging.Level.WARNING,
-                "Failed to delete secure socket directory at ${context.socketDir}",
-                e,
-            )
+        synchronized(daemonLock) {
+            DaemonPtracer.retire(engine, context.daemonProcess)
+            val resources = ownedResources ?: return
+            require(resources.process === context.daemonProcess) { "Cannot retire a daemon not owned by this manager" }
+            resources.use {
+                if (context.daemonProcess.isAlive) triggerDaemonShutdown(context.socketPath, context.daemonProcess)
+            }
+            sharedDaemonContext = null
+            ownedResources = null
         }
     }
 
+    private fun retirePendingStartup() {
+        pendingStartup?.close()
+        pendingStartup = null
+    }
+
     private fun spawnDaemon(): DaemonContext {
-        val endpoint =
-            PrivateUnixEndpoint.create(processLauncher, "mazewall-profiler-", "profiler.sock")
+        val startup = ChildStartupTransaction(processLauncher, "mazewall-profiler-", "profiler.sock")
+        pendingStartup = startup
+        val context = startup.runStartup(::startDaemon)
+        pendingStartup = null
+        return context
+    }
+
+    private fun startDaemon(startup: ChildStartupTransaction): DaemonContext {
+        val endpoint = startup.endpoint
         val socketDir = endpoint.dir
         val socketPath = endpoint.path
 
         val spec =
             JvmChildSpec(
-                mainClass = io.mazewall.profiler.engine.ProfilerDaemon::class.java.name,
+                mainClass = io.mazewall.profiler.internal.engine.ProfilerDaemon::class.java.name,
                 mainArgs = listOf(socketPath),
                 maxHeap = "64m",
                 javaAgents = JavaAgentSelection.JacocoOnly,
@@ -121,49 +128,29 @@ public class ProfilerDaemonManager(
         val pbArgs = JvmChildProcess.commandLine(spec)
         logger.info("Spawning ProfilerDaemon: ${pbArgs.joinToString(" ")}")
 
-        val daemonProcess = JvmChildProcess.start(processLauncher, spec)
-        val daemonPid = daemonProcess.pid()
+        val daemonProcess = startup.start(spec)
 
-        val prctlRes =
-            engine.process.prctl(
-                io.mazewall.core.PrctlCommand
-                    .SetPtracer(daemonPid),
-            )
+        DaemonPtracer.authorize(engine, daemonProcess)
 
-        if (prctlRes is io.mazewall.LinuxNative.SyscallResult.Error) {
-            logger.warning("prctl(PR_SET_PTRACER) failed with errno ${prctlRes.errno}. The daemon may not be able to read process memory if Yama ptrace_scope is restrictive.")
-        }
-
-        val pump =
-            JvmChildProcess.startStdoutPump(
-                process = daemonProcess,
-                readySentinel = io.mazewall.profiler.engine.DAEMON_READY_SENTINEL,
+        startup.startOutputPump(
+                sentinel = io.mazewall.profiler.internal.engine.DAEMON_READY_SENTINEL,
                 onLine = { line ->
-                    System.err.println("[DAEMON] $line")
-                    System.err.flush()
+                    // Child diagnostics may include arbitrary tracee input. Readiness is
+                    // consumed by the resource owner; ordinary output exposes only a size.
+                    logger.fine("Profiler daemon diagnostic received (${line.length} characters)")
                 },
                 threadName = "profiler-daemon-output",
             )
 
-        val ready = JvmChildProcess.awaitReady(pump, 30)
-
-        if (!ready) {
-            val alive = daemonProcess.isAlive
-            val exitCode = if (!alive) daemonProcess.exitValue() else -1
-            if (alive) daemonProcess.destroyForcibly()
-
-            throw IllegalStateException(
-                "ProfilerDaemon failed to signal readiness within 30s (exitCode=$exitCode). " +
-                    "Check [DAEMON] logs above.",
-            )
+        val lifetime = ProfilerDaemonLifetime()
+        startup.registerShutdownHook {
+            check(lifetime.awaitSessions(Duration.ofSeconds(SESSION_SHUTDOWN_GRACE_SECONDS))) { "Profiler sessions did not retire before daemon shutdown deadline" }
         }
-
-        val shutdownHook = Thread {
-            daemonProcess.destroyForcibly()
-        }
-        processLauncher.addShutdownHook(shutdownHook)
-
-        return DaemonContext(socketPath, socketDir, daemonProcess, shutdownHook)
+        startup.awaitReady(LATCH_TIMEOUT_SECONDS)
+        val context = DaemonContext(socketPath, socketDir, daemonProcess, startup.shutdownHook, lifetime)
+        val resources = startup.commit()
+        ownedResources = resources
+        return context
     }
 
     private fun triggerDaemonShutdown(
@@ -171,15 +158,11 @@ public class ProfilerDaemonManager(
         process: Process,
     ) {
         try {
-            Arena.ofConfined().use { arena ->
-                val fd = socketManager.connect(socketPath)
-                try {
-                    val cmd = arena.allocate(1)
-                    cmd.set(ValueLayout.JAVA_BYTE, 0L, SHUTDOWN_COMMAND_BYTE)
-                    engine.memory.write(fd, ConfinedSegment(cmd), 1)
-                } finally {
-                    socketManager.close(fd)
-                }
+            val fd = socketManager.connect(socketPath)
+            try {
+                ProfilerNativeCommandWriter.writeByte(engine.memory, fd, SHUTDOWN_COMMAND_BYTE)
+            } finally {
+                socketManager.close(fd)
             }
         } catch (ignored: Exception) {
             // Caller escalates via destroyForcibly().
@@ -189,7 +172,7 @@ public class ProfilerDaemonManager(
         val deadline = System.currentTimeMillis() + SHUTDOWN_WAIT_MS
         try {
             while (process.isAlive && System.currentTimeMillis() < deadline) {
-                Thread.sleep(10)
+                Thread.sleep(SHUTDOWN_POLL_INTERVAL_MS)
             }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()

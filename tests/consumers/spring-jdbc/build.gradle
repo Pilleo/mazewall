@@ -1,0 +1,158 @@
+plugins { id 'java' }
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+
+repositories {
+    maven {
+        url = uri(providers.gradleProperty('consumerRepository').get())
+        content { includeGroup 'io.mazewall' }
+    }
+    mavenCentral { content { excludeGroup 'io.mazewall' } }
+}
+
+dependencies {
+    def artifact = providers.gradleProperty('useStarter').getOrElse('false') == 'true' ? 'mazewall-spring-boot-starter' : 'mazewall-spring-boot'
+    implementation "io.mazewall:${artifact}:${providers.gradleProperty('consumerVersion').get()}"
+    implementation platform('org.springframework.boot:spring-boot-dependencies:4.1.1')
+    implementation 'com.h2database:h2'
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+sourceSets {
+    other {
+        compileClasspath = sourceSets.main.output + configurations.compileClasspath
+    }
+    security {
+        compileClasspath += sourceSets.main.output
+    }
+}
+configurations.securityImplementation.extendsFrom(configurations.implementation)
+dependencies { securityImplementation 'org.springframework.security:spring-security-core' }
+tasks.register('securityJar', Jar) {
+    dependsOn tasks.classes, tasks.named('securityClasses')
+    archiveClassifier = 'security'
+    from sourceSets.main.output, sourceSets.security.output
+}
+tasks.register('otherJar', Jar) {
+    dependsOn tasks.named('otherClasses')
+    archiveClassifier = 'other-origin'
+    from sourceSets.other.output
+}
+
+def proofRoot = layout.buildDirectory.dir('native-proof')
+def packagedClasspath = files(tasks.jar.archiveFile, tasks.named('otherJar').flatMap { it.archiveFile }, configurations.runtimeClasspath)
+def digest = { File file ->
+    java.security.MessageDigest.getInstance('SHA-256').digest(file.bytes).encodeHex().toString()
+}
+
+tasks.register('measureCandidate', JavaExec) {
+    dependsOn tasks.jar, tasks.named('otherJar')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = packagedClasspath
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    doFirst {
+        def root = proofRoot.get().asFile
+        root.mkdirs()
+        new File(root, 'template.txt').text = 'approved template'
+        new File(root, 'sibling.txt').text = 'private sibling'
+        args 'measure', root.absolutePath
+    }
+}
+
+// Explicit test-review authority is OUTSIDE the implementation JVM and after the finished JAR.
+// This harness approves its known fixed fixture; production must supply its own trusted review.
+tasks.register('approveFixture') {
+    dependsOn tasks.named('measureCandidate')
+    doLast {
+        def root = proofRoot.get().asFile
+        def authority = new Properties()
+        authority.setProperty('jarSha256', digest(tasks.jar.archiveFile.get().asFile))
+        authority.setProperty('documentSha256', digest(new File(root, 'candidate.json')))
+        authority.setProperty('otherDocumentSha256', digest(new File(root, 'other-candidate.json')))
+        authority.setProperty('foreignDocumentSha256', digest(new File(root, 'foreign-candidate.json')))
+        authority.setProperty('staleDocumentSha256', digest(new File(root, 'stale-candidate.json')))
+        authority.setProperty('wrongMemberDocumentSha256', digest(new File(root, 'wrong-member-candidate.json')))
+        authority.setProperty('resourceGeneration', new File(root, 'candidate-generation.txt').text)
+        authority.setProperty('reviewer', 'external-known-fixture-test-reviewer')
+        new File(root, 'trusted-review.properties').withOutputStream { authority.store(it, 'Trusted fixture approval, not production authority') }
+    }
+}
+
+tasks.register('verifyNative', JavaExec) {
+    dependsOn tasks.named('approveFixture'), tasks.named('verifyOriginControls')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = packagedClasspath
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    args 'verify', proofRoot.get().asFile.absolutePath
+}
+
+tasks.register('verifyOriginControls', JavaExec) {
+    dependsOn tasks.classes
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    // This fixture has no main resources; do not declare Gradle's nonexistent NO-SOURCE output as required runtime input.
+    classpath = files(sourceSets.main.output.classesDirs, configurations.runtimeClasspath)
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    args 'verify-origin-controls', layout.buildDirectory.get().asFile.absolutePath
+}
+
+def securityRoot = layout.buildDirectory.dir('security-native-proof')
+def securityClasspath = files(tasks.named('securityJar').flatMap { it.archiveFile },
+        tasks.named('otherJar').flatMap { it.archiveFile }, configurations.securityRuntimeClasspath)
+tasks.register('presentationTest', Test) {
+    dependsOn tasks.named('securityJar'), tasks.named('otherJar')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'presentation' }
+    maxParallelForks = 1
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    doFirst {
+        systemProperty 'presentation.securityJar', tasks.named('securityJar').get().archiveFile.get().asFile.absolutePath
+        systemProperty 'presentation.classpath', securityClasspath.asPath
+    }
+    testLogging { events 'passed', 'failed', 'standardOut', 'standardError'; showStandardStreams = true }
+}
+tasks.register('measureSecurityCandidate', JavaExec) {
+    dependsOn tasks.named('securityJar'), tasks.named('otherJar')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = securityClasspath
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    doFirst {
+        def root = securityRoot.get().asFile
+        root.mkdirs()
+        new File(root, 'template.txt').text = 'approved template'
+        new File(root, 'sibling.txt').text = 'private sibling'
+        args 'measure-security', root.absolutePath
+    }
+}
+tasks.register('approveSecurityFixture') {
+    dependsOn tasks.named('measureSecurityCandidate')
+    doLast {
+        def root = securityRoot.get().asFile
+        def authority = new Properties()
+        authority.setProperty('jarSha256', digest(tasks.named('securityJar').get().archiveFile.get().asFile))
+        ['documentSha256': 'candidate.json', 'otherDocumentSha256': 'other-candidate.json',
+          'foreignDocumentSha256': 'foreign-candidate.json', 'staleDocumentSha256': 'stale-candidate.json',
+          'wrongMemberDocumentSha256': 'wrong-member-candidate.json'].each { key, file ->
+            authority.setProperty(key, digest(new File(root, file)))
+        }
+        authority.setProperty('resourceGeneration', new File(root, 'candidate-generation.txt').text)
+        authority.setProperty('reviewer', 'external-known-security-fixture-test-reviewer')
+        new File(root, 'trusted-review.properties').withOutputStream { authority.store(it, 'External test authority only') }
+    }
+}
+tasks.register('verifySecurityNative', JavaExec) {
+    dependsOn tasks.named('approveSecurityFixture')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = securityClasspath
+    mainClass = 'consumer.spring.NativeJdbcConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    args 'verify-security', securityRoot.get().asFile.absolutePath
+}

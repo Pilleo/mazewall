@@ -1,10 +1,17 @@
 package io.mazewall.enforcer
 
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
-import kotlin.test.fail
 
 class ContainmentViolationExceptionTest {
     @Test
@@ -14,15 +21,12 @@ class ContainmentViolationExceptionTest {
                 "contained",
                 IllegalStateException("cause"),
             )
-        try {
+        val caught = assertFailsWith<ContainmentViolationException> {
             throw thrown
-        } catch (caught: ContainmentViolationException) {
-            assertEquals("contained", caught.message)
-            assertIs<IllegalStateException>(caught.cause)
-            assertTrue(caught is io.mazewall.enforcer.api.ContainmentViolationException)
-            return
         }
-        fail("historical catch type must match library throws of the API exception")
+        assertEquals("contained", caught.message)
+        assertIs<IllegalStateException>(caught.cause)
+        assertTrue(caught is io.mazewall.enforcer.api.ContainmentViolationException)
     }
 
     @Test

@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "qualification": "INCOMPLETE_PREDECLARED_NATIVE_STABILITY",
+  "policy_eligibility": false,
+  "planned_runs": 3,
+  "attempted_runs": 1,
+  "source_snapshot": "clean committed detached clone",
+  "predeclared_plan": {
+    "schema_version": 1,
+    "status": "PREDECLARED",
+    "source_revision": "75d682607bc6799c0d153a2f750c0c14a2b2ea86",
+    "source_digest": "4ee9bf45ec4d8bea2eaecab1a857c260f7d001ec39722f8f740112f84fdf5e99",
+    "native_source_digest": "c3e86a4571e035ca80bbd397355c1e1a66f3f3f2016ef7b80baadef08048528e",
+    "native_agent_sha256": "8e46245a1fef44c8e1065855c90c8109b009ce7290a8de308c7f4e7bd19f13b5",
+    "image_id": "sha256:06650964cc3cbadceb07954247e610920e09e3d15940548f54cfa1c75d31ba91",
+    "profile_sha256": "08b534cf23b642acef8b8d36dd9e8d9fa5a7c357215070578eaddcfda019bb48",
+    "baseline_sha256": "f3f614584f5d0cd37549059fbdb195195247c5cd8bc590abbf01b05a532e9216",
+    "host_kernel": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,1",
+    "phase_series": [
+      "phase-1",
+      "phase-2",
+      "phase-3"
+    ],
+    "samples_per_mode_per_phase": 3,
+    "required_modes": [
+      "full",
+      "unique"
+    ],
+    "on_failure": "stop series; preserve raw samples and INCOMPLETE terminal; no passing receipt cherry-pick",
+    "aggregate_if_all_pass": "consume phase-1 in fresh 39-CTest/full-JVM gate with exact provenance re-verification",
+    "policy_eligibility": false
+  },
+  "phase_terminal": {
+    "schema_version": 1,
+    "success": false,
+    "reason": "INCOMPLETE",
+    "policy_eligibility": false
+  },
+  "phase_identity": {
+    "schema_version": 1,
+    "source_digest": "4ee9bf45ec4d8bea2eaecab1a857c260f7d001ec39722f8f740112f84fdf5e99",
+    "source_revision": "75d682607bc6799c0d153a2f750c0c14a2b2ea86",
+    "image_id": "sha256:06650964cc3cbadceb07954247e610920e09e3d15940548f54cfa1c75d31ba91",
+    "agent_sha256": "8e46245a1fef44c8e1065855c90c8109b009ce7290a8de308c7f4e7bd19f13b5",
+    "workload_class_sha256": "12ac99613bffb53253c02545063b37f01eb1860657233acf7879f90365d7c0e6",
+    "native_build_key": "c6379c32086cf3ef43a43ed8995eea0e7c1bdb944821844722284db135780b5a",
+    "compiler": "c++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+    "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS)\nOpenJDK 64-Bit Server VM Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS, mixed mode, sharing)",
+    "native_build_cache": "gradle:c3e86a4571e035ca80bbd397355c1e1a66f3f3f2016ef7b80baadef08048528e",
+    "cpu_set": "0,1",
+    "run_id": "tier-e-phase-c418d95c-f4b5-4800-8174-69364c5d4c67",
+    "policy_eligibility": false
+  },
+  "phase_verdicts": {
+    "full": {
+      "mode": "full",
+      "status": "PASS",
+      "reason": "complete",
+      "phase_contract_version": 2,
+      "get_stack_trace_ns": 2601223,
+      "raw_key_ns": 18852,
+      "canonical_cache_lookup_ns": 1005357,
+      "logical_metadata_ns": 691038,
+      "key_lookup_logical_total_ns": 1707798,
+      "historical_total_ns": 10730232,
+      "historical_total_limit_ns": 13412790,
+      "policy_eligibility": false
+    },
+    "unique": {
+      "mode": "unique",
+      "status": "INCOMPLETE",
+      "reason": "GetStackTrace phase exceeds unchanged historical limit: 2545657",
+      "policy_eligibility": false
+    }
+  },
+  "raw_get_stack_trace_ns": {
+    "full": [
+      2601223,
+      2484770,
+      2841503
+    ],
+    "unique": [
+      2545657,
+      2059876,
+      2553066
+    ]
+  },
+  "old_native_sha256": "315c2ee3a1d5ff314471c4f12daf0eb3d4c1f88d0254b6761664b5d601091bb8",
+  "prior_workload_class_sha256": "12ac99613bffb53253c02545063b37f01eb1860657233acf7879f90365d7c0e6",
+  "old_native_text_sha256": "4bbbfd694371b52f3602a16394f1e1b365686a902e51473dd25e9291869101d2",
+  "new_native_text_sha256": "4bbbfd694371b52f3602a16394f1e1b365686a902e51473dd25e9291869101d2"
+}

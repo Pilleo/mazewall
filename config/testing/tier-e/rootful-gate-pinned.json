@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "container": {
+    "engine": "docker",
+    "image": "mazewall-tier-e-rootful:perf-20260919-external-profiler"
+  },
+  "cpu_set": "0,2",
+  "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56"
+}

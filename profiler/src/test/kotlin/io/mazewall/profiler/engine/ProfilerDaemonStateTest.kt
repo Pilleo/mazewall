@@ -1,8 +1,15 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+package io.mazewall.profiler.internal.engine
 import io.mazewall.platform.daemon.UnixListenDaemonState
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -11,7 +18,8 @@ import org.junit.jupiter.api.Test
 class ProfilerDaemonStateTest {
     @Test
     fun `active listen state keeps socketPath`() {
-        val serverFd = FileDescriptor.replace<FileDescriptorRole.UnixSocket>(123)
+        val serverFd = TestFileDescriptors
+            .replace<FileDescriptorRole.UnixSocket>(123)
         val listening = UnixListenDaemonState.Uninitialized.listening(serverFd, "/tmp/test.sock")
         val active = listening.active()
         assertEquals(serverFd, active.serverFd)

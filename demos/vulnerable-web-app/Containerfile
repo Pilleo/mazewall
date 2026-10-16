@@ -2,17 +2,32 @@ FROM eclipse-temurin:25-jdk
 
 WORKDIR /app
 
+RUN groupadd --system mazewall && \
+    useradd --system --gid mazewall --home-dir /nonexistent --shell /usr/sbin/nologin mazewall
+
 # Install dependencies (curl for health checks, strace for debugging)
 RUN apt-get update && apt-get install -y curl strace && rm -rf /var/lib/apt/lists/*
 
-# Copy the pre-built jar from the host
-COPY build/libs/vulnerable-app.jar /app/vulnerable-app.jar
+ARG APP_JAR=build/libs/vulnerable-app.jar
+ARG APP_JAR_SHA256
+COPY ${APP_JAR} /app/vulnerable-app.jar
+RUN test -n "$APP_JAR_SHA256" && printf '%s  %s\n' "$APP_JAR_SHA256" /app/vulnerable-app.jar | sha256sum -c -
+LABEL io.mazewall.demo.jar-sha256=${APP_JAR_SHA256}
 
 # Unpack the jar to support exploded classpath resolution for profiler daemon subprocesses
 RUN mkdir -p /app/unpacked && cd /app/unpacked && jar -xf ../vulnerable-app.jar
 
+# Create the exact Landlock roots before filters are installed. Missing roots would
+# otherwise make the demo fall back to protecting their broader /app parent.
+RUN mkdir -p /app/uploads /app/data /app/profiles && \
+    chown mazewall:mazewall /app/uploads /app/data && \
+    chown root:mazewall /app/profiles && \
+    chmod 0755 /app/data && chmod 0770 /app/uploads /app/profiles
+
 # Expose ports
 EXPOSE 8080
+
+USER mazewall
 
 # Default command: run the exploded classpath
 CMD ["java", "-cp", "/app/unpacked/BOOT-INF/classes:/app/unpacked/BOOT-INF/lib/*", "demo.vulnapp.VulnAppApplicationKt"]

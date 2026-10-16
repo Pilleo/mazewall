@@ -1,0 +1,256 @@
+--- a/pkg/symbolizer/symbolizer.go
++++ b/pkg/symbolizer/symbolizer.go
+@@ -18,6 +18,7 @@
+ 
+ import (
+ 	"context"
++	"sync"
+ 	"time"
+ )
+ 
+@@ -51,6 +52,7 @@
+ 	resolvers []ResolverInstance
+ 
+ 	pruneLoopStarted bool
++	pruneMu          sync.Mutex
+ 	pruneTickerTime  time.Duration
+ 	pruneObjTTL      time.Duration
+ 	exit             chan struct{}
+@@ -236,21 +238,7 @@
+ 	}
+ 
+ 	// Most gadgets won't use the symbolizer, so don't start the prune loop until we need it.
+-	if !s.pruneLoopStarted {
+-		isPruningNeeded := false
+-
+-		for _, r := range s.resolvers {
+-			if r.IsPruningNeeded() {
+-				isPruningNeeded = true
+-				break
+-			}
+-		}
+-
+-		if isPruningNeeded {
+-			s.pruneLoopStarted = true
+-			go s.pruneLoop()
+-		}
+-	}
++	s.ensurePruning()
+ 
+ 	return res, nil
+ }
+--- a/pkg/symbolizer/otel/otel.go
++++ b/pkg/symbolizer/otel/otel.go
+@@ -47,8 +47,8 @@
+ 
+ 	o := &otelResolverInstance{
+ 		options:        options,
+-		correlationMap: make(map[uint64]libpf.Frames),
+-		waiters:        make(map[uint64]chan struct{}),
++		correlationMap: make(map[uint64]correlatedFrames),
++		waiters:        make(map[uint64]*correlationWaiter),
+ 		pruneCandidate: make(map[uint64]bool),
+ 	}
+ 	ctx := options.Context
+@@ -77,10 +77,10 @@
+ 	// eBPF ring buffers or hash maps), each calling Resolve()
+ 	// concurrently on the same correlation ID.
+ 	mu             sync.Mutex
+-	correlationMap map[uint64]libpf.Frames
++	correlationMap map[uint64]correlatedFrames
+ 	// waiters holds channels for Resolve() calls waiting on a correlation ID.
+ 	// The channel is closed by traceReporter when the trace arrives.
+-	waiters map[uint64]chan struct{}
++	waiters map[uint64]*correlationWaiter
+ 	// pruneCandidate holds correlation IDs that were absent from the
+ 	// BPF stack cache map on the previous prune cycle. An entry is
+ 	// deleted from correlationMap only if it remains absent for two
+@@ -301,11 +301,23 @@
+ // Linux < 5.8 where bpf_ktime_get_boot_ns is unavailable), the fixed
+ // correlationTimeout is used.
+ func (o *otelResolverInstance) lookupOrWait(correlationID uint64, eventBootTimestamp uint64) (libpf.Frames, bool) {
++	ctx := o.options.Context
++	if ctx == nil {
++		ctx = context.Background()
++	}
++	trace, ok, _ := o.lookupTraceOrWait(ctx, correlationID, eventBootTimestamp)
++	return trace.frames, ok
++}
++
++func (o *otelResolverInstance) lookupTraceOrWait(ctx context.Context, correlationID uint64, eventBootTimestamp uint64) (correlatedFrames, bool, error) {
++	if err := ctx.Err(); err != nil {
++		return correlatedFrames{}, false, err
++	}
+ 	o.mu.Lock()
+ 	frames, ok := o.correlationMap[correlationID]
+ 	if ok {
+ 		o.mu.Unlock()
+-		return frames, true
++		return frames, true, nil
+ 	}
+ 
+ 	// Register a waiter. If another Resolve() call from a different
+@@ -313,9 +325,10 @@
+ 	// its channel so that close() wakes all waiters.
+ 	ch, exists := o.waiters[correlationID]
+ 	if !exists {
+-		ch = make(chan struct{})
++		ch = &correlationWaiter{ch: make(chan struct{})}
+ 		o.waiters[correlationID] = ch
+ 	}
++	ch.refs++
+ 	o.mu.Unlock()
+ 
+ 	timeout := correlationTimeout
+@@ -324,7 +337,10 @@
+ 		// struct gadget_user_stack.boot_timestamp. Compare with
+ 		// CLOCK_BOOTTIME which uses the same clock source.
+ 		var ts unix.Timespec
+-		_ = unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts)
++		if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &ts); err != nil {
++			o.releaseWaiter(correlationID, ch)
++			return correlatedFrames{}, false, err
++		}
+ 		nowBootNs := uint64(ts.Sec)*1e9 + uint64(ts.Nsec)
+ 		if nowBootNs < eventBootTimestamp {
+ 			// Clock anomaly: skip waiting entirely.
+@@ -346,10 +362,11 @@
+ 
+ 	if timeout > 0 {
+ 		select {
+-		case <-ch:
++		case <-ch.ch:
+ 			log.Debugf("OtelResolverInstance: correlation ID %d arrived after wait", correlationID)
+ 		case <-time.After(timeout):
+ 			log.Debugf("OtelResolverInstance: timeout waiting for correlation ID %d after %v", correlationID, timeout)
++		case <-ctx.Done():
+ 		}
+ 	}
+ 
+@@ -357,11 +374,28 @@
+ 	// already removed it by closing the channel).
+ 	o.mu.Lock()
+ 	if w, ok := o.waiters[correlationID]; ok && w == ch {
+-		delete(o.waiters, correlationID)
++		w.refs--
++		if w.refs == 0 {
++			delete(o.waiters, correlationID)
++		}
+ 	}
+ 	frames, ok = o.correlationMap[correlationID]
+ 	o.mu.Unlock()
+-	return frames, ok
++	if err := ctx.Err(); err != nil {
++		return correlatedFrames{}, false, err
++	}
++	return frames, ok, nil
++}
++
++func (o *otelResolverInstance) releaseWaiter(id uint64, waiter *correlationWaiter) {
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if current := o.waiters[id]; current == waiter {
++		current.refs--
++		if current.refs == 0 {
++			delete(o.waiters, id)
++		}
++	}
+ }
+ 
+ func bpfVerifierLogLevel() uint32 {
+@@ -417,13 +451,7 @@
+ 		log.Debugf("Received OpenTelemetry trace (correlation ID %d, pid %d, tid %d):\n%s\n",
+ 			meta.CorrelationID, meta.PID, meta.TID, stackStr)
+ 
+-		o.mu.Lock()
+-		o.correlationMap[meta.CorrelationID] = t.Frames
+-		if ch, ok := o.waiters[meta.CorrelationID]; ok {
+-			close(ch)
+-			delete(o.waiters, meta.CorrelationID)
+-		}
+-		o.mu.Unlock()
++		o.storeTrace(meta.CorrelationID, t.Frames, uint32(meta.PID), uint32(meta.TID))
+ 		return nil
+ 	}
+ 
+--- a/pkg/symbolizer/otel/lookuporwait_test.go
++++ b/pkg/symbolizer/otel/lookuporwait_test.go
+@@ -41,8 +41,8 @@
+ // testing lookupOrWait without starting the OTel eBPF profiler.
+ func newTestInstance() *otelResolverInstance {
+ 	return &otelResolverInstance{
+-		correlationMap: make(map[uint64]libpf.Frames),
+-		waiters:        make(map[uint64]chan struct{}),
++		correlationMap: make(map[uint64]correlatedFrames),
++		waiters:        make(map[uint64]*correlationWaiter),
+ 		pruneCandidate: make(map[uint64]bool),
+ 	}
+ }
+@@ -50,13 +50,7 @@
+ // simulateTraceArrival mimics what traceReporter.reportTraceEvent does:
+ // inserts frames into correlationMap and wakes any waiters.
+ func simulateTraceArrival(o *otelResolverInstance, correlationID uint64, frames libpf.Frames) {
+-	o.mu.Lock()
+-	o.correlationMap[correlationID] = frames
+-	if ch, ok := o.waiters[correlationID]; ok {
+-		close(ch)
+-		delete(o.waiters, correlationID)
+-	}
+-	o.mu.Unlock()
++	o.storeTrace(correlationID, frames, 0, 0)
+ }
+ 
+ // getBootTimeNs returns the current CLOCK_BOOTTIME in nanoseconds.
+@@ -69,7 +63,7 @@
+ func TestLookupOrWait_ImmediateHit(t *testing.T) {
+ 	o := newTestInstance()
+ 	expected := makeFrames("foo", "bar")
+-	o.correlationMap[42] = expected
++	o.storeTrace(42, expected, 0, 0)
+ 
+ 	start := time.Now()
+ 	frames, ok := o.lookupOrWait(42, 0)
+--- a/pkg/symbolizer/otel/prune_test.go
++++ b/pkg/symbolizer/otel/prune_test.go
+@@ -25,9 +25,9 @@
+ 	o := newTestInstance()
+ 
+ 	// Simulate: correlation IDs 100, 200, 300 are in the Go map.
+-	o.correlationMap[100] = makeFrames("func_a")
+-	o.correlationMap[200] = makeFrames("func_b")
+-	o.correlationMap[300] = makeFrames("func_c")
++	o.storeTrace(100, makeFrames("func_a"), 0, 0)
++	o.storeTrace(200, makeFrames("func_b"), 0, 0)
++	o.storeTrace(300, makeFrames("func_c"), 0, 0)
+ 
+ 	// BPF map has 100 and 300, but not 200 (simulating LRU eviction).
+ 	activeBPF := map[uint64]bool{100: true, 300: true}
+@@ -49,7 +49,7 @@
+ func TestPruneCorrelationMap_CandidateReappears(t *testing.T) {
+ 	o := newTestInstance()
+ 
+-	o.correlationMap[100] = makeFrames("func_a")
++	o.storeTrace(100, makeFrames("func_a"), 0, 0)
+ 
+ 	// First prune: 100 absent from BPF → becomes candidate.
+ 	o.pruneCorrelationMap(map[uint64]bool{})
+@@ -64,8 +64,8 @@
+ func TestPruneCorrelationMap_EmptyBPFMap(t *testing.T) {
+ 	o := newTestInstance()
+ 
+-	o.correlationMap[100] = makeFrames("func_a")
+-	o.correlationMap[200] = makeFrames("func_b")
++	o.storeTrace(100, makeFrames("func_a"), 0, 0)
++	o.storeTrace(200, makeFrames("func_b"), 0, 0)
+ 
+ 	// First prune: all become candidates.
+ 	o.pruneCorrelationMap(map[uint64]bool{})
+@@ -89,7 +89,7 @@
+ 
+ func TestPruneOldObjects_NilTracer(t *testing.T) {
+ 	o := newTestInstance()
+-	o.correlationMap[100] = makeFrames("func_a")
++	o.storeTrace(100, makeFrames("func_a"), 0, 0)
+ 
+ 	// Should be a no-op, not panic.
+ 	o.PruneOldObjects(time.Now(), time.Minute)

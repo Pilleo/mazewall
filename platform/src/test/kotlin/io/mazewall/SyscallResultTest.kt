@@ -1,10 +1,32 @@
 package io.mazewall
 
-import io.mazewall.LinuxNative.SyscallResult
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.LinuxNative.SyscallResult
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class SyscallResultTest {
+    @Test
+    fun `native errno adaptation cannot require dynamic JVM bootstrap code`() {
+        val type = LinuxNative.SyscallResult.Error::class.java
+        val resource = "/" + type.name.replace('.', '/') + ".class"
+        val bytes = requireNotNull(type.getResourceAsStream(resource)).use { it.readAllBytes() }
+        val model = java.lang.classfile.ClassFile
+            .of()
+            .parse(bytes)
+        val dynamic = model.methods().filter { it.code().isPresent }.flatMap { method ->
+            method
+                .code()
+                .orElseThrow()
+                .elementList()
+                .filterIsInstance<java.lang.classfile.instruction.InvokeDynamicInstruction>()
+                .map { method.methodName().stringValue() }
+        }
+        assertTrue(dynamic.isEmpty(), "Cold error adaptation must not link executable JVM bootstrap stubs after PROT_EXEC denial: $dynamic")
+    }
+
     @Test
     fun `map should transform success value`() {
         val success: SyscallResult<Long, *> = SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(10L)
@@ -76,19 +98,19 @@ class SyscallResultTest {
 
     @Test
     fun `symbolic mapping should resolve common errnos`() {
-        val eperm = io.mazewall.core.ErrnoMapping
+        val eperm = io.mazewall.platform.syscall.ErrnoMapping
             .getSymbolicName(1)
         assertEquals("EPERM", eperm)
 
-        val eacces = io.mazewall.core.ErrnoMapping
+        val eacces = io.mazewall.platform.syscall.ErrnoMapping
             .getSymbolicName(13)
         assertEquals("EACCES", eacces)
 
-        val einval = io.mazewall.core.ErrnoMapping
+        val einval = io.mazewall.platform.syscall.ErrnoMapping
             .getSymbolicName(22)
         assertEquals("EINVAL", einval)
 
-        val unknown = io.mazewall.core.ErrnoMapping
+        val unknown = io.mazewall.platform.syscall.ErrnoMapping
             .getSymbolicName(9999)
         assertNull(unknown)
     }

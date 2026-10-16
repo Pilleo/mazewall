@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" tests="8" skipped="0" failures="0" errors="0" timestamp="2026-09-25T21:13:19.920Z" hostname="leanid-nitroanv1541" time="27.45">
+  <properties/>
+  <testcase name="timeout retires only its own privileged container(ContainerEndpoint)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="1.498"/>
+  <testcase name="killed fixture controller cannot leave its privileged collector running(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="4.454"/>
+  <testcase name="startup cancellation settles an in flight real Docker creation before cleanup(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="2.996"/>
+  <testcase name="failed real log export retains stopped container and its recoverable logs(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="2.942"/>
+  <testcase name="rootful endpoint executes the Tier E image(ContainerEndpoint)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.724"/>
+  <testcase name="interrupted fixture teardown still reaps unrelated sentinel(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="3.314"/>
+  <testcase name="privileged failure exports caller-owned artifacts(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="0.864"/>
+  <testcase name="non-root coverage target and privileged collector recover the exact 72 paths(ContainerEndpoint, Path)" classname="io.mazewall.profiler.TierERootfulContainerEndpointIntegrationTest" time="10.621"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

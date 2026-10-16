@@ -1,27 +1,29 @@
 package io.mazewall.enforcer.api
 
-import io.mazewall.InstallationAssessment
-import io.mazewall.InstallationAssessor
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.PolicyDefinition
-import io.mazewall.PolicyPresets
-import io.mazewall.PolicyScope
-import io.mazewall.Uncompiled
-import io.mazewall.compile
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
-import io.mazewall.core.isUnderAny
-import io.mazewall.core.resolveReal
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.InstallationAssessment
+import io.mazewall.enforcer.api.InstallationAssessor
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.PolicyPresets
+import io.mazewall.enforcer.api.PolicyScope
+import io.mazewall.enforcer.api.StacktraceScopingPolicy
+import io.mazewall.enforcer.api.Uncompiled
+import io.mazewall.enforcer.api.compile
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
-import io.mazewall.enforcer.internal.ContainedExecutorWrapper
 import io.mazewall.enforcer.state.*
-import io.mazewall.enforcer.supervisor.StacktraceScopingPolicy
 import io.mazewall.landlock.Landlock
+import io.mazewall.landlock.toFailure
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.lifecycle.isUnderAny
+import io.mazewall.platform.lifecycle.resolveReal
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.PureJavaBpfEngine
 import java.util.concurrent.ExecutorService
 import java.util.logging.Logger
@@ -30,20 +32,9 @@ import java.util.logging.Logger
 // @ref: docs/internals/designs/enforcer/containment-design.md — Filter installation ordering (Landlock before Seccomp), TSYNC semantics
 
 /**
- * Public API for wrapping an existing [java.util.concurrent.ExecutorService] to enforce seccomp containment.
- *
- * ### Graceful Shutdown
- * When using wrapped executors, it is strongly recommended to use a graceful shutdown pattern:
- * ```kotlin
- * executor.shutdown()
- * if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
- *     executor.shutdownNow()
- * }
- * ```
- * Avoid using `shutdownNow()` immediately, as it interrupts threads during the critical seccomp
- * installation and handshake phases. While this implementation is robust against such interruptions
- * to prevent kernel/JVM state desync, an interrupted handshake may still leave the thread in a
- * partially initialized supervisor state.
+ * Explicit permanent process/thread installation, assessment and violation detection.
+ * Synchronous application work uses [io.mazewall.enforcer.api.execution.ManagedRuntime]
+ * preparation and owned Callable invocations. Closing a receipt releases registration, never filters.
  *
  * ARCHITECTURAL INVARIANT: Container state is maintained via immutable [ContainerState] objects,
  * which are updated atomically via [ContainmentStateRegistry]. This ensures
@@ -52,14 +43,14 @@ import java.util.logging.Logger
  *
  * ### Thread Safety & Global Policies
  * Modifying process-wide global security policies (e.g., via [installOnProcess]) while
- * asynchronous wrapped executors ([ContainedExecutorWrapper]) are active, executing tasks,
+ * asynchronous contained workers are active, executing tasks,
  * or undergoing shutdown is unsupported. Doing so can cause late-running tasks in the queue to
  * resolve an inconsistent security state because global state transitions and per-task filter
  * installations may interleave unpredictably. All global policies should be fully installed
- * before wrapping or running asynchronous task executors.
+ * before preparing or running asynchronous contained workers.
  *
  * ### Signal Mask Inheritance Warning
- * When using [wrap] or thread installations with policies that configure `SeccompAction.ACT_TRAP`, the seccomp
+ * When using thread installations with policies that configure `SeccompAction.ACT_TRAP`, the seccomp
  * filter relies on the kernel delivering `SIGSYS` to the violating thread. Standard JVM thread pools
  * (such as [ExecutorService]) do not automatically reset POSIX signal masks (`sigprocmask`) or alternate
  * signal stacks (`sigaltstack`) when reusing threads. If a previous uncontained task executing native code (JNI/FFM)
@@ -69,14 +60,14 @@ import java.util.logging.Logger
  * For guaranteed immediate enforcement in such environments, prefer process- or thread-killing actions like
  * `ACT_KILL_PROCESS` or `ACT_KILL_THREAD`.
  *
- * Furthermore, when a new thread is spawned by a wrapped [ExecutorService], it inherits the signal mask of its parent.
+ * Furthermore, when a new thread is spawned by an [ExecutorService], it inherits the signal mask of its parent.
  * If the seccomp filter restricts `rt_sigprocmask`, the new thread might be permanently trapped with blocked signals.
  * To prevent unkillable threads or missed interruptions (e.g. `Thread.interrupt()` failing to wake up blocked I/O calls),
  * policies should ideally allow `rt_sigprocmask` and `rt_sigaction` for standard JVM thread management.
  * Note that `BpfFilter.getJvmCriticalNrs` explicitly and unconditionally whitelists `rt_sigprocmask`, `rt_sigaction`, and
  * `rt_sigreturn` to protect against this failure mode.
  */
-object ContainedExecutors {
+public object ContainedExecutors {
     private val logger = Logger.getLogger(ContainedExecutors::class.java.name)
     private val processLock = Any()
 
@@ -85,8 +76,16 @@ object ContainedExecutors {
         val classes = listOf(
             ContainmentViolationDetector::class.java,
             ContainmentViolationException::class.java,
-            io.mazewall.Platform.FallbackBehavior::class.java,
-            io.mazewall.InstallationReceipt::class.java,
+            io.mazewall.enforcer.api.Platform.FallbackBehavior::class.java,
+            io.mazewall.enforcer.api.InstallationReceipt::class.java,
+            // Receipt deltas and partial-failure reporting must resolve before class reads can be denied.
+            InstallationProgress::class.java,
+            PartialInstallationException::class.java,
+            ContainmentRegistryEffect.InstallationFailed::class.java,
+            ContainmentRegistryEffect.CetLocked::class.java,
+            InstallationEvidence::class.java,
+            CetThreadProof::class.java,
+            CetOutcome::class.java,
             // Post-install self-verification must be resolvable BEFORE any restrictive filter
             // exists: under a jvmFloor-style policy, reading build/classes/** afterwards is
             // denied and manifests as NoClassDefFoundError (issue-20260823-172003).
@@ -120,162 +119,82 @@ object ContainedExecutors {
 
     /**
      * Installs the given policies onto the current thread immediately.
-     *
-     * @deprecated This method returns Unit for backward compatibility. Use the overload that returns
-     * [io.mazewall.InstallationReceipt] for receipt and diagnostic information.
      */
-    @Deprecated(
-        "This variant returns Unit. Use installOnCurrentThread(vararg policies) that returns InstallationReceipt.",
-        ReplaceWith("installOnCurrentThread(*policies)"),
-        DeprecationLevel.HIDDEN,
-    )
-    fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>) {
-        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installOnCurrentThread(combined)
-    }
-
-    /**
-     * Installs the given policies onto the current thread immediately.
-     */
-    fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>): io.mazewall.InstallationReceipt {
+    public fun installOnCurrentThread(vararg policies: Policy<*, Uncompiled>): io.mazewall.enforcer.api.InstallationReceipt {
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
         return installOnCurrentThread(combined)
     }
 
-    /**
-     * @deprecated This method returns Unit for backward compatibility. Use the overload that returns
-     * [io.mazewall.InstallationReceipt] for receipt and diagnostic information.
-     */
-    @Deprecated(
-        "This variant returns Unit. Use installOnCurrentThread(policy, scopingPolicy) that returns InstallationReceipt.",
-        ReplaceWith("installOnCurrentThread(policy, scopingPolicy)"),
-        DeprecationLevel.HIDDEN,
-    )
-    fun installOnCurrentThread(
+    public fun installOnCurrentThread(
         policy: Policy<*, Uncompiled>,
         scopingPolicy: StacktraceScopingPolicy,
-    ) {
-        installOnCurrentThread(policy.definition, scopingPolicy)
-    }
-
-    fun installOnCurrentThread(
-        policy: Policy<*, Uncompiled>,
-        scopingPolicy: StacktraceScopingPolicy,
-    ): io.mazewall.InstallationReceipt {
+    ): io.mazewall.enforcer.api.InstallationReceipt {
         return installOnCurrentThread(policy.definition, scopingPolicy)
     }
 
-    internal fun installOnCurrentThread(policy: PolicyDefinition<*>): io.mazewall.InstallationReceipt {
-        return installOnCurrentThread(policy, io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy)
+    internal fun installOnCurrentThread(policy: PolicyDefinition<*>): io.mazewall.enforcer.api.InstallationReceipt {
+        return installOnCurrentThread(policy, io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy)
     }
 
     internal fun installOnCurrentThread(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
-    ): io.mazewall.InstallationReceipt {
-        return installInternal(false, policy, scopingPolicy)
+        environment: InstallationEnvironment = InstallationEnvironment.capture(),
+        preparedLandlock: io.mazewall.landlock.PreparedLandlock? = null,
+    ): io.mazewall.enforcer.api.InstallationReceipt {
+        return installInternal(false, policy, scopingPolicy, environment, preparedLandlock)
     }
 
     /** Read-only preflight. Does not install filters. */
-    fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = true)
+    public fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = true)
 
     /** Read-only preflight for the current thread. Does not install filters. */
-    fun assessOnCurrentThread(policy: Policy<*, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = false)
-
-    /**
-     * Installs the given policies onto the entire process (all threads) immediately.
-     *
-     * @deprecated This method returns Unit for backward compatibility. Use the overload that returns
-     * [io.mazewall.InstallationReceipt] for receipt and diagnostic information.
-     */
-    @Deprecated(
-        "This variant returns Unit. Use installOnProcess(vararg policies) that returns InstallationReceipt.",
-        ReplaceWith("installOnProcess(*policies)"),
-        DeprecationLevel.HIDDEN,
-    )
-    fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>) {
-        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        installInternal(true, combined)
-    }
+    public fun assessOnCurrentThread(policy: Policy<*, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = false)
 
     /**
      * Installs the given policies onto the entire process (all threads) immediately.
      */
-    fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): io.mazewall.InstallationReceipt {
+    public fun installOnProcess(vararg policies: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): io.mazewall.enforcer.api.InstallationReceipt {
         val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
         return installInternal(true, combined)
     }
 
+    internal fun installOnProcess(
+        policy: PolicyDefinition<PolicyScope.ProcessWideSafe>,
+        environment: InstallationEnvironment,
+    ): InstallationReceipt = installInternal(true, policy, environment = environment)
+
     /**
-     * Wraps an [java.util.concurrent.ExecutorService] so that any task submitted to it will have the given
-     * [policies] applied before execution.
-     *
-     * The caller still owns [delegate]. Filters stay on each worker after a task returns.
-     * Do not reuse the raw delegate for unrestricted work. An owned
-     * `ContainedExecutorService` is **not** planned (issue 032520 is deferred: high
-     * maintenance risk around thread lifecycle vs irreversible seccomp).
+     * Installs a permanent baseline in a dedicated child process, including existing JVM threads.
+     * Unlike the general process API, this internal entry accepts filesystem policies only when
+     * Landlock TSYNC is available (ABI 8+). The child must not publish readiness on failure;
+     * successful stages remain irreversible and are recorded by the ordinary installer.
      */
-    fun wrap(
-        delegate: ExecutorService,
-        vararg policies: Policy<*, Uncompiled>,
-    ): ExecutorService {
-        val combinedPolicy = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
-        return ContainedExecutorWrapper(delegate, combinedPolicy)
-    }
-
-    private fun containedThreadFactory(
-        tag: String,
-        policy: Policy<*, Uncompiled>,
-    ): java.util.concurrent.ThreadFactory {
-        val name = "mazewall-contained-$tag-${policy.definition.hashCode().toUInt().toString(16)}"
-        return java.util.concurrent.ThreadFactory { runnable ->
-            Thread(runnable).apply {
-                isDaemon = true
-                setName(name)
-            }
+    @io.mazewall.platform.lifecycle.MazewallInternal
+    // SUPPRESSION-RATIONALE: One defensive vararg composition precedes the irreversible child baseline; preserving the existing PolicyDefinition API avoids semantic changes.
+    @Suppress("SpreadOperator")
+    public fun installOnDedicatedProcess(vararg policies: Policy<*, Uncompiled>): io.mazewall.enforcer.api.InstallationReceipt {
+        io.mazewall.enforcer.diagnostics
+            .requirePlatformThread()
+        requireNonQuarantinedScope()
+        val environment = InstallationEnvironment.capture()
+        check(environment.platform.isLinux) { "Mazewall requires Linux for kernel-level containment." }
+        check(environment.fallback == Platform.FallbackBehavior.FAIL) { "Dedicated process containment forbids fallback" }
+        val combined = PolicyDefinition.combine(*policies.map { it.definition }.toTypedArray())
+        check(!combined.enforceLandlock || environment.platform.capabilities.matrix.landlockTsyncSupported) {
+            "Dedicated process filesystem containment requires Landlock TSYNC (ABI 8+)"
         }
-    }
-
-    /** Daemon single-thread executor whose threads run under [policy] on wrap. */
-    fun newSingleThreadExecutor(policy: Policy<*, Uncompiled>): ExecutorService =
-        wrap(
-        java.util.concurrent.Executors
-        .newSingleThreadExecutor(containedThreadFactory("single", policy)),
-            policy,
-    )
-
-    /** Daemon fixed pool whose threads run under [policy] on wrap. */
-    fun newFixedThreadPool(
-        nThreads: Int,
-        policy: Policy<*, Uncompiled>,
-    ): ExecutorService =
-        wrap(
-        java.util.concurrent.Executors
-        .newFixedThreadPool(nThreads, containedThreadFactory("pool", policy)),
-            policy,
-    )
-
-    /** Daemon cached pool whose threads run under [policy] on wrap. */
-    fun newCachedThreadPool(policy: Policy<*, Uncompiled>): ExecutorService =
-        wrap(
-        java.util.concurrent.Executors
-        .newCachedThreadPool(containedThreadFactory("cached", policy)),
-            policy,
-    )
-
-    fun wrap(
-        delegate: ExecutorService,
-        policy: Policy<*, Uncompiled>,
-        scopingPolicy: StacktraceScopingPolicy,
-    ): ExecutorService {
-        return ContainedExecutorWrapper(delegate, policy.definition, scopingPolicy)
+        val receipt = installInternal(true, combined, environment = environment).requireInstalled()
+        check(!combined.enforceLandlock || receipt.landlockApplied) { "Dedicated process Landlock was not applied" }
+        return receipt
     }
 
     /**
      * Concurrency model (issue-20260823-135557 resolution):
      *
-     * - [ContainmentStateRegistry.threadState] is a true ThreadLocal; only the current thread ever
-     *   reads or writes its own state. Therefore the gap between the Landlock critical section
+     * - [ContainmentStateRegistry.threadState] is a ThreadLocal. Supervised installation captures
+     *   its holder before the native call so the uncontained coordinator can publish that stage
+     *   before releasing the installer's handshake latch. The gap between the Landlock critical section
      *   ([applyLandlockIfNecessary]) and the Seccomp critical section ([installSeccompFilter]) —
      *   both individually guarded by [processLock] — cannot be corrupted by concurrent
      *   thread-scoped installs on other threads: their interleaved steps touch exclusively their
@@ -285,42 +204,56 @@ object ContainedExecutors {
      *   self-restriction and TSYNC seccomp are monotonic-restrictive with union semantics, so the
      *   final kernel state is order-independent; [io.mazewall.enforcer.state.ContainmentStateRegistry]
      *   process state is updated atomically per phase.
-     * - Catch-block rollback restores only this thread's state from the pre-install snapshot,
-     *   which stays valid because no other thread can write it. The
-     *   `landlockSuccessfullyApplied` guard prevents reverting past irreversible Landlock changes.
+     * - Native stages publish their successful irreversible changes before verification or
+     *   diagnostics. Failures expose partial progress; neither this installer nor its wrappers
+     *   rewind the registry to a pre-install snapshot.
      * - Merging the two phases into one critical section was evaluated and rejected: Java monitors
      *   are reentrant (no self-deadlock either way), and the worst-case lock-hold time is already
      *   bounded by the supervised-filter handshake that runs inside the lock today. The daemon
-     *   spawn ([io.mazewall.enforcer.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon])
+     *   spawn ([io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager.getOrSpawnSharedDaemon])
      *   deliberately happens before any locking.
      */
+    @Suppress("TooGenericExceptionCaught") // installation boundary preserves fatal identity and records irreversible progress
     private fun installInternal(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
-        scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.supervisor.DefaultStacktraceScopingPolicy,
-    ): io.mazewall.InstallationReceipt {
-        val initialState = if (processWide) null else ContainmentStateRegistry.threadState
-        var landlockSuccessfullyApplied = false
+        scopingPolicy: StacktraceScopingPolicy = io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy,
+        environment: InstallationEnvironment = InstallationEnvironment.capture(),
+        preparedLandlock: io.mazewall.landlock.PreparedLandlock? = null,
+    ): io.mazewall.enforcer.api.InstallationReceipt {
+        io.mazewall.enforcer.diagnostics
+            .requirePlatformThread()
+        requireNonQuarantinedScope()
+        // A failed permanent listener cannot be repaired by policy planning or operator bypass.
+        io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+            .requireReusableInstallations()
+        val attempt = InstallationAttempt(processWide, environment, preparedLandlock)
+        if (policy.lockIntelCet) attempt.cetOutcome = CetOutcome.UNCONFIRMED
         try {
+            check(!processWide || !policy.lockIntelCet) { "Process-wide shadow-stack locking is unsupported; CET controls apply to the installing platform thread" }
             val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
-            unsupportedPlatformReceipt(processWide, policy)?.let { return it }
+            unsupportedPlatformReceipt(processWide, policy, attempt)?.let { return recordInstallationResult(it) }
 
-            validateLinuxAndNotVirtual()
-            preparePreSeccompEffects(augmentedPolicy)
-            return installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy) {
-                landlockSuccessfullyApplied = true
-            }
+            check(attempt.platform.isLinux) { "Mazewall requires Linux for kernel-level containment." }
+            preparePreSeccompEffects(augmentedPolicy, attempt)
+            return recordInstallationResult(installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy, attempt))
+        } catch (fatal: Error) {
+            fatal.addSuppressed(PartialInstallationException(attempt.snapshot()))
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, fatal))
+            throw fatal
         } catch (expectedInstallFailure: Throwable) {
-            // Landlock is irreversible in the kernel. Only revert thread-local seccomp state
-            // if Landlock was NOT applied during this installation attempt.
-            if (!processWide && initialState != null && !landlockSuccessfullyApplied) {
-                ContainmentRegistryEffectInterpreter.apply(
-                    ContainmentRegistryEffect.RestoreThreadState(initialState),
-                )
+            // Installed stages are irreversible. Only their installer publishes state;
+            // callers and wrappers never restore a pre-install snapshot.
+            val fallback = attempt.fallback
+            val progress = attempt.snapshot()
+            val failure = if (progress.landlockApplied || progress.seccompApplied || progress.cetLocked) {
+                PartialInstallationException(progress, expectedInstallFailure)
+            } else {
+                expectedInstallFailure
             }
-            val fallback = Platform.configuredFallback()
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, failure))
             val landlockInForce =
-                landlockSuccessfullyApplied ||
+                attempt.landlockApplied ||
                     (
                         if (processWide) {
                         ContainmentStateRegistry.processState
@@ -330,24 +263,45 @@ object ContainedExecutors {
                     ).landlockPolicy != null
             if (fallback != Platform.FallbackBehavior.FAIL) {
                 if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
-                    if (landlockInForce) {
+                    if (progress.seccompApplied) {
+                        logger.warning(
+                            "Installation failed after Seccomp applied: ${expectedInstallFailure.message}. " +
+                                "The filter remains installed; completed stages=$progress.",
+                        )
+                    } else if (landlockInForce) {
                         logger.warning(
                             "Seccomp installation failed after Landlock applied: ${expectedInstallFailure.message}. " +
                                 "Filesystem Landlock remains in force; seccomp did not install.",
                         )
                     } else {
-                        logger.warning("Seccomp installation failed: ${expectedInstallFailure.message}. Code will run uncontained.")
+                        logger.warning("Seccomp installation failed: ${expectedInstallFailure.message}. The receipt reports bypass; required execution will reject it.")
                     }
                 }
-                return io.mazewall.InstallationReceipt(
+                return io.mazewall.enforcer.api.InstallationReceipt(
                     processWide = processWide,
                     requestedPolicy = policy,
                     installed = false,
                     landlockApplied = landlockInForce,
+                    fallback = fallback,
+                    progress = progress,
+                    failure = failure,
+                    cetOutcome = attempt.cetOutcome,
                 )
             }
-            throw expectedInstallFailure
+            throw failure
         }
+    }
+
+    private fun requireNonQuarantinedScope() {
+        ContainerState.resolveCurrentState().installationFailure?.let { throw it }
+    }
+
+    private fun recordInstallationResult(receipt: InstallationReceipt): InstallationReceipt {
+        if (!receipt.installed) {
+            val failure = receipt.failure ?: IllegalStateException("Required containment installation did not complete")
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(receipt.processWide, failure))
+        }
+        return receipt
     }
 
     private fun augmentForScoping(
@@ -361,19 +315,32 @@ object ContainedExecutors {
     private fun unsupportedPlatformReceipt(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
-    ): io.mazewall.InstallationReceipt? {
-        if (Platform.isSupported()) return null
-        handleUnsupportedPlatform()
-        return io.mazewall.InstallationReceipt(processWide = processWide, requestedPolicy = policy, installed = false)
+        attempt: InstallationAttempt,
+    ): io.mazewall.enforcer.api.InstallationReceipt? {
+        if (attempt.platform.isSupported()) return null
+        handleUnsupportedPlatform(attempt.fallback)
+        return io.mazewall.enforcer.api
+            .InstallationReceipt(
+                processWide = processWide,
+                requestedPolicy = policy,
+                installed = false,
+                fallback = attempt.fallback,
+                progress = attempt.snapshot(),
+                failure = UnsupportedOperationException("Platform does not support seccomp"),
+                cetOutcome = attempt.cetOutcome,
+            )
     }
 
-    private fun preparePreSeccompEffects(policy: PolicyDefinition<*>) {
+    private fun preparePreSeccompEffects(
+        policy: PolicyDefinition<*>,
+        attempt: InstallationAttempt,
+    ) {
+        if (policy.lockIntelCet) armIntelCet(attempt)
         if (policy.hasSupervisedSyscalls) {
-            io.mazewall.enforcer.supervisor.SupervisorDaemonManager
+            io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
                 .getInstance()
-                .getOrSpawnSharedDaemon()
+                .getOrSpawnSharedDaemon(attempt.native)
         }
-        if (policy.lockIntelCet) armIntelCet()
     }
 
     private fun installLandlockThenSeccomp(
@@ -381,79 +348,90 @@ object ContainedExecutors {
         requestedPolicy: PolicyDefinition<*>,
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
-        markLandlockApplied: () -> Unit,
-    ): io.mazewall.InstallationReceipt {
-        val landlockApplied = when (applyLandlockIfNecessary(processWide, policy)) {
-            LandlockStep.APPLIED -> true.also { markLandlockApplied() }
+        attempt: InstallationAttempt,
+    ): io.mazewall.enforcer.api.InstallationReceipt {
+        val landlockApplied = when (applyLandlockIfNecessary(processWide, policy, attempt)) {
+            LandlockStep.APPLIED -> true
             LandlockStep.BYPASSED ->
-                return io.mazewall.InstallationReceipt(
+                return io.mazewall.enforcer.api.InstallationReceipt(
                     processWide = processWide,
                     requestedPolicy = requestedPolicy,
                     installed = false,
+                    fallback = attempt.fallback,
+                    progress = attempt.snapshot(),
+                    failure = attempt.failure,
+                    cetOutcome = attempt.cetOutcome,
                 )
-            LandlockStep.UNCHANGED -> activeLandlockPolicy(processWide)
+            LandlockStep.UNCHANGED -> (if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState).landlockPolicy != null
         }
-        return installSeccompFilter(processWide, policy, scopingPolicy, landlockApplied)
+        return installSeccompFilter(processWide, policy, scopingPolicy, landlockApplied, attempt)
     }
-
-    private fun activeLandlockPolicy(processWide: Boolean): Boolean = (if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState).landlockPolicy != null
 
     private fun installSeccompFilter(
         processWide: Boolean,
         combinedPolicy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
         landlockApplied: Boolean,
-    ): io.mazewall.InstallationReceipt {
+        attempt: InstallationAttempt,
+    ): io.mazewall.enforcer.api.InstallationReceipt {
         // FAST PATH: Check if the current thread state already satisfies the policy without locking
-        val fastState = resolveCurrentState()
+        val fastState = installationState(processWide)
         val fastPlan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, fastState)
         if (!fastPlan.needsNewFilter && (!combinedPolicy.hasSupervisedSyscalls || processWide)) {
-            return io.mazewall.InstallationReceipt(
+            return io.mazewall.enforcer.api.InstallationReceipt(
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
-                supervisorSession = null,
                 landlockApplied = landlockApplied,
+                fallback = attempt.fallback,
+                progress = attempt.snapshot(),
+                cetOutcome = attempt.cetOutcome,
             )
         }
 
         synchronized(processLock) {
-            val state = resolveCurrentState()
+            val state = installationState(processWide)
             val plan = FilterInstallationPlanner.calculateNewFilter(combinedPolicy, state)
 
             val session = if (plan.needsNewFilter) {
-                FilterInstallationPlanner.verifyFilterDepth(state.filterDepth)
-                applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction, scopingPolicy)
+                // Kernel depth belongs to this thread's complete filter tree, even
+                // though process policy coverage is planned from processState only.
+                FilterInstallationPlanner.verifyFilterDepth(ContainerState.resolveCurrentState().filterDepth)
+                applyBpfFilter(processWide, plan.toInstall, plan.newBlocks, plan.newDefaultAction, scopingPolicy, attempt)
             } else {
                 null
             }
 
             if (!processWide && combinedPolicy.hasSupervisedSyscalls) {
-                if (session is io.mazewall.enforcer.supervisor.SupervisorSession) {
-                    return io.mazewall.InstallationReceipt(
+                if (session is io.mazewall.enforcer.internal.supervisor.SupervisorSession) {
+                    return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
                         processWide = processWide,
                         requestedPolicy = combinedPolicy,
-                        supervisorSession = session,
+                        supervisorRegistration = session,
                         landlockApplied = landlockApplied,
+                        fallback = attempt.fallback,
+                        progress = attempt.snapshot(),
+                        cetOutcome = attempt.cetOutcome,
                     )
                 } else {
-                    val tid = io.mazewall.LinuxNative.process
-                        .gettid()
-                    io.mazewall.enforcer.supervisor.SupervisorInstaller
-                        .registerThread(tid)
-                    return io.mazewall.InstallationReceipt(
+                    return io.mazewall.enforcer.api.InstallationReceipt.withSupervisorRegistration(
                         processWide = processWide,
                         requestedPolicy = combinedPolicy,
-                        supervisorSession = io.mazewall.enforcer.supervisor
-                            .SupervisorSession(tid),
+                        supervisorRegistration = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+                            .acquireTaskSession(scopingPolicy, attempt.native),
                         landlockApplied = landlockApplied,
+                        fallback = attempt.fallback,
+                        progress = attempt.snapshot(),
+                        cetOutcome = attempt.cetOutcome,
                     )
                 }
             }
-            return io.mazewall.InstallationReceipt(
+            return io.mazewall.enforcer.api.InstallationReceipt(
                 processWide = processWide,
                 requestedPolicy = combinedPolicy,
-                supervisorSession = null,
                 landlockApplied = landlockApplied,
+                fallback = attempt.fallback,
+                progress = attempt.snapshot(),
+                cetOutcome = attempt.cetOutcome,
             )
         }
     }
@@ -463,8 +441,9 @@ object ContainedExecutors {
     private fun applyLandlockIfNecessary(
         processWide: Boolean,
         policy: PolicyDefinition<*>,
+        attempt: InstallationAttempt,
     ): LandlockStep {
-        if (!needsLandlock(policy)) return LandlockStep.UNCHANGED
+        if (!policy.enforceLandlock) return LandlockStep.UNCHANGED
 
         synchronized(processLock) {
             val state = if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState
@@ -487,21 +466,30 @@ object ContainedExecutors {
                 landlockPolicy.allowedFsWritePaths != policy.allowedFsWritePaths
 
             if (isDifferent) {
-                when (val applied = Landlock.tryApplyRuleset(policy, processWide)) {
+                val publish = ContainmentRegistryEffectInterpreter.prepare(
+                    ContainmentRegistryEffect.LandlockApplied(processWide, policy),
+                )
+                val capabilities = attempt.platform.capabilities
+                val onApplied = {
+                    attempt.landlockApplied = true
+                    publish()
+                }
+                val applied = attempt.preparedLandlock?.apply(onApplied)
+                    ?: Landlock.tryApplyRuleset(policy, processWide, fallback = attempt.fallback, native = attempt.native, capabilities = capabilities, onRestrictionApplied = onApplied)
+                when (applied) {
                     is io.mazewall.landlock.LandlockApplyResult.Applied -> {
                         io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
                             io.mazewall.enforcer.diagnostics.MazewallEvents.LandlockApplied(
                                 processWide = processWide,
-                                abiVersion = io.mazewall.landlock.Landlock
-                                    .getAbiVersion(),
+                                abiVersion = capabilities.matrix.landlockAbiVersion,
                             ),
-                        )
-                        ContainmentRegistryEffectInterpreter.apply(
-                            ContainmentRegistryEffect.LandlockApplied(processWide, policy),
                         )
                         return LandlockStep.APPLIED
                     }
-                    is io.mazewall.landlock.LandlockApplyResult.Bypassed -> return LandlockStep.BYPASSED
+                    is io.mazewall.landlock.LandlockApplyResult.Bypassed -> {
+                        attempt.failure = applied.toFailure()
+                        return LandlockStep.BYPASSED
+                    }
                     is io.mazewall.landlock.LandlockApplyResult.Rejected -> applied.orThrow()
                 }
             }
@@ -509,40 +497,13 @@ object ContainedExecutors {
         }
     }
 
-    /**
-     * Landlock is required if the policy enforces Landlock (regardless of whether paths are empty).
-     * Note: We no longer implicitly trigger Landlock for io_uring_setup bypass prevention here.
-     * Instead, if Landlock is not enforced (empty paths) and a policy restricts open/openat but allows io_uring_setup,
-     * PolicyBuilder/PolicyDefinition automatically blocks io_uring_setup in seccomp.
-     */
-    private fun needsLandlock(policy: PolicyDefinition<*>) = policy.enforceLandlock
-
-    /**
-     * True when every [childPaths] entry lies beneath some [parentPaths] entry.
-     *
-     * Uses the canonical [io.mazewall.core.isUnder] containment predicate with realpath resolution
-     * on both sides (see [io.mazewall.core.resolveReal]): Landlock binds rules to dentries, so a
-     * symlinked spelling of an already-allowed directory must compare equal, while an operand that
-     * cannot be resolved compares only by its syntactic value — two different spellings that fail
-     * resolution identically still match, and anything else is rejected (fail closed).
-     */
-    private fun isPathSubset(
-        parentPaths: Set<SandboxedPath>,
-        childPaths: Set<SandboxedPath>,
-    ): Boolean {
-        if (childPaths.isEmpty()) return true
-        val resolvedParents = parentPaths.map { it.resolveReal() }.toSet()
-        return childPaths.all { child -> child.resolveReal().isUnderAny(resolvedParents) }
-    }
-
-    private fun handleUnsupportedPlatform() {
-        val fallback = Platform.configuredFallback()
+    private fun handleUnsupportedPlatform(fallback: Platform.FallbackBehavior) {
         when (fallback) {
             Platform.FallbackBehavior.FAIL ->
                 throw UnsupportedOperationException("Platform does not support seccomp")
 
             Platform.FallbackBehavior.WARN_AND_BYPASS -> {
-                logger.warning("Platform does not support seccomp. Code will run uncontained.")
+                logger.warning("Platform does not support seccomp. The receipt reports bypass; required execution will reject it.")
                 io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
                     io.mazewall.enforcer.diagnostics.MazewallEvents.FallbackEngaged(
                         behaviorName = fallback.name,
@@ -555,69 +516,45 @@ object ContainedExecutors {
         }
     }
 
-    private fun armIntelCet() {
-        if (!Platform.isCetPlatformEligible || !Platform.featureMatrix.cetSupported) {
-            handleCetUnsupported("Intel CET is requested but the current platform/architecture/CPU does not support it.")
+    private fun armIntelCet(attempt: InstallationAttempt) {
+        val native = attempt.native
+        val owner = Thread.currentThread()
+        val prior = ContainmentStateRegistry.threadState.installationEvidence.cet
+        if (prior?.owner === owner && prior.nativeIdentity === native.engineIdentity) {
+            attempt.cetOutcome = CetOutcome.VERIFIED_CURRENT_THREAD
             return
         }
-
-        // 1. Query current status to prevent redundant enabling
-        val initialStatus = Platform.queryIntelCetStatus()
-        val isAlreadyEnabled = (initialStatus and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L
-
-        if (!isAlreadyEnabled) {
-            // Enable Shadow Stack: arch_prctl(ARCH_SHSTK_ENABLE, ARCH_SHSTK_SHSTK)
-            val enableRes = io.mazewall.LinuxNative.process.archPrctl(
-                io.mazewall.ffi.NativeConstants.ARCH_SHSTK_ENABLE,
-                io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK,
+            requireEnabledShadowStack(attempt, "before lock")
+            val lock = native.process.archPrctl(io.mazewall.ffi.NativeConstants.ARCH_SHSTK_LOCK, io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK)
+            check(lock is LinuxNative.SyscallResult.Success && lock.value == 0L) {
+                when (lock) {
+                    is LinuxNative.SyscallResult.Error -> "ARCH_SHSTK_LOCK failed with errno=${lock.errno}"
+                    is LinuxNative.SyscallResult.Success -> "ARCH_SHSTK_LOCK returned unexpected success value ${lock.value}"
+                }
+            }
+            // Successful LOCK is irreversible even if later status/diagnostic work fails.
+            attempt.cetLocked = true
+            requireEnabledShadowStack(attempt, "after lock")
+            ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(CetThreadProof(native.engineIdentity, owner)))
+            attempt.cetOutcome = CetOutcome.VERIFIED_CURRENT_THREAD
+            io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
+                io.mazewall.enforcer.diagnostics.MazewallEvents.CetOutcome(
+                    armed = true,
+                    detail = "pre-enabled SHSTK locked and verified on the installing platform thread",
+                ),
             )
-
-            if (enableRes is io.mazewall.LinuxNative.SyscallResult.Error) {
-                handleCetUnsupported("Failed to enable Intel CET Shadow Stack: $enableRes")
-                return
-            }
-        }
-
-        // 2. Lock Shadow Stack configuration: arch_prctl(ARCH_SHSTK_LOCK, ARCH_SHSTK_SHSTK)
-        val lockRes = io.mazewall.LinuxNative.process.archPrctl(
-            io.mazewall.ffi.NativeConstants.ARCH_SHSTK_LOCK,
-            io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK,
-        )
-
-        if (lockRes is io.mazewall.LinuxNative.SyscallResult.Error) {
-            // EPERM (1) is returned if CET is already locked. If verification is successful, we can ignore this.
-            if (lockRes.errno != io.mazewall.ffi.NativeConstants.EPERM) {
-                handleCetUnsupported("Failed to lock Intel CET Shadow Stack: $lockRes")
-                return
-            }
-        }
-
-        // 3. Verify status to be absolutely sure:
-        val activeStatus = Platform.queryIntelCetStatus()
-        if ((activeStatus and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) == 0L) {
-            handleCetUnsupported("Intel CET is enabled and locked, but verification of status failed.")
-            return
-        }
-
-        logger.info("Intel CET Shadow Stack successfully enabled and locked.")
-        io.mazewall.enforcer.diagnostics.MazewallEvents.emit(
-            io.mazewall.enforcer.diagnostics.MazewallEvents.CetOutcome(
-                armed = true,
-                detail = "shadow stack enabled and locked",
-            ),
-        )
     }
 
-    private fun handleCetUnsupported(reason: String) {
-        val fallback = Platform.configuredFallback()
-        if (fallback == Platform.FallbackBehavior.FAIL) {
-            throw io.mazewall.UnsupportedPlatformException(reason)
-        } else if (fallback == Platform.FallbackBehavior.WARN_AND_BYPASS) {
-            logger.warning("$reason Code will run without CET protection.")
+    private fun requireEnabledShadowStack(
+        attempt: InstallationAttempt,
+        phase: String,
+    ) {
+        val status = Platform.probeShstkStatus(attempt.native, attempt.platform.isCetEligible)
+        if (status !is KernelCapability.Available) throw Platform.cetStatusFailure(status)
+        check((status.value and io.mazewall.ffi.NativeConstants.ARCH_SHSTK_SHSTK) != 0L) {
+            "Shadow stack is inactive $phase. A compatible runtime/loader must enable SHSTK before library entry; late FFM enablement is unsupported."
         }
     }
-
-    private fun resolveCurrentState(): ContainerState = ContainerState.resolveCurrentState()
 
     private fun applyBpfFilter(
         processWide: Boolean,
@@ -625,15 +562,15 @@ object ContainedExecutors {
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
         scopingPolicy: StacktraceScopingPolicy,
+        attempt: InstallationAttempt,
     ): AutoCloseable {
-        val arch = io.mazewall.core.Arch
+        val arch = io.mazewall.platform.syscall.Arch
             .current()
         if (toInstall.hasSupervisedSyscalls) {
             if (processWide) {
                 throw UnsupportedOperationException("Process-wide supervised filters are not supported. Use thread-scoped supervision instead.")
             }
-            val onApplied = {
-                ContainmentRegistryEffectInterpreter.apply(
+            val publish = ContainmentRegistryEffectInterpreter.prepare(
                     ContainmentRegistryEffect.SeccompInstalled(
                         processWide = false,
                         policy = toInstall,
@@ -641,31 +578,27 @@ object ContainedExecutors {
                         defaultAction = newDefaultAction,
                     ),
                 )
-            }
-            val session = io.mazewall.enforcer.supervisor.SupervisorInstaller.installSupervisedFilterForThread(
+            val session = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller.installSupervisedFilterForThread(
                 toInstall,
                 scopingPolicy,
-                onApplied,
+                {
+                    attempt.seccompApplied = true
+                    publish()
+                },
+                attempt.native,
+                attempt.platform.capabilities.matrix.seccompUserNotifSupported,
             )
             return session
         } else {
-            val compiledSandbox = io.mazewall.PolicyCompilationCache.getOrCompile(toInstall, arch)
-            val currentState = resolveCurrentState()
+            val compiledSandbox = io.mazewall.enforcer.api.PolicyCompilationCache
+                .getOrCompile(toInstall, arch)
+            val currentState = ContainerState.resolveCurrentState()
             val priorFilterDepth = currentState.filterDepth
 
             // Compute merged state for union-aware self-verification (issue-20260824-011900)
-            val mergedState = if (processWide) {
-                currentState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
-            } else {
-                currentState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
-            }
+            val mergedState = currentState.withNewSeccompPolicy(toInstall, newBlocks, newDefaultAction)
 
-            if (processWide) {
-                PureJavaBpfEngine.installOnProcess(compiledSandbox)
-            } else {
-                PureJavaBpfEngine.install(compiledSandbox)
-            }
-            ContainmentRegistryEffectInterpreter.apply(
+            val publish = ContainmentRegistryEffectInterpreter.prepare(
                 ContainmentRegistryEffect.SeccompInstalled(
                     processWide,
                     toInstall,
@@ -673,18 +606,37 @@ object ContainedExecutors {
                     newDefaultAction,
                 ),
             )
-            // Runtime self-verification (issue-20260823-172003): OPT-IN via
-            // -Dio.mazewall.selfVerify=true. Asserts the kernel honors the oracle's predictions;
-            // memoized per program identity. See InstallSelfVerifier gate KDoc for why the
-            // default is off under narrow allow-list floors.
+            PureJavaBpfEngine.installWithPublication(compiledSandbox, processWide, native = attempt.native, platform = attempt.platform) {
+                attempt.seccompApplied = true
+                publish()
+            }
+            // Runtime self-verification uses the attempt's captured setting and backend.
+            // Default-ON for the real engine; the property can explicitly opt in/out.
             // Union-aware verification (issue-20260824-011900): passes merged state for stacked filters
             io.mazewall.seccomp.InstallSelfVerifier.verify(
                 compiledSandbox.program,
                 arch,
                 priorFilterDepth,
                 mergedState,
+                attempt.native,
+                attempt.selfVerificationEnabled,
             )
             return AutoCloseable {}
         }
     }
+}
+
+/**
+ * True when every [childPaths] entry lies beneath some [parentPaths] entry.
+ * Uses canonical real paths on both sides because Landlock binds rules to dentries.
+ * Unresolvable operands compare only by their syntactic value; different unresolved
+ * spellings are rejected, preserving the existing fail-closed subset semantics.
+ */
+private fun isPathSubset(
+    parentPaths: Set<SandboxedPath>,
+    childPaths: Set<SandboxedPath>,
+): Boolean {
+    if (childPaths.isEmpty()) return true
+    val resolvedParents = parentPaths.map { it.resolveReal() }.toSet()
+    return childPaths.all { child -> child.resolveReal().isUnderAny(resolvedParents) }
 }

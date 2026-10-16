@@ -1,8 +1,8 @@
 package io.mazewall.ffi.internal
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.Tid
 import io.mazewall.ffi.memory.ErrnoSegment
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.LinuxNative
 import java.lang.foreign.MemorySegment
 import java.lang.invoke.MethodHandle
 
@@ -12,15 +12,17 @@ import java.lang.invoke.MethodHandle
  */
 internal object SyscallInvoker {
     private fun intCall(invoke: (MemorySegment) -> Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = invoke(capturedState.segment)
-        return RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        return ErrnoSegment.withCapturedState { capturedState ->
+            val ret = invoke(capturedState.segment)
+            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+        }
     }
 
     private fun longCall(invoke: (MemorySegment) -> Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = invoke(capturedState.segment)
-        return RealNativeHelper.result(ret, capturedState.getErrno())
+        return ErrnoSegment.withCapturedState { capturedState ->
+            val ret = invoke(capturedState.segment)
+            RealNativeHelper.result(ret, capturedState.getErrno())
+        }
     }
 
     fun syscall(
@@ -100,9 +102,10 @@ internal object SyscallInvoker {
         fd: Int,
         offset: Long,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        val capturedState = ErrnoSegment.getThreadLocal()
-        val ret = handle.invokeExact(capturedState.segment, addr, length, prot, flags, fd, offset) as MemorySegment
-        return RealNativeHelper.result(ret.address(), capturedState.getErrno())
+        return ErrnoSegment.withCapturedState { capturedState ->
+            val ret = handle.invokeExact(capturedState.segment, addr, length, prot, flags, fd, offset) as MemorySegment
+            RealNativeHelper.result(ret.address(), capturedState.getErrno())
+        }
     }
 
     fun close(

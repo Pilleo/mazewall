@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <!-- Reviewed profiler protocol boundaries; see native-helper-exceptions.md. -->
+  <ManuallySuppressedIssues>
+    <ID>CyclomaticComplexMethod:AgentDefinitionFile.kt:AgentDefinitionFile$public fun decode: Contents</ID>
+    <ID>CyclomaticComplexMethod:TierEBpfProgramBuilder.kt:TierEBpfProgramBuilder$private fun buildSysEnterProgram: List&lt;Insn&gt;</ID>
+    <ID>CyclomaticComplexMethod:TierEKotlinDaemon.kt:TierEDaemonService$private fun dispatchEffect: String</ID>
+    <ID>CyclomaticComplexMethod:TierEKotlinDaemon.kt:internal fun main</ID>
+    <ID>CyclomaticComplexMethod:TierEbpfEngine.kt:TierEbpfEngine$@Suppress("TooGenericExceptionCaught") // native acquisition and rollback must retain every failure type public fun install</ID>
+    <ID>LargeClass:TierEbpfEngine.kt:TierEbpfEngine : AutoCloseable</ID>
+    <ID>LongMethod:TierEBpfProgramBuilder.kt:TierEBpfProgramBuilder$public fun buildSysEnterProgram: List&lt;Insn&gt;</ID>
+    <ID>LongMethod:TierEBpfProgramBuilder.kt:TierEBpfProgramBuilder$private fun buildSysEnterProgram: List&lt;Insn&gt;</ID>
+    <ID>LongMethod:TierEKotlinDaemon.kt:TierEDaemonService$private fun dispatchEffect: String</ID>
+    <ID>LongMethod:TierEKotlinDaemon.kt:internal fun main</ID>
+    <ID>LongMethod:TierEbpfEngine.kt:TierEbpfEngine$@Suppress("TooGenericExceptionCaught") // native acquisition and rollback must retain every failure type public fun install</ID>
+    <ID>LongParameterList:TierEKotlinDaemon.kt:TierEDaemonService</ID>
+    <ID>ReturnCount:HandshakeSession.kt:HandshakeSession.Active$fun performHandshake: HandshakeSession</ID>
+    <ID>ReturnCount:ProfilerSessionHandler.kt:ProfilerSessionHandler.&lt;no name provided&gt;$context(arena: NativeArena) private fun advance: NotificationProgress</ID>
+    <ID>ThrowsCount:AgentDefinitionFile.kt:AgentDefinitionFile$public fun decode: Contents</ID>
+    <ID>TooManyFunctions:TierEProfilerSession.kt:TierEProfilerSession : AutoCloseable</ID>
+    <ID>TooManyFunctions:TierEbpfEngine.kt:TierEbpfEngine : AutoCloseable</ID>
+  </ManuallySuppressedIssues>
+  <CurrentIssues/>
+</SmellBaseline>

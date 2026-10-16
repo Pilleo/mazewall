@@ -1,0 +1,30 @@
+--- a/pkg/symbolizer/symbolizer.go
++++ b/pkg/symbolizer/symbolizer.go
+@@ -53,1 +53,4 @@
+-type Symbolizer struct {
++type Symbolizer struct {
++	pruneDone chan struct{}
++	pruneStopOnce sync.Once
++	pruneStopped bool
+@@ -133,2 +135,4 @@
+-func (s *Symbolizer) Close() {
+-	close(s.exit)
++func (s *Symbolizer) Close() {
++	ctx,cancel:=context.WithTimeout(context.Background(),2*time.Second)
++	defer cancel()
++	if err:=s.stopPruning(ctx);err!=nil{return}
+@@ -140,1 +145,2 @@
+-func (s *Symbolizer) pruneLoop() {
++func (s *Symbolizer) pruneLoop() {
++	if s.pruneDone!=nil {defer close(s.pruneDone)}
+--- a/pkg/symbolizer/otel/otel.go
++++ b/pkg/symbolizer/otel/otel.go
+@@ -212,1 +212,7 @@
+-	if o.trc != nil {
++	if o.options.HotSpotEpochTarget.PID != 0 {
++		if err:=o.StopAuxiliary(ctx);err!=nil {
++			if o.options.OnHotSpotFatal!=nil{o.options.OnHotSpotFatal(err)}
++			return
++		}
++	}
++	if o.trc != nil {

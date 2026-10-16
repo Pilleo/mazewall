@@ -1,14 +1,14 @@
 package io.mazewall.ffi.memory
 
-import io.mazewall.LinuxNative
-import io.mazewall.core.Pid
-import io.mazewall.core.Tid
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.Layouts
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.LinuxNative
 import java.lang.foreign.Arena
 import java.lang.foreign.MemorySegment
 import java.lang.foreign.ValueLayout
@@ -16,7 +16,7 @@ import java.lang.foreign.ValueLayout
 /**
  * Shared utility for writing memory to remote processes/threads using process_vm_writev.
  */
-public object SupervisorProcessMemoryWriter {
+internal object SupervisorProcessMemoryWriter {
     context(arena: NativeArena) public fun writeBytes(
         tid: Tid,
         remoteAddr: Long,

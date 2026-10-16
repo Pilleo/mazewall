@@ -1,0 +1,51 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"encoding/binary"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/processmanager"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	"strings"
+	"testing"
+	"unsafe"
+)
+
+func epochTracePacket(count uint16) []byte {
+	b := make([]byte, int(unsafe.Offsetof(support.Trace{}.Frame_data))+int(count)*8)
+	// traceFromRaw copies its input under -race. Encode the wire packet itself,
+	// independently of the decoder being exercised.
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Pid)):], 123)
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Tid)):], 456)
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Kernel_stack_id)):], ^uint32(0))
+	binary.LittleEndian.PutUint32(b[int(unsafe.Offsetof(support.Trace{}.Origin)):], uint32(support.TraceOriginProbe))
+	binary.LittleEndian.PutUint16(b[int(unsafe.Offsetof(support.Trace{}.Frame_data_len)):], count)
+	return b
+}
+func TestHotSpotEpochRawPacketPreservesErrorAndResetsPool(t *testing.T) {
+	tr := &Tracer{tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}}
+	b := epochTracePacket(0)
+	off := int(unsafe.Offsetof(support.Trace{}.Hotspot_identity))
+	binary.LittleEndian.PutUint64(b[off:], 2)
+	binary.LittleEndian.PutUint32(b[off+8:], 1)
+	r, e := tr.loadBpfTrace(b, 0)
+	if e != nil || r.HotSpotIdentity != (libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable}) {
+		t.Fatal(r, e)
+	}
+	tr.tracePool.Put(r)
+	binary.LittleEndian.PutUint64(b[off:], 0)
+	binary.LittleEndian.PutUint32(b[off+8:], 2)
+	code := int32(-13)
+	binary.LittleEndian.PutUint32(b[off+12:], uint32(code))
+	r, e = tr.loadBpfTrace(b, 0)
+	if e != nil || r.HotSpotIdentity.ReadError != -13 || r.HotSpotIdentity.State != libpf.HotSpotEpochReadError {
+		t.Fatal("error/pooled epoch lost", r, e)
+	}
+}
+func TestHotSpotEpochOversizedRawPacketIsRejected(t *testing.T) {
+	tr := &Tracer{tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}}
+	if _, err := tr.loadBpfTrace(epochTracePacket(3073), 0); err == nil || !strings.Contains(err.Error(), "invalid raw frame counts: 0/3073") {
+		t.Fatal("oversized frame array did not reach bounds rejection", err)
+	}
+}

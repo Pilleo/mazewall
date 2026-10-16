@@ -1,0 +1,57 @@
+@startuml portal_lifecycle
+hide empty description
+
+state "Broker" as broker {
+  [*] --> New
+  New --> Starting : StartRequested
+  Starting --> Running : all workers ready\npublish complete pool
+  Starting --> Failed : startup failure\nrollback + reap batch
+  Running --> Closing : CloseRequested
+  Starting --> Closing : concurrent CloseRequested
+  New --> Closing : CloseRequested
+  Failed --> Closing : cleanup retry
+  Closing --> Closed : cleanup complete
+  Closing --> Failed : cleanup failure
+}
+
+state "Worker RPC" as worker {
+  [*] --> AwaitingRequest
+  AwaitingRequest --> Dispatching : request frame
+  Dispatching --> SendingReply : dispatch result
+  SendingReply --> AwaitingRequest : ReplySucceeded
+  SendingReply --> Stopped : ReplyFailed
+  AwaitingRequest --> Stopped : peer close / partial frame
+  AwaitingRequest --> Stopped : transport failure / fatal Error
+  Dispatching --> Stopped : fatal Error
+  SendingReply --> Stopped : fatal Error
+  Dispatching --> Stopped : protocol violation
+}
+
+note right of Starting
+  One absolute 30s deadline spans
+  accept and readiness for the batch.
+  No provisional worker is published.
+  Shutdown cancels + joins startup;
+  late acquisitions stay registered.
+  Failed cleanup signals all waiters;
+  partial owners remain retryable.
+  Output retained as 64 bounded lines;
+  exact READY sentinel publishes readiness.
+end note
+
+note left of AwaitingRequest
+  Channel initialized before containment.
+  Landlock TSYNC (ABI 8+) before Seccomp TSYNC.
+  All existing JVM threads receive the baseline.
+  Guest validation/construction before READY.
+  Startup failure closes the channel;
+  cleanup failures remain suppressed.
+end note
+
+note right of SendingReply
+  A failed or partial write is terminal;
+  no error frame may be appended.
+  Fatal reflected Throwables keep identity;
+  cleanup failures are suppressed in order.
+end note
+@enduml

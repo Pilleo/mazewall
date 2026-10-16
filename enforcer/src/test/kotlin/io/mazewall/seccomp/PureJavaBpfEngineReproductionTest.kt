@@ -1,17 +1,24 @@
 package io.mazewall.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.MockNativeProcess
-import io.mazewall.Policy
-import io.mazewall.compile
-import io.mazewall.core.Arch
-import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
+import io.mazewall.enforcer.api.MockNativeProcess
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.compile
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import kotlin.test.assertFailsWith
@@ -23,13 +30,12 @@ class PureJavaBpfEngineReproductionTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
-        io.mazewall.PolicyCompilationCache.clear()
+        io.mazewall.enforcer.api.PolicyCompilationCache
+            .clear()
     }
 
     @Test
     fun `reproduce no_new_privs being set before filter building failure`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         val prctlCommands = mutableListOf<PrctlCommand>()
         mockProcess.onPrctl = { command ->
@@ -38,27 +44,26 @@ class PureJavaBpfEngineReproductionTest {
         }
         val mockMemory = object : MockNativeMemory() {
             context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
-                throw RuntimeException("Simulated filter building failure")
+                throw IllegalStateException("Simulated filter building failure")
             }
         }
         val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         assertFailsWith<RuntimeException> {
             PureJavaBpfEngine.install(compiled)
         }
 
-        // After the fix, this should be null because buildFilter() is called before setNoNewPrivs()
+        // After the fix, this should be null because buildFilter() is called before privilege locking.
         val calledSetNoNewPrivs = prctlCommands.any { it is PrctlCommand.SetNoNewPrivs }
         assertFalse(calledSetNoNewPrivs, "PR_SET_NO_NEW_PRIVS should NOT have been called after the fix")
     }
 
     @Test
     fun `test error propagation and state logging on JVM Error`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         val mockMemory = object : MockNativeMemory() {
             context(arena: NativeArena) override fun newSockFProg(filters: List<BpfInstruction>): ManagedSegment {
@@ -68,7 +73,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockEngine = MockNativeEngine(process = mockProcess, memory = mockMemory)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         assertFailsWith<AssertionError> {
@@ -83,7 +88,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test seccomp installation retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
         mockProcess.onPrctl = { command ->
             if (command is PrctlCommand.GetSeccomp) {
@@ -105,7 +109,7 @@ class PureJavaBpfEngineReproductionTest {
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)
@@ -118,7 +122,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test fallback prctl retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
@@ -144,7 +147,7 @@ class PureJavaBpfEngineReproductionTest {
         }
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)
@@ -154,7 +157,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test setNoNewPrivs retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
@@ -176,7 +178,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockEngine = MockNativeEngine(process = mockProcess)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)
@@ -186,7 +188,6 @@ class PureJavaBpfEngineReproductionTest {
 
     @Test
     fun `test verifyInstallation retries on EINTR`() {
-        PureJavaBpfEngine.clearCache()
         val mockProcess = MockNativeProcess()
 
         var prctlCalls = 0
@@ -206,7 +207,7 @@ class PureJavaBpfEngineReproductionTest {
         val mockEngine = MockNativeEngine(process = mockProcess)
         LinuxNative.setEngine(mockEngine)
 
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val compiled = policy.definition.compile(Arch.current())
 
         PureJavaBpfEngine.install(compiled)

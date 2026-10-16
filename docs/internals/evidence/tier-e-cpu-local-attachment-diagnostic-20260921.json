@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "tier_e_cpu_local_attachment_diagnostic",
+  "status": "diagnostic_source_dirty",
+  "recorded_at": "2026-09-21",
+  "source_revision": "5a667627cc4b9e25555da522fc809f7f2f88e8a3",
+  "source_dirty_count": 12,
+  "source_fingerprint": "54b8bc92017347956d35772a608e24756dc9c218bfb8d9dd0c8b14d6a9ca3217",
+  "environment": {
+    "image": "mazewall-tier-e-rootful:perf-20260919-external-profiler",
+    "image_id": "sha256:fc5bf5e14796e5187be873b84c1ce4049ce240415d93e4bdc8307fbbe0870c56",
+    "kernel_release": "7.2.4-x64v3-xanmod1",
+    "cpu_set": "0,2",
+    "workload_cpu": 0,
+    "collector_cpu": 2
+  },
+  "failure_mechanism": {
+    "previous_attachment_scope": "CPU 0 only",
+    "corrected_attachment_scope": "all online CPUs allowed to the collector",
+    "independent_denominator": "counter-only raw_syscalls/sys_enter openat/openat2 descriptor map",
+    "earlier_reproduced_gap": "primary attribution and raw denominator both missed the same declared descriptors",
+    "openat2_substitution": false
+  },
+  "corrected_sustained_repeatability": {
+    "scope": "tier-e-sustained-collector",
+    "rate_per_second": 1000,
+    "warmups": 3,
+    "batches": 50,
+    "operations_per_batch": 200,
+    "forks_per_variant": 5,
+    "operations_per_fork": 10600,
+    "total_operations": 106000,
+    "variants": [
+      {
+        "name": "dictionary_full_stream_collector_continuous",
+        "raw_audit_expected": 53000,
+        "raw_audit_observed": 53000,
+        "raw_audit_non_singletons": 0,
+        "raw_audit_openat2": 0,
+        "matched_operations": 53000,
+        "missing_operations": 0,
+        "workload_correctness": "PASS",
+        "whole_session_evidence": "COMPLETE"
+      },
+      {
+        "name": "dictionary_unique_edge_collector_continuous",
+        "raw_audit_expected": 53000,
+        "raw_audit_observed": 53000,
+        "raw_audit_non_singletons": 0,
+        "raw_audit_openat2": 0,
+        "matched_operations": 53000,
+        "missing_operations": 0,
+        "workload_correctness": "PASS",
+        "whole_session_evidence": "COMPLETE"
+      }
+    ]
+  },
+  "verdict": {
+    "capture_domain_validity": "complete_for_declared_openat_workload",
+    "transport_completeness": "complete",
+    "attribution_coverage": "complete_for_source_dirty_five_fork_diagnostic",
+    "dictionary_integrity": "complete",
+    "lifecycle_validity": "complete",
+    "runtime_overhead": "not_measured",
+    "policy_eligibility": false,
+    "capacity_decision": "not_eligible_source_dirty_diagnostic"
+  },
+  "raw_artifact_directory": "/tmp/tier-e-all-cpu-audit-five-fork-v2-20260921"
+}

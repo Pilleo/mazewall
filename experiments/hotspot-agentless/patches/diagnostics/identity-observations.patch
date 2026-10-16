@@ -1,0 +1,73 @@
+--- a/processmanager/manager.go
++++ b/processmanager/manager.go
+@@ -11,6 +11,8 @@
+ 	"hash/fnv"
++	"os"
+ 	"slices"
++	"strings"
+ 	"time"
+ 
+ 	lru "github.com/elastic/go-freelru"
+ 	"go.opentelemetry.io/ebpf-profiler/internal/log"
+@@ -29,6 +31,7 @@
+ 	"go.opentelemetry.io/ebpf-profiler/reporter"
+ 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
++	"go.opentelemetry.io/ebpf-profiler/support"
+ 	"go.opentelemetry.io/ebpf-profiler/times"
+ 	"go.opentelemetry.io/ebpf-profiler/tracer/types"
+ 	"go.opentelemetry.io/ebpf-profiler/traceutil"
+ 	"go.opentelemetry.io/ebpf-profiler/util"
+@@ -354,15 +357,34 @@
+ 		copy(key.data[:], frame)
++		identityCacheHit := false
+ 		if cached, ok := pm.frameCache.GetAndRefresh(key, frameCacheLifetime); ok {
++			identityCacheHit = true
+ 			// Fast path
+ 			cacheHit++
+ 			trace.Frames = append(trace.Frames, cached...)
+ 		} else {
+ 			// Slow path: convert trace.
+ 			if pm.convertFrame(pid, frame, &trace.Frames) {
+ 				cacheMiss++
+ 				pm.frameCache.Add(key, slices.Clone(trace.Frames[oldLen:len(trace.Frames)]))
+ 			}
+ 		}
++		if frame.Type().IsInterpType(libpf.HotSpot) && len(frame) >= 3 {
++			names := make([]string, 0, len(trace.Frames)-oldLen)
++			for _, f := range trace.Frames[oldLen:] {
++				names = append(names, f.Value().FunctionName.String())
++			}
++			fmt.Fprintf(os.Stderr, "mw-raw-identity pid=%d tid=%d ref=%d ktime=%d method=%#x cookie=%#x subtype=%d cache_hit=%t names=%q\n", pid, bpfTrace.TID, bpfTrace.CorrelationID, bpfTrace.KTime, frame.Variable(0), uint32(frame.Variable(1)), frame.Variable(1)>>60, identityCacheHit, strings.Join(names, ";"))
++			if strings.Contains(strings.Join(names, ";"), "UnloadG") && frame.Variable(1)>>60 == uint64(support.FrameHotspotInterpreter) {
++				pm.mu.RLock()
++				for _, instance := range pm.interpreters[pid] {
++					if observer, ok := instance.(interface { ObserveFullIdentity(libpf.EbpfFrame) (uint64, error) }); ok {
++						current, err := observer.ObserveFullIdentity(frame)
++						fmt.Fprintf(os.Stderr, "mw-live-identity ref=%d method=%#x current_const=%#x read_error=%q names=%q\n", bpfTrace.CorrelationID, frame.Variable(0), current, fmt.Sprint(err), strings.Join(names, ";"))
++					}
++				}
++				pm.mu.RUnlock()
++			}
++		}
+ 	}
+ 	if cacheMiss != 0 {
+ 		pm.frameCacheMiss.Add(cacheMiss)
+--- a/interpreter/hotspot/identity.go
++++ b/interpreter/hotspot/identity.go
+@@ -8,6 +8,8 @@
+ 	"go.opentelemetry.io/ebpf-profiler/libpf"
+ 	"go.opentelemetry.io/ebpf-profiler/remotememory"
+ 	"io"
++	"os"
++	"strings"
+ )
+ 
+ func (d *hotspotInstance) readInterpretedConstMethod(addr libpf.Address) (libpf.Address, error) {
+@@ -57,4 +59,7 @@
+ 		return nil, fmt.Errorf("interpreted ConstMethod changed during symbolization")
+ 	}
++	if strings.Contains(method.methodName.String(), "UnloadG") {
++		fmt.Fprintf(os.Stderr, "mw-method-identity method=%#x const=%#x cookie=%#x name=%q\n", addr, ptr, captured, method.methodName.String())
++	}
+ 	return method, nil
+ }

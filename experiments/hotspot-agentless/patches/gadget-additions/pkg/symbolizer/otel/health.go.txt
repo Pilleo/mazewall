@@ -1,0 +1,12 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import "go.opentelemetry.io/ebpf-profiler/tracer"
+
+func (o *otelResolverInstance) TraceReaderHealth() (tracer.TraceReaderObservation, bool) {
+	if o.trc == nil {
+		return tracer.TraceReaderObservation{}, false
+	}
+	return o.trc.TraceReaderHealth()
+}

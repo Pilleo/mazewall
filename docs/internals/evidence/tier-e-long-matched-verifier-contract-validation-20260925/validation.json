@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "verifier_commit": "b23744eab3f236e3583150837a327e4da7490986",
+  "verifier_sha256": "1f811ab995c6ba8bb871e9b717a213e4190a9b71855fa3b57e55bb3a016b4f1a",
+  "checks": {
+    "first_archive_ledger_25_ok": true,
+    "corrected_archive_ledger_19_ok": true,
+    "first_archive_members_1948_ok": true,
+    "corrected_archive_members_1916_ok": true,
+    "first_full_directory_105_90_15_90_pass": true,
+    "corrected_full_directory_105_90_15_90_pass": true,
+    "first_jsonl_only_pass": true,
+    "corrected_jsonl_only_pass": true,
+    "first_estimator_decision_byte_identical": true,
+    "corrected_estimator_decision_byte_identical": true,
+    "eight_review_probes_rejected": true,
+    "pytest_69_pass": true,
+    "historical_measurement_archives_untouched": true,
+    "prior_rejection_and_policy_ineligibility_preserved": true
+  },
+  "verdict": "PASS",
+  "policy_eligibility": false
+}

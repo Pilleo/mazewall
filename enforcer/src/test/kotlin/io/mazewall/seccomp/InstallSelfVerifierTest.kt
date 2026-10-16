@@ -1,13 +1,21 @@
 package io.mazewall.seccomp
 
-import io.mazewall.BpfFilter
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.Policy
-import io.mazewall.core.Arch
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -17,7 +25,7 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
- * Unit tests for the verifier PLUMBING (probe selection, memoization, opt-out, failure mapping).
+ * Unit tests for verifier plumbing (probe selection, current evidence, opt-out, failure mapping).
  * The mock engine derives its verdicts from the shared oracle, so these tests do not re-assert
  * filter semantics — kernel-vs-oracle truth is covered by SeccompDifferentialVerdictTest.
  */
@@ -34,14 +42,13 @@ class InstallSelfVerifierTest {
     fun tearDown() {
         System.clearProperty("io.mazewall.selfVerify")
         LinuxNative.resetToDefault()
-        InstallSelfVerifier.reset()
     }
 
     private fun blacklistProgram(): BpfProgram<BpfStatus.Verified> =
         BpfFilter.build(
             arch,
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_ALLOW)
                 .block(Syscall.CONNECT)
                 .build()
@@ -77,6 +84,66 @@ class InstallSelfVerifierTest {
     }
 
     @Test
+    fun `liveness callback cannot redirect denied probes to another backend`() {
+        val program = blacklistProgram()
+        val foreign = MockNativeEngine().apply {
+            onSyscall = { _, _, _, _, _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
+        }
+        oracleMock(program) { nr ->
+            if (nr == arch.getpid) LinuxNative.setEngine(foreign)
+            null
+        }
+
+        InstallSelfVerifier.verify(program, arch)
+    }
+
+    @Test
+    fun `installation callback cannot disable previously selected self verification`() {
+        val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
+        val program = BpfFilter.build(Arch.current(), policy.definition)
+        val engine = oracleMock(program) { nr ->
+            if (nr == Arch.current().seccompSyscallNumber) LinuxNative.SyscallResult.Success(0L) else null
+        }
+        engine.process.onPrctl = { command ->
+            if (command is PrctlCommand.GetSeccomp) {
+                System.setProperty("io.mazewall.selfVerify", "false")
+                engine.onSyscall = { _, _, _, _, _, _, _ -> LinuxNative.SyscallResult.Success(0L) }
+            }
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        Platform.setProvider(object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName(): String = "Linux"
+
+            override fun hasKernelSeccompSupport(): Boolean = true
+
+            override fun checkSeccompSanity(): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = LinuxNative.SyscallResult.Error(22, -1L)
+
+            override fun getLandlockCapability(): KernelCapability<Int> = KernelCapability.Available(8)
+
+            override fun getLandlockAbiVersion(): Int = 8
+
+            override fun probeSeccompTsync(): Boolean = true
+
+            override fun probeSeccompUserNotif(): Boolean = true
+
+            override fun probeCetSupported(): Boolean = false
+        })
+        try {
+            val failure = assertFailsWith<PartialInstallationException> {
+                ContainedExecutors.installOnCurrentThread(policy).use { it.requireInstalled() }
+            }
+            assertTrue(failure.progress.seccompApplied)
+            assertTrue(failure.cause!!.message!!.contains("liveness"))
+        } finally {
+            Platform.resetToDefault()
+            io.mazewall.enforcer.state.ContainmentStateRegistry.threadState = io.mazewall.enforcer.state
+                .ContainerState()
+            io.mazewall.enforcer.state.ContainmentStateRegistry.processState = io.mazewall.enforcer.state
+                .ContainerState()
+        }
+    }
+
+    @Test
     fun `diverging kernel verdict throws with program attached`() {
         val program = blacklistProgram()
         val connectNr = Syscall.CONNECT.numberFor(arch)
@@ -101,7 +168,7 @@ class InstallSelfVerifierTest {
     }
 
     @Test
-    fun `memoized per program identity`() {
+    fun `each verification probes the current installation`() {
         val program = blacklistProgram()
         var probeCount = 0
         oracleMock(program) { _ ->
@@ -113,11 +180,42 @@ class InstallSelfVerifierTest {
         val afterFirst = probeCount
         assertTrue(afterFirst > 0, "expected probes on first verification")
 
-        // Same instance AND same instruction list through a fresh wrapper: no re-probing.
+        // Identical instructions cannot attest the current installation.
         InstallSelfVerifier.verify(program, arch)
         InstallSelfVerifier.verify(BpfProgram(program.instructions), arch)
 
-        assertEquals(afterFirst, probeCount)
+        assertTrue(probeCount > afterFirst)
+    }
+
+    @Test
+    fun `prior successful program cannot conceal a divergent current backend`() {
+        val program = blacklistProgram()
+        oracleMock(program)
+        InstallSelfVerifier.verify(program, arch)
+        oracleMock(program) { nr -> if (nr == Syscall.CONNECT.numberFor(arch)) LinuxNative.SyscallResult.Success(0L) else null }
+
+        assertFailsWith<InstallSelfVerifier.SelfVerificationException> { InstallSelfVerifier.verify(program, arch) }
+    }
+
+    @Test
+    fun `prior successful program cannot attest a different merged filter state`() {
+        val program = blacklistProgram()
+        oracleMock(program)
+        InstallSelfVerifier.verify(program, arch)
+        val merged = io.mazewall.enforcer.state
+            .ContainerState(syscallActions = mapOf(Syscall.GETPID to SeccompAction.ACT_ERRNO(1)))
+
+        assertFailsWith<InstallSelfVerifier.SelfVerificationException> {
+            InstallSelfVerifier.verify(program, arch, priorFilterDepth = 1, mergedState = merged)
+        }
+    }
+
+    @Test
+    fun `stacked verification requires merged filter evidence`() {
+        val program = blacklistProgram()
+        oracleMock(program)
+
+        assertFailsWith<IllegalArgumentException> { InstallSelfVerifier.verify(program, arch, priorFilterDepth = 1) }
     }
 
     @Test

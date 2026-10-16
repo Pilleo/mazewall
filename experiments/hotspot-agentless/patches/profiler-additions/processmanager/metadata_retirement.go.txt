@@ -1,0 +1,43 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package processmanager
+
+import (
+	"errors"
+	"fmt"
+
+	"go.opentelemetry.io/ebpf-profiler/times"
+)
+
+// ProcessedUntilChecked retires only successfully detached metadata owners.
+// A failed owner and its exit watermark remain available for explicit retry.
+// Strict-profile failure notification occurs after releasing the metadata lock.
+func (pm *ProcessManager) ProcessedUntilChecked(traceCaptureKTime times.KTime) error {
+	pm.mu.Lock()
+	var result error
+	for pid, exit := range pm.exitEvents {
+		if exit > traceCaptureKTime {
+			continue
+		}
+		instances := pm.interpreters[pid]
+		for key, instance := range instances {
+			if err := instance.Detach(pm.ebpf, pid); err != nil {
+				result = errors.Join(result, fmt.Errorf("retire interpreter metadata for PID %d: %w", pid, err))
+				continue
+			}
+			delete(instances, key)
+		}
+		if len(instances) != 0 {
+			continue
+		}
+		delete(pm.pidToProcessInfo, pid)
+		delete(pm.interpreters, pid)
+		delete(pm.exitEvents, pid)
+	}
+	onFatal := pm.epochFatal
+	pm.mu.Unlock()
+	if result != nil && onFatal != nil {
+		onFatal(result)
+	}
+	return result
+}

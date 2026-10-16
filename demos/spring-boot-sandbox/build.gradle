@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.1.1'
+}
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+repositories {
+    maven {
+        url = uri(providers.gradleProperty('consumerRepository').get())
+        content { includeGroup 'io.mazewall' }
+    }
+    mavenCentral { content { excludeGroup 'io.mazewall' } }
+}
+dependencies {
+    implementation platform('org.springframework.boot:spring-boot-dependencies:4.1.1')
+    implementation "io.mazewall:mazewall-spring-boot-starter:${providers.gradleProperty('consumerVersion').get()}"
+    implementation 'com.h2database:h2'
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+springBoot { mainClass = 'demo.boot.ReportApplication' }
+tasks.named('bootJar') { archiveFileName = 'report-application.jar' }
+tasks.named('jar') { enabled = false }
+
+tasks.register('presentationTest', Test) {
+    dependsOn tasks.named('bootJar')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'presentation' }
+    maxParallelForks = 1
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    doFirst {
+        systemProperty 'presentation.jar', tasks.bootJar.archiveFile.get().asFile.absolutePath
+        systemProperty 'presentation.repository', file(providers.gradleProperty('consumerRepository').get()).absolutePath
+        systemProperty 'presentation.version', providers.gradleProperty('consumerVersion').get()
+    }
+    testLogging { events 'passed', 'failed', 'standardOut', 'standardError'; showStandardStreams = true }
+}
+
+sourceSets {
+    ownershipTest {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+tasks.register('ownershipTest', JavaExec) {
+    dependsOn tasks.named('ownershipTestClasses')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = sourceSets.ownershipTest.runtimeClasspath
+    mainClass = 'demo.boot.CandidatePublicationTest'
+}

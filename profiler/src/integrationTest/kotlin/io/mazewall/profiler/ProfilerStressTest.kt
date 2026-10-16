@@ -1,7 +1,7 @@
-package io.mazewall.profiler
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
+package io.mazewall.profiler.api
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
 import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -107,13 +107,14 @@ class ProfilerStressTest : BaseIntegrationTest() {
 
         val results =
             futures.mapIndexed { index, future ->
-                try {
+                runCatching {
                     val valRes = future.get(15, TimeUnit.SECONDS)
                     if (valRes == null) {
                         System.err.println("TASK-$index RETURNED NULL!")
                     }
                     valRes
-                } catch (e: Exception) {
+                }.getOrElse { e ->
+                    if (e !is Exception) throw e
                     throw IllegalStateException("Task $index failed: ${e.message}", e)
                 }
             }

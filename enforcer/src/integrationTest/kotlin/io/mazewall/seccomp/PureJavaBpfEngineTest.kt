@@ -1,13 +1,21 @@
 package io.mazewall.seccomp
-import io.mazewall.BaseIntegrationTest
-import io.mazewall.CompiledSandbox
-import io.mazewall.EnabledIfLinuxAndSupported
-import io.mazewall.NeedsFreshJvm
-import io.mazewall.Policy
-import io.mazewall.compile
-import io.mazewall.core.Arch
-import io.mazewall.core.Syscall
+
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.BaseIntegrationTest
+import io.mazewall.enforcer.api.CompiledSandbox
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.NeedsFreshJvm
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.compile
 import io.mazewall.enforcer.diagnostics.ContainmentViolationDetector
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import java.util.concurrent.Executors
 import kotlin.test.assertFailsWith
@@ -25,8 +33,8 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                     .submit<Boolean> {
                         // We allow mmap exec because on cold CI JVM, ProcessBuilder.start()
                         // might trigger JIT compilation which requires executable memory.
-                        val policy = Policy
-                            .builder()
+                        val policy = ProcessPolicyBuilder
+                            .denyList(RuntimeProfile.NATIVE_IMAGE)
                             .base(Policy.NO_EXEC)
                             .allowMmapExec()
                             .build()
@@ -77,7 +85,7 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                 Syscall.UNSHARE,
                 Syscall.SETNS,
             )
-        val builder = Policy.builder()
+        val builder = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
         // Block a reasonable number of safe syscalls to exercise BPF generation
         safeSyscalls.take(20).forEach { builder.block(it) }
         val policy = builder.build()
@@ -119,8 +127,8 @@ class PureJavaBpfEngineTest : BaseIntegrationTest() {
                 .submit<EngineState> {
                 // We allow mmap exec because on cold CI JVM, any activity here
                 // might trigger JIT compilation which requires executable memory.
-                val policy = Policy
-                    .builder()
+                val policy = ProcessPolicyBuilder
+                    .denyList(RuntimeProfile.NATIVE_IMAGE)
                     .base(Policy.PURE_COMPUTE_UNSAFE)
                     .allowMmapExec()
                     .build()

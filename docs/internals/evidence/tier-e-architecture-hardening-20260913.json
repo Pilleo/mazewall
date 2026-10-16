@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "artifact": "tier-e-architecture-hardening",
+  "recorded_at": "2026-09-13",
+  "branch": "fast-master",
+  "commits": [
+    "79a1091b",
+    "d90c5ffb",
+    "dab331f5",
+    "e40ea251",
+    "5fd4ce2c",
+    "f43c5a64",
+    "da206bcb",
+    "69dc2525",
+    "ccc0cd2a",
+    "bd8b3966",
+    "ac8166a2",
+    "50e14859"
+  ],
+  "commands": {
+    "profiler_unit_tests": {
+      "command": "./gradlew :profiler:test",
+      "result": "PASS"
+    },
+    "focused_hardening_tests": {
+      "command": "./gradlew :profiler:test --tests io.mazewall.profiler.attribution.DictionaryBatchPublisherTest --tests io.mazewall.profiler.attribution.InvocationReplayMachineTest --tests io.mazewall.profiler.attribution.AttributionCollectorTest --tests io.mazewall.profiler.tierE.daemon.TierEFrameDecoderTest",
+      "result": "PASS"
+    },
+    "composed_publication_workflow": {
+      "command": "./gradlew :profiler:test --tests io.mazewall.profiler.attribution.TierEWorkflowIntegrationTest",
+      "result": "PASS",
+      "evidence_artifacts": [
+        "docs/internals/evidence/tier-e-transport-fault-injection-20260913.json",
+        "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json"
+      ],
+      "covers": [
+        "retry before commit",
+        "delayed dictionary resolution",
+        "exact unique-edge acknowledgement",
+        "terminal transport incompleteness"
+      ]
+    },
+    "daemon_integration": {
+      "commands": [
+        "./gradlew :profiler:integrationTest",
+        "./gradlew :profiler:integrationTestFreshJvm"
+      ],
+      "result": "PASS",
+      "rootful_docker_gate": {
+        "command": "DOCKER_HOST=unix:///var/run/docker.sock TIER_E_ARTIFACT_DIR=build/tier-e-evidence-local ./scripts/run_tier_e_rootful_gate.sh",
+        "result": "PASS",
+        "final_evidence_artifact": "docs/internals/evidence/tier-e-rootful-final-gate-20260913.json",
+        "combined_fixture": {
+          "test": "io.mazewall.profiler.TierEDaemonNativeWorkflowIntegrationTest",
+          "tests": 1,
+          "skipped": 0,
+          "failures": 0,
+          "errors": 0
+        },
+        "image": "mazewall-tier-e-rootful:latest",
+        "kernel": "Linux 7.2.4-x64v3-xanmod1",
+        "artifact_directory": "build/tier-e-evidence-local",
+        "workflow_transcript": "docs/internals/evidence/tier-e-daemon-native-workflow-20260913.txt"
+      },
+      "observed_constraints": [
+        "one profiler ACK EPIPE during listener shutdown",
+        "temporary Unix socket cleanup reported Function not implemented"
+      ]
+    },
+    "native_ctest": {
+      "command": "cmake --build /tmp/tier-e-generation-build && ctest --test-dir /tmp/tier-e-generation-build --output-on-failure",
+      "result": "PASS",
+      "tests_passed": 13,
+      "tests_failed": 0,
+      "evidence_artifact": "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json",
+      "local_stress_evidence": "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json"
+    },
+    "live_snapshot_workload": {
+      "command": "java -agentpath:/tmp/tier-e-generation-build/libmazewall_stack_agent.so=definitions=/tmp/tier-e-live.mzsd,live-definitions -cp /tmp/tier-e-generation-build/agent-test-classes AgentWorkload 0 platform 20",
+      "result": "PASS",
+      "observed": [
+        "captured stack events",
+        "MZSE envelope",
+        "closed publication flag",
+        "non-zero publication watermark"
+      ]
+    },
+    "warmed_benchmark": {
+      "command": "java -agentpath:/tmp/tier-e-generation-build/libmazewall_stack_agent.so=benchmark-phases,mode=<full-stream|unique-stack-syscall> -cp /tmp/tier-e-generation-build/agent-test-classes AgentWorkload 0 platform 100",
+      "result": "MEASURED",
+      "full_stream": {
+        "get_stack_trace_ns": 1449615,
+        "raw_key_ns": 271735,
+        "logical_metadata_ns": 6602912,
+        "metadata_cache_hits": 8176,
+        "metadata_cache_misses": 68
+      },
+      "unique_stack_syscall": {
+        "get_stack_trace_ns": 1441304,
+        "raw_key_ns": 633136,
+        "logical_metadata_ns": 461414,
+        "cache_hits": 503,
+        "cache_misses": 11,
+        "metadata_cache_hits": 139,
+        "metadata_cache_misses": 68
+      },
+      "regression_gate": {
+        "baseline_file": "profiler-native/tier-e-benchmark-baseline.env",
+        "threshold_percent": 25,
+        "full_stream_median_total_ns": 8289101,
+        "unique_stack_syscall_median_total_ns": 2581820,
+        "phase_level_limits_authoritative": true,
+        "result": "PASS",
+        "note": "The checker gates each measured phase independently; all six phase medians are below their 125% limits. Aggregate totals are diagnostic only."
+      }
+    }
+  },
+  "verdict_dimensions": {
+    "capture_domain_validity": "PASS",
+    "transport_completeness": "PASS",
+    "attribution_coverage": "PASS",
+    "dictionary_integrity": "PASS",
+    "lifecycle_validity": "PASS",
+    "runtime_overhead": "PASS"
+  },
+  "verified_scope": [
+    "transactional dictionary retry and abandoned batch behavior",
+    "opaque unique-edge acknowledgement behavior",
+    "framed protocol idle and partial-frame deadlines",
+    "stable symbolization generation admission",
+    "pending application exception preservation",
+    "bounded retained observation budget",
+    "fork and exec process incarnation rejection",
+    "repeated fork and exec lifecycle identity stress",
+    "transactional transport fault injection with retry and abandoned batches"
+  ],
+  "remaining_evidence": [
+  ],
+  "final_evidence_artifacts": [
+    "docs/internals/evidence/tier-e-rootful-final-gate-20260913.json",
+    "docs/internals/evidence/tier-e-lifecycle-identity-stress-20260913.json",
+    "docs/internals/evidence/tier-e-transport-fault-injection-20260913.json"
+  ],
+  "fail_closed": true,
+  "status": "COMPLETE"
+}

@@ -1,12 +1,19 @@
 package io.mazewall.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockPlatformProvider
-import io.mazewall.Platform
-import io.mazewall.Policy
-import io.mazewall.PolicyCompilationCache
+import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.api.ContainedExecutors
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockPlatformProvider
+import io.mazewall.enforcer.api.Platform
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.enforcer.api.PolicyCompilationCache
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -19,10 +26,10 @@ import kotlin.test.assertTrue
 class HighConcurrencyInstallationTest {
     @BeforeEach
     fun setup() {
-        val mockProcess = object : io.mazewall.MockNativeProcess() {
-            override fun prctl(command: io.mazewall.core.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        val mockProcess = object : io.mazewall.enforcer.api.MockNativeProcess() {
+            override fun prctl(command: io.mazewall.platform.syscall.PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 // PR_GET_SECCOMP is option 21
-                if (command is io.mazewall.core.PrctlCommand.GetSeccomp) {
+                if (command is io.mazewall.platform.syscall.PrctlCommand.GetSeccomp) {
                     return LinuxNative.SyscallResult.Success(2L)
                 }
                 return LinuxNative.SyscallResult.Success(0L)
@@ -30,37 +37,47 @@ class HighConcurrencyInstallationTest {
         }
         LinuxNative.setEngine(MockNativeEngine(process = mockProcess))
         Platform.setProvider(MockPlatformProvider())
-        io.mazewall.PolicyCompilationCache.clear()
-        PureJavaBpfEngine.clearCache()
+        io.mazewall.enforcer.api.PolicyCompilationCache
+            .clear()
     }
 
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
         Platform.resetToDefault()
-        io.mazewall.PolicyCompilationCache.clear()
-        PureJavaBpfEngine.clearCache()
+        io.mazewall.enforcer.api.PolicyCompilationCache
+            .clear()
     }
 
     @Test
     fun `high concurrency installation of identical policies`() {
         val executor = Executors.newFixedThreadPool(16)
-        val wrapped = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val taskCount = 2000
         val completedCount = AtomicInteger(0)
 
         // Warm up
-        repeat(100) { wrapped.execute { completedCount.incrementAndGet() } }
-
-        val startTime = System.nanoTime()
-        repeat(taskCount) {
-            wrapped.execute {
-                completedCount.incrementAndGet()
+        repeat(100) {
+            executor.execute {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    completedCount.incrementAndGet()
+                }
             }
         }
 
-        wrapped.shutdown()
-        assertTrue(wrapped.awaitTermination(30, TimeUnit.SECONDS), "Executor did not terminate in time")
+        val startTime = System.nanoTime()
+        repeat(taskCount) {
+            executor.execute {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                    receipt.requireInstalled()
+                    completedCount.incrementAndGet()
+                }
+            }
+        }
+
+        executor.shutdown()
+        assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS), "Executor did not terminate in time")
         val duration = System.nanoTime() - startTime
 
         assertEquals(taskCount + 100, completedCount.get(), "Not all tasks completed")
@@ -71,16 +88,28 @@ class HighConcurrencyInstallationTest {
     @Test
     fun `high concurrency installation with exceptions`() {
         val executor = Executors.newFixedThreadPool(16)
-        val wrapped = ContainedExecutors.wrap(executor, Policy.builder().build())
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         val taskCount = 1000
+        val enteredCount = AtomicInteger()
+        val endedCount = AtomicInteger()
 
         repeat(taskCount) {
-            wrapped.execute {
-                throw RuntimeException("Simulated task failure")
+            executor.execute {
+                ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                receipt.requireInstalled()
+                enteredCount.incrementAndGet()
+                try {
+                throw IllegalStateException("Simulated task failure")
+                } finally {
+                    endedCount.incrementAndGet()
+                }
+                }
             }
         }
 
-        wrapped.shutdown()
-        wrapped.awaitTermination(10, TimeUnit.SECONDS)
+        executor.shutdown()
+        assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS), "Executor did not terminate in time")
+        assertEquals(taskCount, enteredCount.get())
+        assertEquals(taskCount, endedCount.get())
     }
 }

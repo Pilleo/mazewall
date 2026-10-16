@@ -1,0 +1,3 @@
+{"schema_version":1,"collector_host_pid":2680616,"cpu_ticks":309,"cpu_ns":3090000000,"peak_rss_kb":136844,"unit":"ns","cpu_time_basis":"process_ticks_since_start","sample_boundary":"after_terminal_report_before_shutdown","collector_starttime":121142455}
+{"reason":"target_cpu_sample_ok","pid":1,"host_pid":2680450,"starttime":121142298,"sample_boundary":"after_workload_before_exit","unit":"ns","target_cpu_ns":470000000}
+split privilege fixture artifacts: /tmp/tier-e-kotlin-cpu-smoke

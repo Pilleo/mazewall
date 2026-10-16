@@ -2,8 +2,23 @@ import java.math.BigDecimal
 
 plugins {
     id("mazewall.quality-conventions")
-    id("mazewall.publishing-conventions")
     id("info.solidsoft.pitest")
+    alias(libs.plugins.plantuml)
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("mavenJava") {
+            from(components["java"])
+        }
+    }
+}
+
+kotlin {
+    jvmToolchain(25)
+    explicitApi()
+    @OptIn(org.jetbrains.kotlin.gradle.dsl.abi.ExperimentalAbiValidation::class)
+    abiValidation()
 }
 
 sourceSets {
@@ -69,7 +84,10 @@ tasks.test {
     dependsOn(compileCAbiOracle)
 }
 
+val plantumlConfig by configurations.creating
+
 dependencies {
+    plantumlConfig(libs.plantuml.core)
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter.api)
     testImplementation(libs.junit.jupiter.params)
@@ -82,23 +100,15 @@ dependencies {
     testRuntimeOnly(libs.slf4j.nop)
 }
 
-publishing {
-    publications {
-        create<MavenPublication>("mavenJava") {
-            from(components["java"])
-        }
-    }
-}
-
 pitest {
     junit5PluginVersion.set("1.2.1")
     targetClasses.set(
         setOf(
-            "io.mazewall.core.SeccompAction*",
+            "io.mazewall.platform.syscall.SeccompAction*",
             "io.mazewall.platform.daemon.UnixListenDaemonMachine*",
             "io.mazewall.ffi.networking.SeccompConnectionMachine*",
-            "io.mazewall.core.PrctlCommand*",
-            "io.mazewall.core.NetworkSyscallMapper*",
+            "io.mazewall.platform.syscall.PrctlCommand*",
+            "io.mazewall.platform.syscall.NetworkSyscallMapper*",
         ),
     )
     excludedClasses.set(
@@ -108,7 +118,7 @@ pitest {
             "io.mazewall.MockNativeEngine*",
             // ACT_KILL_THREAD's native code is the kernel's zero value, so PIT's
             // "replace return with zero" mutant is observationally equivalent.
-            "io.mazewall.core.SeccompAction${'$'}ACT_KILL_THREAD",
+            "io.mazewall.platform.syscall.SeccompAction${'$'}ACT_KILL_THREAD",
         ),
     )
     // Kotlin inserts this non-null check for AtomicReference.get(); stateRef's
@@ -117,11 +127,11 @@ pitest {
     excludedMethods.set(setOf("apply\\${'$'}io_mazewall_platform"))
     targetTests.set(
         setOf(
-            "io.mazewall.core.SeccompActionTest",
+            "io.mazewall.platform.lifecycle.SeccompActionTest",
             "io.mazewall.platform.daemon.UnixListenDaemonMachineTest",
             "io.mazewall.ffi.networking.SeccompConnectionMachineTest",
-            "io.mazewall.core.PrctlCommandTest",
-            "io.mazewall.core.NetworkSyscallMapperTest",
+            "io.mazewall.platform.lifecycle.PrctlCommandTest",
+            "io.mazewall.platform.lifecycle.NetworkSyscallMapperTest",
         ),
     )
     jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
@@ -133,4 +143,49 @@ pitest {
     coverageThreshold.set(97)
     mutationThreshold.set(61)
     testStrengthThreshold.set(98)
+}
+
+classDiagrams {
+    plantumlServer = null
+    renderClasspath(plantumlConfig)
+    defaults {
+        style {
+            theme("spacelab")
+            hide("empty members")
+        }
+        exclude(methods().withNameLike("component*") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(methods().withName("copy") as io.gitlab.plunts.gradle.plantuml.plugin.matcher.MethodMatcher)
+        exclude(classes().withNameLike("*\\\$*"))
+        exclude(classes().withNameLike("*Kt"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Arch"))
+        exclude(classes().withName("io.mazewall.platform.syscall.Syscall"))
+        exclude(classes().withName("io.mazewall.ffi.NativeConstants"))
+        exclude(classes().withName("io.mazewall.ffi.Layouts"))
+    }
+
+    diagram {
+        name("Platform Class Diagram")
+        include(packages().withName("io.mazewall.platform"))
+        include(packages().withName("io.mazewall.ffi"))
+        writeTo(file("$rootDir/docs/diagrams/platform_class_diagram.puml"))
+        renderTo(file("$rootDir/docs/diagrams/platform_class_diagram.svg"))
+    }
+}
+
+tasks.named("generateClassDiagrams") {
+    val pumlFile = file("$rootDir/docs/diagrams/platform_class_diagram.puml")
+    val svgFile = file("$rootDir/docs/diagrams/platform_class_diagram.svg")
+    doLast {
+        fun cleanup(file: File) {
+            if (!file.exists()) return
+            var content = file.readText()
+            content = content.replace(Regex("([a-zA-Z0-9_]+)-[a-zA-Z0-9_-]{7,15}(?=\\b|\\(|$)"), "$1")
+            content = content.replace(Regex("\\\$[a-zA-Z0-9_]+"), "")
+            content = content.replace("set separator none\n", "")
+            content = content.replace(Regex(" data=\"([^\"]*)\" id=\"([^\"]*)\" data=\"([^\"]*)\""), " data-name=\"$1\" id=\"$2\" data-line=\"$3\"")
+            file.writeText(content)
+        }
+        cleanup(pumlFile)
+        cleanup(svgFile)
+    }
 }

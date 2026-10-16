@@ -1,10 +1,17 @@
 package io.mazewall.seccomp
 
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeProcess
-import io.mazewall.core.Arch
-import io.mazewall.core.PrctlCommand
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeProcess
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.PrctlCommand
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledOnOs
@@ -20,7 +27,6 @@ class PureJavaBpfEngineDowncallTest {
     @AfterEach
     fun tearDown() {
         LinuxNative.resetToDefault()
-        PureJavaBpfEngine.clearCache()
     }
 
     @Test
@@ -45,7 +51,7 @@ class PureJavaBpfEngineDowncallTest {
             val mockEngine = MockNativeEngine(process = mockProcess)
             LinuxNative.setEngine(mockEngine)
 
-            PureJavaBpfEngine.setNoNewPrivs()
+            PureJavaBpfEngine.lockNoNewPrivileges()
 
             assertTrue(prctlCalled)
             assertTrue(prctlCommand is PrctlCommand.SetNoNewPrivs)

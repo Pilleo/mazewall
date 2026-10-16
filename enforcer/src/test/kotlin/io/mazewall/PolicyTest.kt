@@ -1,9 +1,16 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
-import io.mazewall.core.Arch
-import io.mazewall.core.SandboxedPath
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.lifecycle.SandboxedPath
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.io.File
@@ -15,14 +22,14 @@ import kotlin.test.assertTrue
 class PolicyTest {
     @Test
     fun `default policy allows everything`() {
-        val p = Policy.builder().build()
+        val p = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         assertEquals(SeccompAction.ACT_ALLOW, p.defaultAction)
         assertTrue(p.isSyscallAllowed(Syscall.OPEN))
     }
 
     @Test
     fun `builder defaults retain the three argument-safety restrictions`() {
-        val policy = Policy.builder().build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
 
         assertFalse(policy.allowMmapExec)
         assertFalse(policy.allowNonThreadClone)
@@ -45,8 +52,8 @@ class PolicyTest {
             .absolutePath
 
         val policy =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowMmapExec()
                 .allowNonThreadClone()
                 .allowUnsafePrctl()
@@ -64,8 +71,8 @@ class PolicyTest {
     @Test
     fun `builder block and allow syscalls`() {
         val p =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .block(Syscall.OPEN)
                 .allow(Syscall.CLOSE)
                 .build()
@@ -77,8 +84,8 @@ class PolicyTest {
     @Test
     fun `builder unblock syscalls`() {
         val p =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .block(Syscall.OPEN)
                 .unblock(Syscall.OPEN)
                 .build()
@@ -95,8 +102,8 @@ class PolicyTest {
             .apply { createNewFile() }
             .absolutePath
         val policy =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead(rPath)
                 .allowFsRead(rPath)
                 .build()
@@ -119,8 +126,8 @@ class PolicyTest {
             .absolutePath
 
         val p1 =
-            Policy
-                .threadLocalBuilder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowMmapExec()
                 .allowNonThreadClone()
                 .allowUnsafePrctl()
@@ -129,7 +136,7 @@ class PolicyTest {
                 .block(Syscall.CONNECT)
                 .build()
 
-        val p2 = Policy.threadLocalBuilder().base(p1).build()
+        val p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).base(p1).build()
 
         assertTrue(p2.allowMmapExec)
         assertTrue(p2.allowNonThreadClone)
@@ -142,14 +149,14 @@ class PolicyTest {
     @Test
     fun `combine() intersects Landlock paths`() {
         val p1 =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead(SandboxedPath.of("/a", true))
                 .allowFsRead(SandboxedPath.of("/common", true))
                 .build()
         val p2 =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead(SandboxedPath.of("/b", true))
                 .allowFsRead(SandboxedPath.of("/common", true))
                 .build()
@@ -161,8 +168,8 @@ class PolicyTest {
 
     @Test
     fun `combine() hierarchical Landlock paths yield most restrictive`() {
-        val p1 = Policy.builder().allowFsRead(SandboxedPath.of("/var", true)).build()
-        val p2 = Policy.builder().allowFsRead(SandboxedPath.of("/var/log", true)).build()
+        val p1 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/var", true)).build()
+        val p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/var/log", true)).build()
         val combined = Policy.combine(p1, p2)
 
         assertEquals(setOf("/var/log"), combined.allowedFsReadPaths.map { it.value }.toSet(), "Should yield the more restrictive path")
@@ -172,14 +179,14 @@ class PolicyTest {
     @Test
     fun `combine() path intersection edge cases`() {
         // Test /h1 vs /h2 (should not intersect)
-        val p1 = Policy.builder().allowFsRead(SandboxedPath.of("/h1", true)).build()
-        val p2 = Policy.builder().allowFsRead(SandboxedPath.of("/h2", true)).build()
+        val p1 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/h1", true)).build()
+        val p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/h2", true)).build()
         val combined = Policy.combine(p1, p2)
         assertTrue(combined.allowedFsReadPaths.isEmpty(), "/h1 should not intersect with /h2")
 
         // Test nested paths
-        val p3 = Policy.builder().allowFsRead(SandboxedPath.of("/d1", true)).build()
-        val p4 = Policy.builder().allowFsRead(SandboxedPath.of("/d1/db", true)).build()
+        val p3 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/d1", true)).build()
+        val p4 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/d1/db", true)).build()
         assertEquals(
             setOf("/d1/db"),
             Policy
@@ -192,8 +199,8 @@ class PolicyTest {
 
     @Test
     fun `combine() disjoint Landlock paths forces Landlock`() {
-        val p1 = Policy.builder().allowFsRead(SandboxedPath.of("/a", true)).build()
-        val p2 = Policy.builder().allowFsRead(SandboxedPath.of("/b", true)).build()
+        val p1 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/a", true)).build()
+        val p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/b", true)).build()
 
         val combined = Policy.combine(p1, p2)
         assertTrue(combined.enforceLandlock)
@@ -202,8 +209,8 @@ class PolicyTest {
 
     @Test
     fun `combine() with no FS paths results in empty set`() {
-        val p1 = Policy.builder().block(Syscall.BIND).build()
-        val p2 = Policy.builder().block(Syscall.CONNECT).build()
+        val p1 = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.BIND).build()
+        val p2 = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).block(Syscall.CONNECT).build()
         val combined = Policy.combine(p1, p2)
         assertTrue(combined.allowedFsReadPaths.isEmpty())
         assertFalse(combined.enforceLandlock)
@@ -211,8 +218,8 @@ class PolicyTest {
 
     @Test
     fun `combineInternal handles empty read-path intersection`() {
-        val p1 = Policy.builder().allowFsRead(SandboxedPath.of("/a", true)).build()
-        val p2 = Policy.builder().allowFsRead(SandboxedPath.of("/b", true)).build()
+        val p1 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/a", true)).build()
+        val p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/b", true)).build()
         val combined = Policy.combine(p1, p2)
         assertTrue(combined.allowedFsReadPaths.isEmpty())
         assertTrue(combined.enforceLandlock)
@@ -226,12 +233,18 @@ class PolicyTest {
         assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVE))
         assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.EXECVEAT))
         assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.MEMFD_CREATE))
+        assertFalse(Policy.NO_EXEC.isSyscallAllowed(Syscall.IO_URING_SETUP))
+        assertFalse(Policy.NO_EXEC.isSyscallAllowed(Syscall.IO_URING_ENTER))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.IO_URING_SETUP))
+        assertFalse(Policy.NO_EXEC_HOTSPOT.isSyscallAllowed(Syscall.IO_URING_ENTER))
     }
 
     @Test
     fun `ProcessPolicies denyProcessCreation is runtime-aware and inspectable`() {
         val hotspot = ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT)
         val native = ProcessPolicies.denyProcessCreation(RuntimeProfile.NATIVE_IMAGE)
+        assertFalse(hotspot.isSyscallAllowed(Syscall.IO_URING_SETUP))
+        assertFalse(hotspot.isSyscallAllowed(Syscall.IO_URING_ENTER))
 
         assertTrue(hotspot.argumentRules.allowExecutableMappings)
         assertFalse(native.argumentRules.allowExecutableMappings)
@@ -246,14 +259,16 @@ class PolicyTest {
     @Test
     fun `denyList and allowList modes are inspectable and compose restrictively`() {
         val denied =
-            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-                denyProcessCreation()
-                denyNetwork()
-            }
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .base(ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT))
+                .base(ProcessPolicies.denyNetwork(RuntimeProfile.HOTSPOT_JIT))
+                .build()
         val extra =
-            Policy.denyList(RuntimeProfile.NATIVE_IMAGE) {
-                denyProcessCreation()
-            }
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
+                .base(ProcessPolicies.denyProcessCreation(RuntimeProfile.NATIVE_IMAGE))
+                .build()
         assertEquals(PolicyMode.DENY_LIST, denied.mode)
         assertTrue(denied.argumentRules.allowExecutableMappings)
         assertFalse(denied.isSyscallAllowed(Syscall.EXECVE))
@@ -266,13 +281,15 @@ class PolicyTest {
         assertFalse(restricted.argumentRules.allowExecutableMappings)
 
         val allowListed =
-            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+            ProcessPolicyBuilder
+                .allowList(RuntimeProfile.NATIVE_IMAGE)
+                .apply {
                 allow(Syscall.READ, Syscall.WRITE)
-            }
+            }.build()
         assertEquals(PolicyMode.ALLOW_LIST, allowListed.mode)
         val customErrno =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES))
                 .allow(Syscall.READ)
                 .build()
@@ -286,24 +303,25 @@ class PolicyTest {
     @Test
     fun `restrictFurtherWith applies default deny to explicit allows on the other policy`() {
         val denyByDefault =
-            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
+            ProcessPolicyBuilder
+                .allowList(RuntimeProfile.NATIVE_IMAGE)
+                .apply {
                 allow(Syscall.READ)
-            }
+            }.build()
         val explicitAllow =
-            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-                advanced { allow(Syscall.CONNECT) }
-            }
+            ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allow(Syscall.CONNECT).build()
         val restricted = denyByDefault.restrictFurtherWith(explicitAllow)
         assertFalse(restricted.isSyscallAllowed(Syscall.CONNECT))
         assertTrue(restricted.isSyscallAllowed(Syscall.READ))
     }
 
     @Test
-    fun `denyList with readOnly produces thread-local policy with Landlock paths`() {
-        val policy = Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-            denyProcessCreation()
-            readOnly("/tmp")
-        }
+    fun `worker denyList produces thread-local policy with Landlock paths`() {
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .base(ProcessPolicies.denyProcessCreation(RuntimeProfile.HOTSPOT_JIT))
+            .allowFsRead("/tmp")
+            .build()
         assertTrue(policy.enforceLandlock)
         assertTrue(policy.allowedFsReadPaths.any { it.value == "/tmp" })
         assertFalse(policy.isSyscallAllowed(Syscall.EXECVE))
@@ -312,13 +330,13 @@ class PolicyTest {
     @Test
     fun `Landlock intersection treats empty read grants as deny`() {
         val reads =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/secret")
                 .build()
         val writesOnly =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsWrite("/tmp")
                 .build()
         val combined = Policy.combine(reads, writesOnly)
@@ -329,13 +347,13 @@ class PolicyTest {
     @Test
     fun `Landlock composition keeps explicit OPEN denials`() {
         val landlock =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/secret")
                 .build()
         val denyOpen =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .block(Syscall.OPEN, Syscall.OPENAT, Syscall.OPENAT2)
                 .build()
         val combined = Policy.combine(landlock, denyOpen)
@@ -347,13 +365,13 @@ class PolicyTest {
     @Test
     fun `Landlock path intersection is not confused by lexicographic siblings`() {
         val child =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/foo/baz")
                 .build()
         val parents =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/foo")
                 .allowFsRead("/foo-bar")
                 .build()
@@ -367,13 +385,13 @@ class PolicyTest {
     @Test
     fun `Landlock path intersection keeps descendants past lexicographic siblings`() {
         val parent =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/foo")
                 .build()
         val mixed =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .allowFsRead("/foo-bar")
                 .allowFsRead("/foo/bar")
                 .build()
@@ -389,24 +407,20 @@ class PolicyTest {
     }
 
     @Test
-    fun `advanced block is applied on denyList and allowList`() {
+    fun `direct syscall configuration is applied on denyList and allowList`() {
         val denied =
-            Policy.denyList(RuntimeProfile.HOTSPOT_JIT) {
-                advanced { block(Syscall.PTRACE) }
-            }
+            ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.PTRACE).build()
         assertFalse(denied.isSyscallAllowed(Syscall.PTRACE))
         val allowed =
-            Policy.allowList(RuntimeProfile.NATIVE_IMAGE) {
-                advanced { allow(Syscall.GETPID) }
-            }
+            ProcessPolicyBuilder.allowList(RuntimeProfile.NATIVE_IMAGE).allow(Syscall.GETPID).build()
         assertTrue(allowed.isSyscallAllowed(Syscall.GETPID))
     }
 
     @Test
     fun `forRuntime NATIVE_IMAGE clears a prior HotSpot mmap exec flag`() {
         val policy =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .forRuntime(RuntimeProfile.HOTSPOT_JIT)
                 .forRuntime(RuntimeProfile.NATIVE_IMAGE)
                 .build()
@@ -439,7 +453,7 @@ class PolicyTest {
     fun `plus operator works and resolves types correctly`() {
         val p1 = Policy.NO_EXEC
         val p2 = Policy.NO_NETWORK
-        val p3 = Policy.builder().allowFsRead(SandboxedPath.of("/t1", true)).build()
+        val p3 = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowFsRead(SandboxedPath.of("/t1", true)).build()
 
         // P + P -> P
         val combinedPP: Policy<PolicyScope.ProcessWideSafe, Uncompiled> = p1 + p2
@@ -458,8 +472,8 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup is blocked if open or openat is restricted and Landlock is not active`() {
-        val p = Policy
-            .builder()
+        val p = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.OPEN)
             .allow(Syscall.IO_URING_SETUP)
             .build()
@@ -470,8 +484,8 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup remains allowed if open and openat are allowed`() {
-        val p = Policy
-            .builder()
+        val p = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allow(Syscall.OPEN)
             .allow(Syscall.OPENAT)
             .allow(Syscall.IO_URING_SETUP)
@@ -483,8 +497,8 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup remains allowed if Landlock is active`() {
-        val p = Policy
-            .builder()
+        val p = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.OPEN)
             .allow(Syscall.IO_URING_SETUP)
             .allowFsRead("/some/path")
@@ -496,13 +510,13 @@ class PolicyTest {
 
     @Test
     fun `io_uring_setup blocking is resolved correctly during policy combination`() {
-        val p1 = Policy
-            .builder()
+        val p1 = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.OPEN)
             .allow(Syscall.IO_URING_SETUP)
             .build()
-        val p2 = Policy
-            .builder()
+        val p2 = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allow(Syscall.OPEN)
             .allow(Syscall.IO_URING_SETUP)
             .build()
@@ -513,8 +527,8 @@ class PolicyTest {
 
     @Test
     fun `hasSupervisedSyscalls is true when defaultAction is ACT_NOTIFY`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_NOTIFY)
             .build()
         assertTrue(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be true when defaultAction is ACT_NOTIFY")
@@ -522,8 +536,8 @@ class PolicyTest {
 
     @Test
     fun `hasSupervisedSyscalls is false when defaultAction is ACT_ALLOW`() {
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .defaultAction(SeccompAction.ACT_ALLOW)
             .build()
         assertFalse(policy.definition.hasSupervisedSyscalls, "hasSupervisedSyscalls should be false when defaultAction is ACT_ALLOW and no syscalls use ACT_NOTIFY")
@@ -531,8 +545,8 @@ class PolicyTest {
 
     @Test
     fun `enforceLandlock is true when Landlock paths are specified`() {
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead("/tmp")
             .build()
         assertTrue(policy.enforceLandlock, "enforceLandlock should be true when Landlock paths are specified")
@@ -540,20 +554,20 @@ class PolicyTest {
 
     @Test
     fun `enforceLandlock is false when no Landlock paths are specified`() {
-        val emptyPolicy = Policy.builder().build()
+        val emptyPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
         assertFalse(emptyPolicy.enforceLandlock, "enforceLandlock should be false when no Landlock paths are specified")
     }
 
     @Test
     fun `combine prefers block companion ERRNO over TRACE regardless of order`() {
         val deny =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .block(Syscall.OPEN)
                 .build()
         val trace =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .addAction(SeccompAction.ACT_TRACE(1), Syscall.OPEN)
                 .build()
 
@@ -572,13 +586,13 @@ class PolicyTest {
     @Test
     fun `combine prefers ACT_ERRNO instance over TRACE for defaults`() {
         val errnoDefault =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_ERRNO(io.mazewall.ffi.NativeConstants.EACCES))
                 .build()
         val traceDefault =
-            Policy
-                .builder()
+            ProcessPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_TRACE(1))
                 .build()
 
@@ -593,33 +607,31 @@ class PolicyTest {
     }
 
     @Test
-    fun `fs promotion must not alias the original builder`(
+    fun `worker filesystem mutation does not alias an already built policy`(
         @TempDir tempDir: java.nio.file.Path,
     ) {
-        // Regression for issue-20260823-135554: the FS-adding methods used to re-type and mutate
-        // the SAME builder instance, so a ProcessWideSafe-typed reference could silently build a
-        // definition containing Landlock filesystem rules.
+        // Process builders cannot acquire filesystem state; packaged compile fixtures enforce
+        // that boundary. Worker mutation must preserve previously frozen definitions.
         val rPath = tempDir.resolve("read").toString()
-        val base = Policy.builder()
+        val base = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
+        val untouched = base.build()
 
         base.allowFsRead(rPath)
-        base.allowJvmClasspath()
-
-        val untouched = base.build()
-        assertFalse(untouched.definition.allowedFsReadPaths.isNotEmpty(), "Original builder must not gain FS paths")
+        assertTrue(base.build().allowedFsReadPaths.isNotEmpty(), "Ignored worker mutator result must retain the grant")
+        assertFalse(untouched.definition.allowedFsReadPaths.isNotEmpty(), "Already built policy must not gain FS paths")
         assertTrue(untouched.definition.allowedFsWritePaths.isEmpty())
     }
 
     @Test
-    fun `promoted builder carries fs state and stays thread-local typed`(
+    fun `fixed worker builder carries fs state and stays thread-local typed`(
         @TempDir tempDir: java.nio.file.Path,
     ) {
         val rPath = tempDir.resolve("r").toString()
         val wPath = tempDir.resolve("w").toString()
 
         val promoted: Policy<PolicyScope.ThreadLocalOnly, Uncompiled> =
-            Policy
-                .builder()
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.NATIVE_IMAGE)
                 .defaultAction(SeccompAction.ACT_ALLOW)
                 .allowFsRead(rPath)
                 .allowFsWrite(wPath)

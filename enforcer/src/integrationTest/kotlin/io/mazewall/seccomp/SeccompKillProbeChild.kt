@@ -1,11 +1,18 @@
 package io.mazewall.seccomp
 
-import io.mazewall.LinuxNative
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 
 /**
  * Child-process entry point for KILL_* verdict probes (issue-20260823-172000).
  *
- * Runs inside a fresh JVM spawned by [io.mazewall.IsolatedProcessTester]. Installs a seccomp
+ * Runs inside a fresh JVM spawned by [io.mazewall.enforcer.api.IsolatedProcessTester]. Installs a seccomp
  * filter whose matched action is SECCOMP_RET_KILL_THREAD, then deliberately triggers the killed
  * syscall. A surviving process prints PROBE_OK (the failure signal the parent asserts against);
  * a correctly enforced filter terminates this JVM with SIGSYS before the marker is printed.
@@ -17,16 +24,16 @@ import io.mazewall.LinuxNative
 object SeccompKillProbeChild {
     @JvmStatic
     fun main(args: Array<String>) {
-        val arch = io.mazewall.core.Arch
+        val arch = io.mazewall.platform.syscall.Arch
             .current()
         val victimNr = args[0].toInt()
 
-        val policy = io.mazewall.Policy
-            .builder()
-            .defaultAction(io.mazewall.core.SeccompAction.ACT_ALLOW)
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
+            .defaultAction(io.mazewall.platform.syscall.SeccompAction.ACT_ALLOW)
             .addAction(
-                io.mazewall.core.SeccompAction.ACT_KILL_THREAD,
-                io.mazewall.core.Syscall.entries
+                io.mazewall.platform.syscall.SeccompAction.ACT_KILL_THREAD,
+                io.mazewall.platform.syscall.Syscall.entries
                 .first { it.numberFor(arch) == victimNr },
             ).build()
 
@@ -41,17 +48,17 @@ object SeccompKillProbeChild {
         // Deliberately trigger the killed syscall. If we survive, enforcement failed.
         val res = LinuxNative.raw.syscall(
             victimNr.toLong(),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0),
-            io.mazewall.core.NativeArg
+            io.mazewall.platform.syscall.NativeArg
                 .LongArg(0),
         )
         println("PROBE_SURVIVED res=$res")

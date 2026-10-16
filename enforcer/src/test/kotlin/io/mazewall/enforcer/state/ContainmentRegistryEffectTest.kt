@@ -1,12 +1,22 @@
 package io.mazewall.enforcer.state
 
-import io.mazewall.Policy
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
+import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.Policy
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.SeccompInstallationState
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 class ContainmentRegistryEffectTest {
     @AfterEach
@@ -19,8 +29,8 @@ class ContainmentRegistryEffectTest {
     fun `thread-scoped seccomp effect updates only the active thread state`() {
         val processState = ContainerState(filterDepth = 4)
         ContainmentStateRegistry.processState = processState
-        val policy = Policy
-            .builder()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .block(Syscall.EXECVE)
             .build()
             .definition
@@ -43,8 +53,8 @@ class ContainmentRegistryEffectTest {
     fun `process-scoped Landlock effect does not mutate thread-local bookkeeping`() {
         val threadState = ContainerState(filterDepth = 2)
         ContainmentStateRegistry.threadState = threadState
-        val policy = Policy
-            .builder()
+        val policy = WorkerPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
             .allowFsRead("/sandbox")
             .build()
             .definition
@@ -58,18 +68,27 @@ class ContainmentRegistryEffectTest {
     }
 
     @Test
-    fun `rollback restores the supplied thread state without weakening process state`() {
+    fun `coordinator publication updates the installing thread rather than the coordinator`() {
         val processState = ContainerState(filterDepth = 5)
-        val expectedThreadState = ContainerState(filterDepth = 2)
         ContainmentStateRegistry.processState = processState
-        ContainmentStateRegistry.threadState = ContainerState(filterDepth = 3)
-
-        ContainmentRegistryEffectInterpreter.apply(
-            ContainmentRegistryEffect.RestoreThreadState(expectedThreadState),
+        ContainmentStateRegistry.threadState = ContainerState()
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.NATIVE_IMAGE)
+            .block(Syscall.EXECVE)
+            .build()
+            .definition
+        val publish = ContainmentRegistryEffectInterpreter.prepare(
+            ContainmentRegistryEffect.SeccompInstalled(false, policy, mapOf(Syscall.EXECVE to SeccompAction.ACT_ERRNO()), SeccompAction.ACT_ALLOW),
         )
-
+        java.util.concurrent.Executors.newSingleThreadExecutor().use { coordinator ->
+            coordinator
+                .submit {
+                publish()
+                assertEquals(0, ContainmentStateRegistry.threadState.filterDepth)
+            }.get()
+        }
         assertEquals(processState, ContainmentStateRegistry.processState)
-        assertEquals(expectedThreadState, ContainmentStateRegistry.threadState)
+        assertEquals(1, ContainmentStateRegistry.threadState.filterDepth)
     }
 
     @Test
@@ -82,5 +101,79 @@ class ContainmentRegistryEffectTest {
 
         assertEquals(state, ContainmentStateRegistry.processState.engineState)
         assertEquals(state, ContainmentStateRegistry.threadState.engineState)
+    }
+
+    @Test
+    fun `terminal failure retains applied state and cannot be replaced by stronger engine evidence`() {
+        val failure = IllegalStateException("original installation failure")
+        ContainmentStateRegistry.threadState = ContainerState(filterDepth = 2, engineState = SeccompInstallationState.SystemCallApplied)
+        ContainmentStateRegistry.processState = ContainerState(filterDepth = 3, engineState = SeccompInstallationState.Verified)
+        ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(false, failure))
+        ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(false, IllegalStateException("later failure")))
+        ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.EngineStateUpdated(false, SeccompInstallationState.Verified))
+
+        val merged = ContainmentStateRegistry.resolveCurrentState()
+        assertSame(failure, merged.installationFailure)
+        assertEquals(5, merged.filterDepth)
+        assertEquals(SeccompInstallationState.Verified, merged.engineState)
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `late successful publication cannot erase terminal quarantine`(processWide: Boolean) {
+        val policy = ProcessPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .block(Syscall.EXECVE)
+            .build()
+            .definition
+        val publish = ContainmentRegistryEffectInterpreter.prepare(
+            ContainmentRegistryEffect.SeccompInstalled(processWide, policy, mapOf(Syscall.EXECVE to SeccompAction.ACT_ERRNO()), SeccompAction.ACT_ALLOW),
+        )
+        val failure = IllegalStateException("installation rejected before coordinator publication")
+        ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, failure))
+
+        publish()
+
+        val state = if (processWide) ContainmentStateRegistry.processState else ContainmentStateRegistry.threadState
+        assertSame(failure, state.installationFailure)
+        assertEquals(1, state.filterDepth)
+        assertEquals(SeccompAction.ACT_ERRNO(), state.syscallActions[Syscall.EXECVE])
+    }
+
+    @Test
+    fun `process failure invalidates merged-state cache and is visible to fresh threads`() {
+        ContainmentStateRegistry.resolveCurrentState()
+        val failure = IllegalStateException("process baseline failure")
+        ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(true, failure))
+
+        assertSame(failure, ContainmentStateRegistry.resolveCurrentState().installationFailure)
+        java.util.concurrent.Executors.newSingleThreadExecutor().use { worker ->
+            val observed = worker.submit(java.util.concurrent.Callable { ContainmentStateRegistry.resolveCurrentState().installationFailure }).get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertSame(failure, observed)
+        }
+    }
+
+    @Test
+    fun `late publication retains current thread CET proof without promoting process proof`() {
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build().definition
+        val publish = ContainmentRegistryEffectInterpreter.prepare(
+            ContainmentRegistryEffect.SeccompInstalled(false, policy, emptyMap(), SeccompAction.ACT_ALLOW),
+        )
+        val proof = CetThreadProof(Any(), Thread.currentThread())
+        ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(proof))
+        publish()
+        assertSame(proof, ContainmentStateRegistry.threadState.installationEvidence.cet)
+        assertSame(proof, ContainmentStateRegistry.resolveCurrentState().installationEvidence.cet)
+        java.util.concurrent.Executors.newSingleThreadExecutor().use { other ->
+            val observed = other.submit(java.util.concurrent.Callable { ContainmentStateRegistry.resolveCurrentState().installationEvidence.cet }).get(5, java.util.concurrent.TimeUnit.SECONDS)
+            assertEquals(null, observed)
+        }
+    }
+
+    @Test
+    fun `CET proof publication rejects a different owning thread`() {
+        val proof = CetThreadProof(Any(), Thread.ofPlatform().unstarted {})
+        kotlin.test.assertFailsWith<IllegalStateException> { ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.CetLocked(proof)) }
+        assertEquals(null, ContainmentStateRegistry.threadState.installationEvidence.cet)
     }
 }

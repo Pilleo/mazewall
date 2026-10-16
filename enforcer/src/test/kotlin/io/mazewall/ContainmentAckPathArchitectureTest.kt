@@ -1,10 +1,17 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import com.tngtech.archunit.core.importer.ClassFileImporter
 import com.tngtech.archunit.core.importer.ImportOption
 import com.tngtech.archunit.junit.AnalyzeClasses
 import com.tngtech.archunit.junit.ArchTest
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
@@ -13,7 +20,7 @@ class ContainmentAckPathArchitectureTest {
     private val rule = noClasses()
         .that()
         .resideInAnyPackage(
-            "io.mazewall.enforcer.supervisor..",
+            "io.mazewall.enforcer.internal.supervisor..",
             "io.mazewall.seccomp..",
             "io.mazewall.landlock..",
             "io.mazewall.enforcer.state..",
@@ -30,7 +37,7 @@ class ContainmentAckPathArchitectureTest {
 
     @Test
     fun coroutinesBannedOnAckPathDetectsViolation() {
-        val classes = ClassFileImporter().importClasses(io.mazewall.enforcer.supervisor.DummyCoroutineAckViolator::class.java)
+        val classes = ClassFileImporter().importClasses(io.mazewall.enforcer.internal.supervisor.DummyCoroutineAckViolator::class.java)
         assertThrows<AssertionError> {
             rule.check(classes)
         }

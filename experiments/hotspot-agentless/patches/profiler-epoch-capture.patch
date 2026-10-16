@@ -1,0 +1,100 @@
+--- a/support/ebpf/types.h
++++ b/support/ebpf/types.h
+@@ -451,3 +451,5 @@
+ typedef struct HotspotProcInfo {
++  u64 counter_address;
++  u64 initial_epoch;
+   // The global JIT heap mapping. All JIT code is between these two address.
+   u64 codecache_start, codecache_end;
+@@ -587,1 +589,10 @@
++typedef struct HotspotEpochIdentity { u64 epoch; u32 state; s32 read_error; } HotspotEpochIdentity;
++#define HOTSPOT_EPOCH_UNKNOWN 0
++#define HOTSPOT_EPOCH_STABLE 1
++#define HOTSPOT_EPOCH_READ_ERROR 2
++#define HOTSPOT_EPOCH_IN_PROGRESS 3
++#define HOTSPOT_EPOCH_CHANGED 4
++#define HOTSPOT_EPOCH_UNSUPPORTED 5
++#define HOTSPOT_EPOCH_REGRESSED 6
++
+ typedef struct Trace {
+@@ -625,1 +636,2 @@
++  HotspotEpochIdentity hotspot_identity;
+   u64 frame_data[3072];
+@@ -793,4 +805,5 @@
+   u32 pid;
+   u32 tid;
++  HotspotEpochIdentity hotspot_identity;
+   u64 frame_data[3072];
+ } TraceCache;
+--- a/support/types_def.go
++++ b/support/types_def.go
+@@ -125,2 +125,3 @@
+ type Trace C.Trace
++type HotspotEpochIdentity C.HotspotEpochIdentity
+ type UnwindInfo C.UnwindInfo
+--- a/support/ebpf/tracemgmt.h
++++ b/support/ebpf/tracemgmt.h
+@@ -240,2 +240,3 @@
+   trace->kernel_stack_id = -1;
++  trace->hotspot_identity = (HotspotEpochIdentity){0};
+   trace->frame_data_len  = 0;
+--- a/support/ebpf/hotspot_tracer.ebpf.c
++++ b/support/ebpf/hotspot_tracer.ebpf.c
+@@ -941,1 +941,21 @@
++  if (ji->counter_address && trace->hotspot_identity.state == HOTSPOT_EPOCH_UNKNOWN) {
++    u64 epoch = 0;
++    int rc = bpf_probe_read_user(&epoch, sizeof(epoch), (void *)ji->counter_address);
++    trace->hotspot_identity.epoch = epoch;
++    if (rc) {
++      trace->hotspot_identity.state = HOTSPOT_EPOCH_READ_ERROR;
++      trace->hotspot_identity.read_error = rc;
++      goto exit;
++    }
++    if (epoch >= (1ULL << 63) || epoch < ji->initial_epoch) {
++      trace->hotspot_identity.state = HOTSPOT_EPOCH_REGRESSED;
++      goto exit;
++    }
++    if (epoch & 1) {
++      trace->hotspot_identity.state = HOTSPOT_EPOCH_IN_PROGRESS;
++      goto exit;
++    }
++    trace->hotspot_identity.state = HOTSPOT_EPOCH_STABLE;
++  }
++
+   for (int i = 0; i < HOTSPOT_FRAMES_PER_PROGRAM; i++) {
+--- a/support/ebpf/interpreter_dispatcher.ebpf.c
++++ b/support/ebpf/interpreter_dispatcher.ebpf.c
+@@ -9,2 +9,3 @@
+ #include "types.h"
++extern struct hotspot_procs_t hotspot_procs;
+ 
+@@ -337,1 +337,24 @@
++  pid_t epoch_pid = trace->pid;
++  HotspotProcInfo *epoch_info = bpf_map_lookup_elem(&hotspot_procs, &epoch_pid);
++  if (epoch_info && epoch_info->counter_address) {
++    if (trace->hotspot_identity.state != HOTSPOT_EPOCH_STABLE)
++      return 0;
++    u64 current_epoch = 0;
++    int rc = bpf_probe_read_user(&current_epoch, sizeof(current_epoch), (void *)epoch_info->counter_address);
++    if (rc) {
++      trace->hotspot_identity.state = HOTSPOT_EPOCH_READ_ERROR;
++      trace->hotspot_identity.read_error = rc;
++      return 0;
++    }
++    if (current_epoch >= (1ULL << 63) || current_epoch < epoch_info->initial_epoch) {
++      trace->hotspot_identity.state = HOTSPOT_EPOCH_REGRESSED;
++      return 0;
++    }
++    if (current_epoch != trace->hotspot_identity.epoch || (current_epoch & 1)) {
++      trace->hotspot_identity.state = HOTSPOT_EPOCH_CHANGED;
++      return 0;
++    }
++  }
++
++
+   // Build traceCache
+@@ -355,3 +378,4 @@
+   traceCache->tid = trace->tid;
++  traceCache->hotspot_identity = trace->hotspot_identity;
+ 
+   u16 len = trace->frame_data_len;

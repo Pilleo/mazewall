@@ -10,9 +10,9 @@ Operating these tools requires deep interaction with Linux kernel notification l
 
 ### 1. Profiler ACK Deadlock Prevention
 > [!CAUTION]
-> Every code path in `ProfilerSessionHandler.kt` that receives a `USER_NOTIF` seccomp event **must** either send `SECCOMP_USER_NOTIF_FLAG_CONTINUE` (via the `0x41` ACK byte loop) or `SECCOMP_USER_NOTIF_FLAG_KILL_THREAD`. 
+> Every accepted notification must reach exactly one terminal kernel reply or an explicitly classified `ENOENT` notification-gone outcome. Encode a continue reply with `error=0`, `val=0`, and `SECCOMP_USER_NOTIF_FLAG_CONTINUE`; encode a denial with a negative errno in `error` and `flags=0`. Do not invent a kill-thread response flag: closing the listener is terminal cleanup, not a notification reply.
 > 
-> **The 0xAC (PROTOCOL_ACK_BYTE) Handshake:** Before the daemon sends a `CONTINUE` response to the kernel, it must wait for the mandatory `0xAC` acknowledgment byte from the JVM Trace Listener. If you miss sending or receiving this ACK, the tracee worker OS thread will deadlock permanently.
+> **The 0xAC (`PROTOCOL_ACK_BYTE`) Handshake:** For an event selected for publication, the daemon sends the complete event frame, waits for exactly one listener ACK, and only then sends the kernel `CONTINUE` reply. The ACK is private socket protocol data; it is not the kernel response or the value `0x41`. Noise paths that are not published do not wait for this ACK.
 
 ### 2. Reactor Loop & Session Handling
 The `ProfilerDaemonEngine` uses a non-blocking reactor loop that delegates session-specific logic to `ProfilerSessionHandler`.

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" tests="50" skipped="0" failures="0" errors="0" timestamp="2026-09-21T15:03:48.423Z" hostname="leanid-nitroanv1541" time="0.215">
+  <properties/>
+  <testcase name="bounded inline snapshot publication has a machine-readable failure class()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.025"/>
+  <testcase name="readiness scope contains only paired dictionary collector policies and baseline()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.008"/>
+  <testcase name="targeted selection determines terminal expected fork count()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.003"/>
+  <testcase name="owned argument scope rotates primitive and boxed controls for both dictionary modes()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.003"/>
+  <testcase name="poll backoff scope rotates bounded dictionary collector pacing arms()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="progress line identifies the completed variant and evidence state()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.004"/>
+  <testcase name="legacy byte decoding remains the session default outside the benchmark experiment()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="reviewed narrowed capture profile matches the application workload family()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.01"/>
+  <testcase name="marker transport scope rotates all paired tier e arms with unchanged controls()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.003"/>
+  <testcase name="full stream exact joins produce valid capture efficiency evidence()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="direct profiler contrasts retain their declared right minus left direction()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.012"/>
+  <testcase name="ready transfer scope rotates copy and read only controls for both dictionary modes()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="dictionary publication scope retains only baseline and paired dictionary arms()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="rate accounting reports matched per-operation overhead without whole-app extrapolation()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="retention exhaustion scope is isolated to one explicit full stream fixture()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="calibrated receipt age bounds are retained in benchmark evidence()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.009"/>
+  <testcase name="ring argument view scope rotates paired lazy and eager controls()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="comparable long-run scope excludes only bounded inline transports()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="native marker transition phases are retained in benchmark evidence()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.004"/>
+  <testcase name="paired full matrix intervals retain candidate minus baseline direction()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="default full capture profile remains an omitted native agent option()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.052"/>
+  <testcase name="ring argument list scope rotates paired direct decoder constructions()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="operation oracle omissions make otherwise complete evidence incomplete()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.003"/>
+  <testcase name="shared openat workloads require user notif operation proof()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.008"/>
+  <testcase name="child termination fixture targets only a Tier E child()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="injected child termination takes precedence over child output classification()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="task identity scope rotates paired per-event and consecutive reuse controls()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="capture profile boundary metrics aggregate native admitted and excluded bindings()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="targeted benchmark selector keeps only named generated variants and rejects typos()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="owned ring drain counters are retained in benchmark evidence()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="publication scope rotates terminal and live arms()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="capture timing scope rotates an instrumented production mode against its disabled control()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="ring submission control variants cover both modes and retain safe defaults()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="fork timing separates measured workload from lifecycle overhead()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="capture profile scope pairs full and narrowed dictionary captures()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="profile exclusions do not invalidate joined admitted captures()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.0"/>
+  <testcase name="sustained collector scope measures only continuous production policy()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="capture profile pair requires complete correct useful evidence on both arms()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="artifact escaping keeps child control output valid JSON()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="benchmark retained record limit must be positive()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="capture yield bindings retain exact usefulness counters()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="production selection scope compares auto with both concrete dictionary transports()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="calibration scope schedules only the unprofiled baseline()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="every retained benchmark record is explicitly policy ineligible()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.002"/>
+  <testcase name="full benchmark schedules every profiler comparator exactly once per rotated fork()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="comparable marker transport scope excludes bounded inline transport()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.0"/>
+  <testcase name="ring decode scope pairs direct and legacy Tier E arms without unrelated user notify controls()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="verified baseline receives an admissible performance label()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <testcase name="application workloads require checked terminal frames for Tier E semantic verification()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.0"/>
+  <testcase name="capture-profile semantic digest normalizes JVM-local loader and location details()" classname="io.mazewall.profiler.tierE.stress.TierEMatchedBenchmarkJsonTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

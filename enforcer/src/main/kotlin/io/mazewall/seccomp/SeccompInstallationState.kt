@@ -1,16 +1,16 @@
 package io.mazewall.seccomp
-import io.mazewall.CompiledSandbox
-import io.mazewall.LinuxNative
-import io.mazewall.PolicyDefinition
-import io.mazewall.core.Arch
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.CompiledSandbox
+import io.mazewall.enforcer.api.PolicyDefinition
 import io.mazewall.enforcer.diagnostics.*
-import io.mazewall.enforcer.diagnostics.validateLinuxAndNotVirtual
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.syscall.Arch
 
 /**
  * States representing the progress of a Seccomp program installation.
@@ -29,9 +29,10 @@ internal sealed interface SeccompInstallationState {
         fun buildFilter(
             arena: NativeArena,
             sandbox: CompiledSandbox<*>,
+            native: NativeEngine = LinuxNative.snapshot(),
         ): FilterBuilt {
             val filters = sandbox.compiledFilters
-            val prog = with(arena) { LinuxNative.memory.newSockFProg(filters) }
+            val prog = with(arena) { native.memory.newSockFProg(filters) }
             return FilterBuilt(prog)
         }
     }
@@ -42,9 +43,13 @@ internal sealed interface SeccompInstallationState {
     ) : SeccompInstallationState {
         override val rank: Int = 2
 
-        fun lockPrivileges(): PrivilegesLocked {
-            validateLinuxAndNotVirtual()
-            PureJavaBpfEngine.setNoNewPrivs()
+        fun lockPrivileges(
+            native: NativeEngine = LinuxNative.snapshot(),
+            platform: CapturedPlatform = Platform.capture(native),
+        ): PrivilegesLocked {
+            requirePlatformThread()
+            if (!platform.isLinux) throw UnsupportedOperationException("Mazewall requires Linux for kernel-level containment.")
+            PureJavaBpfEngine.lockNoNewPrivileges(native)
             return PrivilegesLocked(program)
         }
     }
@@ -58,15 +63,19 @@ internal sealed interface SeccompInstallationState {
         fun applyFilter(
             arch: Arch,
             useTsync: Boolean,
+            native: NativeEngine = LinuxNative.snapshot(),
         ): FilterApplied {
-            return PureJavaBpfEngine.installFilter(arch, program, useTsync)
+            return PureJavaBpfEngine.installFilter(arch, program, useTsync, native)
         }
     }
 
     /** Common interface for applied filter states. */
     sealed interface FilterApplied : SeccompInstallationState {
-        fun verify(definition: PolicyDefinition<*>): Verified {
-            PureJavaBpfEngine.verifyInstallation(definition)
+        fun verify(
+            definition: PolicyDefinition<*>,
+            native: NativeEngine = LinuxNative.snapshot(),
+        ): Verified {
+            PureJavaBpfEngine.verifyInstallation(definition, native)
             return Verified
         }
     }

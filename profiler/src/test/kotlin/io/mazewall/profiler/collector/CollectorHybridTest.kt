@@ -1,16 +1,29 @@
 package io.mazewall.profiler.collector
-
-import io.mazewall.core.Tid
-import io.mazewall.profiler.EbpfLoad
-import io.mazewall.profiler.IncompleteProfileException
-import io.mazewall.profiler.IoUringVisibility
-import io.mazewall.profiler.MazewallProfiler
-import io.mazewall.profiler.NetworkEndpoint
-import io.mazewall.profiler.ObservationCorrelation
-import io.mazewall.profiler.ObservationSource
-import io.mazewall.profiler.ProfileObservation
-import io.mazewall.profiler.ProfileOptions
-import io.mazewall.profiler.ProfileStrategy
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.platform.syscall.Arch
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.EbpfLoad
+import io.mazewall.profiler.api.IncompleteProfileException
+import io.mazewall.profiler.api.IoUringVisibility
+import io.mazewall.profiler.api.MazewallProfiler
+import io.mazewall.profiler.api.NetworkEndpoint
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.api.ObservationCorrelation
+import io.mazewall.profiler.api.ObservationSource
+import io.mazewall.profiler.api.ObservedSyscall
+import io.mazewall.profiler.api.OpenFlagsEvidence
+import io.mazewall.profiler.api.PathResolution
+import io.mazewall.profiler.api.PathResolutionFailure
+import io.mazewall.profiler.api.PathResolutionQuality
+import io.mazewall.profiler.api.ProfileEnvironment
+import io.mazewall.profiler.api.ProfileObservation
+import io.mazewall.profiler.api.ProfileOptions
+import io.mazewall.profiler.api.ProfileStrategy
+import io.mazewall.profiler.api.ProfilingCoverage
+import io.mazewall.profiler.api.StackAttribution
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -18,6 +31,76 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class CollectorHybridTest {
+    @Test
+    fun `eBPF syscall mapping uses selected architecture and retains unknown numbers`() {
+        assertEquals(
+            ObservedSyscall.Known(io.mazewall.platform.syscall.Syscall.OPENAT),
+            ProfileObservationEbpfCollector.syscallFor(Arch.AARCH64, Arch.AARCH64.openat),
+        )
+        assertEquals(
+            ObservedSyscall.Unknown("syscall:999999"),
+            ProfileObservationEbpfCollector.syscallFor(Arch.AMD64, 999999),
+        )
+    }
+
+    @Test
+    fun `collector merge retains distinct typed failures and reports mixed coverage`() {
+        val correlation = ObservationCorrelation(1, Tid(7), 5)
+        val denied = PathResolutionFailure(0, PathResolutionFailure.Reason.VmReadDenied, "Yama denied")
+        val truncated = PathResolutionFailure(0, PathResolutionFailure.Reason.Truncated, "no NUL")
+        val syscall = ProfileObservation.Syscall(correlation, ObservationSource.USER_NOTIF, "OPEN")
+        val first = syscall.withPathResolution(PathResolution.Failed(listOf(denied)))
+        val second = syscall.withPathResolution(PathResolution.Failed(listOf(truncated)))
+        val merged = ObservationMerger.merge(listOf(CollectorDrain(listOf(first)), CollectorDrain(listOf(second, first))))
+        assertEquals(2, merged.observations.size)
+        val coverage = ProfilingCoverage.infer(
+            ProfileStrategy.USER_NOTIF,
+            "merged",
+            false,
+            merged.observations,
+            StackAttribution.SKIPPED,
+            merged.droppedEvents,
+            merged.drainComplete,
+            ProfileEnvironment("test", EbpfLoad.Denied("test")),
+        )
+        assertEquals(PathResolutionQuality.MIXED, coverage.pathResolution)
+        assertEquals(listOf(denied, truncated), coverage.pathFailures)
+    }
+
+    @Test
+    fun `collector keys preserve typed diagnostics on every observation variant`() {
+        val correlation = ObservationCorrelation(1, Tid(7), 5)
+        val reasons = listOf(PathResolutionFailure.Reason.VmReadDenied, PathResolutionFailure.Reason.Truncated)
+        val observations = reasons.flatMap { reason ->
+            val resolution = PathResolution.Failed(listOf(PathResolutionFailure(0, reason, "inspection")))
+            listOf(
+                ProfileObservation.Syscall(correlation, ObservationSource.USER_NOTIF, "OPEN").withPathResolution(resolution),
+                ProfileObservation.IoUring(correlation, ObservationSource.EBPF, "OPENAT").withPathResolution(resolution),
+                ProfileObservation.Connect(correlation, ObservationSource.EBPF, NetworkEndpoint("127.0.0.1", 80)).withPathResolution(resolution),
+            )
+        }
+        val merged = ObservationMerger.merge(listOf(CollectorDrain(observations + observations)))
+        assertEquals(6, merged.observations.size)
+    }
+
+    @Test
+    fun `collector merge identity retains distinct typed open flags evidence`() {
+        val correlation = ObservationCorrelation(1, Tid(7), 5)
+        val observations = listOf("O_FUTURE_A", "O_FUTURE_B").map { symbol ->
+            ProfileObservation.Syscall(
+                correlation,
+                ObservationSource.STRACE,
+                "OPENAT2",
+                paths = listOf("/tmp/target"),
+                openFlagsEvidence = OpenFlagsEvidence.Incomplete(0, setOf(symbol)),
+            )
+        }
+
+        val merged = ObservationMerger.merge(listOf(CollectorDrain(observations + observations)))
+
+        assertEquals(observations, merged.observations)
+    }
+
     @Test
     fun `parser reads uring syscall and connect lines`() {
         val log = """

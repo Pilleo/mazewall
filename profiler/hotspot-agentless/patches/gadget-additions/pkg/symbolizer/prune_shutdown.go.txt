@@ -1,0 +1,31 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symbolizer
+
+import "context"
+
+func (s *Symbolizer) stopPruning(ctx context.Context) error {
+	s.pruneMu.Lock()
+	s.pruneStopped = true
+	s.pruneStopOnce.Do(func() {
+		if s.exit != nil {
+			close(s.exit)
+		}
+	})
+	done := s.pruneDone
+	s.pruneMu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}

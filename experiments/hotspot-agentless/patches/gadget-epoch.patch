@@ -1,0 +1,29 @@
+--- a/pkg/symbolizer/symbolizer.go
++++ b/pkg/symbolizer/symbolizer.go
+@@ -24,2 +24,4 @@
+ 	"time"
++
++	"go.opentelemetry.io/ebpf-profiler/libpf"
+ )
+@@ -37,2 +39,4 @@
+ type SymbolizerOptions struct {
++	HotSpotEpochTarget libpf.HotSpotEpochTarget
++	OnHotSpotFatal func(error)
+ 	UseSymtab           bool
+@@ -155,2 +159,3 @@
+ type Task struct {
++	HotSpotIdentity libpf.HotSpotIdentity
+ 	// Pids of the process that we want to resolve symbols for.
+--- a/pkg/symbolizer/otel/otel.go
++++ b/pkg/symbolizer/otel/otel.go
+@@ -451,2 +451,5 @@
++		if o.options.HotSpotEpochTarget.PID != 0 {
++			return o.storeEpochTrace(meta.CorrelationID, t.Frames, uint32(meta.PID), uint32(meta.TID), t.HotSpotIdentity, t.HotSpotValidation)
++		}
+ 		o.storeTrace(meta.CorrelationID, t.Frames, uint32(meta.PID), uint32(meta.TID))
+ 		return nil
+@@ -466,2 +469,4 @@
+ 	trc, err := oteltracer.NewTracer(ctx, &oteltracer.Config{
++		HotSpotEpochTarget: o.options.HotSpotEpochTarget,
++		OnHotSpotFatal: o.options.OnHotSpotFatal,
+ 		Intervals:              intervals,

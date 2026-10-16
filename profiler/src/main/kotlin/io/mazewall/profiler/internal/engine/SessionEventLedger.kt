@@ -1,0 +1,98 @@
+package io.mazewall.profiler.internal.engine
+
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReferenceArray
+
+internal const val MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH = 80
+internal const val MAX_RECENT_SESSION_EVENTS = 8
+
+internal sealed interface SessionEvent {
+    val timestampNanos: Long
+    val threadId: Long
+
+    class Notified
+        @JvmOverloads
+        constructor(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+        val syscall: Long,
+        val arch: Int? = null,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: NOTIFIED syscall $syscall arch=$arch"
+    }
+
+    /** Bounded diagnostic metadata only; paths, arguments and exception messages are excluded. */
+    class ReplyFailed(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+        val operation: String,
+        val errno: Int?,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: REPLY_FAILED ${operation.take(MAX_SESSION_DIAGNOSTIC_TYPE_LENGTH)} errno=$errno"
+    }
+
+    class VmReadvResolved(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+        val success: Boolean,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: VM_READV_RESOLVED success=$success"
+    }
+
+    class EventSent(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: EVENT_SENT"
+    }
+
+    class AckReceived(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: ACK_RECEIVED"
+    }
+
+    class ContinueReplied(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+        val valToReply: Long,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: CONTINUE_REPLIED valToReply=$valToReply"
+    }
+
+    class ErrorReplied(
+        override val timestampNanos: Long,
+        override val threadId: Long,
+        val errno: Int,
+    ) : SessionEvent {
+        override fun toString() = "[$timestampNanos] Thread $threadId: ERROR_REPLIED errno=$errno"
+    }
+}
+
+internal class SessionEventLedger {
+    private val buffer = AtomicReferenceArray<SessionEvent>(CAPACITY)
+    private val writeIndex = AtomicLong(0)
+
+    fun record(event: SessionEvent) {
+        val idx = writeIndex.getAndIncrement()
+        buffer.set((idx % CAPACITY).toInt(), event)
+    }
+
+    fun dump(): List<SessionEvent> {
+        val currentWrite = writeIndex.get()
+        val start = maxOf(0L, currentWrite - CAPACITY)
+        val list = mutableListOf<SessionEvent>()
+        for (i in start until currentWrite) {
+            val event = buffer.get((i % CAPACITY).toInt())
+            if (event != null) {
+                list.add(event)
+            }
+        }
+        return list
+    }
+
+    companion object {
+        private const val CAPACITY = 64
+    }
+}

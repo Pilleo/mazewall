@@ -1,0 +1,33 @@
+{
+  "kind": "tier_e_node_noise_rootful_decision",
+  "timestamp": "2026-09-20",
+  "runner": "local rootful Docker with host-visible global raw sys_enter attachment",
+  "artifact": "build/tier-e-node-noise-rootful/results.jsonl",
+  "probe": "scripts/run_tier_e_node_noise_probe.sh",
+  "pairs": 5,
+  "unrelated_workload": "a CPU-pinned shell loop reopening and reading /proc/self/stat for three seconds",
+  "attachment_handshake": "the probe waits for the benchmark-only /artifacts/attachment-ready file, emitted only after Tier E installAndAttach succeeds",
+  "paired_iteration_delta_percent": [-57.245800765723764, 11.04557789223016, 9.294719282413105, -59.27086369377247, -5.167812413093223],
+  "median_iteration_delta_percent": -5.167812413093223,
+  "promotion_gate": {
+    "required": "at least 15% added unrelated-host CPU cost with a paired confidence interval excluding zero and complete target evidence",
+    "result": "not_justified",
+    "reason": "deltas have mixed signs and the median does not approach the 15% threshold; the observed variation cannot support a scoped-tracepoint promotion claim"
+  },
+  "decision": "Do not implement the per-platform-TID perf-event attachment prototype. Retain the global raw sys_enter tracepoint and revisit only with a materially different host-noise hypothesis.",
+  "dimensions": {
+    "capture_domain_validity": "complete_for_target",
+    "transport_completeness": "complete_for_target",
+    "attribution_coverage": "complete_for_target",
+    "dictionary_integrity": "complete_for_target",
+    "lifecycle_validity": "complete_for_target",
+    "runtime_overhead": "measured_but_inconclusive_for_promotion"
+  },
+  "evidence_integrity": "complete",
+  "performance_gate": "rejected",
+  "policy_eligibility": false,
+  "limitations": [
+    "The worker is an intentionally dependency-free syscall-rate probe, not an application-wide node-load simulator.",
+    "The failure to meet the promotion gate is sufficient to reject the risky scoped-attachment prototype; it is not proof that global attachment has zero cost on every kernel or workload."
+  ]
+}

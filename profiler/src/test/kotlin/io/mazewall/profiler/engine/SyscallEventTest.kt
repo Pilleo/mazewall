@@ -1,6 +1,11 @@
-package io.mazewall.profiler.engine
-
-import io.mazewall.core.Tid
+package io.mazewall.profiler.internal.engine
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.*
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
@@ -51,7 +56,7 @@ class SyscallEventTest {
     fun `test defensive copy isolates event from mutable input list modifications`() {
         val mutableArgs = mutableListOf(1L, 2L)
         val mutablePaths = mutableListOf("/etc/passwd")
-        val mutableStackTrace = mutableListOf("io.mazewall.Test.run(Test.kt:10)")
+        val mutableStackTrace = mutableListOf("io.mazewall.enforcer.api.Test.run(Test.kt:10)")
 
         val event = SyscallEvent<SyscallEventState.Raw>(
             tid = Tid(100),
@@ -65,11 +70,11 @@ class SyscallEventTest {
 
         mutableArgs.add(3L)
         mutablePaths.add("/etc/shadow")
-        mutableStackTrace.add("io.mazewall.Test.main(Test.kt:20)")
+        mutableStackTrace.add("io.mazewall.enforcer.api.Test.main(Test.kt:20)")
 
         assertEquals(listOf(1L, 2L), event.args)
         assertEquals(listOf("/etc/passwd"), event.paths)
-        assertEquals(listOf("io.mazewall.Test.run(Test.kt:10)"), event.stackTrace)
+        assertEquals(listOf("io.mazewall.enforcer.api.Test.run(Test.kt:10)"), event.stackTrace)
         assertEquals(true, set.contains(event), "Hash-based set should retain stable lookup after caller mutates original lists")
     }
 

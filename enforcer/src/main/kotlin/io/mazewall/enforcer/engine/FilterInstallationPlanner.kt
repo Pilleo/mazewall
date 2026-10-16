@@ -1,15 +1,15 @@
 package io.mazewall.enforcer.engine
 
-import io.mazewall.PolicyBuilder
-import io.mazewall.PolicyDefinition
-import io.mazewall.PolicyScope
-import io.mazewall.core.SeccompAction
-import io.mazewall.core.Syscall
 import io.mazewall.enforcer.*
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.api.PolicyBuilder
+import io.mazewall.enforcer.api.PolicyDefinition
+import io.mazewall.enforcer.api.PolicyScope
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
 import io.mazewall.enforcer.state.*
+import io.mazewall.platform.syscall.SeccompAction
+import io.mazewall.platform.syscall.Syscall
 import java.util.logging.Logger
 
 /**

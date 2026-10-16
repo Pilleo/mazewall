@@ -1,19 +1,27 @@
 package io.mazewall.profiler.internal
-
-import io.mazewall.LinuxNative
-import io.mazewall.MockNativeEngine
-import io.mazewall.MockNativeMemory
-import io.mazewall.core.FdOwnership
-import io.mazewall.core.FdState
-import io.mazewall.core.FileDescriptor
-import io.mazewall.core.FileDescriptorRole
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.enforcer.api.MockNativeMemory
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.TestFileDescriptors
+import io.mazewall.platform.native.*
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.syscall.*
+import io.mazewall.profiler.api.*
+import io.mazewall.profiler.api.ObservationConstructorContract
+import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
+import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 
@@ -40,16 +48,18 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val result = stream.read()
                 assertEquals(0x42, result)
                 assertEquals(3, attempts)
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -75,18 +85,20 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 val result = stream.read(buffer)
                 assertEquals(1, result)
                 assertEquals(0x42.toByte(), buffer[0])
                 assertEquals(3, attempts)
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -105,10 +117,14 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 Thread.currentThread().interrupt()
                 try {
                     stream.read()
@@ -120,8 +136,6 @@ class NativeSocketInputStreamTest {
                     Thread.interrupted()
                 }
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -140,10 +154,14 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 Thread.currentThread().interrupt()
                 try {
@@ -156,8 +174,6 @@ class NativeSocketInputStreamTest {
                     Thread.interrupted()
                 }
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -181,10 +197,14 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 try {
                     stream.read()
                     fail("Expected InterruptedIOException from sleep interruption")
@@ -194,8 +214,6 @@ class NativeSocketInputStreamTest {
                     Thread.interrupted()
                 }
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -213,20 +231,22 @@ class NativeSocketInputStreamTest {
                 }
             },
         )
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 assertEquals(-1, stream.read())
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
-    fun `read should return -1 on non-EINTR error`() {
+    fun `read should report a non-EINTR error instead of treating it as EOF`() {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 override fun read(
@@ -238,14 +258,17 @@ class NativeSocketInputStreamTest {
                 }
             },
         )
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
-                assertEquals(-1, stream.read())
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
+                val failure = assertThrows(IOException::class.java) { stream.read() }
+                assertTrue(failure.message.orEmpty().contains("errno=22 (EINVAL)"))
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -253,7 +276,12 @@ class NativeSocketInputStreamTest {
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
     fun `bulk read with length 0 should return 0`() {
         NativeArena.ofConfined().use { arena ->
-            val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+            val stream = NativeSocketInputStream(
+                TestFileDescriptors
+                .replace<FileDescriptorRole.Generic>(1),
+                arena,
+                MockNativeMemory(),
+            )
             val buffer = ByteArray(5)
             assertEquals(0, stream.read(buffer, 0, 0))
         }
@@ -273,21 +301,23 @@ class NativeSocketInputStreamTest {
                 }
             },
         )
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(5)
                 assertEquals(-1, stream.read(buffer))
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
     @Test
     @Timeout(value = 5, unit = TimeUnit.SECONDS)
-    fun `bulk read should return -1 on non-EINTR error`() {
+    fun `bulk read should report a non-EINTR error instead of treating it as EOF`() {
         val mock = MockNativeEngine(
             memory = object : MockNativeMemory() {
                 override fun read(
@@ -299,15 +329,18 @@ class NativeSocketInputStreamTest {
                 }
             },
         )
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(5)
-                assertEquals(-1, stream.read(buffer))
+                val failure = assertThrows(IOException::class.java) { stream.read(buffer) }
+                assertTrue(failure.message.orEmpty().contains("errno=22 (EINVAL)"))
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -333,15 +366,17 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 assertEquals(0x42, stream.read())
                 assertEquals(6, callCount)
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -367,17 +402,19 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 assertEquals(1, stream.read(buffer))
                 assertEquals(0x42.toByte(), buffer[0])
                 assertEquals(6, callCount)
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 
@@ -401,10 +438,14 @@ class NativeSocketInputStreamTest {
             },
         )
 
-        LinuxNative.setEngine(mock)
-        try {
+        run {
             NativeArena.ofConfined().use { arena ->
-                val stream = NativeSocketInputStream(FileDescriptor.replace<FileDescriptorRole.Generic>(1), arena)
+                val stream = NativeSocketInputStream(
+                    TestFileDescriptors
+                    .replace<FileDescriptorRole.Generic>(1),
+                        arena,
+                    mock.memory,
+                )
                 val buffer = ByteArray(1)
                 try {
                     stream.read(buffer)
@@ -415,8 +456,6 @@ class NativeSocketInputStreamTest {
                     Thread.interrupted()
                 }
             }
-        } finally {
-            LinuxNative.resetToDefault()
         }
     }
 }

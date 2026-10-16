@@ -1,4 +1,4 @@
-package io.mazewall
+package io.mazewall.enforcer.api
 
 import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
@@ -7,6 +7,13 @@ import io.kotest.property.arbitrary.boolean
 import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.stringPattern
 import io.kotest.property.checkAll
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 
@@ -19,7 +26,7 @@ class PolicyCombinePropertyTest {
         val writes = Arb.list(pathArb, 0..3).bind()
         val enforce = Arb.boolean().bind()
 
-        val builder = Policy.builder()
+        val builder = WorkerPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE)
         reads.forEach { builder.allowFsRead(it) }
         writes.forEach { builder.allowFsWrite(it) }
         // If we force enforce, we need at least one path to avoid the "collapse to empty" warning turning into a hard block
@@ -62,8 +69,8 @@ class PolicyCombinePropertyTest {
     }
 
     private fun isParentOrEqual(
-        parent: io.mazewall.core.SandboxedPath,
-        child: io.mazewall.core.SandboxedPath,
+        parent: io.mazewall.platform.lifecycle.SandboxedPath,
+        child: io.mazewall.platform.lifecycle.SandboxedPath,
     ): Boolean {
         val p = parent.value
         val c = child.value

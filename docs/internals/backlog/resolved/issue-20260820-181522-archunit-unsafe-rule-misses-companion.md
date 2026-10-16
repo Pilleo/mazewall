@@ -17,10 +17,10 @@ paperclip_identifier: MAZ-483
 
 # 🟡 [Severity: MEDIUM]: ArchUnit FileDescriptor.unsafe production ban does not match Companion calls
 
-**Context:** `ArchitectureTest.fileDescriptorUnsafeMustNotBeUsedInProduction` rejects calls whose target owner is assignable to `FileDescriptor` and whose name is `unsafe`. Kotlin compiles `FileDescriptor.unsafe(...)` onto `io.mazewall.core.FileDescriptor$Companion` (`unsafe` / `unsafe$default`), not onto `FileDescriptor` itself. `javap` of `FileDescriptor$Companion.class` and of `SupervisorInstaller` (unixSocket `$default` on Companion) confirm this ABI. The predicate therefore never matches, so the new production ban is a no-op even if `unsafe()` is reintroduced in `io.mazewall` main sources.
+**Context:** `ArchitectureTest.fileDescriptorUnsafeMustNotBeUsedInProduction` rejects calls whose target owner is assignable to `FileDescriptor` and whose name is `unsafe`. Kotlin compiles `FileDescriptor.unsafe(...)` onto `io.mazewall.platform.fd.FileDescriptor$Companion` (`unsafe` / `unsafe$default`), not onto `FileDescriptor` itself. `javap` of `FileDescriptor$Companion.class` and of `SupervisorInstaller` (unixSocket `$default` on Companion) confirm this ABI. The predicate therefore never matches, so the new production ban is a no-op even if `unsafe()` is reintroduced in `io.mazewall` main sources.
 
 **Needed:**
-1. Match `FileDescriptor$Companion` (and `$default` synthetic) in the ArchUnit predicate, e.g. owner name `io.mazewall.core.FileDescriptor$Companion` and method name `unsafe` or `unsafe$default`.
+1. Match `FileDescriptor$Companion` (and `$default` synthetic) in the ArchUnit predicate, e.g. owner name `io.mazewall.platform.fd.FileDescriptor$Companion` and method name `unsafe` or `unsafe$default`.
 2. Add a regression: a comment or a checked example so a deliberate `FileDescriptor.unsafe` in a production `io.mazewall` class fails the rule (temporary fixture class under `src/main` is not required if ArchUnit’s `expectViolation` / a dedicated analyzed package is used).
 3. Keep test sources excluded (`DoNotIncludeTests`); tests may still call `unsafe` until they migrate.
 

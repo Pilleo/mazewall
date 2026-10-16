@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "policy_eligibility": false,
+  "archives": {
+    "short_matched": {
+      "path": "docs/internals/evidence/tier-e-split-matched-20260922/raw-five-fork.tar.zst",
+      "sha256": "50de23bdb8c019b57b1fa0b532782cfc9bc4515b3274781ea1e6eddd2cc96a38",
+      "matched_rows": 35
+    },
+    "fault_discovery": {
+      "path": "docs/internals/evidence/tier-e-hybrid-20260923/fault-fifteen-discovery.tar.zst",
+      "sha256": "2d7554a16517ec5142f9f84b09725dc09d89c637e64a1fb9c7e50120277f3b23",
+      "matched_rows": 30
+    },
+    "native_live_fault": {
+      "path": "docs/internals/evidence/tier-e-native-live-admission-20260923/sustained-live-five.tar.zst",
+      "sha256": "2fc00d8f7540b97ae8d673e82872ba1c25128f1d75d59cdd741196b924e4fa2e",
+      "matched_rows": 10
+    }
+  }
+}

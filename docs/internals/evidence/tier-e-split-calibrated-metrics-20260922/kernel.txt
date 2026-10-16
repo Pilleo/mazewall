@@ -1,0 +1,1 @@
+Linux leanid-nitroanv1541 7.2.4-x64v3-xanmod1 #0~20260907.g48995b0 SMP PREEMPT_DYNAMIC Mon Sep  7 19:39:22 UTC x86_64 GNU/Linux

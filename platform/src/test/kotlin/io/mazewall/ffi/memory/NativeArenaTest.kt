@@ -1,5 +1,13 @@
 package io.mazewall.ffi.memory
 
+import io.mazewall.*
+import io.mazewall.enforcer.api.*
+import io.mazewall.platform.fd.*
+import io.mazewall.platform.lifecycle.*
+import io.mazewall.platform.native.*
+import io.mazewall.platform.process.*
+import io.mazewall.platform.socket.*
+import io.mazewall.platform.syscall.*
 import org.junit.jupiter.api.Test
 import java.lang.foreign.ValueLayout
 import kotlin.test.assertEquals
@@ -17,6 +25,8 @@ class NativeArenaTest {
         assertEquals(16L, segment.byteSize())
         assertTrue(segment is ConfinedSegment)
 
+        arena.close()
+        assertFalse(arena.isAlive)
         arena.close()
         assertFalse(arena.isAlive)
     }

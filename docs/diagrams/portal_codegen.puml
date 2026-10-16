@@ -1,0 +1,33 @@
+@startuml
+title Explicit portal host and worker compilation
+skinparam componentStyle rectangle
+component "Compiled service API" as api
+component "Validated immutable schema\nwire IDs + boundary readers" as schema
+component "Atomic output publisher" as publisher
+component "assemble / build\n(worker opt-in)" as build
+package "Host main source set / jar" {
+  component "Generated host stub" as stub
+}
+package "Explicit worker source set / portalWorkerJar" {
+  component "Guest implementation" as guest
+  component "Generated dispatcher" as dispatcher
+  artifact "META-INF/mazewall/portal/<service>" as descriptor
+}
+component "Worker defining classloader" as loader
+component "Immutable dispatcher table" as table
+api --> schema
+schema --> publisher
+publisher --> stub
+publisher --> dispatcher
+publisher --> descriptor
+build --> dispatcher : compile and package worker artifact
+dispatcher --> guest
+descriptor --> loader
+loader --> dispatcher : validate before guest construction
+dispatcher --> table : method handlers
+note bottom of schema
+ReadFd: direct inbound parameters only
+Kotlin: constructor-backed properties
+Java records: validated component methods
+end note
+@enduml

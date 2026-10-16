@@ -1,8 +1,10 @@
 package io.mazewall;
 
-import io.mazewall.core.SandboxedPath;
-import io.mazewall.core.SeccompAction;
-import io.mazewall.core.Syscall;
+import io.mazewall.enforcer.api.*;
+import io.mazewall.enforcer.api.execution.*;
+import io.mazewall.platform.lifecycle.SandboxedPath;
+import io.mazewall.platform.syscall.SeccompAction;
+import io.mazewall.platform.syscall.Syscall;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -20,26 +22,16 @@ class MazewallJavaApiTest {
 
     @Test
     void testPresetsAccess() {
-        assertNotNull(Mazewall.PURE_COMPUTE);
-        assertNotNull(Mazewall.PURE_COMPUTE_UNSAFE);
-        assertNotNull(Mazewall.NO_NETWORK);
-        assertNotNull(Mazewall.NO_EXEC);
-        assertNotNull(Mazewall.NO_EXEC_NO_FS_WRITE);
-        assertNotNull(Mazewall.DEFAULT_SAFE);
-
-        // Also test functional preset accessors
-        assertNotNull(Mazewall.pureCompute());
-        assertNotNull(Mazewall.pureComputeUnsafe());
-        assertNotNull(Mazewall.noNetwork());
-        assertNotNull(Mazewall.noExec());
-        assertNotNull(Mazewall.noExecNoFsWrite());
-        assertNotNull(Mazewall.defaultSafe());
+        assertNotNull(Policy.PURE_COMPUTE);
+        assertNotNull(Policy.PURE_COMPUTE_UNSAFE);
+        assertNotNull(Policy.NO_NETWORK);
+        assertNotNull(Policy.NO_EXEC_HOTSPOT);
     }
 
     @Test
     void testJavaPolicyBuilderThreadLocal() {
-        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = Mazewall.threadLocalBuilder()
-                .base(Mazewall.pureCompute())
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+                .base(Policy.PURE_COMPUTE)
                 .defaultAction(SeccompAction.ACT_ALLOW.INSTANCE)
                 .allow(Syscall.READ, Syscall.WRITE)
                 .unblock(Syscall.OPENAT)
@@ -67,11 +59,11 @@ class MazewallJavaApiTest {
 
     @Test
     void testJavaPolicyBuilderProcessWide() {
-        Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> processPolicy = Mazewall.builder()
-                .base(Mazewall.pureComputeUnsafe())
+        Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> processPolicy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
+                .base(Policy.PURE_COMPUTE_UNSAFE)
                 .defaultAction(SeccompAction.ACT_ALLOW.INSTANCE)
                 .allow(Syscall.GETPID)
-                .buildProcessWide();
+                .build();
 
         assertNotNull(processPolicy);
         assertTrue(processPolicy.isSyscallAllowed(Syscall.GETPID));
@@ -79,87 +71,91 @@ class MazewallJavaApiTest {
     }
 
     @Test
-    void testProcessWideDisallowsFsRules() {
-        JavaPolicyBuilder builder = Mazewall.builder().allowFsRead("/tmp");
-        assertThrows(IllegalStateException.class, builder::buildProcessWide);
+    void testWorkerFilesystemMutationRetainsIgnoredResult() {
+        WorkerPolicyBuilder builder = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT);
+        builder.allowFsRead("/tmp");
+        assertEquals(1, builder.build().getAllowedFsReadPaths().size());
     }
 
     @Test
     void testCombinePolicies() {
-        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p1 = Mazewall.threadLocalBuilder()
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p1 = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
                 .allow(Syscall.READ)
                 .build();
-        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p2 = Mazewall.threadLocalBuilder()
+        Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> p2 = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
                 .allow(Syscall.WRITE)
                 .build();
 
         Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> combined =
-                Mazewall.combineThreadLocal(p1, p2);
+                Policy.restrictFurtherWith(p1, p2);
         assertNotNull(combined);
     }
 
     @Test
-    void testRunContainedWithCallableAndSupplier() {
-        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS");
-        try {
-            // We use PURE_COMPUTE_UNSAFE as mock/dry-run baseline
-            Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
-
-            String callableResult = Mazewall.runContained(policy, (Callable<String>) () -> "successCallable");
+    void testCanonicalCallableEntryIsUnambiguous() {
+        try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
+            InProcessDomain domain = runtime.prepare(WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(), new DomainLimits(1, 1));
+            String callableResult = Mazewall.callContained(runtime, domain, () -> "successCallable");
             assertEquals("successCallable", callableResult);
-
-            String supplierResult =
-                    Mazewall.runContained(policy, (java.util.function.Supplier<String>) () -> "successSupplier");
-            assertEquals("successSupplier", supplierResult);
-
-            AtomicInteger runCount = new AtomicInteger(0);
-            Mazewall.runContained(policy, (Runnable) runCount::incrementAndGet);
-            assertEquals(1, runCount.get());
         } finally {
-            System.clearProperty("io.mazewall.fallback");
+            OwnedRuntimeJavaTestSupport.reset();
+        }
+    }
+
+    @Test
+    void testExplicitCustomPreparationKeepsUncastCallableEntry() {
+        try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
+            AtomicInteger captures = new AtomicInteger();
+            Thread caller = Thread.currentThread();
+            StacktraceScopingPolicy scoping = () -> {
+                assertSame(caller, Thread.currentThread());
+                captures.incrementAndGet();
+                return java.util.Map.of();
+            };
+            InProcessDomain domain = runtime.prepare(
+                    WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(),
+                    new DomainLimits(1, 1), scoping);
+            assertEquals("custom-owned", Mazewall.callContained(runtime, domain, () -> "custom-owned"));
+            assertEquals(1, captures.get());
+        } finally {
+            OwnedRuntimeJavaTestSupport.reset();
         }
     }
 
     @Test
     void testContainedExecutors() throws Exception {
-        System.setProperty("io.mazewall.fallback", "SILENT_BYPASS");
-        try {
-            Policy<PolicyScope.ProcessWideSafe, PolicyState.Uncompiled> policy = Mazewall.pureComputeUnsafe();
-
-            ExecutorService singleThreadExecutor = Mazewall.newContainedSingleThreadExecutor(policy);
-            try {
-                Future<Integer> future = singleThreadExecutor.submit(() -> 42);
-                assertEquals(42, future.get());
-            } finally {
-                singleThreadExecutor.shutdown();
-            }
-
-            ExecutorService fixedPool = Mazewall.newContainedFixedThreadPool(2, policy);
-            try {
-                Future<String> future = fixedPool.submit(() -> "fixed");
-                assertEquals("fixed", future.get());
-            } finally {
-                fixedPool.shutdown();
-            }
-
-            ExecutorService cachedPool = Mazewall.newContainedCachedThreadPool(policy);
-            try {
-                Future<String> future = cachedPool.submit(() -> "cached");
-                assertEquals("cached", future.get());
-            } finally {
-                cachedPool.shutdown();
-            }
-
-            ExecutorService custom = Executors.newSingleThreadExecutor();
-            try {
-                ExecutorService wrapped = Mazewall.wrapContainedExecutor(custom, policy);
-                Future<String> future = wrapped.submit(() -> "wrapped");
-                assertEquals("wrapped", future.get());
-            } finally {
-                custom.shutdown();
-            }
+        try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
+            InProcessDomain domain = runtime.prepare(WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(), new DomainLimits(2, 2));
+            InvocationHandle<String> invocation = runtime.submit(domain, () -> "owned");
+            assertEquals("owned", invocation.result().toCompletableFuture().get());
+            assertInstanceOf(ExecutionEnd.Finished.class, invocation.executionEnd().toCompletableFuture().get());
         } finally {
-            System.clearProperty("io.mazewall.fallback");
+            OwnedRuntimeJavaTestSupport.reset();
+        }
+    }
+
+    @Test
+    void applicationDeclaredMetadataUsesExistingUncastCallableEntry() {
+        var context = new ThreadLocal<java.util.Map<String, String>>();
+        try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
+            // Synchronous result delivery may precede executionEnd; keep one worker with two bounded admissions.
+            InProcessDomain domain = runtime.prepare(WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(), new DomainLimits(1, 2));
+            var mutable = new java.util.HashMap<String, String>();
+            mutable.put("request", "captured");
+            context.set(mutable);
+            InvocationContextBridge bridge = () -> new InvocationContextSnapshot(context.get(), metadata -> {
+                var prior = context.get();
+                context.set(metadata);
+                return () -> { if (prior == null) context.remove(); else context.set(prior); };
+            });
+            Callable<String> captured = runtime.captureInvocation(domain, bridge, () -> context.get().get("request"));
+            mutable.put("request", "changed");
+            assertEquals("captured", Mazewall.callContained(runtime, domain, captured));
+            assertEquals("changed", context.get().get("request"));
+            assertNull(Mazewall.callContained(runtime, domain, () -> context.get()));
+        } finally {
+            context.remove();
+            OwnedRuntimeJavaTestSupport.reset();
         }
     }
 
@@ -167,17 +163,28 @@ class MazewallJavaApiTest {
     void testInstallationReceiptAccessors() {
         InstallationReceipt receipt = new InstallationReceipt(
                 true,
-                io.mazewall.PolicyPresets.INSTANCE.NO_EXEC,
-                null,
+                io.mazewall.enforcer.api.PolicyPresets.INSTANCE.NO_EXEC,
                 12345L,
                 true,
                 Platform.configuredFallback(),
-                false
+                false,
+                null,
+                null,
+                CetOutcome.NOT_REQUESTED
         );
 
         assertTrue(receipt.getInstalled());
         assertTrue(receipt.getProcessWide());
         assertFalse(receipt.getLandlockApplied());
         assertEquals(12345L, receipt.getTimestampMillis());
+    }
+
+    @Test
+    void testJavaInstallationApiReturnsReceiptOnly() {
+        assertTrue(
+                java.util.Arrays.stream(ContainedExecutors.class.getDeclaredMethods())
+                        .filter(method -> method.getName().startsWith("install"))
+                        .allMatch(method -> method.getReturnType().equals(InstallationReceipt.class))
+        );
     }
 }
