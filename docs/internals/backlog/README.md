@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 142 | *Total Resolved Issues:* 694
+*Total Active Issues:* 143 | *Total Resolved Issues:* 694
 
-Active status detail: 141 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 142 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |
 | Archived [issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi](resolved/issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi.md) | Recover broker cleanup regression controls from historical worktrees | high | core |
 | [issue-20261016-015032-003-repair-first-time-library-installation-guidance](issue-20261016-015032-003-repair-first-time-library-installation-guidance.md) | Repair first-time library installation guidance | high | core |
 | Archived [issue-20261016-010021-700-allow-bounded-result-and-execution-end-overlap-in-](resolved/issue-20261016-010021-700-allow-bounded-result-and-execution-end-overlap-in-.md) | Allow bounded result and execution-end overlap in Java metadata fixture | high | core |
