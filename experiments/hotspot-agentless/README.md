@@ -165,11 +165,18 @@ build/mw-experiment-tools verify-runtime /absolute/case/manifest.json /absolute/
 build/mw-experiment-tools verify-loom /absolute/case/oracle.jsonl /absolute/case/capture.jsonl
 ```
 
-Each candidate retains its actual VM flags, logs, capture and verdict. Carrier-only
-virtual observations stay carrier-only, and every candidate remains explicitly
+Each candidate retains its actual VM flags, logs, capture and verdict. `verify-loom`
+requires the independent `identity.json` beside its oracle (live target PID, birth
+ticks and full fixture root); it does not infer expected identity from capture.
+Both verifiers require a complete bounded schema1 stream with paired terminals and
+final counters. Application prefixes use exact renderer owner/method names.
+Carrier-only virtual observations stay carrier-only, and every candidate remains explicitly
 non-production-qualified. Oracle route checks do not establish a metadata lifetime
-lease. Capture/file/command failures abort acquisition; bounded cleanup removes
-only containers whose IDs were acquired by the current invocation.
+lease. Capture/file/command failures abort acquisition. Named/session-labelled
+create requests retain actual receipts and ambiguous outcomes. Bounded cleanup
+checks remote absence, joins every local wrapper and retains errors/pending handles
+in `cleanup.json`; results are published only after successful retirement. An empty
+query after an ambiguous create does not prove that a late acquisition is retired.
 
 ```bash
 DOCKER_HOST=unix:///var/run/docker.sock make benchmark-fixture benchmark-report build

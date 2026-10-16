@@ -160,15 +160,68 @@ func HashFile(path string) (string, error) {
 }
 
 func RemoveOwned(d Docker, ids ...string) error {
-	var failure error
+	_, failure := RetireOwned(d, time.Now().Add(20*time.Second), ids...)
+	return failure
+}
+
+func ValidContainerID(id string) bool {
+	if len(id) != 64 || strings.ToLower(id) != id {
+		return false
+	}
+	_, err := hex.DecodeString(id)
+	return err == nil
+}
+
+type commandOutput interface {
+	Output(time.Duration, ...string) (string, error)
+}
+
+// An rm acknowledgement or local client exit is not proof of remote absence.
+func RetireOwned(d commandOutput, deadline time.Time, ids ...string) (pending []string, failure error) {
+	call := func(args ...string) (string, error) {
+		left := time.Until(deadline)
+		if left <= 0 {
+			return "", context.DeadlineExceeded
+		}
+		return d.Output(min(5*time.Second, left), args...)
+	}
+	present := func(id string) (bool, error) {
+		text, err := call("ps", "-a", "--no-trunc", "--filter", "id="+id, "--format", "{{.ID}}")
+		if err != nil {
+			return false, err
+		}
+		values := strings.Fields(text)
+		if len(values) == 0 {
+			return false, nil
+		}
+		if len(values) != 1 || values[0] != id {
+			return false, fmt.Errorf("ambiguous remote identity for %s: %q", id, text)
+		}
+		return true, nil
+	}
 	for _, id := range ids {
-		if strings.TrimSpace(id) == "" {
+		if id == "" {
 			continue
 		}
-		_, err := d.Output(20*time.Second, "rm", "-f", id)
+		if !ValidContainerID(id) {
+			pending = append(pending, id)
+			failure = errors.Join(failure, fmt.Errorf("invalid owned container receipt %q", id))
+			continue
+		}
+		found, err := present(id)
 		failure = errors.Join(failure, err)
+		if found || err != nil {
+			_, err = call("rm", "-f", id)
+			failure = errors.Join(failure, err)
+			found, err = present(id)
+			failure = errors.Join(failure, err)
+		}
+		if found || err != nil {
+			pending = append(pending, id)
+			failure = errors.Join(failure, fmt.Errorf("remote retirement unproved: %s", id))
+		}
 	}
-	return failure
+	return pending, failure
 }
 
 func NewDirectory(parent, prefix string) (string, error) {

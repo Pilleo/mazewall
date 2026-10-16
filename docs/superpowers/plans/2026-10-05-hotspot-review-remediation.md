@@ -94,21 +94,21 @@ Task5 depends on all four. Keep each fix independently reviewable.
 The migrated Go runner already joins removal errors. Check its remaining gaps
 instead of reimplementing the retired Python cleanup.
 
-- [ ] Fault-test failed/timed-out removal/query, permission failure, ambiguous
+- [x] Fault-test failed/timed-out removal/query, permission failure, ambiguous
   create, still-listed receipts, wrapper join/kill failure and a primary failure.
-- [ ] Acquire through named/session-labelled `docker create` and validate64hex
+- [x] Acquire through named/session-labelled `docker create` and validate64hex
   receipts before start. Retain ambiguous acquisition requests; recover only by
   matching name plus session label, never remove an unrelated name.
-- [ ] Within bounded retirement, attempt every acquired remote owner and every
+- [x] Within bounded retirement, attempt every acquired remote owner and every
   local wrapper, even after another cleanup operation fails. Successful retirement
   needs a successful absence query, not only rm or local process exit.
-- [ ] Retain pending remote receipts/acquisitions and actual wrapper handles in
+- [x] Retain pending remote receipts/acquisitions and actual wrapper handles in
   memory; cleanup.json records IDs/PIDs/status and error details. Preserve original
   error objects with Go error chaining, including permission/cancellation causes.
   Later confirmed absence can clear pending ownership but cannot erase an rm error.
-- [ ] Publish case result only after retirement. Cleanup failure cannot mask the
+- [x] Publish case result only after retirement. Cleanup failure cannot mask the
   primary error or produce success. Preserve native/public task budgets.
-- [ ] Run deterministic host faults and explicit rootful named-container lifecycle,
+- [x] Run deterministic host faults and explicit rootful named-container lifecycle,
   inspect actual absence and all exits before live candidate reruns.
 
 ## Task4: Per-CPU contradiction refusal (R4)
