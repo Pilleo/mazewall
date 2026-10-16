@@ -68,66 +68,87 @@ class ProcessBrokerIntegrationTest {
     @Test
     fun `failed launch preserves ordinary and fatal identity and closes actual listener once`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
-        for (primary in listOf(java.io.IOException("launch denied"), AssertionError("fatal launch"))) {
-            val listeners = mutableListOf<io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>>()
-            val closed = mutableListOf<io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>>()
-            val paths = mutableListOf<String>()
-            val launches = AtomicInteger()
-            val sockets = object : io.mazewall.platform.socket.SocketManager by io.mazewall.platform.socket.RealSocketManager {
-                override fun createUnixServer(
-                    socketPath: String,
-                ): io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned> =
-                    io.mazewall.platform.socket.RealSocketManager.createUnixServer(socketPath).also {
-                        listeners.add(it)
-                        paths.add(socketPath)
-                    }
+        for (fatalLaunch in listOf(false, true)) {
+            for (cleanupFailure in listOf(null, java.io.IOException("listener close denied"), AssertionError("fatal listener close"))) {
+                val primary = if (fatalLaunch) AssertionError("fatal launch") else java.io.IOException("launch denied")
+                val listeners = mutableListOf<io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>>()
+                val closed = mutableListOf<io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>>()
+                val paths = mutableListOf<String>()
+                val launches = AtomicInteger()
+                val closeAttempts = AtomicInteger()
+                var rejectedOwner: FileDescriptor<*, FdState.Open, FdOwnership.Owned>? = null
+                val sockets = object : io.mazewall.platform.socket.SocketManager by io.mazewall.platform.socket.RealSocketManager {
+                    override fun createUnixServer(
+                        socketPath: String,
+                    ): io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned> =
+                        io.mazewall.platform.socket.RealSocketManager.createUnixServer(socketPath).also {
+                            listeners.add(it)
+                            paths.add(socketPath)
+                        }
 
-                override fun close(fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>) {
-                    io.mazewall.platform.socket.RealSocketManager
-                        .close(fd)
-                    closed.add(fd)
+                    override fun close(fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>) {
+                        if (closeAttempts.incrementAndGet() == 1 && cleanupFailure != null) {
+                            rejectedOwner = fd
+                            throw cleanupFailure
+                        }
+                        io.mazewall.platform.socket.RealSocketManager
+                            .close(fd)
+                        closed.add(fd)
+                    }
                 }
-            }
-            val launcher = object : ProcessLauncher by RealProcessLauncher {
-                override fun startProcess(
-                    args: List<String>,
-                    redirectErrorStream: Boolean,
-                    preparation: io.mazewall.platform.process.JvmLaunchPreparation,
-                ): Process {
-                    launches.incrementAndGet()
-                    throw primary
+                val launcher = object : ProcessLauncher by RealProcessLauncher {
+                    override fun startProcess(
+                        args: List<String>,
+                        redirectErrorStream: Boolean,
+                        preparation: io.mazewall.platform.process.JvmLaunchPreparation,
+                    ): Process {
+                        launches.incrementAndGet()
+                        throw primary
+                    }
                 }
-            }
-            val broker = ProcessBroker(launcher = launcher, sockets = sockets)
-            try {
-                val result = runCatching { broker.start() }
-                assertSame(primary, result.exceptionOrNull(), "failed launch must preserve the exact primary throwable")
-                assertEquals(1, launches.get(), "failure must occur at the actual launcher boundary")
-                assertEquals(1, listeners.size)
-                assertEquals(1, closed.size)
-                assertSame(listeners.single(), closed.single(), "close must consume the actual acquired listener")
-                assertFalse(
-                    Files.exists(
-                        java.nio.file.Path
-                    .of(paths.single()),
-                    ),
+                val broker = ProcessBroker(launcher = launcher, sockets = sockets)
+                try {
+                    val result = runCatching { broker.start() }
+                    val expected = if (cleanupFailure is Error && primary !is Error) cleanupFailure else primary
+                    assertSame(expected, result.exceptionOrNull(), "actual startup Result must preserve cleanup precedence and exact identity")
+                    if (cleanupFailure != null) {
+                        assertEquals(1, expected.suppressed.size)
+                        assertSame(if (expected === primary) cleanupFailure else primary, expected.suppressed.single())
+                        assertSame(listeners.single(), rejectedOwner, "pre-native failure must belong to the actual acquired listener")
+                    }
+                    assertEquals(1, launches.get(), "failure must occur at the actual launcher boundary")
+                    assertEquals(1, listeners.size)
+                    assertEquals(1, closeAttempts.get(), "startup rollback must attempt the listener cleanup")
+                    assertEquals(if (cleanupFailure == null) 1 else 0, closed.size)
+                    if (cleanupFailure == null) assertSame(listeners.single(), closed.single(), "close must consume the actual acquired listener")
+                    assertFalse(
+                        Files.exists(
+                            java.nio.file.Path
+                                .of(paths.single()),
+                        ),
                         "rollback must unlink the actual socket",
-                )
-                assertFalse(
-                    Files.exists(
-                        java.nio.file.Path
-                    .of(paths.single())
-                    .parent,
-                    ),
+                    )
+                    assertFalse(
+                        Files.exists(
+                            java.nio.file.Path
+                                .of(paths.single())
+                                .parent,
+                        ),
                         "rollback must remove the private endpoint directory",
-                )
+                    )
+                    assertEquals(if (cleanupFailure == null) 0 else 1, broker.provisionalWorkers(), "only the rejected listener owner remains pending after endpoint cleanup")
+                    assertEquals(0, broker.trackedWorkers())
+                    assertEquals(0, broker.spawnedWorkers(), "failed launch must not publish a worker")
+                } finally {
+                    broker.close()
+                }
+                assertEquals(if (cleanupFailure == null) 1 else 2, closeAttempts.get(), "later close retries only the rejected listener")
                 assertEquals(0, broker.provisionalWorkers())
-                assertEquals(0, broker.trackedWorkers())
-                assertEquals(0, broker.spawnedWorkers(), "failed launch must not publish a worker")
-            } finally {
+                assertSame(listeners.single(), closed.single(), "retry must retire the same actual listener owner")
+                assertEquals(1, closed.size, "later broker close must not close the retired listener again")
                 broker.close()
+                assertEquals(if (cleanupFailure == null) 1 else 2, closeAttempts.get(), "completed retirement must not be dispatched again")
             }
-            assertEquals(1, closed.size, "later broker close must not close the retired listener again")
         }
     }
 
@@ -518,6 +539,11 @@ class ProcessBrokerIntegrationTest {
             broker.start()
             val interruptedChild = receipts.children.single()
             val capability = broker.openReadOnly(FIXTURE_ROOT, fixture.fileName.toString())
+            val grantedFdPath = capability.borrow { fd ->
+                java.nio.file.Path.of("/proc/self/fd/${fd.value}").also { path ->
+                    assertEquals(fixture.toRealPath(), Files.readSymbolicLink(path), "native grant must pin the actual fixture")
+                }
+            }
             val borrowEntered = CountDownLatch(1)
             val releaseBorrow = CountDownLatch(1)
             val borrower = CompletableFuture.runAsync {
@@ -543,6 +569,12 @@ class ProcessBrokerIntegrationTest {
             releaseBorrow.countDown()
             borrower.get(2, TimeUnit.SECONDS)
             capability.close()
+            val remainingTarget = try {
+                Files.readSymbolicLink(grantedFdPath)
+            } catch (_: java.nio.file.NoSuchFileException) {
+                null
+            }
+            assertFalse(remainingTarget == fixture.toRealPath(), "actual kernel-issued grant must retire before fixture deletion; integer reuse for another owner is permitted")
             Files.deleteIfExists(fixture)
 
             assertFalse(waiting.isAlive)
