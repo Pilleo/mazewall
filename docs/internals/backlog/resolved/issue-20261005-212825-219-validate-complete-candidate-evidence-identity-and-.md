@@ -1,7 +1,7 @@
 ---
 title: "Validate complete candidate evidence identity and terminal pairing"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -22,8 +22,10 @@ Review reproduces schema99 foreign occurrence IDs and wrong-process carrier reco
 1. Add strict shared schema session nested identity PID birth full path and terminal pairing tests before verifier hardening
 
 **Execution:** Current Go verifier hardening and host/race regressions are recorded
-in the [remediation evidence](../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
-Retained/live packet revalidation remains required before archival.
+in the [remediation evidence](../../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
+Retained runtime and fresh independently bound virtual captures pass final CLI
+revalidation. The full build, ABI gates and seven actual public native cases pass.
+Resolved with complete-stream, typed-presence and unchanged qualification limits.
 
 ---
 <!-- id: issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-  file: issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-.md -->

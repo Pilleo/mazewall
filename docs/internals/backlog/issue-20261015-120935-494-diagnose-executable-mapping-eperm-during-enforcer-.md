@@ -46,5 +46,16 @@ without changing policies or denial assertions. It does not by itself establish
 that every older FutureTask/VarHandle executable-mapping case is resolved; this
 broader item remains open.
 
+## HotSpot remediation worktree observation
+
+Pre-commit `run-414d65775111` reproduced the fatal executable mmap denial on
+GraalVM25.0.4.1.1 in ContainmentDesignSpec, pool-2-thread-1:
+ContainedExecutors.applyBpfFilter -> MethodHandle native-wrapper generation ->
+CodeHeap.expand_by (65536bytes, EPERM). The worktree retains
+`enforcer/hs_err_pid2602181.log`; no enforcer changes were staged. The isolated
+class passes on installed Ubuntu OpenJDK25 (`run-951d09818b2a`), as does the full
+unmodified commit hook (`run-912f155266ca`). This is runtime-comparison evidence,
+not a fix; the broader issue remains open.
+
 ---
 <!-- id: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-  file: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md -->

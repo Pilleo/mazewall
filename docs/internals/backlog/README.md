@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 141 | *Total Resolved Issues:* 698
+*Total Active Issues:* 138 | *Total Resolved Issues:* 702
 
-Active status detail: 140 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 137 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o](issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md) | Retain ambiguous benchmark container acquisition ownership | high | profiler |
 | Archived [issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-](resolved/issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-.md) | Keep container JVM preference outputs outside the source checkout | high | core |
 | Archived [issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only](resolved/issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md) | Qualify optional integrations and expose read-only execution diagnostics | high | core |
 | [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |
@@ -172,10 +173,10 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261006-021624-843-replace-stale-synchronization-waits-with-observabl](issue-20261006-021624-843-replace-stale-synchronization-waits-with-observabl.md) | Replace stale synchronization waits with observable bounded conditions | high | core |
 | [issue-20261006-021323-433-preserve-active-filesystem-intent-and-immutable-po](issue-20261006-021323-433-preserve-active-filesystem-intent-and-immutable-po.md) | Preserve active filesystem intent and immutable policy snapshots | high | enforcer |
 | [issue-20261006-015240-317-repair-aggregate-verification-task-selection-for-c](issue-20261006-015240-317-repair-aggregate-verification-task-selection-for-c.md) | Repair aggregate verification task selection for container projects | high | core |
-| [issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-](issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-.md) | Validate complete candidate evidence identity and terminal pairing | high | profiler |
-| [issue-20261005-212825-569-match-exact-candidate-application-methods-instead-](issue-20261005-212825-569-match-exact-candidate-application-methods-instead-.md) | Match exact candidate application methods instead of substrings | high | profiler |
-| [issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi](issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi.md) | Retain remote candidate cleanup failures and pending container ownership | high | profiler |
-| [issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot](issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot.md) | Reject contradictory per CPU conservation snapshots before aggregation | high | profiler |
+| Archived [issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-](resolved/issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-.md) | Validate complete candidate evidence identity and terminal pairing | high | profiler |
+| Archived [issue-20261005-212825-569-match-exact-candidate-application-methods-instead-](resolved/issue-20261005-212825-569-match-exact-candidate-application-methods-instead-.md) | Match exact candidate application methods instead of substrings | high | profiler |
+| Archived [issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi](resolved/issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi.md) | Retain remote candidate cleanup failures and pending container ownership | high | profiler |
+| Archived [issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot](resolved/issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot.md) | Reject contradictory per CPU conservation snapshots before aggregation | high | profiler |
 | [issue-20261005-193139-440-qualify-pinned-hotspot-jit-and-gc-lifetime-candida](issue-20261005-193139-440-qualify-pinned-hotspot-jit-and-gc-lifetime-candida.md) | Qualify pinned HotSpot JIT and GC lifetime candidates | high | profiler |
 | [issue-20261005-193139-727-qualify-mounted-virtual-thread-identity-and-logica](issue-20261005-193139-727-qualify-mounted-virtual-thread-identity-and-logica.md) | Qualify mounted virtual thread identity and logical scope | high | profiler |
 | [issue-20261005-193140-042-prove-selected-hotspot-event-conservation-and-all-](issue-20261005-193140-042-prove-selected-hotspot-event-conservation-and-all-.md) | Prove selected HotSpot event conservation and all-source loss inventory | high | profiler |

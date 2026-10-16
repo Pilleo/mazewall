@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 8b1f8391df5321e606fef9636f45e68edb98b4e4
-status: in_progress
+status: completed
 ---
 
 # HotSpot Review Remediation Implementation Plan
@@ -74,7 +74,7 @@ Task5 depends on all four. Keep each fix independently reviewable.
 - [x] Record PID/birth from live `/proc/PID/stat` in the runner before collection;
   reuse `preflight.ParseStartTicks`, never derive context from captured events.
 - [x] Run focused candidate/driver race tests. Keep qualification flags false.
-- [ ] Revalidate actual packets and complete issue evidence under Task5.
+- [x] Revalidate actual packets and complete issue evidence under Task5.
 
 ## Task2: Exact application method names (R2)
 
@@ -126,14 +126,14 @@ instead of reimplementing the retired Python cleanup.
 
 ## Task5: Evidence, review and final gates
 
-- [ ] Record observed red/green outputs and current revisions for all four findings.
-- [ ] Revalidate retained runtime manifests/captures with exact method matching.
+- [x] Record observed red/green outputs and current revisions for all four findings.
+- [x] Revalidate retained runtime manifests/captures with exact method matching.
   Old virtual reports lack independent birth/path context: preserve as historical,
   rerun with new identity.json instead of deriving context from those events.
-- [ ] Run affected live harness after R3. Preserve cold native-only/unavailable
+- [x] Run affected live harness after R3. Preserve cold native-only/unavailable
   and readiness failures; inspect summary pairing, all exits and remote absence.
   Missing captured lifetime/mount proofs remain unqualified.
-- [ ] Run focused checks, one connected-code review and final quality gates:
+- [x] Run focused checks, one connected-code review and final quality gates:
 
 ```bash
 # experiments/hotspot-agentless
@@ -144,14 +144,21 @@ go test -race ./internal/accounting
 ./gradlew :profiler:test --tests '*HotSpotRawJsonTest' --tests '*HotSpotWireReaderTest' \
   --tests '*HotSpotResultCompatibilityTest' :profiler:checkKotlinAbi :profiler:checkLegacyAbi
 ./scripts/adkw check-backlog
-./scripts/lint.sh
 git diff --check
 ./gradlew build
 ```
 
-- [ ] Archive each review issue only after its negative regression and affected
+Current Gradle build owns formatting/static-analysis gates; the old lint shell
+entrypoint was retired by the baseline tooling consolidation.
+
+- [x] Archive each review issue only after its negative regression and affected
   positive/native path pass. Update current backlog counts, preserve unrelated rows.
-- [ ] Commit corrected evidence/plan; retain branch/worktree pending operator choice.
+- [x] Prepare corrected evidence/plan; retain branch/worktree pending operator choice.
+
+Completion evidence: [remediation record](../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
+Full build passes with native acceptance enabled: seven public tests, zero skips,
+failures or errors. Canonical active index is138issues (137open/1deferred), with
+702resolved; the separate benchmark and existing executable-mapping issues stay open.
 
 ## Completion and next boundary
 

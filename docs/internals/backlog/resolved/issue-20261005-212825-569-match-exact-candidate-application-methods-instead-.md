@@ -1,7 +1,7 @@
 ---
 title: "Match exact candidate application methods instead of substrings"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -22,8 +22,10 @@ Review reproduces WrongFixture.leafCorrupt and WrongFixture.routeACorrupt counte
 1. Add false-useful route reproductions and parse exact owner method names before ordered comparison
 
 **Execution:** Exact renderer owner/method and ordered-prefix regressions now pass
-in the Go verifier; see [remediation evidence](../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
-Retained packet revalidation remains required before archival.
+in the Go verifier; see [remediation evidence](../../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
+Retained C1/C2/G1 and all six fresh runtime/virtual cases pass exact-name CLI
+revalidation; full build/native/ABI gates pass. Unnamed native frames remain
+unavailable and no complete-stack or lifetime qualification is inferred.
 
 ---
 <!-- id: issue-20261005-212825-569-match-exact-candidate-application-methods-instead-  file: issue-20261005-212825-569-match-exact-candidate-application-methods-instead-.md -->

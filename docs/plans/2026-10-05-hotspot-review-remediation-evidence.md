@@ -134,5 +134,35 @@ acquisition needs the separate [registered follow-up](../internals/backlog/issue
 The existing GraalVM/late-executable-mapping issue also remains open. No additional
 blocking defect remains within the four-finding remediation scope.
 
-Final documentation/quality gates remain in progress.
-Production qualification and whole-collection policy completeness remain false.
+## Final verification (2026-10-17)
+
+Final executable revision: `7a9f454d` (R1 `05c0503b`, R2 `de7f1807`, R3
+`9389cd44`, R4 `34bfe418`, followed by the scoped pathname correction).
+
+- Complete experimental Go host/race suite:158tests/18packages, all pass
+  (`run-6442fdc7539a`). Canonical accounting:6host/race tests pass.
+- Actual named-container lifecycle and actual512openat pressure/sticky-overflow
+  checks execute and pass; they are separate from synthetic fault controls.
+- Final parser CLI revalidation of all six current native captures passes with the
+  table's exact counts (`run-5825d71b9970`), including independent virtual identity.
+- Production readout/wire/compatibility tests and Kotlin/legacy ABI gates pass
+  (`run-6cc465599fa5`).
+- Full `./gradlew build` passes in7m34s (`run-1d6283f8b15d`), using installed Ubuntu
+  OpenJDK25, both rootful endpoint aliases, MW_HOTSPOT_NATIVE_ACCEPTANCE=true and
+  the verified current canonical asset directory. Formatting, static analysis,
+  tests and configured coverage gates pass. No hook, assertion or policy was bypassed.
+- Actual public acceptance XML records7tests,0skipped,0failures,0errors under
+  `profiler/build/test-results/integrationTest/TEST-io.mazewall.profiler.hotspot.HotSpotPublicIntegrationTest.xml`.
+  This includes real permission/startup/target-exit, retention and dense diagnostic
+  outcomes; it does not turn a retained incomplete dense readout into success.
+- The four review issues are archived with evidence. ADK backlog checks pass
+  (`run-93d644366400`); final local link checks pass239references
+  (`run-366102353513`). Canonical recursive metadata confirms137open/1deferred and
+  702resolved; post-archive Gradle validateBacklogIndex passes
+  (`run-c5814d3f51c6`). Whitespace checks pass.
+
+The isolated branch/worktree is retained for operator-controlled review/integration.
+Existing benchmark-acquisition and executable-mapping follow-ups remain open.
+Production lifetime/virtual-parent qualification and whole-collection policy
+completeness remain false; wider providers/runtime/loss integration retain their
+separate approval and proof boundaries.

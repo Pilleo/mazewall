@@ -1,7 +1,7 @@
 ---
 title: "Reject contradictory per CPU conservation snapshots before aggregation"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -23,8 +23,9 @@ Review reproduces CPU1 attempts1 submits2 and CPU2 attempts1 submits0 combining 
 
 **Execution:** The contradictory-tuple regression, six host/race tests and actual
 512openat kernel pressure/overflow proof pass; see
-[remediation evidence](../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
-Final review/gates remain before archival.
+[remediation evidence](../../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
+Full build/native/ABI gates pass. Resolved with per-CPU subtraction before checked
+aggregation; production map binding/all-source completeness remain separate work.
 
 ---
 <!-- id: issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot  file: issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot.md -->
