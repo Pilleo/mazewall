@@ -9,6 +9,25 @@ import org.junit.jupiter.api.Test
 
 class SyscallResultTest {
     @Test
+    fun `native errno adaptation cannot require dynamic JVM bootstrap code`() {
+        val type = LinuxNative.SyscallResult.Error::class.java
+        val resource = "/" + type.name.replace('.', '/') + ".class"
+        val bytes = requireNotNull(type.getResourceAsStream(resource)).use { it.readAllBytes() }
+        val model = java.lang.classfile.ClassFile
+            .of()
+            .parse(bytes)
+        val dynamic = model.methods().filter { it.code().isPresent }.flatMap { method ->
+            method
+                .code()
+                .orElseThrow()
+                .elementList()
+                .filterIsInstance<java.lang.classfile.instruction.InvokeDynamicInstruction>()
+                .map { method.methodName().stringValue() }
+        }
+        assertTrue(dynamic.isEmpty(), "Cold error adaptation must not link executable JVM bootstrap stubs after PROT_EXEC denial: $dynamic")
+    }
+
+    @Test
     fun `map should transform success value`() {
         val success: SyscallResult<Long, *> = SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(10L)
         val mapped = success.map { it * 2 }

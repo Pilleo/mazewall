@@ -114,15 +114,20 @@ internal object LinuxNative : NativeEngine {
         public data class Error<out Handled : SyscallHandledState>(val errno: Int, val rawValue: Long) : SyscallResult<Nothing, Handled> {
             /** Throws an [IllegalStateException] with the given [context]. */
             public fun throwErrno(context: String): Nothing {
-                val symbol = io.mazewall.platform.syscall.ErrnoMapping.getSymbolicName(errno)
-                val errnoStr = if (symbol != null) "$errno ($symbol)" else "$errno"
-                throw IllegalStateException("$context failed with errno=$errnoStr (raw return=$rawValue)")
+                val message = appendErrno(StringBuilder().append(context).append(" failed with errno="))
+                    .append(" (raw return=").append(rawValue).append(')').toString()
+                throw IllegalStateException(message)
             }
 
-            override fun toString(): String {
+            override fun toString(): String = appendErrno(StringBuilder().append("Error(errno="))
+                .append(", rawValue=").append(rawValue).append(')').toString()
+
+            // Cold concat bootstraps may commit executable JVM code on an already restricted thread.
+            private fun appendErrno(message: StringBuilder): StringBuilder {
                 val symbol = io.mazewall.platform.syscall.ErrnoMapping.getSymbolicName(errno)
-                val errnoStr = if (symbol != null) "$errno ($symbol)" else "$errno"
-                return "Error(errno=$errnoStr, rawValue=$rawValue)"
+                message.append(errno)
+                if (symbol != null) message.append(" (").append(symbol).append(')')
+                return message
             }
         }
 
