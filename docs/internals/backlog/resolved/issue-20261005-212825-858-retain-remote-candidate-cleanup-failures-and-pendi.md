@@ -8,7 +8,7 @@ component: "profiler"
 target_modules: [profiler]
 target_files:
   - "experiments/hotspot-agentless/internal/candidate/runner.go"
-  - "experiments/hotspot-agentless/internal/candidate/ownership.go"
+  - "experiments/hotspot-agentless/internal/driver/ownership.go"
   - "experiments/hotspot-agentless/internal/driver/process.go"
 target_symbols:
   - "candidateOwners"
@@ -28,8 +28,8 @@ target/helper plus six-case qualification evidence are recorded in
 [remediation evidence](../../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
 Faults retain original causes and actual pending handles; checked create/start/
 join/remove/absence paths pass, results follow retirement and the full build passes.
-Resolved for candidate acquisition; the separate benchmark acquisition gap remains
-registered as issue-20261016-225418-065.
+Resolved for candidate acquisition; subsequent benchmark continuation also resolves
+issue-20261016-225418-065 using this same owner in the shared driver package.
 
 ---
 <!-- id: issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi  file: issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi.md -->

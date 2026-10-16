@@ -23,6 +23,11 @@ type benchmarkOptions struct {
 	DrainEvents, DrainFull                                                           bool
 }
 
+type benchmarkDocker interface {
+	Output(time.Duration, ...string) (string, error)
+	Start(*os.File, *os.File, ...string) (*exec.Cmd, error)
+}
+
 func parseBenchmarkOptions(args []string) (benchmarkOptions, error) {
 	var o benchmarkOptions
 	f := flag.NewFlagSet("benchmark", flag.ContinueOnError)
@@ -157,7 +162,7 @@ func median(values []float64) float64 {
 	return values[middle]
 }
 
-func runOne(root string, o benchmarkOptions, mode string, repeat int, directory string, docker driver.Docker, images map[string]string, patch, image string) (report RunReport, failure error) {
+func runOne(root string, o benchmarkOptions, mode string, repeat int, directory string, docker benchmarkDocker, images map[string]string, patch, image string) (report RunReport, failure error) {
 	artifact := filepath.Join(directory, fmt.Sprintf("%s-%d", mode, repeat))
 	if err := os.Mkdir(artifact, 0755); err != nil {
 		return report, err
@@ -166,35 +171,41 @@ func runOne(root string, o benchmarkOptions, mode string, repeat int, directory 
 	if err != nil {
 		return report, err
 	}
-	output, err := os.Create(filepath.Join(artifact, "events.jsonl"))
-	if err != nil {
-		return report, err
-	}
-	defer func() { failure = errors.Join(failure, output.Close()) }()
-	stderr, err := os.Create(filepath.Join(artifact, "collector.log"))
-	if err != nil {
-		return report, err
-	}
-	defer func() { failure = errors.Join(failure, stderr.Close()) }()
-	var target, collector string
-	var attached *exec.Cmd
+	owners := driver.NewContainerOwners(docker)
+	var logs []*os.File
 	var sampler *resourceSampler
 	defer func() {
 		if sampler != nil {
 			sampler.stop()
 		}
-		failure = errors.Join(failure, driver.RemoveOwned(docker, collector, target))
-		if attached != nil {
-			failure = errors.Join(failure, driver.WaitChild(attached, 5*time.Second))
+		failure = owners.Finish(artifact, failure, logs...)
+		if failure == nil {
+			failure = driver.WriteJSON(filepath.Join(artifact, "run-report.json"), report)
+		}
+		if failure != nil {
+			report = RunReport{}
 		}
 	}()
-	started := time.Now()
-	target, err = docker.Output(30*time.Second, "run", "-d", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--pid=host", "--mount", "type=bind,src="+root+",dst=/work,readonly", "--mount", "type=bind,src="+artifact+",dst=/fixture", images["jdk"], "java", "-Xint", "-XX:+UseSerialGC", "-Xmx128m", "-cp", "/work/build/benchmark-classes", "BenchmarkFixture", "/fixture", run, strconv.Itoa(o.Operations), strconv.Itoa(o.Warmup), strconv.Itoa(o.Diversity), strconv.Itoa(o.PauseNS), strconv.Itoa(o.PostAttachWarmup))
+	output, err := os.Create(filepath.Join(artifact, "events.jsonl"))
 	if err != nil {
-		target = ""
 		return report, err
 	}
-	target = strings.TrimSpace(target)
+	logs = append(logs, output)
+	stderr, err := os.Create(filepath.Join(artifact, "collector.log"))
+	if err != nil {
+		return report, err
+	}
+	logs = append(logs, stderr)
+	var target, collector string
+	var attached *driver.OwnedCommand
+	started := time.Now()
+	target, err = owners.Create("benchmark-target", "--user", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), "--pid=host", "--mount", "type=bind,src="+root+",dst=/work,readonly", "--mount", "type=bind,src="+artifact+",dst=/fixture", images["jdk"], "java", "-Xint", "-XX:+UseSerialGC", "-Xmx128m", "-cp", "/work/build/benchmark-classes", "BenchmarkFixture", "/fixture", run, strconv.Itoa(o.Operations), strconv.Itoa(o.Warmup), strconv.Itoa(o.Diversity), strconv.Itoa(o.PauseNS), strconv.Itoa(o.PostAttachWarmup))
+	if err != nil {
+		return report, err
+	}
+	if _, err := docker.Output(10*time.Second, "start", target); err != nil {
+		return report, err
+	}
 	pid, err := inspectInt(docker, target, "{{.State.Pid}}")
 	if err != nil {
 		return report, err
@@ -219,7 +230,7 @@ func runOne(root string, o benchmarkOptions, mode string, repeat int, directory 
 			}
 			store = filepath.Join(home, ".ig/oci-store")
 		}
-		args := []string{"create", "--privileged", "--pid=host", "--mount", "type=bind,src=/sys,dst=/sys,readonly", "--mount", "type=bind,src=" + root + ",dst=/work,readonly", "--mount", "type=bind,src=" + store + ",dst=/store,readonly", "--entrypoint", "/work/" + collectorBinary, images["go"], "--capture", "--pid", strconv.Itoa(pid), "--image", image, "--store", "/store", "--duration", "45s"}
+		args := []string{"--privileged", "--pid=host", "--mount", "type=bind,src=/sys,dst=/sys,readonly", "--mount", "type=bind,src=" + root + ",dst=/work,readonly", "--mount", "type=bind,src=" + store + ",dst=/store,readonly", "--entrypoint", "/work/" + collectorBinary, images["go"], "--capture", "--pid", strconv.Itoa(pid), "--image", image, "--store", "/store", "--duration", "45s"}
 		if mode == "events" {
 			args = append(args, "--collection-mode", "events")
 		} else {
@@ -231,13 +242,11 @@ func runOne(root string, o benchmarkOptions, mode string, repeat int, directory 
 		if o.DrainFull {
 			args = append(args, "--drain-full")
 		}
-		collector, err = docker.Output(30*time.Second, args...)
+		collector, err = owners.Create("benchmark-collector", args...)
 		if err != nil {
-			collector = ""
 			return report, err
 		}
-		collector = strings.TrimSpace(collector)
-		attached, err = docker.Start(output, stderr, "start", "--attach", collector)
+		attached, err = owners.Start(output, stderr, collector)
 		if err != nil {
 			return report, err
 		}
@@ -347,9 +356,7 @@ func runOne(root string, o benchmarkOptions, mode string, repeat int, directory 
 		if _, err := docker.Output(10*time.Second, "kill", "--signal", "SIGINT", collector); err != nil {
 			return report, err
 		}
-		child := attached
-		attached = nil
-		if err := driver.WaitChild(child, 10*time.Second); err != nil {
+		if err := attached.Wait(10 * time.Second); err != nil {
 			return report, err
 		}
 		data["post_target_stop_ns"] = time.Since(stopping).Nanoseconds()
@@ -393,13 +400,10 @@ func runOne(root string, o benchmarkOptions, mode string, repeat int, directory 
 	if err != nil {
 		return report, err
 	}
-	if err := driver.WriteJSON(filepath.Join(artifact, "run-report.json"), report); err != nil {
-		return report, err
-	}
 	return report, validateReport(o, mode, report)
 }
 
-func inspectInt(docker driver.Docker, id, format string) (int, error) {
+func inspectInt(docker benchmarkDocker, id, format string) (int, error) {
 	text, err := docker.Output(5*time.Second, "inspect", "--format", format, id)
 	if err != nil {
 		return 0, err

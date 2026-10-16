@@ -21,6 +21,11 @@ type candidateCase struct {
 	virtual bool
 }
 
+type candidateDocker interface {
+	Output(time.Duration, ...string) (string, error)
+	Start(*os.File, *os.File, ...string) (*exec.Cmd, error)
+}
+
 func Run(root string, args []string) error {
 	f := flag.NewFlagSet("candidates", flag.ContinueOnError)
 	assets := f.String("assets", "", "")
@@ -80,9 +85,9 @@ func Run(root string, args []string) error {
 }
 
 func compileCandidates(docker candidateDocker, source, out, classes, image string) (failure error) {
-	owners := candidateOwners{docker: docker}
-	defer func() { failure = owners.finish(out, nil, failure) }()
-	id, err := owners.create("compiler", "--pull=never", "--user", strconv.Itoa(os.Getuid()), "--mount", "type=bind,src="+source+",dst="+source+",readonly", "--mount", "type=bind,src="+out+",dst="+out, image, "javac", "-d", classes, filepath.Join(source, "RuntimeCandidateFixture.java"), filepath.Join(source, "VirtualThreadOracle.java"))
+	owners := driver.NewContainerOwners(docker)
+	defer func() { failure = owners.Finish(out, failure) }()
+	id, err := owners.Create("candidate-compiler", "--pull=never", "--user", strconv.Itoa(os.Getuid()), "--mount", "type=bind,src="+source+",dst="+source+",readonly", "--mount", "type=bind,src="+out+",dst="+out, image, "javac", "-d", classes, filepath.Join(source, "RuntimeCandidateFixture.java"), filepath.Join(source, "VirtualThreadOracle.java"))
 	if err != nil {
 		return err
 	}
@@ -96,11 +101,15 @@ func runCase(docker candidateDocker, c candidateCase, assets, out, classes strin
 		return nil, err
 	}
 	var target, collector string
-	var child, owner processOwner
-	owners := candidateOwners{docker: docker}
+	var child, owner *driver.OwnedCommand
+	owners := driver.NewContainerOwners(docker)
 	var logs []*os.File
 	defer func() {
-		failure = owners.finish(root, result, failure, logs...)
+		failure = owners.Finish(root, failure, logs...)
+		if failure == nil {
+			result["resources_retired"] = true
+			failure = driver.WriteJSON(filepath.Join(root, "result.json"), result)
+		}
 		if failure != nil {
 			result = nil
 		}
@@ -118,11 +127,11 @@ func runCase(docker candidateDocker, c candidateCase, assets, out, classes strin
 	} else {
 		argv = append(argv, "RuntimeCandidateFixture", root, "40")
 	}
-	target, err = owners.create("target", argv...)
+	target, err = owners.Create("candidate-target", argv...)
 	if err != nil {
 		return nil, err
 	}
-	child, err = owners.start(targetLog, targetLog, target)
+	child, err = owners.Start(targetLog, targetLog, target)
 	if err != nil {
 		return nil, err
 	}
@@ -173,11 +182,11 @@ func runCase(docker candidateDocker, c candidateCase, assets, out, classes strin
 		return nil, err
 	}
 	logs = append(logs, stderr)
-	collector, err = owners.create("collector", "--pull=never", "--privileged", "--pid=host", "--mount", "type=bind,src="+assets+",dst="+assets+",readonly", "--mount", "type=bind,src=/sys,dst=/sys,readonly", images["go"], filepath.Join(assets, "mw-hotspot-collector"), "--capture", "--protocol-version=1", "--hotspot-identity=unknown", "--pid", strconv.Itoa(pid), "--store", filepath.Join(assets, "oci"), "--image", image, "--duration", "15s")
+	collector, err = owners.Create("candidate-collector", "--pull=never", "--privileged", "--pid=host", "--mount", "type=bind,src="+assets+",dst="+assets+",readonly", "--mount", "type=bind,src=/sys,dst=/sys,readonly", images["go"], filepath.Join(assets, "mw-hotspot-collector"), "--capture", "--protocol-version=1", "--hotspot-identity=unknown", "--pid", strconv.Itoa(pid), "--store", filepath.Join(assets, "oci"), "--image", image, "--duration", "15s")
 	if err != nil {
 		return nil, err
 	}
-	owner, err = owners.start(stdout, stderr, collector)
+	owner, err = owners.Start(stdout, stderr, collector)
 	if err != nil {
 		return nil, err
 	}
@@ -189,11 +198,11 @@ func runCase(docker candidateDocker, c candidateCase, assets, out, classes strin
 	if err := os.WriteFile(filepath.Join(root, "measure"), []byte("measure"), 0644); err != nil {
 		return nil, err
 	}
-	collectorErr := owner.wait(30 * time.Second)
+	collectorErr := owner.Wait(30 * time.Second)
 	if err := os.WriteFile(filepath.Join(root, "release"), []byte("release"), 0644); err != nil {
 		return nil, errors.Join(collectorErr, err)
 	}
-	targetErr := child.wait(10 * time.Second)
+	targetErr := child.Wait(10 * time.Second)
 	if err := errors.Join(collectorErr, targetErr); err != nil {
 		return nil, err
 	}

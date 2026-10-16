@@ -1,9 +1,8 @@
 //go:build mw_kernel
 
-package candidate
+package driver
 
 import (
-	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +10,7 @@ import (
 	"time"
 )
 
-func TestCandidateDockerOwnersAreActuallyRetired(t *testing.T) {
+func TestContainerOwnersAreActuallyRetired(t *testing.T) {
 	endpoint := os.Getenv("MW_CANDIDATE_DOCKER_HOST")
 	if endpoint == "" {
 		t.Fatal("explicit MW_CANDIDATE_DOCKER_HOST required")
@@ -21,11 +20,11 @@ func TestCandidateDockerOwnersAreActuallyRetired(t *testing.T) {
 		t.Fatal(err)
 	}
 	var lock struct{ Images map[string]string }
-	if err := driver.ReadJSON(filepath.Join(root, "dependencies.lock.json"), &lock); err != nil {
+	if err := ReadJSON(filepath.Join(root, "dependencies.lock.json"), &lock); err != nil {
 		t.Fatal(err)
 	}
-	docker := driver.NewDocker(root, endpoint)
-	owners := candidateOwners{docker: docker}
+	docker := NewDocker(root, endpoint)
+	owners := NewContainerOwners(docker)
 	t.Cleanup(func() {
 		if _, err := owners.retire(); err != nil {
 			t.Error(err)
@@ -38,19 +37,19 @@ func TestCandidateDockerOwnersAreActuallyRetired(t *testing.T) {
 	}
 	defer log.Close()
 	for _, role := range []string{"target", "helper"} {
-		id, err := owners.create(role, "--pull=never", lock.Images["go"], "sh", "-c", "exit 0")
+		id, err := owners.Create(role, "--pull=never", lock.Images["go"], "sh", "-c", "exit 0")
 		if err != nil {
 			t.Fatal(err)
 		}
-		process, err := owners.start(log, log, id)
+		process, err := owners.Start(log, log, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := process.wait(10 * time.Second); err != nil {
+		if err := process.Wait(10 * time.Second); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := owners.finish(out, map[string]any{"production_qualified": false}, nil); err != nil {
+	if err := owners.Finish(out, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, receipt := range owners.requests {

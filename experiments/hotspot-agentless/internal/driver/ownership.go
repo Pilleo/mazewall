@@ -1,10 +1,9 @@
-package candidate
+package driver
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,9 +11,9 @@ import (
 	"time"
 )
 
-const candidateLabel = "io.mazewall.qual.session"
+const qualificationLabel = "io.mazewall.qual.session"
 
-type candidateDocker interface {
+type containerDocker interface {
 	Output(time.Duration, ...string) (string, error)
 	Start(*os.File, *os.File, ...string) (*exec.Cmd, error)
 }
@@ -26,19 +25,19 @@ type containerReceipt struct {
 }
 
 type processOwner interface {
-	wait(time.Duration) error
+	Wait(time.Duration) error
 	kill() error
 	pid() int
 	joined() bool
 }
 
-type ownedCommand struct {
+type OwnedCommand struct {
 	command *exec.Cmd
 	done    chan struct{}
 	failure error
 }
 
-func (p *ownedCommand) wait(timeout time.Duration) error {
+func (p *OwnedCommand) Wait(timeout time.Duration) error {
 	select {
 	case <-p.done:
 		return p.failure
@@ -56,9 +55,9 @@ func (p *ownedCommand) wait(timeout time.Duration) error {
 		return context.DeadlineExceeded
 	}
 }
-func (p *ownedCommand) kill() error { return p.command.Process.Kill() }
-func (p *ownedCommand) pid() int    { return p.command.Process.Pid }
-func (p *ownedCommand) joined() bool {
+func (p *OwnedCommand) kill() error { return p.command.Process.Kill() }
+func (p *OwnedCommand) pid() int    { return p.command.Process.Pid }
+func (p *OwnedCommand) joined() bool {
 	select {
 	case <-p.done:
 		return p.command.ProcessState != nil
@@ -67,23 +66,27 @@ func (p *ownedCommand) joined() bool {
 	}
 }
 
-type candidateOwners struct {
-	docker    candidateDocker
+type ContainerOwners struct {
+	docker    containerDocker
 	requests  []*containerReceipt
 	processes []processOwner
 }
 
-func (o *candidateOwners) create(role string, args ...string) (string, error) {
-	nonce, err := driver.Token(12)
+func NewContainerOwners(docker containerDocker) *ContainerOwners {
+	return &ContainerOwners{docker: docker}
+}
+
+func (o *ContainerOwners) Create(role string, args ...string) (string, error) {
+	nonce, err := Token(12)
 	if err != nil {
 		return "", err
 	}
-	request := &containerReceipt{Name: "mw-candidate-" + role + "-" + nonce, Session: nonce}
+	request := &containerReceipt{Name: "mw-" + role + "-" + nonce, Session: nonce}
 	o.requests = append(o.requests, request)
-	argv := append([]string{"create", "--name", request.Name, "--label", candidateLabel + "=" + nonce}, args...)
+	argv := append([]string{"create", "--name", request.Name, "--label", qualificationLabel + "=" + nonce}, args...)
 	text, err := o.docker.Output(20*time.Second, argv...)
 	id := strings.TrimSpace(text)
-	if driver.ValidContainerID(id) {
+	if ValidContainerID(id) {
 		request.ID = id
 	}
 	if err != nil {
@@ -95,12 +98,22 @@ func (o *candidateOwners) create(role string, args ...string) (string, error) {
 	return request.ID, nil
 }
 
-func (o *candidateOwners) start(stdout, stderr *os.File, id string) (processOwner, error) {
+func (o *ContainerOwners) Start(stdout, stderr *os.File, id string) (*OwnedCommand, error) {
+	owned := false
+	for _, request := range o.requests {
+		if request.ID == id && ValidContainerID(id) {
+			owned = true
+			break
+		}
+	}
+	if !owned {
+		return nil, fmt.Errorf("start requires an acquired container receipt")
+	}
 	command, err := o.docker.Start(stdout, stderr, "start", "--attach", id)
 	if err != nil {
 		return nil, err
 	}
-	p := &ownedCommand{command: command, done: make(chan struct{})}
+	p := &OwnedCommand{command: command, done: make(chan struct{})}
 	o.processes = append(o.processes, p)
 	go func() { p.failure = command.Wait(); close(p.done) }()
 	return p, nil
@@ -116,18 +129,18 @@ type cleanupReport struct {
 	Failures            []string           `json:"failures"`
 }
 
-type candidateCleanupError struct {
+type containerCleanupError struct {
 	report cleanupReport
-	owners *candidateOwners
+	owners *ContainerOwners
 	cause  error
 }
 
-func (e *candidateCleanupError) Error() string {
-	return fmt.Sprintf("candidate cleanup incomplete or failed: %v", e.cause)
+func (e *containerCleanupError) Error() string {
+	return fmt.Sprintf("container cleanup incomplete or failed: %v", e.cause)
 }
-func (e *candidateCleanupError) Unwrap() error { return e.cause }
+func (e *containerCleanupError) Unwrap() error { return e.cause }
 
-func (o *candidateOwners) retire() (cleanupReport, error) {
+func (o *ContainerOwners) retire() (cleanupReport, error) {
 	deadline := time.Now().Add(20 * time.Second)
 	report := cleanupReport{PendingContainers: []string{}, PendingAcquisitions: []containerReceipt{}, PendingWrappers: []int{}, Failures: []string{}}
 	var failure error
@@ -143,12 +156,12 @@ func (o *candidateOwners) retire() (cleanupReport, error) {
 			var text string
 			var err error
 			if left := time.Until(deadline); left > 0 {
-				text, err = o.docker.Output(min(5*time.Second, left), "ps", "-a", "--no-trunc", "--filter", "name=^/"+r.Name+"$", "--filter", "label="+candidateLabel+"="+r.Session, "--format", "{{.ID}}")
+				text, err = o.docker.Output(min(5*time.Second, left), "ps", "-a", "--no-trunc", "--filter", "name=^/"+r.Name+"$", "--filter", "label="+qualificationLabel+"="+r.Session, "--format", "{{.ID}}")
 			} else {
 				err = context.DeadlineExceeded
 			}
 			values := strings.Fields(text)
-			if err == nil && len(values) == 1 && driver.ValidContainerID(values[0]) {
+			if err == nil && len(values) == 1 && ValidContainerID(values[0]) {
 				r.ID = values[0]
 			} else {
 				report.PendingAcquisitions = append(report.PendingAcquisitions, *r)
@@ -156,16 +169,16 @@ func (o *candidateOwners) retire() (cleanupReport, error) {
 				continue
 			}
 		}
-		pending, err := driver.RetireOwned(o.docker, deadline, r.ID)
+		pending, err := RetireOwned(o.docker, deadline, r.ID)
 		report.PendingContainers = append(report.PendingContainers, pending...)
 		record(err)
 	}
 	for _, p := range o.processes {
-		err := p.wait(min(5*time.Second, time.Until(deadline)))
+		err := p.Wait(min(5*time.Second, time.Until(deadline)))
 		record(err)
 		if !p.joined() {
 			record(p.kill())
-			err = p.wait(min(5*time.Second, time.Until(deadline)))
+			err = p.Wait(min(5*time.Second, time.Until(deadline)))
 			record(err)
 			if !p.joined() {
 				report.PendingWrappers = append(report.PendingWrappers, p.pid())
@@ -181,24 +194,16 @@ func (o *candidateOwners) retire() (cleanupReport, error) {
 		report.Wrappers = append(report.Wrappers, p.pid())
 	}
 	if failure != nil {
-		return report, &candidateCleanupError{report: report, owners: o, cause: failure}
+		return report, &containerCleanupError{report: report, owners: o, cause: failure}
 	}
 	return report, nil
 }
 
-func (o *candidateOwners) finish(root string, result map[string]any, primary error, logs ...*os.File) error {
+func (o *ContainerOwners) Finish(root string, primary error, logs ...*os.File) error {
 	report, cleanupErr := o.retire()
 	failure := errors.Join(primary, cleanupErr)
 	for _, log := range logs {
 		failure = errors.Join(failure, log.Close())
 	}
-	failure = errors.Join(failure, driver.WriteJSON(filepath.Join(root, "cleanup.json"), report))
-	if failure != nil {
-		return failure
-	}
-	if result != nil {
-		result["resources_retired"] = true
-		return driver.WriteJSON(filepath.Join(root, "result.json"), result)
-	}
-	return nil
+	return errors.Join(failure, WriteJSON(filepath.Join(root, "cleanup.json"), report))
 }

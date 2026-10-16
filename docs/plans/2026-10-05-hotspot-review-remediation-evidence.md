@@ -130,7 +130,8 @@ Gradle build because the old lint script was retired by the baseline migration.
 
 The unchanged benchmark caller still loses ambiguous acquisition requests when
 Docker returns an error; its known-ID cleanup benefits from the shared fix, but
-acquisition needs the separate [registered follow-up](../internals/backlog/issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md).
+acquisition needed the separate [registered follow-up](../internals/backlog/resolved/issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md),
+subsequently resolved by the benchmark ownership continuation below.
 The existing GraalVM/late-executable-mapping issue also remains open. No additional
 blocking defect remains within the four-finding remediation scope.
 
@@ -161,8 +162,18 @@ Final executable revision: `7a9f454d` (R1 `05c0503b`, R2 `de7f1807`, R3
   702resolved; post-archive Gradle validateBacklogIndex passes
   (`run-c5814d3f51c6`). Whitespace checks pass.
 
-The isolated branch/worktree is retained for operator-controlled review/integration.
-Existing benchmark-acquisition and executable-mapping follow-ups remain open.
+At this original checkpoint the isolated branch/worktree was retained for
+operator-controlled review/integration, with benchmark-acquisition and
+executable-mapping follow-ups open; the subsequent continuation is recorded below.
 Production lifetime/virtual-parent qualification and whole-collection policy
 completeness remain false; wider providers/runtime/loss integration retain their
 separate approval and proof boundaries.
+
+## Subsequent integration/continuation
+
+Operator-requested local integration fast-forwards fast-master to9e14bf8e with an
+identical tested tree. The [benchmark ownership continuation](2026-10-17-hotspot-benchmark-ownership-evidence.md)
+then shares the owner implementation through internal/driver and resolves the
+separate acquisition gap with actual lifecycle/failure checks. Its full build and
+seven public native cases pass. Independent full-benchmark epoch-zero readiness
+refusal remains tracked; no original rejection or promotion boundary is weakened.

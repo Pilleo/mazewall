@@ -178,6 +178,13 @@ checks remote absence, joins every local wrapper and retains errors/pending hand
 in `cleanup.json`; results are published only after successful retirement. An empty
 query after an ambiguous create does not prove that a late acquisition is retired.
 
+The benchmark driver uses the same receipt/command owner in `internal/driver`.
+Both target and collector acquisition retain ambiguous requests, and each run's
+`cleanup.json` records actual retirement before `run-report.json` is published.
+Readiness failure remains an error even when all resources are subsequently retired.
+Explicit create/start requests are part of startup/readiness timing; the measured
+target workload window is unchanged.
+
 ```bash
 DOCKER_HOST=unix:///var/run/docker.sock make benchmark-fixture benchmark-report build
 COLLECTOR_DOCKER_HOST=unix:///var/run/docker.sock bash scripts/run-benchmark.sh \

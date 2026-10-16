@@ -1,9 +1,8 @@
-package candidate
+package driver
 
 import (
 	"context"
 	"errors"
-	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 const receiptID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 type faultDocker struct {
-	driver.Docker
+	Docker
 	output func(time.Duration, ...string) (string, error)
 }
 
@@ -28,7 +27,7 @@ type faultProcess struct {
 	waitAttempted, reaped, killAttempted bool
 }
 
-func (p *faultProcess) wait(time.Duration) error {
+func (p *faultProcess) Wait(time.Duration) error {
 	p.waitAttempted = true
 	if len(p.waits) == 0 {
 		p.reaped = true
@@ -75,11 +74,11 @@ func TestCleanupRetainsRemoteFailurePrimaryAndEveryWrapper(t *testing.T) {
 				}
 			}}
 			first, second := &faultProcess{}, &faultProcess{}
-			owners := candidateOwners{docker: docker, requests: []*containerReceipt{{ID: receiptID}}, processes: []processOwner{first, second}}
+			owners := ContainerOwners{docker: docker, requests: []*containerReceipt{{ID: receiptID}}, processes: []processOwner{first, second}}
 			primary := errors.New("original capture failure")
 			root := t.TempDir()
-			err := owners.finish(root, map[string]any{"success": true}, primary)
-			var cleanup *candidateCleanupError
+			err := owners.Finish(root, primary)
+			var cleanup *containerCleanupError
 			if !errors.Is(err, primary) || !errors.As(err, &cleanup) || cleanup.owners != &owners || !first.waitAttempted || !second.waitAttempted {
 				t.Fatalf("failure/owner/join lost: %v", err)
 			}
@@ -93,9 +92,6 @@ func TestCleanupRetainsRemoteFailurePrimaryAndEveryWrapper(t *testing.T) {
 			if len(cleanup.report.PendingContainers) != wantPending || len(cleanup.report.Containers) != 1 || cleanup.report.Containers[0].ID != receiptID {
 				t.Fatalf("wrong pending proof: %+v", cleanup.report)
 			}
-			if _, err := os.Stat(filepath.Join(root, "result.json")); !os.IsNotExist(err) {
-				t.Fatal("published success before retirement")
-			}
 			if _, err := os.Stat(filepath.Join(root, "cleanup.json")); err != nil {
 				t.Fatal(err)
 			}
@@ -106,9 +102,9 @@ func TestCleanupRetainsRemoteFailurePrimaryAndEveryWrapper(t *testing.T) {
 func TestCleanupRetainsUnjoinedHandleAndContinuesJoining(t *testing.T) {
 	first := &faultProcess{waits: []error{context.DeadlineExceeded, context.DeadlineExceeded}, killError: os.ErrPermission}
 	second := &faultProcess{}
-	owners := candidateOwners{processes: []processOwner{first, second}}
+	owners := ContainerOwners{processes: []processOwner{first, second}}
 	report, err := owners.retire()
-	var cleanup *candidateCleanupError
+	var cleanup *containerCleanupError
 	if report.ResourcesRetired || len(report.PendingWrappers) != 1 || !first.killAttempted || !second.waitAttempted || !errors.Is(err, os.ErrPermission) || !errors.As(err, &cleanup) || cleanup.owners.processes[0] != first {
 		t.Fatalf("lost pending actual handle: %+v %v", report, err)
 	}
@@ -116,7 +112,7 @@ func TestCleanupRetainsUnjoinedHandleAndContinuesJoining(t *testing.T) {
 
 func TestCleanupWaitFailureRetainsActualWrapperHandle(t *testing.T) {
 	process := &faultProcess{waits: []error{os.ErrPermission, os.ErrPermission}, killError: os.ErrPermission}
-	owners := candidateOwners{processes: []processOwner{process}}
+	owners := ContainerOwners{processes: []processOwner{process}}
 	report, err := owners.retire()
 	if report.ResourcesRetired || len(report.PendingWrappers) != 1 || !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("failed wait treated as join proof: %+v %v", report, err)
@@ -154,8 +150,8 @@ func TestAmbiguousAcquisitionRetainsRequestAndRecoversLateReceipt(t *testing.T) 
 			return "", nil
 		}
 	}}
-	owners := candidateOwners{docker: docker}
-	if _, err := owners.create("target", "--pull=never", "image"); !errors.Is(err, context.DeadlineExceeded) {
+	owners := ContainerOwners{docker: docker}
+	if _, err := owners.Create("target", "--pull=never", "image"); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
 	report, err := owners.retire()
@@ -169,7 +165,7 @@ func TestAmbiguousAcquisitionRetainsRequestAndRecoversLateReceipt(t *testing.T) 
 	}
 }
 
-func TestCleanRetirementPrecedesResultPublication(t *testing.T) {
+func TestCleanRetirementRecordsActualAbsence(t *testing.T) {
 	present := true
 	docker := faultDocker{output: func(_ time.Duration, args ...string) (string, error) {
 		switch args[0] {
@@ -186,15 +182,31 @@ func TestCleanRetirementPrecedesResultPublication(t *testing.T) {
 			return "", nil
 		}
 	}}
-	owners := candidateOwners{docker: docker, requests: []*containerReceipt{{ID: receiptID}}}
+	owners := ContainerOwners{docker: docker, requests: []*containerReceipt{{ID: receiptID}}}
 	root := t.TempDir()
-	if err := owners.finish(root, map[string]any{"production_qualified": false}, nil); err != nil {
+	if err := owners.Finish(root, nil); err != nil {
 		t.Fatal(err)
 	}
 	var result struct {
 		ResourcesRetired bool `json:"resources_retired"`
 	}
-	if err := driver.ReadJSON(filepath.Join(root, "result.json"), &result); err != nil || !result.ResourcesRetired || present {
+	if err := ReadJSON(filepath.Join(root, "cleanup.json"), &result); err != nil || !result.ResourcesRetired || present {
 		t.Fatalf("unretired publication: %+v %v", result, err)
+	}
+}
+
+func TestContainerStartRequiresAnAcquiredReceipt(t *testing.T) {
+	root := t.TempDir()
+	log, err := os.Create(filepath.Join(root, "client.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer log.Close()
+	owners := NewContainerOwners(Docker{Root: root, Prefix: []string{"sh", "-c", "exit 17", "docker"}})
+	process, err := owners.Start(log, log, receiptID)
+	if err == nil {
+		process.Wait(time.Second)
+		owners.Finish(root, nil)
+		t.Fatal("started a container without an acquisition receipt")
 	}
 }

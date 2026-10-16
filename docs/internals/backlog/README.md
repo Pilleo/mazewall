@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 138 | *Total Resolved Issues:* 702
+*Total Active Issues:* 138 | *Total Resolved Issues:* 703
 
 Active status detail: 137 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -50,7 +50,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o](issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md) | Retain ambiguous benchmark container acquisition ownership | high | profiler |
+| [issue-20261016-233030-441-investigate-epoch-zero-full-benchmark-readiness-re](issue-20261016-233030-441-investigate-epoch-zero-full-benchmark-readiness-re.md) | Investigate epoch-zero full benchmark readiness refusal | high | profiler |
+| Archived [issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o](resolved/issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md) | Retain ambiguous benchmark container acquisition ownership | high | profiler |
 | Archived [issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-](resolved/issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-.md) | Keep container JVM preference outputs outside the source checkout | high | core |
 | Archived [issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only](resolved/issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md) | Qualify optional integrations and expose read-only execution diagnostics | high | core |
 | [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |
