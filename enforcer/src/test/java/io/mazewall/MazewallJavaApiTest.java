@@ -138,7 +138,8 @@ class MazewallJavaApiTest {
     void applicationDeclaredMetadataUsesExistingUncastCallableEntry() {
         var context = new ThreadLocal<java.util.Map<String, String>>();
         try (ManagedRuntime runtime = OwnedRuntimeJavaTestSupport.open()) {
-            InProcessDomain domain = runtime.prepare(WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(), new DomainLimits(1, 1));
+            // Synchronous result delivery may precede executionEnd; keep one worker with two bounded admissions.
+            InProcessDomain domain = runtime.prepare(WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(), new DomainLimits(1, 2));
             var mutable = new java.util.HashMap<String, String>();
             mutable.put("request", "captured");
             context.set(mutable);
