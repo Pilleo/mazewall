@@ -207,5 +207,24 @@ Hosted PR review/CI and actual credentialed master publication remain their norm
 separate delivery boundary. Production reviewer/launch/cgroup authority, hardware
 prerequisites and independent human comprehension are not invented or closed.
 
+## Hosted cold-metadata follow-up
+
+PR #534 was explicitly authorized for delivery. Its first hosted run
+`38926099406` failed strict verification of ten already-pinned Spring BOM
+`.module` files, not execution or a Project-capture regression. Fresh metadata
+resolution additionally exposed the pinned Log4j 2.25.5 parent POM. Warm local
+resolution had used previously approved metadata forms.
+
+All ten module identities/platform variants and existing approved POM hashes were
+independently compared with fresh Maven Central bytes and SHA512 sidecars
+(`run-bb69dca3ae0d`). The Log4j parent was compared byte-for-byte through both
+Central endpoints and its published SHA1 sidecar; Boot's existing 4.1.1 BOM pins
+2.25.5 (`run-0d3b7d03c4ac`). Exactly eleven SHA256 approvals are added, with no
+existing approval removed/replaced or verification setting weakened
+(`run-7a200146382e`). Actual refreshed strict optional builds pass
+(`run-db25d6a02671`); the normal strict command also passes and reuses its
+configuration cache (`run-9364b9720063`). No dependency version or runtime behavior
+changes. Hosted acceptance must pass at the corrected PR head before merge.
+
 ---
 <!-- id: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only  file: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md -->
