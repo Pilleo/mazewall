@@ -21,5 +21,10 @@ Review reproduces CPU1 attempts1 submits2 and CPU2 attempts1 submits0 combining 
 **Needed:**
 1. Validate each CPU tuple before summing with overflow-safe subtraction and keep proof unknown on contradiction
 
+**Execution:** The contradictory-tuple regression, six host/race tests and actual
+512openat kernel pressure/overflow proof pass; see
+[remediation evidence](../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
+Final review/gates remain before archival.
+
 ---
 <!-- id: issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot  file: issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot.md -->

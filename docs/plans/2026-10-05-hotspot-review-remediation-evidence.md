@@ -95,5 +95,20 @@ candidate containers remain (`run-2e5bc7f858b6`). Useful counts differ from the 
 run and are recorded as observed; no lifetime, logical-parent or production proof
 is inferred.
 
-R4 and final gates remain in progress.
+## R4: Per-CPU conservation
+
+- Red `run-706a4240d8ad` reproduced five contradictory tuples becoming known,
+  including impossible rows cancelling into valid aggregate totals.
+- Aggregate now checks each CPU's Submitted≤Attempted and
+  ReserveFailed=Attempted−Submitted after sticky-overflow refusal, before existing
+  checked Add64 sums. Generation/cardinality and whole-source equations remain intact.
+- Host/race checks pass6tests (`run-be6d78dd7298`), including MaxUint64 valid
+  boundaries, mixed submit/reserve CPUs, sum overflow and the cancelling-negative.
+- The actual tagged kernel test passes on the pinned Go image/rootful host-PID
+  endpoint (`run-94ecaf8f3959`):512openat attempts,255submitted/received,
+  257reserve failures/lost,12possible CPU slots; sticky native overflow rejects.
+  This remains isolated selected-producer qualification, not the default Gadget
+  owner binding or all-source completeness proof.
+
+Final review/documentation/quality gates remain in progress.
 Production qualification and whole-collection policy completeness remain false.

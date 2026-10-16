@@ -113,13 +113,13 @@ instead of reimplementing the retired Python cleanup.
 
 ## Task4: Per-CPU contradiction refusal (R4)
 
-- [ ] Reproduce contradictory tuples `(1,2,0)` and `(1,0,0)` cancelling into
+- [x] Reproduce contradictory tuples `(1,2,0)` and `(1,0,0)` cancelling into
   valid totals. Cover individual contradictions, MaxUint64, valid mixed CPU counts,
   cardinality/generation/sticky overflow and sum overflow.
-- [ ] After overflow refusal, reject `Submitted > Attempted` or
+- [x] After overflow refusal, reject `Submitted > Attempted` or
   `ReserveFailed != Attempted-Submitted` on each CPU before checked Add64 sums.
   Preserve the existing Aggregate API and whole-source Evaluate equations.
-- [ ] Run host/race tests in `profiler/hotspot-agentless` and actual
+- [x] Run host/race tests in `profiler/hotspot-agentless` and actual
   `TestKernelOpenatCountersPressureAndOverflow` with mw_kernel tag, pinned Go image,
   privileged/rootful Docker and host PID namespace. Require512attempts, pressure
   and overflow rejection; no unconditional capability skip or production loss claim.
