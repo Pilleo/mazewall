@@ -60,7 +60,8 @@ ordinary Spring consumers and the basic starter do not acquire an Actuator runti
 The `mazewall` endpoint declares read-only access and has only a read operation.
 HTTP/JMX exposure and authentication remain application configuration.
 
-Both adapters inspect already-created singletons only. They never use bean lookup
+Both adapters inspect fully published singletons only, excluding in-creation
+early-reference factories. They never use bean lookup
 that initializes lazy application bootstrap. Spring's own `SmartLifecycle`
 discovery/startup semantics remain independent of these probes.
 

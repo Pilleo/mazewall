@@ -11,28 +11,37 @@ import javax.tools.ToolProvider
 fun main() {
     val compiler = checkNotNull(ToolProvider.getSystemJavaCompiler()) { "probe requires the pinned JDK compiler" }
     val directory = Files.createTempDirectory("koog-operation-constructor-")
-    val negative = directory.resolve("ConstructorNegative.java")
-    Files.writeString(negative, """
+    for ((suffix, arguments) in listOf("Legacy" to "value -> null", "Observed" to "value -> null, () -> ExecutionDiagnostics.UNAVAILABLE")) {
+        val className = "ConstructorNegative$suffix"
+        val negative = directory.resolve("$className.java")
+        Files.writeString(negative, """
         package external.consumer;
         import io.mazewall.portal.PreparedPortalOperation;
-        public final class ConstructorNegative {
+        import io.mazewall.enforcer.api.execution.ExecutionDiagnostics;
+        public final class $className {
             public static PreparedPortalOperation<String, String> forge() {
-                return new PreparedPortalOperation<String, String>(value -> null);
+                return new PreparedPortalOperation<String, String>($arguments);
             }
         }
     """.trimIndent())
-    val diagnostics = DiagnosticCollector<JavaFileObject>()
-    compiler.getStandardFileManager(diagnostics, Locale.ROOT, Charsets.UTF_8).use { manager ->
-        val accepted = compiler.getTask(null, manager, diagnostics,
-            listOf("-classpath", System.getProperty("java.class.path"), "-d", directory.toString()),
-            null, manager.getJavaFileObjects(negative.toFile())).call()
-        check(!accepted) { "external Java constructed an arbitrary-submitter PreparedPortalOperation" }
-        val errors = diagnostics.diagnostics.filter { it.kind == Diagnostic.Kind.ERROR }
-        check(errors.size == 1 && errors.single().code == "compiler.err.not.def.public.cant.access") {
-            "expected only constructor accessibility rejection, got $errors"
+        val diagnostics = DiagnosticCollector<JavaFileObject>()
+        compiler.getStandardFileManager(diagnostics, Locale.ROOT, Charsets.UTF_8).use { manager ->
+            val accepted = compiler.getTask(null, manager, diagnostics,
+                listOf("-classpath", System.getProperty("java.class.path"), "-d", directory.toString()),
+                null, manager.getJavaFileObjects(negative.toFile())).call()
+            check(!accepted) { "external Java constructed an arbitrary-submitter PreparedPortalOperation" }
+            val errors = diagnostics.diagnostics.filter { it.kind == Diagnostic.Kind.ERROR }
+            check(errors.size == 1) { "expected one constructor accessibility rejection, got $errors" }
+            val error = errors.single()
+            val message = error.getMessage(Locale.ROOT)
+            val accessFailure = error.code == "compiler.err.not.def.public.cant.access" ||
+                (error.code == "compiler.err.cant.apply.symbols" &&
+                    "is not public in io.mazewall.portal.PreparedPortalOperation; cannot be accessed from outside package" in message)
+            check(accessFailure && "PreparedPortalOperation" in message) {
+                "expected actual package-private constructor rejection, got $errors"
+            }
+            println("EXTERNAL_JAVA_OPERATION_ROOT_OK $suffix ${error.code}")
         }
-        check(errors.single().getMessage(Locale.ROOT).contains("PreparedPortalOperation"))
-        println("EXTERNAL_JAVA_OPERATION_ROOT_OK ${errors.single().code}")
     }
     val positive = directory.resolve("RuntimePositive.java")
     Files.writeString(positive, """

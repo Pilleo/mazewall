@@ -12,6 +12,23 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Typed observation fixtures test health decisions, not kernel attestation. */
 class DiagnosticsHealthTest {
+    @Test void inCreationSingletonFactoriesAreNotPublishedOwnersAndCannotBeInvokedByPolling() {
+        var beans = new CreatingBeans();
+        beans.registerEarly("pendingBootstrap", () -> {
+            throw new AssertionError("diagnostics invoked an early singleton factory");
+        });
+        assertTrue(new MazewallDiagnosticsEndpoint(beans).read().isEmpty());
+        assertEquals(Status.OUT_OF_SERVICE, new MazewallDiagnosticsHealthIndicator(beans).health().getStatus());
+        assertFalse(beans.containsSingleton("pendingBootstrap"));
+    }
+
+    private static final class CreatingBeans extends DefaultListableBeanFactory {
+        void registerEarly(String name, org.springframework.beans.factory.ObjectFactory<?> factory) {
+            beforeSingletonCreation(name);
+            addSingletonFactory(name, factory);
+        }
+    }
+
     @Test void readyRequiresObservedGenerationAndLiveWorkerAndEverySourceMustBeReady() {
         var beans = new DefaultListableBeanFactory();
         var indicator = new MazewallDiagnosticsHealthIndicator(beans);

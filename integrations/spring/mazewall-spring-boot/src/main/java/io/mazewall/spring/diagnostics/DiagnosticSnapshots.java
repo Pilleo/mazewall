@@ -12,8 +12,8 @@ final class DiagnosticSnapshots {
     static List<OperationDiagnostics> capture(ConfigurableListableBeanFactory beans) {
         var snapshots = new ArrayList<OperationDiagnostics>();
         Arrays.stream(beans.getSingletonNames()).sorted().forEach(name -> {
-            // getBean/getBeansOfType would initialize lazy application-owned bootstrap.
-            if (beans.getSingleton(name) instanceof ExecutionDiagnosticsSource source) {
+            // Even getSingleton can invoke an early-reference factory before full publication.
+            if (beans.containsSingleton(name) && beans.getSingleton(name) instanceof ExecutionDiagnosticsSource source) {
                 snapshots.add(new OperationDiagnostics(name, source.operationId(), source.diagnostics()));
             }
         });

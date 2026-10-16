@@ -213,8 +213,12 @@ sourceSets {
 // the direct implementation modules—never a published consumer.
 val rootKotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val rootKotlinCompilations = rootKotlinExtension.target.compilations
-val rootPlatformJar = project(":platform").layout.buildDirectory.file("libs/platform-${project(":platform").version}.jar")
-val rootEnforcerJar = project(":enforcer").layout.buildDirectory.file("libs/enforcer-${project(":enforcer").version}.jar")
+val rootPlatformJar = objects.fileProperty()
+val rootEnforcerJar = objects.fileProperty()
+gradle.projectsEvaluated {
+    rootPlatformJar.set(project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile })
+    rootEnforcerJar.set(project(":enforcer").tasks.named<Jar>("jar").flatMap { it.archiveFile })
+}
 configurations.named("sharedTestCompileClasspath") {
     attributes.attribute(
         org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,

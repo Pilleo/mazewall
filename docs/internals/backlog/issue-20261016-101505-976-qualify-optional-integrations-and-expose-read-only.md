@@ -125,5 +125,26 @@ Operator approved all four follow-ups after PR533: fix Koog strict dependency ve
 - Full source-bound native/package acceptance and the final included-module build
   remain completion gates; implementation wiring is not claimed as a native pass.
 
+## Cold-gate and connected-review corrections
+
+- The first exact-publication run failed closed in real producer compilation
+  (`pty_b9becef0`, retained evidence under
+  `/tmp/mazewall-consumer-bootstrap-18206841922636170268/checkout/optional-integration-evidence`).
+  Shared fixtures forecast friend JAR names before the staging init script changed
+  versions; actual platform/enforcer JARs had the fresh candidate names. Root
+  friend inputs now bind the actual Jar task archive providers after project
+  configuration. Actual renamed-candidate shared compilation passes
+  (`run-bdc0104cadcd`). No internal declaration is widened or test skipped.
+- Connected review confirmed that Spring7.0.9's `getSingletonNames` includes early
+  factories and `getSingleton` can invoke them (`run-3b8176639b7f`). A real registry
+  regression failed when polling invoked an early factory (`run-fc03daf2aed5`).
+  Sampling now requires `containsSingleton` before lookup; the owning regression
+  passes with the renamed-candidate check above.
+- Actual external javac shows the added package-private overload changes the
+  diagnostic envelope to `compiler.err.cant.apply.symbols`, with the same explicit
+  package-access cause (`run-a4580779ec5b`). The consumer now independently rejects
+  both legacy and observed constructor signatures, still requiring exactly one
+  error and actual package-access evidence, plus positive public-facade compilation.
+
 ---
 <!-- id: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only  file: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md -->
