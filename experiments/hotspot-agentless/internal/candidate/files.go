@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 	"os"
+	"path/filepath"
 	"unicode/utf8"
 )
 
@@ -20,12 +21,10 @@ func readLines[T any](path string) ([]T, error) {
 	defer file.Close()
 	rows := []T{}
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 4096), 4<<20)
+	scanner.Buffer(make([]byte, 4096), maxCaptureLine+2)
+	scanner.Split(captureLine)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
 		if !utf8.Valid(line) {
 			return nil, fmt.Errorf("invalid UTF8 in %s", path)
 		}
@@ -34,8 +33,30 @@ func readLines[T any](path string) ([]T, error) {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		rows = append(rows, row)
+		if len(rows) > maxCaptureRows {
+			return nil, fmt.Errorf("capture row limit")
+		}
 	}
 	return rows, scanner.Err()
+}
+
+func captureLine(data []byte, atEOF bool) (int, []byte, error) {
+	if end := bytes.IndexByte(data, '\n'); end >= 0 {
+		if end > maxCaptureLine {
+			return 0, nil, fmt.Errorf("capture line limit")
+		}
+		if len(bytes.TrimSpace(data[:end])) == 0 {
+			return 0, nil, fmt.Errorf("empty capture row")
+		}
+		return end + 1, data[:end], nil
+	}
+	if len(data) > maxCaptureLine {
+		return 0, nil, fmt.Errorf("capture line limit")
+	}
+	if atEOF && len(data) > 0 {
+		return 0, nil, fmt.Errorf("truncated capture row")
+	}
+	return 0, nil, nil
 }
 
 func VerifyFiles(virtual bool, oraclePath, capturePath string) (any, error) {
@@ -44,6 +65,10 @@ func VerifyFiles(virtual bool, oraclePath, capturePath string) (any, error) {
 		return nil, err
 	}
 	if virtual {
+		var target TargetIdentity
+		if err := driver.ReadJSON(filepath.Join(filepath.Dir(oraclePath), "identity.json"), &target); err != nil {
+			return nil, fmt.Errorf("independent virtual identity: %w", err)
+		}
 		type oracleRow struct {
 			Token string
 			VirtualOracle
@@ -54,12 +79,15 @@ func VerifyFiles(virtual bool, oraclePath, capturePath string) (any, error) {
 		}
 		oracle := map[string]VirtualOracle{}
 		for _, entry := range entries {
+			if entry.Token == "" || entry.VirtualOracle.LogicalID == 0 {
+				return nil, fmt.Errorf("invalid oracle identity")
+			}
 			if _, duplicate := oracle[entry.Token]; duplicate {
 				return nil, fmt.Errorf("duplicate oracle token")
 			}
 			oracle[entry.Token] = entry.VirtualOracle
 		}
-		verdict, err := VerifyVirtual(oracle, rows)
+		verdict, err := VerifyVirtual(oracle, rows, target)
 		if err != nil {
 			return nil, &oracleRejection{err}
 		}

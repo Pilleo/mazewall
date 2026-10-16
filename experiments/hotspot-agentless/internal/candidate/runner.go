@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io.mazewall/experiments/hotspot-agentless/internal/driver"
+	"io.mazewall/experiments/hotspot-agentless/internal/preflight"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -139,6 +140,17 @@ func runCase(docker driver.Docker, c candidateCase, assets, out, classes string,
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
 	if err != nil || pid <= 0 {
 		return nil, fmt.Errorf("invalid fixture PID: %q", pidBytes)
+	}
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return nil, err
+	}
+	ticks, err := preflight.ParseStartTicks(string(stat))
+	if err != nil {
+		return nil, err
+	}
+	if err := driver.WriteJSON(filepath.Join(root, "identity.json"), TargetIdentity{PID: uint32(pid), StartTicks: ticks, FixtureRoot: root}); err != nil {
+		return nil, err
 	}
 	flags, flagsErr := docker.Output(20*time.Second, "exec", target, "jcmd", strconv.Itoa(pid), "VM.flags", "-all")
 	flagsCode := 0

@@ -7,9 +7,9 @@ dependencies: []
 component: "profiler"
 target_modules: [profiler]
 target_files:
-  - "experiments/hotspot-agentless/scripts"
+  - "experiments/hotspot-agentless/internal/candidate"
 target_symbols:
-  - "verify"
+  - "validateCapture"
 open_questions: false
 ---
 
@@ -20,6 +20,10 @@ Review reproduces schema99 foreign occurrence IDs and wrong-process carrier reco
 
 **Needed:**
 1. Add strict shared schema session nested identity PID birth full path and terminal pairing tests before verifier hardening
+
+**Execution:** Current Go verifier hardening and host/race regressions are recorded
+in the [remediation evidence](../../plans/2026-10-05-hotspot-review-remediation-evidence.md).
+Retained/live packet revalidation remains required before archival.
 
 ---
 <!-- id: issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-  file: issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-.md -->
