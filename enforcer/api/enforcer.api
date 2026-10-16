@@ -900,6 +900,49 @@ public final class io/mazewall/enforcer/api/execution/DrainReport$Incomplete : i
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class io/mazewall/enforcer/api/execution/ExecutionDiagnosticState : java/lang/Enum {
+	public static final field CLOSED Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public static final field DRAINING Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public static final field FAILED Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public static final field PREPARING Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public static final field READY Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public static final field UNKNOWN Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public static fun values ()[Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionDiagnostics {
+	public static final field Companion Lio/mazewall/enforcer/api/execution/ExecutionDiagnostics$Companion;
+	public static final field UNAVAILABLE Lio/mazewall/enforcer/api/execution/ExecutionDiagnostics;
+	public fun <init> (Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;Lio/mazewall/enforcer/api/execution/ExecutionGeneration;Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;IIZ)V
+	public final fun component1 ()Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public final fun component2 ()Lio/mazewall/enforcer/api/execution/ExecutionGeneration;
+	public final fun component3 ()Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun component6 ()Z
+	public final fun copy (Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;Lio/mazewall/enforcer/api/execution/ExecutionGeneration;Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;IIZ)Lio/mazewall/enforcer/api/execution/ExecutionDiagnostics;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ExecutionDiagnostics;Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;Lio/mazewall/enforcer/api/execution/ExecutionGeneration;Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;IIZILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ExecutionDiagnostics;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()Lio/mazewall/enforcer/api/execution/ExecutionGeneration;
+	public final fun getInvocations ()Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;
+	public final fun getLiveWorkers ()I
+	public final fun getRetirementComplete ()Z
+	public final fun getState ()Lio/mazewall/enforcer/api/execution/ExecutionDiagnosticState;
+	public final fun getUnfinishedInvocations ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionDiagnostics$Companion {
+}
+
+public abstract interface class io/mazewall/enforcer/api/execution/ExecutionDiagnosticsSource {
+	public abstract fun diagnostics ()Lio/mazewall/enforcer/api/execution/ExecutionDiagnostics;
+	public abstract fun operationId ()Ljava/lang/String;
+}
+
 public abstract interface class io/mazewall/enforcer/api/execution/ExecutionEnd {
 }
 
@@ -925,11 +968,61 @@ public final class io/mazewall/enforcer/api/execution/ExecutionEnd$NotStarted : 
 	public fun toString ()Ljava/lang/String;
 }
 
+public abstract interface class io/mazewall/enforcer/api/execution/ExecutionGeneration {
+	public abstract fun getKind ()Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionGeneration$InProcess : io/mazewall/enforcer/api/execution/ExecutionGeneration {
+	public fun <init> (J)V
+	public final fun component1 ()J
+	public final fun copy (J)Lio/mazewall/enforcer/api/execution/ExecutionGeneration$InProcess;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ExecutionGeneration$InProcess;JILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ExecutionGeneration$InProcess;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getGeneration ()J
+	public fun getKind ()Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionGeneration$Kind : java/lang/Enum {
+	public static final field IN_PROCESS Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+	public static final field PORTAL_INPUTS Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+	public static final field UNAVAILABLE Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+	public static fun values ()[Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionGeneration$PortalInputs : io/mazewall/enforcer/api/execution/ExecutionGeneration {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Lio/mazewall/enforcer/api/execution/ExecutionGeneration$PortalInputs;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ExecutionGeneration$PortalInputs;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ExecutionGeneration$PortalInputs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getInputsSha256 ()Ljava/lang/String;
+	public fun getKind ()Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+	public final fun getManifestsSha256 ()Ljava/lang/String;
+	public final fun getRuntimeSha256 ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ExecutionGeneration$Unavailable : io/mazewall/enforcer/api/execution/ExecutionGeneration {
+	public static final field INSTANCE Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Unavailable;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getKind ()Lio/mazewall/enforcer/api/execution/ExecutionGeneration$Kind;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class io/mazewall/enforcer/api/execution/ExecutionTransitionException : java/lang/IllegalStateException {
 	public fun <init> (Ljava/lang/String;)V
 }
 
 public final class io/mazewall/enforcer/api/execution/InProcessDomain {
+	public final fun diagnostics ()Lio/mazewall/enforcer/api/execution/ExecutionDiagnostics;
 	public final fun getGeneration ()J
 	public final fun getLimits ()Lio/mazewall/enforcer/api/execution/DomainLimits;
 	public final fun getOperationBinding ()Lio/mazewall/enforcer/api/OperationBinding;
@@ -946,6 +1039,27 @@ public abstract interface class io/mazewall/enforcer/api/execution/InvocationCon
 
 public final class io/mazewall/enforcer/api/execution/InvocationContextSnapshot {
 	public fun <init> (Ljava/util/Map;Ljava/util/function/Function;)V
+}
+
+public final class io/mazewall/enforcer/api/execution/InvocationDiagnostics {
+	public fun <init> ()V
+	public fun <init> (JJJJJ)V
+	public synthetic fun <init> (JJJJJILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()J
+	public final fun component2 ()J
+	public final fun component3 ()J
+	public final fun component4 ()J
+	public final fun component5 ()J
+	public final fun copy (JJJJJ)Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;JJJJJILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/InvocationDiagnostics;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAdmitted ()J
+	public final fun getCancellationRequests ()J
+	public final fun getDelivered ()J
+	public final fun getEnded ()J
+	public final fun getRejected ()J
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/mazewall/enforcer/api/execution/InvocationEvidence {

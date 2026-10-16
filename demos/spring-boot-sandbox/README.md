@@ -80,6 +80,7 @@ review harness is **test authority only**, not a production approval service.
   physical retirement separately. Shutdown never removes the process baseline.
 
 This executable advertises **Security absence** only and checks no forced Security linkage.
+It also checks that the normal starter does not force optional Actuator linkage.
 It does not advertise authentication, principal restoration, post-authorization or HTTP
 acceptance. Those optional Security semantics have their separate adapter/ordinary-JAR
 evidence. There is no complete ACE/shared-heap/tenant isolation, immutable-content,
@@ -91,3 +92,20 @@ See [the external consumer instructions](../../tests/consumers/spring-boot/READM
 for locked local publication, standalone packaging and fresh-deployment proof. The root
 settings/catalog are untouched; standalone settings intentionally prevent project
 substitution. No Docker, remote publication or credentials are used.
+
+The current one-command source-bound gate is
+`./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache`.
+It stages current source under a fresh local candidate, runs the readable
+`BootPresentationTest` cases and the full external-review/ownership negatives.
+The task owns its lock internally. A retired historical coordinate cannot be
+substituted for current diagnostic APIs.
+
+## Read-only diagnostic evidence
+
+The real finished executable checks and prints `DIAGNOSTICS_READY`,
+`DIAGNOSTICS_DRAINING` and `DIAGNOSTICS_CLOSED`. The first has its genuine prepared
+in-process generation; the held-cancellation case still has live unfinished
+execution after caller delivery; the last requires canonical complete drain,
+zero live/unfinished work and observed execution ends. These are checks on actual
+owned workers/resources, separate from the optional Actuator host adapter and
+separate from kernel-denial provenance. Polling never submits, drains or starts work.

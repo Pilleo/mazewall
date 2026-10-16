@@ -3,6 +3,7 @@ package io.mazewall.spring;
 import io.mazewall.enforcer.api.Mazewall;
 import io.mazewall.enforcer.api.execution.InProcessDomain;
 import io.mazewall.enforcer.api.execution.ManagedRuntime;
+import io.mazewall.enforcer.api.execution.ExecutionDiagnostics;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 
@@ -28,6 +29,8 @@ public final class ManagedRuntimeDispatcher implements InvocationDispatcher {
     }
 
     long generation() { return domain.getGeneration(); }
+
+    ExecutionDiagnostics diagnostics() { return domain.diagnostics(); }
 
     // Shared Callable adaptation is directly host-characterizable without native runtime setup.
     static Callable<Object> callable(Body body) {

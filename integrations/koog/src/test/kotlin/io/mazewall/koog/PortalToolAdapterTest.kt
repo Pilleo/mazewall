@@ -3,6 +3,8 @@ package io.mazewall.koog
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.serialization.typeToken
 import io.mazewall.enforcer.api.execution.CancellationDisposition
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticsSource
 import io.mazewall.enforcer.api.execution.ExecutionEnd
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.portal.PreparedPortalOperation
@@ -21,6 +23,18 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class PortalToolAdapterTest {
+    @Test
+    fun `diagnostic polling never submits work or invents ownership for legacy test construction`() {
+        var submissions = 0
+        val source: ExecutionDiagnosticsSource = tool(TestHandle(), { submissions++ })
+        assertEquals("bounded_echo", source.operationId())
+        repeat(3) {
+            assertEquals(ExecutionDiagnosticState.UNKNOWN, source.diagnostics().state)
+            assertFalse(source.diagnostics().retirementComplete)
+        }
+        assertEquals(0, submissions)
+    }
+
     @Test
     fun `JVM public constructor requires a prepared operation rather than arbitrary submitter`() {
         val constructors = PortalToolAdapter::class.java.constructors

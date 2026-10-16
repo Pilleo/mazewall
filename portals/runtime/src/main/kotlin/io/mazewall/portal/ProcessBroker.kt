@@ -1,5 +1,8 @@
 package io.mazewall.portal
 
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState
+import io.mazewall.enforcer.api.execution.ExecutionDiagnostics
+import io.mazewall.enforcer.api.execution.ExecutionGeneration
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
@@ -106,6 +109,8 @@ public class ProcessBroker internal constructor(
     @Volatile private var mostRecentInvocation: PortalInvocationTiming? = null
 
     @Volatile private var mostRecentWorkerLifecycle: PortalWorkerLifecycle = PortalWorkerLifecycle.notStarted()
+
+    @Volatile private var mostRecentGeneration: ExecutionGeneration = ExecutionGeneration.Unavailable
 
     private val lifecycleGate = Any()
 
@@ -221,9 +226,32 @@ public class ProcessBroker internal constructor(
     /** Broker-owned diagnostics; these do not contact, alter, or revive a worker. */
     internal fun workerPids(): List<Long> = trackedSlots.mapNotNull { slot -> slot.process.takeIf(Process::isAlive)?.pid() }.sorted()
 
-    internal fun lastInvocationTiming(): PortalInvocationTiming? = mostRecentInvocation
+    internal fun health(baseline: PortalServiceHealth): PortalServiceHealth =
+        baseline.copy(
+        cgroupUsage = cgroupUsage(),
+        lastWorkerLifecycle = mostRecentWorkerLifecycle,
+        workerPids = workerPids(),
+        lastInvocation = mostRecentInvocation,
+    )
 
-    internal fun lastWorkerLifecycle(): PortalWorkerLifecycle = mostRecentWorkerLifecycle
+    internal fun diagnostics(): ExecutionDiagnostics {
+        val state = when (lifecycle) {
+            ProcessBrokerLifecycle.New -> ExecutionDiagnosticState.UNKNOWN
+            ProcessBrokerLifecycle.Starting -> ExecutionDiagnosticState.PREPARING
+            ProcessBrokerLifecycle.Running -> ExecutionDiagnosticState.READY
+            ProcessBrokerLifecycle.Closing -> ExecutionDiagnosticState.DRAINING
+            ProcessBrokerLifecycle.Closed -> ExecutionDiagnosticState.CLOSED
+            is ProcessBrokerLifecycle.Failed -> ExecutionDiagnosticState.FAILED
+        }
+        return ExecutionDiagnostics(
+            state,
+            mostRecentGeneration,
+            operations.diagnostics(),
+            trackedSlots.count { it.process.isAlive },
+            operations.unfinishedInvocations(),
+            state == ExecutionDiagnosticState.CLOSED,
+        )
+    }
 
     internal fun cgroupUsage(): List<PortalCgroupUsage> = trackedSlots.mapNotNull { slot -> slot.cgroup?.let(cgroupController::sample) }.sortedBy { it.directory }
 
@@ -574,6 +602,7 @@ public class ProcessBroker internal constructor(
                 attempt.transferred = true
             }
             spawned.incrementAndGet()
+            mostRecentGeneration = ExecutionGeneration.PortalInputs(generation.inputs, generation.manifests, generation.runtime)
             mostRecentWorkerLifecycle = PortalWorkerLifecycle(PortalWorkerLifecycleState.STARTED, process.pid())
             provisionalAttempts.remove(attempt)
             return slot

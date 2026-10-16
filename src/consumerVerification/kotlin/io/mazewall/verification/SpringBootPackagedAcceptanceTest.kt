@@ -123,6 +123,10 @@ class SpringBootPackagedAcceptanceTest {
                         val output = launch("verify")
                         for (marker in listOf(
                                 "BOOT_SECURITY_ABSENT",
+                                "BOOT_ACTUATOR_ABSENT",
+                                "DIAGNOSTICS_READY",
+                                "DIAGNOSTICS_DRAINING",
+                                "DIAGNOSTICS_CLOSED",
                                 "REQUIRED_UNBOUND_REJECTED",
                                 "BOOT_ACTUAL_ORIGIN",
                                 "TRUSTED_INIT_JDBC_WARMUP",

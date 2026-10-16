@@ -156,6 +156,10 @@ public final class NativeJdbcConsumer {
                 throw new AssertionError("Ordinary adapter/starter must not force Security at runtime");
             } catch (ClassNotFoundException absent) { System.out.println("PUBLISHED_SECURITY_ABSENCE_NO_LINKAGE"); }
         }
+        try {
+            Class.forName("org.springframework.boot.actuate.endpoint.annotation.Endpoint");
+            throw new AssertionError("Normal Spring publications must not force optional Actuator linkage");
+        } catch (ClassNotFoundException absent) { System.out.println("PUBLISHED_ACTUATOR_ABSENCE_NO_LINKAGE"); }
         var policy = WorkerPolicyBuilder.denyList(PROFILE).allowFsRead(jar, root.resolve("template.txt")).build();
         Class<?> foreignClass = Class.forName("consumer.spring.ForeignJdbcOperation");
         check(!foreignClass.getProtectionDomain().getCodeSource().getLocation().equals(
@@ -241,6 +245,12 @@ public final class NativeJdbcConsumer {
             var lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 4), resources, Duration.ofMillis(50),
                     security == null ? InvocationContextBridge.none() : security.contexts());
             lifecycle.start();
+            var ready = lifecycle.diagnostics();
+            check(ready.getState() == ExecutionDiagnosticState.READY
+                    && ready.getGeneration() instanceof ExecutionGeneration.InProcess
+                    && ready.getLiveWorkers() > 0 && !ready.getRetirementComplete(), "Actual prepared diagnostics required");
+            check(ready.getInvocations().getAdmitted() == 0, "Polling cannot admit a reviewed operation");
+            System.out.println("DIAGNOSTICS_READY operation=" + lifecycle.operationId());
             resources.close(); // Transferred close cannot revoke genuine live worker ownership.
             var binder = new SpringOperationBinder(beans, lifecycle, guard);
             var target = security == null ? new JdbcOperation(jdbc, root.resolve("template.txt"), root.resolve("sibling.txt"))
@@ -322,6 +332,8 @@ public final class NativeJdbcConsumer {
             lifecycle.stop(); // Never claimed: lifecycle closes the genuine acquisitions.
             assertClosed(unused);
             check(lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Never-started lifecycle drains explicit owner");
+            check(lifecycle.diagnostics().getState() == ExecutionDiagnosticState.CLOSED
+                    && lifecycle.diagnostics().getRetirementComplete(), "Unused owner diagnostics must follow actual drain");
         } finally { unused.close(); }
         for (var rejected : List.of(staleArtifact, wrongMemberArtifact)) {
         var failed = PreparedOperationResources.resolve(PROFILE, policy, implementation, strictPaths);
@@ -334,6 +346,9 @@ public final class NativeJdbcConsumer {
                 check(mismatch.getMessage().contains(expectedReason), "Actual contract rejection required: " + mismatch);
             }
             check(!lifecycle.isRunning(), "Failed preparation cannot be ready");
+            check(lifecycle.diagnostics().getState() == ExecutionDiagnosticState.FAILED
+                    && lifecycle.diagnostics().getGeneration() instanceof ExecutionGeneration.Unavailable,
+                    "Failed preparation cannot publish protected-ready generation diagnostics");
             assertClosed(failed);
             lifecycle.stop();
             check(lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Preparation failure retired all actual resources");
@@ -380,6 +395,11 @@ public final class NativeJdbcConsumer {
             lifecycle.stop();
             check(lifecycle.lastDrain() instanceof DrainReport.Incomplete, "Held cleanup must report Incomplete, not physical end");
             check(target.bodyEnded.getCount() == 1 && target.worker.isAlive(), "Actual physical worker/body remains live");
+            var pending = lifecycle.diagnostics();
+            check(pending.getState() == ExecutionDiagnosticState.DRAINING && !pending.getRetirementComplete()
+                    && pending.getUnfinishedInvocations() > 0 && pending.getInvocations().getCancellationRequests() > 0,
+                    "Diagnostic cancellation is not physical retirement");
+            System.out.println("DIAGNOSTICS_DRAINING deliveryEnded=true physicalRetirement=false");
             resources.validate(); // Retained owner must still be usable throughout unfinished cleanup.
         } finally { target.cleanupRelease.countDown(); }
         check(target.bodyEnded.await(5, TimeUnit.SECONDS), "Lexical body cleanup finished");
@@ -387,6 +407,11 @@ public final class NativeJdbcConsumer {
         check(!target.worker.isAlive(), "Actual captured physical worker terminated");
         lifecycle.stop();
         check(lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Actual owned runtime/manager/resource physical retirement");
+        var retiredSnapshot = lifecycle.diagnostics();
+        check(retiredSnapshot.getState() == ExecutionDiagnosticState.CLOSED && retiredSnapshot.getRetirementComplete()
+                && retiredSnapshot.getLiveWorkers() == 0 && retiredSnapshot.getUnfinishedInvocations() == 0
+                && retiredSnapshot.getInvocations().getEnded() > 0, "Canonical diagnostic retirement required");
+        System.out.println("DIAGNOSTICS_CLOSED operation=" + lifecycle.operationId());
         try { resources.validate(); throw new AssertionError("Retired resource owner stayed available"); }
         catch (IllegalStateException retired) { /* Exact public owner closes only after physical retirement. */ }
         check(jdbc.queryForObject("select count(*) from effects where name = 'cancel'", Integer.class) == 0, "Cancelled SQL rollback");

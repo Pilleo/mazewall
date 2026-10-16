@@ -141,6 +141,7 @@ CONTAINER_ARGS=(
     -v "${CACHE_HOME}:/container-gradle-home"
     -v "${NVD_CACHE}:/container-gradle-home/dependency-check-data"
     -e GRADLE_USER_HOME=/container-gradle-home
+    -e JAVA_TOOL_OPTIONS=-Djava.util.prefs.userRoot=/container-gradle-home/java-preferences
     -e HOME=/tmp
     -e IO_MAZEWALL_TEST=true
     -e MAZEWALL_IN_CONTAINER=true

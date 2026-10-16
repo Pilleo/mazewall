@@ -44,7 +44,8 @@ class SpringSecurityPresentationTest {
         String result = launch("verify-security");
         for (String effect : List.of("NATIVE_SECURITY_DELEGATION_PASS", "postauth-real-SQL-rollback", "clean-context",
                 "OBSERVED_FILESYSTEM_OPEN_DENIED mutate", "OBSERVED_FILESYSTEM_OPEN_DENIED sibling",
-                "STALE_AND_WRONG_MEMBER_REJECTED bodyEntries=0", "NATIVE_ORDINARY_JAR_PASS")) {
+                "STALE_AND_WRONG_MEMBER_REJECTED bodyEntries=0", "NATIVE_ORDINARY_JAR_PASS",
+                "PUBLISHED_ACTUATOR_ABSENCE_NO_LINKAGE", "DIAGNOSTICS_READY", "DIAGNOSTICS_DRAINING", "DIAGNOSTICS_CLOSED")) {
             assertTrue(result.contains(effect), "Missing actual checked effect: " + effect + "\n" + result);
         }
         assertEquals("approved template", Files.readString(root.resolve("template.txt")));
@@ -65,7 +66,7 @@ class SpringSecurityPresentationTest {
             assertTrue(process.waitFor(60, TimeUnit.SECONDS), "Owned native Security process exceeded deadline");
             String output = Files.readString(log);
             assertEquals(0, process.exitValue(), output);
-            output.lines().filter(line -> line.startsWith("NATIVE_") || line.startsWith("OBSERVED_") || line.startsWith("STALE_"))
+            output.lines().filter(line -> line.startsWith("NATIVE_") || line.startsWith("OBSERVED_") || line.startsWith("STALE_") || line.startsWith("DIAGNOSTICS_"))
                     .forEach(System.out::println);
             return output;
         } finally {

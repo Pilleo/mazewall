@@ -42,7 +42,8 @@ internal class OwnedPortalInvocation<T>(
             }
         }
         val failure = CancellationException("Portal invocation cancellation requested")
-        if (queued) finishNotStarted(failure) else delivered.completeExceptionally(failure)
+        owner.recordCancellation()
+        if (queued) finishNotStarted(failure) else deliverFailure(failure)
         return CancellationDisposition.REQUESTED
     }
 
@@ -60,8 +61,12 @@ internal class OwnedPortalInvocation<T>(
 
     private fun finishNotStarted(failure: Throwable) {
         owner.finished(this)
-        ended.complete(ExecutionEnd.NotStarted(failure))
-        delivered.completeExceptionally(failure)
+        if (ended.complete(ExecutionEnd.NotStarted(failure))) owner.recordEnd()
+        deliverFailure(failure)
+    }
+
+    private fun deliverFailure(failure: Throwable) {
+        if (delivered.completeExceptionally(failure)) owner.recordDelivery()
     }
 
     @Suppress("TooGenericExceptionCaught") // Fatal host mapping failure still retains exact process retirement ownership.
@@ -77,10 +82,10 @@ internal class OwnedPortalInvocation<T>(
             val value = retirement.run(action)
             retirement.failure?.let { throw it }
             check(retirement.started) { "Portal operation mapping returned without invoking its prepared worker" }
-            delivered.complete(value)
+            if (delivered.complete(value)) owner.recordDelivery()
         } catch (bodyFailure: Throwable) {
             failure = bodyFailure
-            delivered.completeExceptionally(bodyFailure)
+            deliverFailure(bodyFailure)
         } finally {
             synchronized(lock) {
                 phase = PortalInvocationLifecycle.evaluate(phase, PortalInvocationEvent.BODY_ENDED)
@@ -96,7 +101,7 @@ internal class OwnedPortalInvocation<T>(
             Thread.interrupted()
             owner.finished(this)
             val outcome = if (retirement.started) ExecutionEnd.Finished(failure) else ExecutionEnd.NotStarted(checkNotNull(failure))
-            ended.complete(outcome)
+            if (ended.complete(outcome)) owner.recordEnd()
         }
     }
 }

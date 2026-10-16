@@ -213,8 +213,12 @@ sourceSets {
 // the direct implementation modules—never a published consumer.
 val rootKotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val rootKotlinCompilations = rootKotlinExtension.target.compilations
-val rootPlatformJar = project(":platform").layout.buildDirectory.file("libs/platform-${project(":platform").version}.jar")
-val rootEnforcerJar = project(":enforcer").layout.buildDirectory.file("libs/enforcer-${project(":enforcer").version}.jar")
+val rootPlatformJar = objects.fileProperty()
+val rootEnforcerJar = objects.fileProperty()
+gradle.projectsEvaluated {
+    rootPlatformJar.set(project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile })
+    rootEnforcerJar.set(project(":enforcer").tasks.named<Jar>("jar").flatMap { it.archiveFile })
+}
 configurations.named("sharedTestCompileClasspath") {
     attributes.attribute(
         org.gradle.api.attributes.LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE,
@@ -279,7 +283,7 @@ tasks.register<Test>("consumerHarnessTest") {
     description = "Checks portable consumer harness ownership without requiring published applications."
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
-    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence") }
+    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
 }
 
 tasks.register<Test>("consumerCheck") {
@@ -335,6 +339,20 @@ tasks.register<Test>("consumerNativeCheck") {
     for (name in listOf("verificationLock", "consumerRepository", "consumerVersion", "consumerRevision", "consumerKoogJar", "consumerBootJar", "consumerEvidence")) {
         providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
     }
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
+tasks.register<Test>("optionalIntegrationCheck") {
+    group = "verification"
+    description = "Stages exact optional publications and verifies real Koog, JDBC/Security and finished Boot consumers."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("optional-integration") }
+    maxParallelForks = 1
+    systemProperty("consumerWorkspace", layout.projectDirectory.asFile.absolutePath)
+    providers.gradleProperty("verificationLock").orNull?.let { systemProperty("verificationLock", it) }
+    testLogging.showStandardStreams = true
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
 }

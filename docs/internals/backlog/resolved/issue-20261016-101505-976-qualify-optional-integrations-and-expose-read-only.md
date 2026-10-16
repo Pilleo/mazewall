@@ -1,0 +1,230 @@
+---
+title: "Qualify optional integrations and expose read-only execution diagnostics"
+severity: "MEDIUM"
+status: "resolved"
+priority: high
+dependencies: []
+component: "core"
+target_modules:
+  - ":enforcer"
+  - ":portals:runtime"
+  - ":integrations:koog"
+  - ":integrations:spring:mazewall-spring-boot"
+  - ":integrations:spring:mazewall-spring-boot-starter"
+target_files:
+  - "integrations"
+  - "enforcer/src/main/kotlin/io/mazewall/enforcer/api/execution"
+  - "enforcer/src/main/kotlin/io/mazewall/enforcer/internal/execution"
+  - "portals/runtime"
+  - "buildSrc"
+  - "gradle/verification-metadata.xml"
+  - ".github/workflows/ci.yml"
+  - "demos/koog-contained-tool"
+  - "src/consumerVerification"
+  - "tests/consumers"
+target_symbols: []
+open_questions: false
+---
+
+# Resolved: Qualify optional integrations and expose read-only execution diagnostics
+
+**Context:**
+Operator approved all four follow-ups after PR533: fix Koog strict dependency verification and Spring configuration-cache capture, add optional integration CI/publication, refresh guides/showcases, and implement read-only lifecycle/admission/cancellation/retirement/identity diagnostics with optional Spring Actuator exposure.
+
+**Needed:**
+1. Implement the approved staged plan in the current checkout with strict dependency provenance, existing ownership semantics, focused regressions, packaged consumers and complete included-module gates.
+
+## Scope and constraints
+
+- Baseline: merged PR533, `628983edfeb3181bfee605ec91824da6a6c907bc`.
+- Operator approved all four recommendations, including optional Actuator API
+  dependencies. Keep them compile-only/conditional, following the existing optional
+  Security pattern; no new required framework dependency in core or ordinary starter.
+- Execute inline in the existing checkout. No new worktree, agent delegation,
+  automatic GitHub merge, or publication of raw benchmark/command receipts.
+- Read-only diagnostics expose finite lifecycle, actual generation identity and
+  owner-observed admission/cancellation/delivery/end counters. They cannot install,
+  start, admit, retry, cancel, drain, retire, or certify containment. Exclude payloads,
+  resource paths, environment and exception text.
+- Preserve result-versus-physical-end semantics, explicit process baseline, required
+  native installation, strict verification, historical artifacts/locks, public
+  constructor compatibility and all existing quality/security gates.
+- Codanna impact evidence for `ManagedRuntime` is PARTIAL (`CODANNA_TIMEOUT`,
+  `run-4312f1b5f5de`); direct connected-code inspection supplies caller evidence.
+
+## Build regression evidence
+
+- Actual Spring Test configuration reproduced the Project-capture configuration-cache
+  failure inside a new real Gradle/TestKit fixture (`run-0712dc365d9b`). The fixture
+  also compiles an external public consumer and rejects a test-only class, so merely
+  making the cache reusable cannot hide test-output leakage.
+- The provider correction passed that mandatory fixture and existing buildSrc
+  contracts (`run-a15cdab87220`). The four missing pinned artifacts match fresh
+  Maven Central bytes and local-cache bytes; JVM metadata's legitimate parent link
+  and advertised JAR SHA256 were independently checked (`run-d83746c87df3`).
+- Both actual optional builds now pass with strict verification and fatal
+  configuration-cache checks (`run-4606ca57f962`): **5 Koog and 93 Spring tests,
+  no failures/errors/skips**, plus Spring static analysis. The identical invocation
+  then reuses the configuration cache (`run-c95b08fe9dc4`). Existing checksum
+  approvals and coordinates are preserved.
+
+## Diagnostics checkpoint
+
+- Added the maintained [read-only diagnostics contract](../../designs/core/execution-diagnostics.md).
+  The ABI adds only immutable diagnostic models/source and the domain observation
+  method; existing declarations remain present. Prepared Portal operations retain
+  their original package-private constructor and expose no public constructor.
+- Tests first rejected missing diagnostics APIs (`run-2c3ada1e33b9`,
+  `run-a14c88eafef6`, `run-3fbb61d35d46`, `run-f0cc3079302a`,
+  `run-bff2663b2c9b`). A strengthened real-thread test also failed when polling
+  incorrectly certified retirement before the canonical drain boundary
+  (`run-da2b17746903`, exact assertion `run-c32ba707c3ae`). The guarded observation
+  then passes (`run-2b42d37fd32a`).
+- Native Portal checks observe the actual launch/readiness input tuple, reject
+  publication after failed readiness, preserve held retirement/admission, and
+  retain post-close views. Actual scoped checkpoints pass (`run-0b3655ff68e7`,
+  `run-c2d454fd5ca1`).
+- The final checkpoint includes **66 selected core ownership/architecture cases,
+  148 Portal host cases, 5 selected Portal native cases, 6 Koog cases and 103 Spring
+  cases**, all with zero failures/errors/skips. Additive ABI checking, Spring
+  static analysis and the unchanged Detekt warning ratchet pass. Existing separate
+  optional native prerequisites are not relabeled as passes.
+- Health/read endpoints are independently optional, explicit-property enabled,
+  immutable and passive over existing singleton sources. Actual context tests
+  cover absent APIs, disabled/default behavior, independent API absence, user
+  override and no lazy-source initialization. Health rejects unknown, failed,
+  draining and closed observations and never masks source failures.
+- Strict optional-module locks are generated; the six added optional Boot4.1.1 /
+  managed Jackson-annotation artifacts match independent Maven Central bytes
+  (`run-d95e29bf5a9e`, `run-8b23216f2393`). No existing checksum changes or dependency
+  version drift are approved. Root lock changes only add the actual consumer
+  verification configuration association for existing versions.
+
+## CI, publication and adoption implementation
+
+- Added a dedicated optional job, actual full-adapter build/cache-reuse steps and
+  `optionalIntegrationCheck`. The latter compiles as ordinary test code and remains
+  excluded from the host-safe harness (`run-854dd7c90830`). It uses existing owned
+  command/clone/package/Boot fixtures, pins committed producer inputs, stages a
+  fresh exact local version, verifies constructor/public observation visibility,
+  rejects malformed version namespaces, preserves historical locks, and executes
+  real JAR-only native Koog, JDBC/Security and finished-Boot consumers.
+- The existing required core job uses an always-run success guard on optional
+  acceptance; optional failure cannot skip into a green required job. Workflow
+  parsing/dependency checks passed (`run-eda4fb43118a`). Existing master publication
+  selects both optional library flags and bootstrap-only Koog selection, preserving
+  credential bindings and excluding demo/denied fixture publications.
+- The exact proposed CI host build passes (`run-60279924664d`) and its unchanged
+  second invocation reuses configuration cache (`run-4a89964f18e5`). Actual standalone
+  consumer parsing rejects `../escape` before resolution/lock writes
+  (`run-abcba477f664`). The publication gate additionally checks this regression.
+- Updated guides remove stale coordinator-patch/retired-shell/private-candidate
+  instructions. Existing JUnit stories now assert real ready/held-draining/closed
+  diagnostics and optional Actuator absence against published artifacts. Reference,
+  anchor and Bash-syntax checks passed for 18 relative links (`run-3c3e28979da7`).
+- At this checkpoint, full source-bound native/package acceptance and the final
+  included-module build remained outstanding; their final results are recorded below.
+
+## Cold-gate and connected-review corrections
+
+- The first exact-publication run failed closed in real producer compilation
+  (`pty_b9becef0`, retained evidence under
+  `/tmp/mazewall-consumer-bootstrap-18206841922636170268/checkout/optional-integration-evidence`).
+  Shared fixtures forecast friend JAR names before the staging init script changed
+  versions; actual platform/enforcer JARs had the fresh candidate names. Root
+  friend inputs now bind the actual Jar task archive providers after project
+  configuration. Actual renamed-candidate shared compilation passes
+  (`run-bdc0104cadcd`). No internal declaration is widened or test skipped.
+- Connected review confirmed that Spring7.0.9's `getSingletonNames` includes early
+  factories and `getSingleton` can invoke them (`run-3b8176639b7f`). A real registry
+  regression failed when polling invoked an early factory (`run-fc03daf2aed5`).
+  Sampling now requires `containsSingleton` before lookup; the owning regression
+  passes with the renamed-candidate check above.
+- Actual external javac shows the added package-private overload changes the
+  diagnostic envelope to `compiler.err.cant.apply.symbols`, with the same explicit
+  package-access cause (`run-a4580779ec5b`). The consumer now independently rejects
+  both legacy and observed constructor signatures, still requiring exactly one
+  error and actual package-access evidence, plus positive public-facade compilation.
+
+## Published consumer continuation evidence
+
+- Corrected producer `0592f882fbd25fe38d0c312567e330721dcba47d` now stages actual
+  source-bound publications successfully. Retained candidate is
+  `0.1.0-integration.0592f882fbd2`, with opaque native-fixture package verification.
+- Real javax.tools diagnostics use the singular or plural constructor-applicability
+  envelope depending on compiler context. Both still require the explicit actual
+  package-private access cause. The retained published consumer independently
+  rejects both constructor signatures and compiles the public observation facade
+  (`run-ebaf20a263cf`); no wrong-symbol/arity-only rejection is accepted.
+- The strict JAR-only native Koog probe passes from a fresh owned directory with
+  27 staged JARs, actual registry/denial/crash/cancel and diagnostic checks
+  (`run-d6ee3a858ecd`). Ordinary-JAR JDBC, Security and readable presentation pass
+  (`run-416394c01cef`), as does actual finished-Boot packaging/presentation
+  (`run-3ef94c2e259e`). Example-local diagnostic variables were renamed to avoid
+  shadowing existing Java catch variables; producer library bytes are unchanged.
+- Full finished-JAR source/ownership/negative acceptance passes with the actual
+  full producer revision and a newly acquired evidence destination
+  (`run-dfd4d9540e18`). The earlier mistyped manual revision is a rejected input,
+  not an accepted producer or a library failure.
+- These continuations retain the exact published producer and separately modified
+  consumer inputs. Final acceptance below additionally executes the combined gate
+  automatically on the committed implementation checkpoint.
+
+## Final local acceptance
+
+- Immutable library/consumer checkpoint **P =
+  `4edb465fd2cc014f5c9b1af886dd4f0931271172`**. Later harness-timeout/backlog metadata
+  does not relabel this producer, its artifacts or native receipts.
+- Full **`build` with both optional integrations included** passed in **7m4s**
+  (`run-6b517f055232`), preserving ABI, lint/static analysis, coverage and kernel gates.
+- Actual **`optionalIntegrationCheck` passed in 9m59s**, one owning JUnit case with
+  zero failures/errors/skips. Candidate `0.1.0-integration.4edb465fd2cc`, source-bound
+  evidence under `/tmp/mazewall-consumer-bootstrap-130149253302231107/checkout/optional-integration-evidence`.
+  All automatic phase checks passed: producer identity, real publications, opaque
+  worker package, new-coordinate locks, strict fresh Koog native, ordinary-JAR
+  JDBC/Security, finished-Boot showcase and complete Boot ownership/negative matrix.
+  The opaque native-fixture worker contains 13 JARs and no host frameworks; original
+  checkout/source integrity is asserted by the actual owning harness.
+- The supplementary existing bootstrap fault suite first exhausted its four-minute
+  first-producer setup limit after the producer itself succeeded in 3m48s. The cold
+  configuration case had not compiled that closure. Only the first real two-stage
+  producer received the same ten-minute cold-setup window; warm bounds and failure
+  controls remain unchanged. The complete suite then **passed in 15m27s**
+  (`run-9fba04cdb40f`): 29 named CLI cases plus the direct exclusion case,
+  production/native package variants, no failures/errors/skips.
+- Persisted successful combined/bootstrap XML and phase counts were rechecked
+  (`run-6fb83d6f2520`). The externally interrupted bootstrap attempt has no accepted
+  completion receipt and is not counted as a pass.
+- One connected-code review produced the actual-archive and early-singleton fixes
+  above; the final native/publication and bootstrap gates cover their relevant
+  boundaries. No production containment downgrade or retry/fallback was added.
+- Final issue archival passes both `adkw check-backlog` and Gradle
+  `validateBacklogIndex`; all 215 relative links in the canonical index and three
+  resolved issues exist. The local execution plan and raw receipts remain untracked.
+
+This resolves the approved local implementation and engineering acceptance scope.
+Hosted PR review/CI and actual credentialed master publication remain their normal
+separate delivery boundary. Production reviewer/launch/cgroup authority, hardware
+prerequisites and independent human comprehension are not invented or closed.
+
+## Hosted cold-metadata follow-up
+
+PR #534 was explicitly authorized for delivery. Its first hosted run
+`38926099406` failed strict verification of ten already-pinned Spring BOM
+`.module` files, not execution or a Project-capture regression. Fresh metadata
+resolution additionally exposed the pinned Log4j 2.25.5 parent POM. Warm local
+resolution had used previously approved metadata forms.
+
+All ten module identities/platform variants and existing approved POM hashes were
+independently compared with fresh Maven Central bytes and SHA512 sidecars
+(`run-bb69dca3ae0d`). The Log4j parent was compared byte-for-byte through both
+Central endpoints and its published SHA1 sidecar; Boot's existing 4.1.1 BOM pins
+2.25.5 (`run-0d3b7d03c4ac`). Exactly eleven SHA256 approvals are added, with no
+existing approval removed/replaced or verification setting weakened
+(`run-7a200146382e`). Actual refreshed strict optional builds pass
+(`run-db25d6a02671`); the normal strict command also passes and reuses its
+configuration cache (`run-9364b9720063`). No dependency version or runtime behavior
+changes. Hosted acceptance must pass at the corrected PR head before merge.
+
+---
+<!-- id: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only  file: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md -->

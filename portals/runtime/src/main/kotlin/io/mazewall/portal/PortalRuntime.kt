@@ -33,14 +33,14 @@ public class PortalRuntime private constructor(
     ): PreparedPortalOperation<A, R> {
         val service = get(type, id)
         val broker = brokerFor(registry.resolve(type, id))
-        return PreparedPortalOperation { arguments ->
+        return PreparedPortalOperation({ arguments ->
             broker.operations.submit(
                 java.util.concurrent.Callable {
                 ensureOpen()
                 call.invoke(service, arguments)
             },
             )
-        }
+        }, broker::diagnostics)
     }
 
     public fun <T : Any> get(type: Class<T>): T {
@@ -88,15 +88,12 @@ public class PortalRuntime private constructor(
             .map { (group, members) ->
                 val baseline = statefulGate.health(members.first())
                 val manifest = members.first()
-                 val broker = brokers.ready(group)
-                baseline.copy(
+                val broker = brokers.ready(group)
+                val configured = baseline.copy(
                     policyProfile = manifest.policyProfile,
                     workerProfile = config.profile(manifest),
-                    cgroupUsage = broker?.cgroupUsage().orEmpty(),
-                    lastWorkerLifecycle = broker?.lastWorkerLifecycle() ?: PortalWorkerLifecycle.notStarted(),
-                    workerPids = broker?.workerPids().orEmpty(),
-                    lastInvocation = broker?.lastInvocationTiming(),
                 )
+                broker?.health(configured) ?: configured
             }
 
     private fun ensureOpen() {

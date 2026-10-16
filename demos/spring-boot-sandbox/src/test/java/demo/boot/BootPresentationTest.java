@@ -53,7 +53,8 @@ class BootPresentationTest {
         assertEquals("Reviewed quarterly template", Files.readString(root.resolve("template.txt")));
         assertEquals("Reviewed quarterly template: approved report", Files.readString(root.resolve("reports/quarterly.txt")));
         assertEquals(review.getProperty("jarSha256"), sha(root.resolve("application.jar")));
-        for (String effect : List.of("BOOT_SECURITY_ABSENT", "REQUIRED_UNBOUND_REJECTED", "VIRTUAL_CALLER_PLATFORM_BODY",
+        for (String effect : List.of("BOOT_SECURITY_ABSENT", "BOOT_ACTUATOR_ABSENT", "DIAGNOSTICS_READY", "DIAGNOSTICS_DRAINING", "DIAGNOSTICS_CLOSED",
+                "REQUIRED_UNBOUND_REJECTED", "VIRTUAL_CALLER_PLATFORM_BODY",
                 "JDBC_COMMITTED actualRow=approved", "DENIED_TEMPLATE_MUTATION", "DENIED_SIBLING_READ",
                 "EXTERNAL_FILE_AND_HEAP_EFFECTS_SURVIVE_SQL_ROLLBACK", "CALLER_DELIVERY_NOT_PHYSICAL_END",
                 "PHYSICAL_WORKER_RETIRED", "BOOT_NATIVE_PASS")) {
@@ -94,7 +95,7 @@ class BootPresentationTest {
             assertTrue(process.waitFor(60, TimeUnit.SECONDS), "Owned finished Boot process exceeded its deadline");
             String output = Files.readString(log);
             if (success) assertEquals(0, process.exitValue(), output); else assertNotEquals(0, process.exitValue(), output);
-            output.lines().filter(line -> line.contains("JDBC_") || line.contains("DENIED_") || line.contains("PHYSICAL_") || line.contains("BODY"))
+            output.lines().filter(line -> line.contains("JDBC_") || line.contains("DENIED_") || line.contains("PHYSICAL_") || line.contains("BODY") || line.startsWith("DIAGNOSTICS_"))
                     .forEach(System.out::println);
             return output;
         } finally {

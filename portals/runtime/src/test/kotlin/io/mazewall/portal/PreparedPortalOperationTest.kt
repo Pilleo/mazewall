@@ -28,6 +28,7 @@ class PreparedPortalOperationTest {
     fun `delivery failure retains admission until exact physical retirement`() {
         val identity = Any()
         val owner = PortalOperationOwner(identity, PortalRuntimeLimits(maxAdmissions = 1))
+        val initial = owner.diagnostics()
         val retirement = CompletableFuture<Unit>()
         try {
             val failed = owner.submit(
@@ -40,8 +41,12 @@ class PreparedPortalOperationTest {
             runCatching { failed.result().toCompletableFuture().get(5, TimeUnit.SECONDS) }
             failed.executionEnd().toCompletableFuture().complete(ExecutionEnd.Finished(null))
             assertFalse(failed.executionEnd().toCompletableFuture().isDone)
+            assertEquals(1, owner.unfinishedInvocations())
             val rejected = owner.submit(Callable { error("overloaded body must not run") })
             assertIs<ExecutionEnd.NotStarted>(rejected.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
+            assertEquals(1L, owner.diagnostics().admitted)
+            assertEquals(1L, owner.diagnostics().rejected)
+            assertEquals(1, owner.unfinishedInvocations(), "delivery and rejected delivery cannot retire the held invocation")
             retirement.complete(Unit)
             assertIs<ExecutionEnd.Finished>(failed.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
             assertEquals(CancellationDisposition.ALREADY_ENDED, failed.requestCancellation())
@@ -54,6 +59,10 @@ class PreparedPortalOperationTest {
                 .afterMillis(5_000),
                 ),
             )
+            assertEquals(0, owner.unfinishedInvocations())
+            assertEquals(2L, owner.diagnostics().delivered)
+            assertEquals(2L, owner.diagnostics().ended)
+            assertEquals(0L, initial.admitted, "captured counter snapshots must not change")
         }
     }
 
@@ -78,6 +87,7 @@ class PreparedPortalOperationTest {
             assertEquals(CancellationDisposition.REQUESTED, queued.requestCancellation())
             assertIs<ExecutionEnd.NotStarted>(queued.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
             assertEquals(0, mapped.get())
+            assertEquals(1L, owner.diagnostics().cancellationRequests)
             val next = owner.submit(
                 Callable {
                 PortalInvocationRetirement.dispatched(identity)
@@ -97,6 +107,8 @@ class PreparedPortalOperationTest {
                 .afterMillis(5_000),
                 ),
             )
+            assertEquals(3L, owner.diagnostics().admitted)
+            assertEquals(3L, owner.diagnostics().ended)
         }
     }
 
