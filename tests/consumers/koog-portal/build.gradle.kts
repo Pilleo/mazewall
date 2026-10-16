@@ -1,14 +1,20 @@
 import java.io.File
+import java.nio.file.Files
 
 plugins { kotlin("jvm"); kotlin("plugin.serialization") }
 kotlin { jvmToolchain(25) }
 val candidate = providers.gradleProperty("consumerVersion").get()
+require(Regex("[0-9]+\\.[0-9]+\\.[0-9]+[-.A-Za-z0-9]*").matches(candidate)) { "Pinned safe consumer version required" }
 val repository = providers.gradleProperty("consumerRepository").get()
 repositories {
     maven { url = uri(repository); content { includeGroup("io.mazewall") } }
     mavenCentral { content { excludeGroup("io.mazewall") } }
 }
-dependencyLocking { lockAllConfigurations(); lockMode = LockMode.STRICT }
+dependencyLocking {
+    lockAllConfigurations()
+    lockMode = LockMode.STRICT
+    if (candidate != "0.1.0-task10") lockFile.set(layout.projectDirectory.file("locks/$candidate/gradle.lockfile"))
+}
 dependencies {
     implementation("io.mazewall:koog-contained-tool:$candidate")
     implementation("io.mazewall:denied-api:$candidate")
@@ -34,6 +40,22 @@ tasks.register<Sync>("stageFreshProbe") {
     from(sourceSets.main.get().runtimeClasspath.filter { it.isFile && it.extension == "jar" })
     from(tasks.named<Jar>("jar").flatMap { it.archiveFile })
     into(layout.buildDirectory.dir("fresh-probe/lib"))
+}
+
+tasks.register<JavaExec>("verifyFreshNative") {
+    dependsOn("stageFreshProbe", "verifyPublishedClosure")
+    classpath = fileTree(layout.buildDirectory.dir("fresh-probe/lib")) { include("*.jar") }
+    mainClass.set("io.mazewall.consumer.koog.KoogPortalProbeKt")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    doFirst {
+        require(classpath.files.isNotEmpty() && classpath.files.all { it.isFile && it.extension == "jar" }) {
+            "Fresh native consumer must use staged JARs only"
+        }
+        workingDir = Files.createTempDirectory("mazewall-koog-native-").toFile()
+        logger.lifecycle("FRESH_NATIVE_CONSUMER directory={} jars={}", workingDir, classpath.files.size)
+    }
 }
 
 tasks.register("verifyPublishedClosure") {

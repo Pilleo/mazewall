@@ -39,9 +39,13 @@ fun main() {
         package external.consumer;
         import io.mazewall.portal.PreparedPortalOperation;
         import io.mazewall.enforcer.api.execution.InvocationHandle;
+        import io.mazewall.enforcer.api.execution.ExecutionDiagnostics;
         public final class RuntimePositive {
             public static InvocationHandle<String> submit(PreparedPortalOperation<String, String> operation, String value) {
                 return operation.submit(value);
+            }
+            public static ExecutionDiagnostics observe(PreparedPortalOperation<String, String> operation) {
+                return operation.diagnostics();
             }
         }
     """.trimIndent())

@@ -49,7 +49,7 @@ Assertions cover:
 
 No assumptions/skips/fallbacks: required native feature, permission or assertion failure
 fails the command. Native JDBC proof uses ordinary JARs; the separate exploded control
-qualifies resolution, not an installed exploded JDBC worker. Immutable 617 supports
+qualifies resolution, not an installed exploded JDBC worker. Current resources support
 explicitly granted bounded ordinary exploded trees (4096 descendants, depth 64,
 256 MiB, no descendant symlinks) and the pinned Boot 4.1.1 packaging. Other loaders
 and unsupported packaging still reject; this fixture does not replay Boot proof. No complete ACE, shared
@@ -57,13 +57,25 @@ heap, preopened-FD, immutable-content/redefinition or file/network rollback clai
 
 ## Reproduce locally
 
-Run every command under the fleet's shared verification lock. In the assigned worktree:
+The complete current source workflow is:
 
 ```bash
+./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache
+```
+
+It owns its lock, stages current code under a fresh exact local version and executes
+this fixture plus the finished-Boot and Koog consumers. For manual reproduction,
+first stage the four current publications using the
+[finished-Boot producer recipe](../spring-boot/README.md#manual-finished-boot-reproduction).
+Then supply its exact absolute repository/version; serialize these manual commands
+with the shared verification lock:
+
+```bash
+: "${repository:?Set the absolute staged Maven repository}"
+: "${version:?Set its exact current producer version}"
 ./gradlew -p tests/consumers/spring-jdbc \
-  -PconsumerVersion=0.1.0-candidate.617fc10d \
-  -PconsumerRepository=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/task-6c-final/repository/617fc10d3aa38e50887541da31baa459d6002ef7 \
-  verifyNative
+  -PconsumerVersion="$version" -PconsumerRepository="$repository" \
+  verifyNative --no-configuration-cache
 ```
 
 External authority and candidate files live in this consumer's `build/native-proof`.
@@ -77,12 +89,17 @@ Security fixture; the fresh Security chain measures/reviews its own finished JAR
 
 ```bash
 ./gradlew -p tests/consumers/spring-jdbc -PuseStarter=true \
-  -PconsumerVersion=0.1.0-candidate.617fc10d \
-  -PconsumerRepository=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/task-6c-final/repository/617fc10d3aa38e50887541da31baa459d6002ef7 \
-  verifyNative verifySecurityNative
+  -PconsumerVersion="$version" -PconsumerRepository="$repository" \
+  verifyNative verifySecurityNative presentationTest --no-configuration-cache
 ```
 
 The optional Security source set adds Security7.1.1 explicitly; the ordinary source
 set/runtime remains Security-free. Its external authority files live in
 `build/security-native-proof`. Neither path launches a Boot executable or claims
 nested-origin support. Wrap all fleet commands in the shared verification lock.
+
+Both variants additionally assert that ordinary publications do not force Actuator
+linkage. The actual public lifecycle supplies READY, held DRAINING and canonical
+CLOSED diagnostic evidence, preserving operation identity and unfinished physical
+ownership separately from caller delivery. The Security showcase prints these
+checks beside its independently verified principal/SQL effects.

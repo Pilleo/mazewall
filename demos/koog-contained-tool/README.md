@@ -62,6 +62,26 @@ publication with platform/enforcer API dependencies. See the
 [packaged consumer](../../tests/consumers/koog-portal/README.md) for local staging,
 stable Kotlin consumption and fresh native verification.
 
+## Show the real owner and diagnostic lifecycle
+
+```bash
+bash scripts/koog-build.sh --console=plain -- \
+  :demos:koog-contained-tool:presentationTest :demos:koog-contained-tool:portalCheck
+```
+
+The named JUnit case checks actual upstream registry dispatch, transformed Unicode
+text, a distinct live child, unavailable host guest classes and real bounded-input
+rejection. Its diagnostic sample contains the accepted worker-generation tuple;
+polling changes no admission count, snapshots remain immutable, and a delivered
+result is not runtime retirement. After joined close both the actual child and
+the diagnostic owner must be retired. Ordinary source-built examples and test-only
+denied/crash fixtures remain separately identified.
+
+For the full **published-only** Koog/JDBC/Security/Boot gate, run
+`./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache` from
+the committed checkout. It owns its verification lock and uses a disposable normal
+clone and fresh local candidate; it never renames operator source/output paths.
+
 `koogNativeFixtures=true` adds a separate denied-resource API/guest **for tests
 only**. It is absent from production metadata/ZIPs and is never added to the
 advertised registry, even in the native fixture. No remote model account or

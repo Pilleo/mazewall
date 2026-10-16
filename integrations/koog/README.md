@@ -34,12 +34,44 @@ service integration, not a general hostile-code/shell/MCP boundary.
 
 ## Integration status
 
-Focused tests, actual generated packaging, stable Kotlin2.4.20/JDK25 published
-consumer and fresh-directory native verification pass in the scoped fixture.
-Production root opt-in/plugin wiring and Portal runtime Maven publication need
-the coordinator patches recorded in task-7-report.md. The producer still uses
-the root Kotlin2.4.20-Beta1; no metadata/prerelease skip flags are used.
+The optional source adapter is selected with `includeKoogIntegration=true`;
+`koogBootstrap=true` selects the adapter without evaluating the demo's plugin
+buildscript. The actual two-stage [source workflow](../../demos/koog-contained-tool/README.md#source-build)
+builds and verifies the codegen plugin before demo evaluation. Runtime and adapter
+Maven publications are declared in the build. The producer uses root
+Kotlin2.4.20-Beta1; the independent consumer uses stable Kotlin2.4.20 with no
+metadata/prerelease skip flags.
 
-Operator launch-profile/environment/descriptor review, C4 resource preparation,
-combined publication/release gates and human usability remain pending. These
-checks do not establish credential/environment isolation or release closure.
+## Read-only diagnostics
+
+`PortalToolAdapter` implements `ExecutionDiagnosticsSource`. `operationId()` is
+the fixed host-selected tool name; `diagnostics()` samples its existing prepared
+broker without submitting or contacting the worker:
+
+```kotlin
+val snapshot = tool.diagnostics()
+println("${tool.operationId()}: ${snapshot.state}, admitted=${snapshot.invocations.admitted}")
+```
+
+Identity is the input/manifests/runtime tuple accepted by required readiness.
+Cancellation/result delivery is separate from execution end and runtime retirement.
+The old package-private test construction path reports unavailable ownership,
+never invented native readiness. See the [diagnostics contract](../../docs/internals/designs/core/execution-diagnostics.md).
+
+## Verification and delivery
+
+```bash
+./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true :integrations:koog:build \
+  --configuration-cache-problems=fail
+# The exact-publication/native gate owns its lock internally.
+./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache
+```
+
+The dedicated optional-integration CI lane checks actual adapter builds, strict
+dependency state, cache reuse and source-bound Koog/JDBC/finished-Boot consumers.
+Its failure blocks the existing required core job and package publication. The
+existing master publication selects optional libraries explicitly; denied/crash
+fixture guests remain local test artifacts, outside the advertised registry and
+normal release selection. Native gates still require the documented Linux host
+and outer-runtime permissions. Production reviewer/launch/cgroup authority and
+human usability are separate from these known-fixture engineering checks.

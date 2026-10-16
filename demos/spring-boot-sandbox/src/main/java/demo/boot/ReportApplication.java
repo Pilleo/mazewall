@@ -1,6 +1,8 @@
 package demo.boot;
 
 import io.mazewall.enforcer.api.execution.DrainReport;
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState;
+import io.mazewall.enforcer.api.execution.ExecutionGeneration;
 import io.mazewall.spring.SpringTransactionEffects;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
@@ -32,6 +34,10 @@ public final class ReportApplication {
             Class.forName("org.springframework.security.core.context.SecurityContextHolder");
             throw new AssertionError("This executable advertises Security absence only");
         } catch (ClassNotFoundException absent) { System.out.println("BOOT_SECURITY_ABSENT no forced linkage/auth changes"); }
+        try {
+            Class.forName("org.springframework.boot.actuate.endpoint.annotation.Endpoint");
+            throw new AssertionError("The ordinary starter must not force optional Actuator linkage");
+        } catch (ClassNotFoundException absent) { System.out.println("BOOT_ACTUATOR_ABSENT optional diagnostics linkage is not forced"); }
         try (var bootstrap = ReportBootstrap.open(root, unsupported)) {
             var application = new SpringApplication(ReportConfiguration.class);
             application.setWebApplicationType(WebApplicationType.NONE);
@@ -72,6 +78,13 @@ public final class ReportApplication {
 
     private static void verify(Reports report, JdbcTemplate jdbc, ReportBootstrap bootstrap) throws Exception {
         Path root = bootstrap.root();
+        var prepared = bootstrap.lifecycle().diagnostics();
+        check(prepared.getState() == ExecutionDiagnosticState.READY
+                && prepared.getGeneration() instanceof ExecutionGeneration.InProcess
+                && prepared.getLiveWorkers() > 0 && !prepared.getRetirementComplete(), "Actual prepared diagnostic owner required");
+        check(prepared.getInvocations().getAdmitted() == 0, "Polling cannot submit the reviewed body");
+        System.out.println("DIAGNOSTICS_READY operation=" + bootstrap.lifecycle().operationId()
+                + " generation=" + ((ExecutionGeneration.InProcess) prepared.getGeneration()).getGeneration());
         AtomicReference<String> result = new AtomicReference<>();
         AtomicReference<Throwable> error = new AtomicReference<>();
         Thread caller = Thread.ofVirtual().name("non-web-virtual-request-caller").start(() -> {
@@ -135,6 +148,11 @@ public final class ReportApplication {
             bootstrap.lifecycle().stop();
             check(bootstrap.lifecycle().lastDrain() instanceof DrainReport.Incomplete, "Held body cleanup must retain incomplete drain");
             check(state.worker.physicalThread().isAlive() && state.bodyEnded.getCount() == 1, "Actual physical body still live");
+            var pending = bootstrap.lifecycle().diagnostics();
+            check(pending.getState() == ExecutionDiagnosticState.DRAINING && !pending.getRetirementComplete()
+                    && pending.getUnfinishedInvocations() > 0 && pending.getLiveWorkers() > 0
+                    && pending.getInvocations().getCancellationRequests() > 0, "Diagnostics must retain actual cancelled execution/cleanup");
+            System.out.println("DIAGNOSTICS_DRAINING deliveryEnded=true physicalRetirement=false");
             bootstrap.resources().validate();
             System.out.println("CALLER_DELIVERY_NOT_PHYSICAL_END drain=" + bootstrap.lifecycle().lastDrain());
         } finally { state.releaseCleanup.countDown(); }
@@ -143,6 +161,12 @@ public final class ReportApplication {
         check(!state.worker.physicalThread().isAlive(), "Captured physical worker actually terminated");
         bootstrap.lifecycle().stop();
         check(bootstrap.lifecycle().lastDrain() == DrainReport.Complete.INSTANCE, "Exact runtime/resources physical retirement");
+        var retired = bootstrap.lifecycle().diagnostics();
+        check(retired.getState() == ExecutionDiagnosticState.CLOSED && retired.getRetirementComplete()
+                && retired.getLiveWorkers() == 0 && retired.getUnfinishedInvocations() == 0
+                && retired.getInvocations().getEnded() > 0, "Diagnostics must observe canonical physical retirement");
+        System.out.println("DIAGNOSTICS_CLOSED operation=" + bootstrap.lifecycle().operationId()
+                + " ended=" + retired.getInvocations().getEnded() + " retirementComplete=true");
         try { bootstrap.resources().validate(); throw new AssertionError("Retired owner still available"); }
         catch (IllegalStateException retired) { /* Genuine public owner is physically retired. */ }
         check(jdbc.queryForObject("select count(*) from effects where name='cancel'", Integer.class) == 0, "Cancelled JDBC rollback");

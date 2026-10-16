@@ -17,7 +17,8 @@
    custom CONNECT rejection, authorized analysis vs denied web-stack spawn. This is
    experimental exact-call-path supervision with early VFORK, not shared-heap isolation.
 6. **Process Portal (2 minutes):** typed ASCII transformation preserves Unicode;
-   actual distinct child/readiness, opaque guest classpath, bounded arguments and joined close.
+    actual distinct child/readiness, opaque guest classpath, bounded arguments and joined close;
+    immutable diagnostic samples keep delivery and canonical retirement separate.
 7. **Framework adoption (3 minutes):** finished Boot report and H2 effects, external
    known-fixture review, transactions/denials/physical end; separately named ordinary-JAR
    optional Security principal/rollback/restoration. Never attribute Security to the Security-free Boot fixture.
@@ -55,28 +56,31 @@ bash scripts/koog-build.sh --console=plain --no-build-cache -- \
   :demos:koog-contained-tool:presentationTest :demos:koog-contained-tool:portalCheck
 ```
 
-For the published-only Spring examples, supply the exact existing candidate repository.
-These commands use the locally verified library producer617; they do not publish or
-claim that changed demo/test sources existed at that producer commit.
+For current published-only examples, prepare a fresh current candidate. The complete
+source-bound gate below stages one itself and runs actual Koog, ordinary-JAR
+Security/JDBC and finished-Boot showcases plus ownership/negative controls. It owns
+its lock internally:
 
 ```bash
-repository=/home/leanid/Documents/code/java/jseccomp/.superpowers/sdd/2026-10-11-integration-contract-completion/task-6c-final/repository/617fc10d3aa38e50887541da31baa459d6002ef7
+./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache
+# Or supply the exact current repository/version from the manual consumer recipe:
+: "${repository:?Set the absolute current publication repository}"
+: "${version:?Set its exact producer version}"
 ./gradlew -p demos/spring-boot-sandbox presentationTest \
-  -PconsumerVersion=0.1.0-candidate.617fc10d -PconsumerRepository="$repository" --console=plain
+  -PconsumerVersion="$version" -PconsumerRepository="$repository" --console=plain --no-configuration-cache
 ./gradlew -p tests/consumers/spring-jdbc presentationTest -PuseStarter=true \
-  -PconsumerVersion=0.1.0-candidate.617fc10d -PconsumerRepository="$repository" --console=plain
+  -PconsumerVersion="$version" -PconsumerRepository="$repository" --console=plain --no-configuration-cache
 ./gradlew :demos:vulnerable-web-app:presentationTest --console=plain
 ```
 
 The Spring parent JUnit fixture acquires private resources, independently approves
 its fixed measured candidate, then executes the actual finished-JAR native body.
-Tests assert checked effects plus actual file bytes and artifact identity. It is
+Tests assert checked effects, real diagnostic lifecycle, actual file bytes and artifact identity. It is
 external **test-fixture** authority, not application self-approval or a production reviewer.
 The web tests reuse the real bean/HTTP assertions. Its prepared-policy control and
-real profiling publication/incomplete refusal are separate proofs, not a complete
-profile→enforcement sweep. That genuine JVM case is blocked: collector[1] drain did
-not complete, and collector[2] CONNECT was observed without a parsed destination.
-Do not present it as a passing sweep. The core tour does not start Compose or
+real profiling publication/incomplete refusal are separate owning proofs. Run the
+current profile-first native tests for that pipeline; the historical collector-drain
+and unresolved-CONNECT defects are not current completion evidence. The core tour does not start Compose or
 `./scripts/run_vulnerable_app_demo.sh`.
 
 After preparation, add `--offline` for rehearsal. The Koog receipt still needs its

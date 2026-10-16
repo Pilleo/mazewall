@@ -68,6 +68,9 @@ Health is UP only when every observed source is READY, has an available actual
 generation, and reports a live worker. Empty, unavailable, preparing, draining and
 closed sources are OUT_OF_SERVICE; failed sources are DOWN. Counter completion
 cannot make them healthy. Source failures propagate rather than being omitted.
+This is readiness of the configured execution owner, not evidence that every
+required application route/proxy was bound. Required-binding validation and
+production review remain explicit application bootstrap responsibilities.
 
 Endpoint records retain source bean name, explicit operation ID and typed sample;
 duplicate operation IDs do not erase another owner. Results are immutable and
@@ -82,3 +85,21 @@ end, then require the canonical drain before complete diagnostics. Portal native
 tests compare exposed generation against the actual launch/readiness tuple,
 reject unverified generation, and observe actual child retirement. Published
 consumer/showcase gates separately qualify normal dependency and packaging paths.
+
+## Integration CI and source-bound delivery
+
+The dedicated optional-integration lane builds both adapters with strict module
+locks/checksums and fatal configuration-cache checks, then repeats to exercise
+cache reuse. `optionalIntegrationCheck` owns its lock and uses a disposable normal
+clone, committed producer inputs and a fresh exact local publication coordinate.
+It executes actual generated Koog packaging, external constructor/public-facade
+compilation, a fresh JAR-only native Koog consumer, ordinary-JAR JDBC/Security and
+finished-Boot showcases, and finished-JAR ownership/review negatives. Historical
+consumer locks are not rewritten for the new coordinate.
+
+Failure blocks the existing required core job through an explicit result guard;
+the core job cannot silently skip into a green required status. Master publication
+selects the optional library flags with `koogBootstrap=true`, so no demo/denied
+fixture artifact is selected for normal release. Existing credential bindings
+remain at the original publication boundary. Raw receipts stay local; CI uploads
+ordinary owning JUnit diagnostics, not fixture approvals or benchmark archives.

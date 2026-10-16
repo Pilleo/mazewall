@@ -7,9 +7,9 @@ existing Java or Kotlin service interface on the host and executes its
 implementation in a restricted local child JVM. It is not a microservices
 framework, a remote-execution protocol, or a dependency-injection framework.
 
-Spring integration is explicitly out of scope for this release. A later
-integration may consume the same manifest, but it must not add Spring
-dependencies to `:portals:runtime` or alter the runtime contract defined here.
+This document defines the framework-agnostic Portal runtime. Optional framework
+adapters consume its owned execution contract without adding Spring/Koog
+dependencies to `:portals:runtime` or altering the boundary defined here.
 
 The generated boundary currently supports copied primitive values, strings,
 byte arrays, `UUID`, `Instant`, `BigDecimal`, enums by constant name, and
@@ -94,6 +94,11 @@ network denial. Per-profile readable paths and arbitrary syscall policies remain
 deferred.
 
 ## Diagnostics and failure evidence
+
+Prepared operations additionally expose passive immutable execution diagnostics;
+see [the shared observation contract](../core/execution-diagnostics.md). The
+runtime keeps its existing public health model compatible. Diagnostic generation
+comes from successful required readiness, never from profile configuration.
 
 `PortalRuntime.health()` is read-only local diagnostics: for each group it
 reports availability/state-loss, the worker PIDs still live in that runtime,

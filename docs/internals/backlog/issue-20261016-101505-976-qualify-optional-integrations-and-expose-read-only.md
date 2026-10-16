@@ -100,5 +100,30 @@ Operator approved all four follow-ups after PR533: fix Koog strict dependency ve
   version drift are approved. Root lock changes only add the actual consumer
   verification configuration association for existing versions.
 
+## CI, publication and adoption implementation
+
+- Added a dedicated optional job, actual full-adapter build/cache-reuse steps and
+  `optionalIntegrationCheck`. The latter compiles as ordinary test code and remains
+  excluded from the host-safe harness (`run-854dd7c90830`). It uses existing owned
+  command/clone/package/Boot fixtures, pins committed producer inputs, stages a
+  fresh exact local version, verifies constructor/public observation visibility,
+  rejects malformed version namespaces, preserves historical locks, and executes
+  real JAR-only native Koog, JDBC/Security and finished-Boot consumers.
+- The existing required core job uses an always-run success guard on optional
+  acceptance; optional failure cannot skip into a green required job. Workflow
+  parsing/dependency checks passed (`run-eda4fb43118a`). Existing master publication
+  selects both optional library flags and bootstrap-only Koog selection, preserving
+  credential bindings and excluding demo/denied fixture publications.
+- The exact proposed CI host build passes (`run-60279924664d`) and its unchanged
+  second invocation reuses configuration cache (`run-4a89964f18e5`). Actual standalone
+  consumer parsing rejects `../escape` before resolution/lock writes
+  (`run-abcba477f664`). The publication gate additionally checks this regression.
+- Updated guides remove stale coordinator-patch/retired-shell/private-candidate
+  instructions. Existing JUnit stories now assert real ready/held-draining/closed
+  diagnostics and optional Actuator absence against published artifacts. Reference,
+  anchor and Bash-syntax checks passed for 18 relative links (`run-3c3e28979da7`).
+- Full source-bound native/package acceptance and the final included-module build
+  remain completion gates; implementation wiring is not claimed as a native pass.
+
 ---
 <!-- id: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only  file: issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md -->

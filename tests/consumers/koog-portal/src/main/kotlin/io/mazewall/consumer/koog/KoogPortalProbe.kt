@@ -5,6 +5,8 @@ import ai.koog.serialization.JSONObject
 import ai.koog.serialization.kotlinx.KotlinxSerializer
 import io.mazewall.demo.koog.TextTransformerService
 import io.mazewall.enforcer.api.execution.ExecutionEnd
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticState
+import io.mazewall.enforcer.api.execution.ExecutionGeneration
 import io.mazewall.demo.koog.TextArguments
 import io.mazewall.demo.koog.TextTools
 import io.mazewall.koog.PortalToolAdapter
@@ -39,11 +41,17 @@ fun main() = runBlocking {
     val config = TextTools.configuration(cache)
     check(config.limits.maxRequestBytes == 131_072 && config.limits.maxResponseBytes == 131_072)
     check(config.workerArtifacts.isNotEmpty())
+    var observedTool: PortalToolAdapter<TextArguments, String>? = null
     PortalRuntime.open(config).use { runtime ->
         val registry = TextTools.registry(runtime)
         check(registry.tools.map { it.name } == listOf("uppercase_ascii"))
         check(registry.getToolOrNull("test-denied") == null)
         val tool = registry.getTool<PortalToolAdapter<TextArguments, String>>()
+        observedTool = tool
+        check(tool.operationId() == "uppercase_ascii")
+        val ready = tool.diagnostics()
+        check(ready.state == ExecutionDiagnosticState.READY && ready.generation is ExecutionGeneration.PortalInputs)
+        check(ready.invocations.admitted == 0L && ready.liveWorkers == 1 && !ready.retirementComplete)
         val serializer = KotlinxSerializer(kotlinx.serialization.json.Json { ignoreUnknownKeys = false })
         val decoded = tool.decodeArgs(serializer.decodeJSONElementFromString("{\"text\":\"abc\"}") as JSONObject, serializer)
         check(decoded == TextArguments("abc"))
@@ -55,6 +63,8 @@ fun main() = runBlocking {
         }
         check(registry.getTool("uppercase_ascii") === tool)
         check(tool.execute(TextArguments("aBc éß🙂")) == "ABC éß🙂")
+        check(tool.diagnostics().invocations.admitted == 1L)
+        check(ready.invocations.admitted == 0L)
         check(tool.execute(TextArguments("x".repeat(65_536))) == "X".repeat(65_536))
         check(tool.execute(TextArguments("é".repeat(32_768))) == "é".repeat(32_768))
         expectFailure<IllegalArgumentException> { tool.execute(TextArguments("é".repeat(32_769))) }
@@ -95,6 +105,9 @@ fun main() = runBlocking {
         check(childrenAfter.all { it in childrenBefore }) { "terminal session must not reconstruct or replay" }
         check(tool.execute(TextArguments("independent")) == "INDEPENDENT")
     }
+    val closed = checkNotNull(observedTool).diagnostics()
+    check(closed.state == ExecutionDiagnosticState.CLOSED && closed.retirementComplete && closed.liveWorkers == 0)
+    check(closed.invocations.admitted > 0 && closed.invocations.ended > 0)
     // Explicit new runtime is the only way to recreate the test singleton after loss.
     PortalRuntime.open(config).use { runtime ->
         val waiting = boundProbe(runtime, "test_wait") { service, _ -> service.waitForever() }
@@ -117,7 +130,7 @@ fun main() = runBlocking {
         expectFailure<PortalStateLostException> { tooLarge.execute(ProbeArguments("")) }
     }
     check(ProcessHandle.current().children().use { it.noneMatch { child -> child.isAlive } }) { "runtime close must account for physical worker retirement" }
-    println("KOOG_NATIVE_FRESH_OK registry=upstream typed=generated text=65536 wire=131072 denial=true terminal=true cancellation=true fallback=false replay=false")
+    println("KOOG_NATIVE_FRESH_OK registry=upstream typed=generated text=65536 wire=131072 denial=true terminal=true cancellation=true diagnostics=true fallback=false replay=false")
 }
 
 private fun boundProbe(

@@ -21,7 +21,21 @@ measurement process cannot approve itself. The harness's private fixture authori
 not a signing service or arbitrary-JAR safety analysis. Digests identify artifacts; they
 do not attest to trustworthy source, immutable loaded bytecode or all kernel activity.
 
-## Reproduce in the assigned worktree
+## Current source-bound acceptance
+
+From the current committed checkout, run:
+
+```bash
+./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache
+```
+
+This internally locking gate stages a fresh source-bound local candidate, runs
+the actual Koog and JDBC/Security consumers, and executes both finished-Boot
+showcases and the complete ownership/negative matrix. It uses a disposable normal
+clone and checks the operator checkout unchanged. No worktree or remote package
+publication is created by this fixture workflow.
+
+## Manual finished-Boot reproduction
 
 Use absolute paths for fleet work. Every Gradle, native acceptance and commit command is
 serialized with the same lock. The following shell variables contain no credentials:
@@ -29,7 +43,7 @@ serialized with the same lock. The following shell variables contain no credenti
 ```bash
 ROOT="$PWD"
 REVISION=$(git rev-parse HEAD)
-VERSION="0.1.0-cleanup.${REVISION:0:12}"
+VERSION="0.1.0-integration.${REVISION:0:12}"
 REPOSITORY="$ROOT/build/boot-maven-$REVISION"
 # Independent checkouts default to the shared Git common-directory lock.
 LOCK="$(git rev-parse --path-format=absolute --git-common-dir)/mazewall/verification.lock"
@@ -74,6 +88,12 @@ external sidecars, sidecar SHA, deployed whole-JAR SHA, actual generation, publi
 hashes and source input inventories. The printed deployment path is retained for
 inspection. Caller completion is not labeled physical end, initialization/warmup is
 not labeled protected body, and SQL rollback is not labeled rollback of external effects.
+
+The current fixture additionally requires real `DIAGNOSTICS_READY`,
+`DIAGNOSTICS_DRAINING`, `DIAGNOSTICS_CLOSED` and `BOOT_ACTUATOR_ABSENT` observations.
+These bind a genuine prepared generation and held cleanup to canonical retirement;
+they do not infer physical end from caller delivery. New public APIs require fresh
+current publications, not the retired historical producer617 coordinate.
 
 ## Ownership and failure checks
 

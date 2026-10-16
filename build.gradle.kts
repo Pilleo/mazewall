@@ -279,7 +279,7 @@ tasks.register<Test>("consumerHarnessTest") {
     description = "Checks portable consumer harness ownership without requiring published applications."
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
-    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence") }
+    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
 }
 
 tasks.register<Test>("consumerCheck") {
@@ -335,6 +335,20 @@ tasks.register<Test>("consumerNativeCheck") {
     for (name in listOf("verificationLock", "consumerRepository", "consumerVersion", "consumerRevision", "consumerKoogJar", "consumerBootJar", "consumerEvidence")) {
         providers.gradleProperty(name).orNull?.let { systemProperty(name, it) }
     }
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
+tasks.register<Test>("optionalIntegrationCheck") {
+    group = "verification"
+    description = "Stages exact optional publications and verifies real Koog, JDBC/Security and finished Boot consumers."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("optional-integration") }
+    maxParallelForks = 1
+    systemProperty("consumerWorkspace", layout.projectDirectory.asFile.absolutePath)
+    providers.gradleProperty("verificationLock").orNull?.let { systemProperty("verificationLock", it) }
+    testLogging.showStandardStreams = true
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
 }

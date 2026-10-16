@@ -7,7 +7,8 @@ optional normal-JAR starter, with no automatic runtime/baseline installation. It
 Spring **7.0.9**, on JDK **25**. H2 **2.4.240** is test-only. Spring remains outside core.
 
 See [S1-S2-contract.md](S1-S2-contract.md) for the explicit reviewed binding/lifecycle
-and qualified JDBC entry, evidence limits and remaining Boot/S3 release gates.
+and qualified JDBC entry. Historical phase-specific evidence is supplemented by
+the current ordinary-JAR and finished-Boot consumer workflows linked below.
 The entry below is the narrower retained S0 placement API.
 
 See [S3-contract.md](S3-contract.md) for optional per-invocation supported Security
@@ -134,7 +135,9 @@ multiple-origin negative fixtures reject uncaptured Classes from the same and an
 actual JAR despite repeated fixed-policy/generation metadata. The optional ordinary-JAR
 Security native variant additionally proves clean per-call context, alternating principals,
 actual post-denied JDBC rollback, ordinary error/cancel and physical end. Executable
-Boot/exploded and combined-release acceptance remain open; unsupported origins reject.
+Boot/exploded origin support has its own exact bounded contract and finished-JAR
+fixture. It is not inferred from these host or ordinary-JAR tests; unsupported
+origins continue to reject.
 
 Direct references/self-invocation, shared heap, preopened descriptors, independent
 executors, construction/init and late work are outside the proxy body boundary.
@@ -144,8 +147,39 @@ runtime or receipt does not uninstall permanent restrictions from live threads.
 ## Focused verification
 
 ```bash
-./gradlew -PincludeSpringIntegration=true :integrations:spring:mazewall-spring-boot:test \
-  :integrations:spring:mazewall-spring-boot:spotbugsMain
+./gradlew -PincludeSpringIntegration=true :integrations:spring:mazewall-spring-boot:build \
+  :integrations:spring:mazewall-spring-boot-starter:build --configuration-cache-problems=fail
+# Repeat unchanged to prove configuration-cache reuse.
+# Exact-publication/native acceptance owns its lock internally:
+./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache
 ```
 
-In the fleet, every invocation is wrapped with the shared verification lock.
+Serialize ordinary build/native commands with the shared verification lock when
+needed. Do not externally wrap `optionalIntegrationCheck` with that same lock;
+the owning harness acquires it internally.
+
+## Read-only lifecycle and operation diagnostics
+
+`DomainLifecycle` implements `ExecutionDiagnosticsSource`. Its `operationId()` is
+the externally reviewed binding identity; `diagnostics()` samples the existing
+prepared domain without starting it, submitting work, validating resources or
+draining. Polling also stays nonblocking while preparation/drain holds the lifecycle
+monitor. Explicit uncontained characterization reports unavailable readiness.
+
+```java
+var snapshot = lifecycle.diagnostics();
+System.out.println(lifecycle.operationId() + ": " + snapshot.getState());
+System.out.println("cancel requests=" + snapshot.getInvocations().getCancellationRequests()
+        + ", unfinished=" + snapshot.getUnfinishedInvocations());
+```
+
+Cancelled delivery and completed results are not physical retirement. A captured
+Incomplete observation never upgrades when a worker subsequently exits; canonical
+drain remains necessary. See the [diagnostics contract](../../../docs/internals/designs/core/execution-diagnostics.md)
+and [optional Actuator setup](../mazewall-spring-boot-starter/README.md#optional-read-only-actuator-diagnostics).
+
+The dedicated optional CI lane selects actual adapter builds, strict locks,
+configuration-cache reuse and published Koog/JDBC/Security/finished-Boot acceptance.
+The existing required core job and master package publication are gated by that
+lane. Optional library publications use the same operator-managed credentials as
+the existing publication boundary; there is no application credential discovery.
