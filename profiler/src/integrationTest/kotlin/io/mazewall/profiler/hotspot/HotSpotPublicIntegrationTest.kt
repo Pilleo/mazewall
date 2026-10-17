@@ -10,6 +10,7 @@ import io.mazewall.profiler.api.ProfileStrategy
 import io.mazewall.profiler.api.StructuredProfileEvidence
 import io.mazewall.profiler.testing.tierE.EnabledIfTierERootfulAvailable
 import io.mazewall.testing.containers.ContainerEndpoint
+import jdk.jfr.consumer.RecordingFile
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -135,10 +136,17 @@ class HotSpotPublicIntegrationTest {
         @TempDir directory: Path,
     ) = currentJvmMeasurement(endpoint, directory, dense = true)
 
+    @Test
+    fun `profiled dense interpreter diagnostic retains JFR and checked retirement`(
+        endpoint: ContainerEndpoint,
+        @TempDir directory: Path,
+    ) = currentJvmMeasurement(endpoint, directory, dense = true, readoutJfr = true)
+
     private fun currentJvmMeasurement(
         endpoint: ContainerEndpoint,
         directory: Path,
         dense: Boolean,
+        readoutJfr: Boolean = false,
     ) {
         val assets = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))
         val root = Path.of(".").toAbsolutePath().normalize()
@@ -152,6 +160,17 @@ class HotSpotPublicIntegrationTest {
         val collector = "hs-current-${java.util.UUID.randomUUID()}"
         val client = "$collector-client"
         val docker = Path.of("/usr/bin/docker")
+        val readoutRecording = directory.resolve("readout.jfr")
+        val recordingArguments = if (readoutJfr) {
+            listOf(
+                "-XX:FlightRecorderOptions=stackdepth=128",
+                "-XX:StartFlightRecording=filename=$readoutRecording,settings=profile," +
+                    "dumponexit=true,maxsize=16m,jdk.ExecutionSample#period=1ms," +
+                    "jdk.ObjectAllocationSample#throttle=1000/s,jdk.JavaMonitorEnter#threshold=1ms",
+            )
+        } else {
+            emptyList()
+        }
         try {
             val commandResult = HotSpotAcceptanceHarness.runCommand(
                 endpoint.command(
@@ -181,6 +200,7 @@ class HotSpotPublicIntegrationTest {
                     "java",
                     "-Xint",
                     "-XX:+UseSerialGC",
+                    *recordingArguments.toTypedArray(),
                     "-cp",
                     "$dist/*:$classes",
                 "io.mazewall.profiler.hotspot.HotSpotSupportedWorkloadMain",
@@ -219,6 +239,21 @@ class HotSpotPublicIntegrationTest {
             Files.writeString(destination.resolve("client-output.txt"), commandResult.second)
             Files.copy(directory.resolve(if (accepted) "current-result.txt" else "current-failure.txt"), destination.resolve("result.txt"))
             Files.copy(assets.resolve("manifest.json"), destination.resolve("assets-manifest.json"))
+            if (readoutJfr) {
+                assertTrue(Files.size(readoutRecording) > 0L, "Client JVM produced no JFR recording")
+                var vmInformationSeen = false
+                var executionSampleSeen = false
+                RecordingFile(readoutRecording).use { recording ->
+                    while (recording.hasMoreEvents()) {
+                        val eventName = recording.readEvent().eventType.name
+                        if (eventName == "jdk.JVMInformation") vmInformationSeen = true
+                        if (eventName == "jdk.ExecutionSample") executionSampleSeen = true
+                    }
+                }
+                assertTrue(vmInformationSeen, "No actual JVM identity event in recording")
+                assertTrue(executionSampleSeen, "No CPU samples; recording cannot diagnose readout")
+                Files.copy(readoutRecording, destination.resolve("readout.jfr"))
+            }
         } finally {
             val progress = directory.resolve("current-progress.txt")
             if (Files.exists(progress)) println("Current-JVM progress: ${Files.readString(progress)}")
