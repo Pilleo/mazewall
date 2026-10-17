@@ -4,6 +4,8 @@ package io.mazewall.consumer.koog;
 public interface DeniedResourceService {
     String read(String path);
     String write(String path);
+    String connectLoopback(int port);
+    String spawnJavaVersion();
     String crash();
     String waitForever();
     String oversizedText();

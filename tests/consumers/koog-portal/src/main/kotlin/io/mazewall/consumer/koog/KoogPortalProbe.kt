@@ -95,6 +95,8 @@ fun main() = runBlocking {
         expectFailure<IllegalArgumentException> { oversized.execute(ProbeArguments("")) }
         // An application-size result rejection is completed, not state loss or a replay.
         expectFailure<PortalRemoteCallException> { denied.execute(ProbeArguments(forbidden.toString())) }
+        verifyNetworkAndProcessContainment(runtime)
+        check(tool.execute(TextArguments("after network and process denial")) == "AFTER NETWORK AND PROCESS DENIAL")
         val crash = boundProbe(runtime, "test_crash") { service, _ -> service.crash() }
         val ownerBefore = runtime.health().single { it.isolationGroup == "test-denied" }
         check(ownerBefore.state == PortalServiceHealthState.AVAILABLE && ownerBefore.workerPids.size == 1)
