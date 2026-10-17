@@ -60,6 +60,27 @@ You need a **Linux host or container with kernel ≥ 6.2** for integration tests
 
 The full build already selects kernel and fresh-JVM suites for included modules; equivalent iteration commands need not be repeated after that gate. For orchestrator work, use `./gradlew build -PincludeOrchestrator=true`. Documentation-only changes use reference/link checks, `git diff --check`, and backlog validation.
 
+### Commit verification
+
+The version-controlled `scripts/hooks/pre-commit` runs `./gradlew build` on every
+commit, retaining the explicit portal checks when that module is included. It does
+not exclude `check`: formatting, static analysis, tests and configured coverage
+failures abort the commit. Full output is retained in
+`/tmp/mazewall-precommit-test.log`. The hook preserves staged security audits and
+isolates Git-local repository variables only for the Gradle subprocess.
+
+Use the configured host/kernel test environment for commits, just as for the full
+build above. `core.hooksPath=scripts/hooks` selects the tracked hook in this
+checkout. The hook regression can be run independently:
+
+```bash
+bash scripts/tests/git_hook_environment_test.sh
+```
+
+It exercises real disposable Git commits with a controlled Gradle boundary,
+including full-build arguments, failed-verification rejection, staged/alternate
+index audits and foreign-repository isolation.
+
 ### Optional architecture report
 
 RefactorFirst is intentionally not part of `build`, `check`, `unitCheck`, or `kernelCheck`.

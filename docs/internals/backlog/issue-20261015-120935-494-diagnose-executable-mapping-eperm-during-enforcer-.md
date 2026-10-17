@@ -85,5 +85,18 @@ without changing production policy. See
 and issue-20261017-082745-923. This fixture correction does not invent provenance
 for the original completion trace, so the broader investigation remains open.
 
+## Full commit-gate FFM adapter observation
+
+The operator-requested complete pre-commit build correctly rejects a real
+GraalVM native integration failure (`run-2f8bff6c9276`). Retained
+`enforcer/hs_err_pid3623280.log` identifies pool-11-thread-1 in
+MmapProtectionTest.pkey_mprotect -> anonymousMapping -> RealNativeFileSystem.mmap
+-> SyscallInvoker.mmap offset120 -> cold MethodHandle invocation linkage ->
+native CodeHeap expansion65536bytes denied EPERM. This is before the intended
+protection assertion, distinct from the previously fixed string-concat adapter
+and no-op callback. The exact full log is preserved at
+`build/reports/precommit-full-build/graal-native-failure.log` in the authorized
+HotSpot worktree. No protection, assertion or build task was disabled to accept it.
+
 ---
 <!-- id: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-  file: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md -->
