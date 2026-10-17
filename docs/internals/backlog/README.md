@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 137 | *Total Resolved Issues:* 707
+*Total Active Issues:* 137 | *Total Resolved Issues:* 708
 
 Active status detail: 136 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261017-092012-444-warm-the-typed-mmap-adapter-before-strict-native-p](resolved/issue-20261017-092012-444-warm-the-typed-mmap-adapter-before-strict-native-p.md) | Warm the typed mmap adapter before strict native protection probes | high | enforcer |
 | Archived [issue-20261017-085257-132-require-the-complete-gradle-verification-build-in-](resolved/issue-20261017-085257-132-require-the-complete-gradle-verification-build-in-.md) | Require the complete Gradle verification build in the commit hook | high | ci |
 | Archived [issue-20261017-082745-923-use-explicit-jvm-runtime-profiles-in-worker-comple](resolved/issue-20261017-082745-923-use-explicit-jvm-runtime-profiles-in-worker-comple.md) | Use explicit JVM runtime profiles in worker-completion fixtures | high | enforcer |
 | Archived [issue-20261017-001100-102-remove-cold-no-op-callback-linkage-after-seccomp-i](resolved/issue-20261017-001100-102-remove-cold-no-op-callback-linkage-after-seccomp-i.md) | Remove cold no-op callback linkage after seccomp installation | high | enforcer |

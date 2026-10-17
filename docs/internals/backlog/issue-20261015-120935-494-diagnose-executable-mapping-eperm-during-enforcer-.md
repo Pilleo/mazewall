@@ -98,5 +98,13 @@ and no-op callback. The exact full log is preserved at
 `build/reports/precommit-full-build/graal-native-failure.log` in the authorized
 HotSpot worktree. No protection, assertion or build task was disabled to accept it.
 
+The precise fixture setup is corrected under issue-20261017-092012-444: an unused
+raw mmap handle is replaced with an actual owned non-executable allocation through
+the typed production adapter before installing the strict filter. Focused actual
+native protection checks pass; see
+[typed mmap bootstrap evidence](../../plans/2026-10-17-typed-mmap-probe-bootstrap-evidence.md).
+This does not change the native invocation/layout/errno contract or establish
+arbitrary HotSpot safety under a no-executable-mapping policy.
+
 ---
 <!-- id: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-  file: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md -->
