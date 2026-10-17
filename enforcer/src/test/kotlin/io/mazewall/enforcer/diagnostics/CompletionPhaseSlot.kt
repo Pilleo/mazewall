@@ -21,6 +21,8 @@ data class CompletionSample(
     val phase: CompletionPhase,
 )
 
+// Worker is the sole writer until successful Future.get; only then may its owner advance phases.
+// Identity is unknown before INSTALLING publishes both bind fields; samples are lower-bound progress.
 class CompletionPhaseSlot {
     private val worker = AtomicLong()
     private val tid = AtomicInteger()
