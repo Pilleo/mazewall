@@ -8,6 +8,11 @@ import java.nio.file.Path
 public class DeniedResourceProbe : DeniedResourceService {
     override fun read(path: String): String = Files.readString(Path.of(path))
 
+    override fun write(path: String): String {
+        Files.writeString(Path.of(path), "WORKER_WRITE")
+        return "WROTE"
+    }
+
     override fun crash(): String {
         Runtime.getRuntime().halt(73)
         error("halt returned")
