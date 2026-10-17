@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 137 | *Total Resolved Issues:* 709
+*Total Active Issues:* 138 | *Total Resolved Issues:* 709
 
-Active status detail: 136 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 137 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo](issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo.md) | Record qualification source receipts and linked-worktree Go VCS limitations | high | profiler |
 | Archived [issue-20261017-120338-807-match-exact-java-owners-in-benchmark-readiness-and](resolved/issue-20261017-120338-807-match-exact-java-owners-in-benchmark-readiness-and.md) | Match exact Java owners in benchmark readiness and reporting | high | profiler |
 | Archived [issue-20261017-092012-444-warm-the-typed-mmap-adapter-before-strict-native-p](resolved/issue-20261017-092012-444-warm-the-typed-mmap-adapter-before-strict-native-p.md) | Warm the typed mmap adapter before strict native protection probes | high | enforcer |
 | Archived [issue-20261017-085257-132-require-the-complete-gradle-verification-build-in-](resolved/issue-20261017-085257-132-require-the-complete-gradle-verification-build-in-.md) | Require the complete Gradle verification build in the commit hook | high | ci |

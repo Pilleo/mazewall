@@ -71,5 +71,21 @@ complete public parse/map/render/finalization/cleanup cost and admission; no
 isolated line-copy bottleneck or600promotion is established. See
 [fresh evidence](../../plans/2026-10-17-hotspot-dense-next-evidence.md).
 
+**Admission contract2026-10-17:** Private full-byte Java provider boundary and
+legacy ABI checks pass. Fresh native hash-only pairs are56.35/67.42/57.15ms for
+all9files/68,487,216bytes; pinned interpreted common asset-mode totals are
+27.17/32.13/19.75s. These are different semantics, not equivalent native admission
+or an in-process deadline guarantee. Current7.2host operations succeed; absent
+af_alg_restrict is ENOENT, not zero. Current upstream AF_ALG insecure/deprecated
+status requires explicit operator acceptance separately from host support.
+See [contract](../../plans/2026-10-17-hotspot-native-digest-contract.md) and
+[qualification evidence](../../plans/2026-10-17-hotspot-admission-next-evidence.md).
+Native activation remains **not_authorized**, Java default unchanged. Real pending
+worker/FD ownership, deadline/cleanup/short-I/O/permission injection and additive
+public/platform API approval remain required. Binary identities are verified;
+historical exact Go source-byte linkage is INFERRED/UNVERIFIED, tracked by the
+[source-receipt issue](issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo.md).
+Keep open for complete admission latency and dense public readout; no600promotion.
+
 ---
 <!-- id: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-  file: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md -->
