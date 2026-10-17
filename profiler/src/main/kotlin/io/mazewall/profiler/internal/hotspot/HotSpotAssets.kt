@@ -6,7 +6,6 @@ import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
-import java.security.MessageDigest
 import java.util.HexFormat
 
 private const val MAX_MANIFEST_BYTES = 65536
@@ -36,6 +35,12 @@ internal data class HotSpotAssets private constructor(
         fun load(
             directory: Path,
             timings: HotSpotAssetTimings?,
+        ): HotSpotAssets = load(directory, timings, JavaHotSpotAssetDigest)
+
+        fun load(
+            directory: Path,
+            timings: HotSpotAssetTimings?,
+            digest: HotSpotAssetDigest,
         ): HotSpotAssets {
             val root = directory.toAbsolutePath().normalize()
             val manifest = measuredAssetPhase(timings, "manifest") {
@@ -53,9 +58,12 @@ internal data class HotSpotAssets private constructor(
             for ((name, expected) in manifest.files) {
                 require(SHA256_PATTERN.matches(expected)) { "Invalid asset checksum: $name" }
                 val path = ownedFile(root, name)
-                totalBytes += Files.size(path)
-                require(totalBytes <= MAX_ASSET_BYTES) { "HotSpot asset size limit exceeded" }
-                require(sha256(path) == expected) { "HotSpot asset checksum mismatch: $name" }
+                val remaining = MAX_ASSET_BYTES - totalBytes
+                require(Files.size(path) <= remaining) { "HotSpot asset size limit exceeded" }
+                val actual = digest.digest(path, remaining)
+                require(actual.bytesHashed <= remaining) { "HotSpot asset hash byte budget exceeded" }
+                totalBytes += actual.bytesHashed
+                require(HexFormat.of().formatHex(actual.bytes()) == expected) { "HotSpot asset checksum mismatch: $name" }
                 if (name.startsWith("oci/blobs/sha256/")) {
                     require(name.removePrefix("oci/blobs/sha256/") == expected) { "OCI blob digest mismatch: $name" }
                 }
@@ -111,19 +119,6 @@ private fun ownedFile(
     }
     require(Files.isRegularFile(path, NOFOLLOW_LINKS)) { "Missing HotSpot asset: $name" }
     return path
-}
-
-private fun sha256(path: Path): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    Files.newInputStream(path).use { input ->
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        var count = input.read(buffer)
-        while (count != -1) {
-            digest.update(buffer, 0, count)
-            count = input.read(buffer)
-        }
-    }
-    return HexFormat.of().formatHex(digest.digest())
 }
 
 private fun checkAssetJsonDepth(

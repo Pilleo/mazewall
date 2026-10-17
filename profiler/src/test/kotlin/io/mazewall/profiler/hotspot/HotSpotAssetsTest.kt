@@ -1,7 +1,10 @@
 package io.mazewall.profiler.hotspot
 
+import io.mazewall.profiler.internal.hotspot.HotSpotAssetDigest
 import io.mazewall.profiler.internal.hotspot.HotSpotAssetTimings
 import io.mazewall.profiler.internal.hotspot.HotSpotAssets
+import io.mazewall.profiler.internal.hotspot.HotSpotFileDigest
+import io.mazewall.profiler.internal.hotspot.JavaHotSpotAssetDigest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.io.TempDir
@@ -16,6 +19,55 @@ import kotlin.test.assertTrue
 class HotSpotAssetsTest {
     @TempDir
     lateinit var directory: Path
+
+    @Test
+    fun `every admission rehashes bytes and preserves the original provider failure`() {
+        fixture()
+        var calls = 0
+        val hasher = HotSpotAssetDigest { path, budget ->
+            calls++
+            JavaHotSpotAssetDigest.digest(path, budget)
+        }
+        HotSpotAssets.load(directory, null, hasher)
+        val once = calls
+        HotSpotAssets.load(directory, null, hasher)
+        assertTrue(once >= 4)
+        assertEquals(once * 2, calls)
+        val denied = java.nio.file.AccessDeniedException(directory.toString())
+        val observed = assertFailsWith<java.nio.file.AccessDeniedException> {
+            HotSpotAssets.load(directory, null, HotSpotAssetDigest { _, _ -> throw denied })
+        }
+        kotlin.test.assertSame(denied, observed)
+    }
+
+    @Test
+    fun `streamed digest refuses bytes beyond its actual budget`() {
+        val path = Files.write(directory.resolve("bytes"), byteArrayOf(1, 2, 3))
+        assertFailsWith<IllegalArgumentException> { JavaHotSpotAssetDigest.digest(path, 2) }
+        val result = JavaHotSpotAssetDigest.digest(path, 3)
+        assertEquals(32, result.bytes().size)
+        assertEquals(3L, result.bytesHashed)
+    }
+
+    @Test
+    fun `aggregate allowance consumes streamed counts and rejects provider overflow`() {
+        fixture()
+        var calls = 0
+        val hasher = HotSpotAssetDigest { path, budget ->
+            calls++
+            val actual = JavaHotSpotAssetDigest.digest(path, budget)
+            if (calls == 1) {
+                assertEquals(536_870_912L, budget)
+                HotSpotFileDigest(budget - 1000, actual.bytes())
+            } else {
+                assertEquals(1000L, budget)
+                HotSpotFileDigest(budget + 1, actual.bytes())
+            }
+        }
+        val failure = assertFailsWith<IllegalArgumentException> { HotSpotAssets.load(directory, null, hasher) }
+        assertEquals("HotSpot asset hash byte budget exceeded", failure.message)
+        assertEquals(2, calls)
+    }
 
     @Test
     fun `measured admission preserves the resolved asset contract`() {
