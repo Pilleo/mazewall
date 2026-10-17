@@ -35,6 +35,17 @@ investigation to GraalVM or treat the generic JVM out-of-memory text as RAM proo
 Five isolated floor child cases subsequently pass, but that is not a fix for
 this independently retained fatal denial.
 
+## Scoped library callback correction
+
+The applyBpfFilter offset385 path is isolated to an unused unsupervised
+AutoCloseable lambda created after filter installation. A fresh-child JFR ClassLoad
+regression reproduces its late linkage; returning no lease removes the callback
+without weakening executable-map denial. See
+[scoped evidence](../../plans/2026-10-17-containment-post-install-bootstrap-evidence.md)
+and issue-20261017-001100-102. Other retained FutureTask/VarHandle paths and the
+documented strict-profile-on-HotSpot limitation remain under this broader issue;
+one passing runtime/suite does not close it.
+
 ## Specific diagnostic path established
 
 CI38822914139 on Temurin25.0.4.1 records pool-11-thread-1 in the actual
