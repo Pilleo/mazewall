@@ -1,6 +1,7 @@
 package io.mazewall.profiler.hotspot.performance
 
 import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceAssembler
+import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceDocument
 import io.mazewall.profiler.internal.hotspot.HotSpotReplayLimits
 import io.mazewall.profiler.internal.hotspot.HotSpotWireReader
 import io.mazewall.profiler.internal.hotspot.StructuredProfileEvidence
@@ -34,4 +35,20 @@ internal fun measureReplay(
     val evidence = accumulator.finish()
     val finishNanos = System.nanoTime() - finishStarted
     return HotSpotReplayMeasurement(evidence, records, pipelineNanos, mappingNanos, finishNanos)
+}
+
+internal data class HotSpotRenderedReplay(
+    val replay: HotSpotReplayMeasurement,
+    val canonicalJson: String,
+    val renderNanos: Long,
+)
+
+internal fun measureReplayAndRender(
+    input: InputStream,
+    limits: HotSpotReplayLimits,
+): HotSpotRenderedReplay {
+    val measured = measureReplay(input, limits)
+    val started = System.nanoTime()
+    val text = HotSpotEvidenceDocument.encode(measured.evidence)
+    return HotSpotRenderedReplay(measured, text, System.nanoTime() - started)
 }
