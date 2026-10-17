@@ -117,26 +117,34 @@ type VirtualVerdict struct {
 
 var methodDisplay = regexp.MustCompile(`^(?:[^\s]+\s+)?([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\.([A-Za-z_$][A-Za-z0-9_$]*|<init>|<clinit>)\([^)]*\)$`)
 
+// ParseJavaMethod extracts exact owner/method names in the qualification renderer's naming domain.
+func ParseJavaMethod(display string) (owner, method string, ok bool) {
+	parsed := methodDisplay.FindStringSubmatch(display)
+	if parsed == nil {
+		return "", "", false
+	}
+	return parsed[1], parsed[2], true
+}
+
 func routeMatches(frames []Frame, expected []string) (bool, error) {
 	if len(expected) == 0 {
 		return false, fmt.Errorf("missing expected application route")
 	}
-	first := methodDisplay.FindStringSubmatch(expected[0] + "()")
-	if first == nil {
+	owner, _, ok := ParseJavaMethod(expected[0] + "()")
+	if !ok {
 		return false, fmt.Errorf("invalid expected method")
 	}
-	owner := first[1]
 	for _, name := range expected {
-		parsed := methodDisplay.FindStringSubmatch(name + "()")
-		if parsed == nil || parsed[1] != owner || parsed[1]+"."+parsed[2] != name {
+		parsedOwner, method, ok := ParseJavaMethod(name + "()")
+		if !ok || parsedOwner != owner || parsedOwner+"."+method != name {
 			return false, fmt.Errorf("invalid or mixed expected owners")
 		}
 	}
 	var application []string
 	for _, frame := range frames {
-		parsed := methodDisplay.FindStringSubmatch(frame.FunctionName)
-		if parsed != nil && parsed[1] == owner {
-			application = append(application, parsed[1]+"."+parsed[2])
+		parsedOwner, method, ok := ParseJavaMethod(frame.FunctionName)
+		if ok && parsedOwner == owner {
+			application = append(application, parsedOwner+"."+method)
 		}
 	}
 	if len(application) == 0 {

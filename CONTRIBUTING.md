@@ -69,6 +69,9 @@ failures abort the commit. Full output is retained in
 `/tmp/mazewall-precommit-test.log`. The hook preserves staged security audits and
 isolates Git-local repository variables only for the Gradle subprocess.
 
+`build` already includes `check`. Explicitly requesting `build check` does not add
+verification tasks, so the hook selects the full build once.
+
 Use the configured host/kernel test environment for commits, just as for the full
 build above. `core.hooksPath=scripts/hooks` selects the tracked hook in this
 checkout. The hook regression can be run independently:

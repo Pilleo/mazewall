@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 137 | *Total Resolved Issues:* 708
+*Total Active Issues:* 137 | *Total Resolved Issues:* 709
 
 Active status detail: 136 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261017-120338-807-match-exact-java-owners-in-benchmark-readiness-and](resolved/issue-20261017-120338-807-match-exact-java-owners-in-benchmark-readiness-and.md) | Match exact Java owners in benchmark readiness and reporting | high | profiler |
 | Archived [issue-20261017-092012-444-warm-the-typed-mmap-adapter-before-strict-native-p](resolved/issue-20261017-092012-444-warm-the-typed-mmap-adapter-before-strict-native-p.md) | Warm the typed mmap adapter before strict native protection probes | high | enforcer |
 | Archived [issue-20261017-085257-132-require-the-complete-gradle-verification-build-in-](resolved/issue-20261017-085257-132-require-the-complete-gradle-verification-build-in-.md) | Require the complete Gradle verification build in the commit hook | high | ci |
 | Archived [issue-20261017-082745-923-use-explicit-jvm-runtime-profiles-in-worker-comple](resolved/issue-20261017-082745-923-use-explicit-jvm-runtime-profiles-in-worker-comple.md) | Use explicit JVM runtime profiles in worker-completion fixtures | high | enforcer |
