@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 	"io.mazewall/experiments/hotspot-agentless/internal/preflight"
+	"io.mazewall/experiments/hotspot-agentless/internal/tooling"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +46,13 @@ func Run(root string, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := tooling.Run(root, []string{"verify", "--bundle", assetRoot}); err != nil {
+		return err
+	}
 	if err := os.Mkdir(out, 0755); err != nil {
+		return err
+	}
+	if err := writeCaptureAudit(assetRoot, out); err != nil {
 		return err
 	}
 	classes := filepath.Join(out, "classes")
@@ -81,7 +88,7 @@ func Run(root string, args []string) error {
 		}
 		results = append(results, result)
 	}
-	return driver.WriteJSON(filepath.Join(out, "summary.json"), map[string]any{"jdk_image": lock.Images["jdk"], "go_image": lock.Images["go"], "asset_manifest": manifest, "experimental_schema": 1, "results": results, "production_qualified": false})
+	return driver.WriteJSON(filepath.Join(out, "summary.json"), map[string]any{"jdk_image": lock.Images["jdk"], "go_image": lock.Images["go"], "asset_manifest": manifest, "capture_audit": "capture-audit.json", "experimental_schema": 1, "results": results, "production_qualified": false})
 }
 
 func compileCandidates(docker candidateDocker, source, out, classes, image string) (failure error) {

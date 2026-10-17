@@ -231,6 +231,13 @@ These are future acceptance requirements, not commands authorized by this dispat
    - `profiler/src/test/kotlin/io/mazewall/profiler/hotspot/HotSpotProtocolTest.kt`
    - `profiler/src/test/kotlin/io/mazewall/profiler/hotspot/HotSpotChildFixture.kt`
 
+   If the upstream-alignment source audit has since been implemented, its canonical
+   and mirrored `internal/qualification/jitgc/capture_audit.go` and
+   `capture_audit_test.go`, plus the valid-pin fixture in experimental
+   `internal/candidate/capture_audit_test.go`, are five additional reviewed-key consumers. Repeat actual
+   source characterization/review before advancing those keys; until then the new
+   overlay remains unaudited and candidate source-contract generation rejects it.
+
 4. Recompute canonical and experimental patch IDs and require equality; run existing
    `prepare` in both module directories, record generated patch manifests and exact
    source graph. Reject the old patch pin at new production admission; do not admit
@@ -294,11 +301,15 @@ No native proof is claimed by this contract. Approval alone does not satisfy the
 
 1. **Acquisition timing:** current materialized Gadget `ebpf.go` calls
    `prepareEventFinalization` at line 734, before `NewCollectionWithOptions` at 890
-   and `i.collection = collection` at 899. The brief's bind call at prepare rejects
-   `i.collection==nil` and therefore cannot work at that location. Review an explicit
-   post-acquisition/pre-attach binding point with safe partial-start cleanup; preserve
-   early profile validation and do not publish ready before binding. No such source
-   relocation is authorized here.
+    and `i.collection = collection` at 899. The original brief's bind call at prepare
+    rejected `i.collection==nil` and could not work there. The revised proposal keeps
+    strict target parsing and by-value options copying in early prepare, then calls
+    `bindPreparedSelectedAccounting()` immediately after the actual collection
+    assignment, before tail-call setup, map publication991, tracer startup1002 and
+    attachment1012. Bind failure joins its original cause with checked cleanup of
+    that acquired/unpublished collection. Review and prove this partial-start path
+    and write-once getter publication before implementation approval; no native
+    source relocation or new receipt is authorized by this planning correction.
 2. **Identity API and locking:** `gc.GetVar("ebpfInstance")` exists in the current
    graph, but the proposed getter does not yet exist. Prove its availability before
    collector OnStart, write-once publication/happens-before and final read ordering.

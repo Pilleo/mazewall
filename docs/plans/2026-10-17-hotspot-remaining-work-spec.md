@@ -103,6 +103,13 @@ Current native ABI2 captures safepoint identity, not a compiled-generation lease
 metadata reclamation lease or virtual-thread mount/object lease. Existing Go
 Facts are offline evaluators and are never production authorities.
 
+The pinned upstream already captures `nmethod._compile_id` in its frame cookie and
+checks it during JIT symbolization/cache lookup. This existing generation check
+must not be described as absent or equated with a retained code/metadata owner.
+[The upstream-alignment supplement](2026-10-17-hotspot-upstream-alignment-spec.md)
+defines the corrected source audit and actual-decoder characterization; it does
+not qualify a loaded runtime or authorize a new capture field/asset pin.
+
 Deliver machine-readable native capability audits, occurrence-bound proof models,
 wrong-generation/mount/reuse negative corpora, and independently bound actual
 candidate reports. A supplied boolean is never a captured lease. Useful Java

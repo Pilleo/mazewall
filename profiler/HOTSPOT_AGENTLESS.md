@@ -111,6 +111,17 @@ qualification tools, not broader production admission. See the
 [readout evidence](../docs/plans/2026-10-05-hotspot-dense-readout-evidence.md) and
 [workstream design](../docs/plans/2026-10-05-hotspot-performance-capability-design.md).
 
+The pinned upstream already captures `nmethod._compile_id` and checks it during
+JIT cache lookup/symbolization. The shared candidate audit reports those reviewed
+source checks; it does not prove loaded-object identity or native code/metadata
+validity through decode or exclude concurrent reclamation. Compiled/concurrent-GC
+production qualification remains false, with the interpreted/Serial profile above
+unchanged. The actual diagnostic retained a four-carrier identity refusal; a later
+fully receipted six-case run passing the experimental validators does not erase
+that failure or qualify runtime lifetime. See the
+[generation evidence](../docs/plans/2026-10-17-hotspot-upstream-generation-evidence.md)
+and [native mechanism decision](../docs/plans/2026-10-17-hotspot-jitgc-native-mechanism-decision.md).
+
 Fresh2026-10-17public acceptance still rejects dense600/1ms:
 275received/265paired/10pending,225/600marked tokens in paired public evidence,
 with no pending physical owner and checked helper/client absence. Passing the7-test
