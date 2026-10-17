@@ -62,7 +62,9 @@ Actual Task3 RED first reported undefined `writeCaptureAudit` (package build
 failure, exit 1). After adding only the helper, the source-audit test passed but
 both missing-assets/source-contract-only cases failed with `output created before
 common admission` (exit 1). After the runner correction, uncached host and race
-checks each passed **29 top-level tests plus 16 subtests**, zero skips/failures:
+checks each passed **30 top-level tests plus 16 subtests**, zero skips/failures.
+Both logs prefix the `TestCommandStdoutRemainsSeparateFromDiagnostics` PASS marker
+with diagnostic output; that top-level pass is included in these totals:
 
 ```bash
 # cwd: experiments/hotspot-agentless; prepared modfile, existing offline dependencies
@@ -78,9 +80,12 @@ fresh recompilation of every dependency is claimed.
 ## Actual rootful six-case runs: original failure and receipted follow-up
 
 The named CLI was built with `-buildvcs=false` and the prepared experimental
-modfile after collecting the actual non-test/non-race selected package graph,
-1,376 source/module/toolchain/environment inputs across 203 package records,
-module replacements and full graph. Output SHA256 was recorded **before** execution.
+modfile after collecting the actual non-test/non-race selected package graph:
+**203 package records, 1,376 selected path spellings and 1,375 serialized hashed
+files**, covering source/module/toolchain/environment inputs, module replacements
+and the full graph. The one filtered spelling, relative `build/experiment.go.mod`,
+aliases the already-hashed absolute experimental modfile; it adds no unique input.
+Output SHA256 was recorded **before** execution.
 All commands used the authorized checkout; the CLI ran from the experimental
 module directory because its real entrypoint uses `os.Getwd()` as root.
 Self-review found that the Go input selection did not include the two Java fixture
