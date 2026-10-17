@@ -137,8 +137,8 @@ MW_HOTSPOT_ASSET_TEST_DIR="$PWD/profiler/hotspot-agentless/build/assets" \
 ./gradlew :profiler:integrationTest --tests '*HotSpotPublicIntegrationTest' --rerun
 ```
 
-`native/invocation.json` records the actual invocation (347.663s through copying
-evidence, exit0). Diagnostic-only `JAVA_TOOL_OPTIONS` requested JUnit temporary
+`native/invocation.json` records the actual invocation (subprocess elapsed
+345.9682219028473s, exit0). Diagnostic-only `JAVA_TOOL_OPTIONS` requested JUnit temporary
 directory retention; no new temporary directories were retained by that attempt.
 The copied official reports and XML remain authoritative. Public suite timestamp
 `2026-10-17T16:01:22.336Z`,149.483s: **7tests/0skips/0failures/0errors**.

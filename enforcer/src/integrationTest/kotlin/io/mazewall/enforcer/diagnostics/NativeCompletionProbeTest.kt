@@ -29,7 +29,7 @@ class NativeCompletionProbeTest : BaseIntegrationTest() {
 
     @Test
     @EnabledIfLinuxAndSupported
-    fun `JVM compatible completion and strict denial are recorded in owned children`() {
+    fun `JVM compatible completion and strict-profile outcomes are recorded in owned children`() {
         val hot = runProbe(RuntimeProfile.HOTSPOT_JIT, directory.resolve("hot"))
         assertTrue(hot.completed)
         assertEquals(0, hot.exitCode)
