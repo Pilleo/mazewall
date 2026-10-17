@@ -22,6 +22,7 @@ import io.mazewall.platform.syscall.Syscall
 import io.mazewall.seccomp.BpfInstruction
 import java.lang.foreign.MemoryLayout
 import java.lang.foreign.ValueLayout
+import java.util.concurrent.atomic.AtomicReference
 
 class ContainmentDesignSpec :
     FreeSpec({
@@ -182,7 +183,7 @@ class ContainmentDesignSpec :
 
         "Sandbox Cleanliness (designs/enforcer/containment-design.md)" -
             {
-            "Pre-warmed JVM task runs successfully inside sandboxed executor without JIT crashes" {
+            "JVM task completes using an explicit HotSpot-compatible runtime profile" {
                 val isSupported = io.mazewall.enforcer.api.Platform
                     .isSupported() &&
                     io.mazewall.landlock.Landlock
@@ -195,6 +196,8 @@ class ContainmentDesignSpec :
                     false
                 }
                 if (isSupported) {
+                    val native = LinuxNative.snapshot()
+                    val executableMapping = AtomicReference<LinuxNative.SyscallResult<Long, *>>()
                     val executor = java.util.concurrent.Executors
                         .newSingleThreadExecutor()
                     try {
@@ -203,9 +206,15 @@ class ContainmentDesignSpec :
                                 java.util.concurrent.Callable {
                                     ContainedExecutors
                                         .installOnCurrentThread(
-                                            ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build(),
+                                            ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build(),
                                         ).use { receipt ->
                                         receipt.requireInstalled()
+                                        // JVM future completion can need executable wrappers even when application arithmetic is warm.
+                                        val mapping = native.fileSystem.mmap(0, 4096, MmapProt(7), MmapFlags(0x22), FileDescriptor.ANON, 0)
+                                        if (mapping is LinuxNative.SyscallResult.Success) {
+                                            NativeMapping(native.raw, mapping.value, 4096).close()
+                                        }
+                                        executableMapping.set(mapping)
                                         val a = 1
                                         val b = 2
                                         a + b
@@ -214,6 +223,8 @@ class ContainmentDesignSpec :
                             ).get(5, java.util.concurrent.TimeUnit.SECONDS)
 
                         result shouldBe 3
+                        val mapping = executableMapping.get()
+                        (mapping is LinuxNative.SyscallResult.Success) shouldBe true
                     } finally {
                         executor.shutdown()
                         executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS) shouldBe true

@@ -68,5 +68,22 @@ class passes on installed Ubuntu OpenJDK25 (`run-951d09818b2a`), as does the ful
 unmodified commit hook (`run-912f155266ca`). This is runtime-comparison evidence,
 not a fix; the broader issue remains open.
 
+## Direct retained-report follow-up
+
+Both original reports were located read-only in `.worktrees/repository-cleanup/enforcer/`.
+pid88950 is the genuine FutureTask.set/VarHandle completion path, after its callable
+has returned. Its source callable is not visible; the current dispatcher worker
+naming does not establish SandboxDispatcherCacheTest as that caller. pid199455
+actually identifies ContainedExecutors.applyBpfFilter385/ContainmentDesignSpec and
+is covered by the scoped callback correction, not a second FutureTask-set case.
+
+The JVM-completion fixtures independently chose NATIVE_IMAGE despite promising
+ordinary HotSpot work. An actual executable-map probe reproduces that mismatch;
+explicit HOTSPOT_JIT fixture profiles and owned cache-pool cleanup correct it
+without changing production policy. See
+[worker profile evidence](../../plans/2026-10-17-jvm-worker-profile-evidence.md)
+and issue-20261017-082745-923. This fixture correction does not invent provenance
+for the original completion trace, so the broader investigation remains open.
+
 ---
 <!-- id: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-  file: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md -->

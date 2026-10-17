@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 137 | *Total Resolved Issues:* 705
+*Total Active Issues:* 137 | *Total Resolved Issues:* 706
 
 Active status detail: 136 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261017-082745-923-use-explicit-jvm-runtime-profiles-in-worker-comple](resolved/issue-20261017-082745-923-use-explicit-jvm-runtime-profiles-in-worker-comple.md) | Use explicit JVM runtime profiles in worker-completion fixtures | high | enforcer |
 | Archived [issue-20261017-001100-102-remove-cold-no-op-callback-linkage-after-seccomp-i](resolved/issue-20261017-001100-102-remove-cold-no-op-callback-linkage-after-seccomp-i.md) | Remove cold no-op callback linkage after seccomp installation | high | enforcer |
 | Archived [issue-20261016-233030-441-investigate-epoch-zero-full-benchmark-readiness-re](resolved/issue-20261016-233030-441-investigate-epoch-zero-full-benchmark-readiness-re.md) | Investigate epoch-zero full benchmark readiness refusal | high | profiler |
 | Archived [issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o](resolved/issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md) | Retain ambiguous benchmark container acquisition ownership | high | profiler |

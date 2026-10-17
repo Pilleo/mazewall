@@ -18,13 +18,14 @@ import kotlin.test.assertTrue
 class SandboxDispatcherCacheTest {
     @AfterEach
     fun tearDown() {
+        SandboxDispatcher.shutdownAll()
         System.clearProperty("io.mazewall.fallback")
     }
 
     @Test
     fun testExecute() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build()
         val result = SandboxDispatcher.execute(policy, Callable { "success" })
         assertEquals("success", result)
     }
@@ -32,7 +33,7 @@ class SandboxDispatcherCacheTest {
     @Test
     fun testExecuteBlock() {
         System.setProperty("io.mazewall.fallback", "SILENT_BYPASS")
-        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
+        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build()
         val result = SandboxDispatcher.executeBlock(policy) { "success" }
         assertEquals("success", result)
     }
