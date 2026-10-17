@@ -50,5 +50,26 @@ explicit native bridge/opt-in/deadline/ABI review. See
 [readout](../../plans/2026-10-05-hotspot-dense-readout-evidence.md) and
 [digest qualification](../../plans/2026-10-05-hotspot-kernel-digest-evidence.md).
 
+**Fresh completion decision2026-10-17:** Task2 line-buffer work is deferred:
+actual JFR did not establish material copy cost. Baseline/candidate parser,
+tooling and jars are byte-identical (1,218files). Three alternating fresh pinned
+interpreted replay pairs per input preserve canonical bytes/accounting. Total
+medians are0.109/0.099s for the3row fixture and0.583/0.644s for the genuine retained
+84row capture; these same-code differences are not optimization gains. Totals
+include canonical render/hash/measurement-field construction, not process startup
+or outer report serialization/I/O. Full asset validation still rehashes all9files/
+68,487,216bytes on the same read-only graph.
+
+Actual public7case matrix runs with0skips/failures/errors, but dense600/1ms
+**rejects**275received/265paired/10pending: only225/600marked tokens in paired
+public evidence. No pending physical owner; actual helper/client absence checked.
+Additional raw dense capture also rejects publicly (313/310/3,270/600marked),
+although the original native JSONL contains all600marked tokens plus40warmups,
+640terminal pairs and final resource-retirement observations. Native stream
+completion does not repair public deadline failure. Keep open for measured
+complete public parse/map/render/finalization/cleanup cost and admission; no
+isolated line-copy bottleneck or600promotion is established. See
+[fresh evidence](../../plans/2026-10-17-hotspot-dense-next-evidence.md).
+
 ---
 <!-- id: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-  file: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md -->

@@ -111,6 +111,20 @@ qualification tools, not broader production admission. See the
 [readout evidence](../docs/plans/2026-10-05-hotspot-dense-readout-evidence.md) and
 [workstream design](../docs/plans/2026-10-05-hotspot-performance-capability-design.md).
 
+Fresh2026-10-17public acceptance still rejects dense600/1ms:
+275received/265paired/10pending,225/600marked tokens in paired public evidence,
+with no pending physical owner and checked helper/client absence. Passing the7-test
+matrix, including its dense success-or-rejection diagnostic, does not promote
+that workload. A separate retained
+original native stream contains all600marked tokens and final retirement
+observations, yet its public consumer also times out; native completion and
+complete public readout are separate requirements. No new reader/buffer change
+was justified by actual JFR, so that work is deferred. Fresh same-code alternating
+replay timings show no optimization gain; they include canonical render/hash and
+measurement-field construction, excluding process startup and outer report
+serialization/file I/O. See the
+[fresh matched evidence and decision](../docs/plans/2026-10-17-hotspot-dense-next-evidence.md).
+
 The uncalled kernel-SHA256 qualification prototype is retained only for historical
 replay at `96789e51`; it was never a production hash provider. Recover its exact
 `profiler/hotspot-agentless/scripts/kernel-digest.py` and paired self-test with
