@@ -87,5 +87,23 @@ historical exact Go source-byte linkage is INFERRED/UNVERIFIED, tracked by the
 [source-receipt issue](issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo.md).
 Keep open for complete admission latency and dense public readout; no600promotion.
 
+**Consumer profile2026-10-17 (recovered2026-10-18):** All6 alternating selected
+control/JFR diagnostics actually ran without skips; all6 public collections
+**rejected**. Paired marked counts in execution order are411/230/548/311/232/273
+of600. Event/terminal/pending and actual PID-birth/A-B identities are retained;
+owned containers/processes retired, but every partial summary has incomplete
+physical drain and terminal accounting. Actual client JFR identifies stdout
+`HotSpotWireReader.parseObject` (1391/1395/1407 samples), eager public raw-diagnostic
+materialization through `StructuredProfileEvidence`/`HotSpotRawJson.getText`, and
+`HotSpotEvidenceDocument.encode` (1867/1514/1337 samples). Decision:
+**consumer_cost_identified_requires_followup**, not a proved deadline root cause.
+Smallest next proposal: defer public rawJson materialization to existing getters,
+with render-counting/canonical-byte/legacy-ABI/validation/owner regressions and full
+public rendering measurements. Whole-client categories overlap; scalar timings
+have no absolute phase markers, and JFR adds work/events. No line-copy, buffer,
+deadline, native pin or profile change is justified. See
+[consumer evidence](../../plans/2026-10-17-hotspot-consumer-readout-evidence.md).
+Keep open; historical raw640 is a separate experiment and600 remains unqualified.
+
 ---
 <!-- id: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-  file: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md -->

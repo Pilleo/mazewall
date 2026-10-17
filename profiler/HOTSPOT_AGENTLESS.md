@@ -136,6 +136,19 @@ measurement-field construction, excluding process startup and outer report
 serialization/file I/O. See the
 [fresh matched evidence and decision](../docs/plans/2026-10-17-hotspot-dense-next-evidence.md).
 
+The2026-10-17 alternating public consumer diagnostics (recovered2026-10-18)
+retain6 actual rejected collections:411/230/548/311/232/273 paired marked tokens
+of600, despite green success-or-rejection tests and checked resource retirement.
+All six partial summaries still lack complete physical drain/terminal accounting.
+Actual pinned client JFR identifies JSON parsing and eager public diagnostic/report
+serialization cost; the decision is `consumer_cost_identified_requires_followup`.
+It does not establish a sole deadline cause, optimization gain or600 acceptance.
+Whole-client stack categories overlap, scalar fixture durations cannot locate a
+post-stop interval, and JFR itself adds work/openat events. The proposed follow-up
+is deferred public rawJson materialization with unchanged validation/ABI/ownership
+regressions; production code and all current bounds remain unchanged. See
+[actual consumer evidence](../docs/plans/2026-10-17-hotspot-consumer-readout-evidence.md).
+
 The uncalled kernel-SHA256 qualification prototype is retained only for historical
 replay at `96789e51`; it was never a production hash provider. Recover its exact
 `profiler/hotspot-agentless/scripts/kernel-digest.py` and paired self-test with
