@@ -106,5 +106,31 @@ native protection checks pass; see
 This does not change the native invocation/layout/errno contract or establish
 arbitrary HotSpot safety under a no-executable-mapping policy.
 
+## Owned native completion diagnostic decision (2026-10-17)
+
+At implementation commit `49da8dcff79c2945e0a19199dde7ce6a61bfdb57`, the
+owned disposable diagnostic completed both HOTSPOT_JIT and NATIVE_IMAGE profiles
+on actual Ubuntu OpenJDK and GraalVM. All ten retained children reached
+WORKER_RETIRED with exit 0 and no fatal reports. Independent unchanged native
+MmapProtectionTest (17 tests) and BpfHardeningTest (15 tests) passed on each VM
+with zero failures/errors/skips, preserving genuine EPERM assertions.
+
+[The attributed evidence and raw SHA256 manifest](../../plans/2026-10-17-native-completion-attribution-evidence.md)
+record the exact original report locations, VM/thread/stack facts, child identities,
+journals/outcomes/VM/log hashes, retained XML and generated decision. They also
+distinguish initial runs from final runs after the fixed-sleep synchronization
+gate correction to timed Future.get polling.
+
+The originals were inspected read-only: pid88950 is the FutureTask.set/VarHandle
+completion path with **unknown source callable**; pid199455 is the distinct,
+already-corrected applyBpfFilter+385 callback case. The new controls did not
+reproduce the historical crash or attribute its callable. Their success does not
+prove arbitrary JVM safety under strict executable-memory denial or authorize
+weaker protection. The generated decision explicitly leaves callable attribution
+and strict arbitrary-JVM safety unproved, with protection assertions unchanged.
+**Keep this parent issue open at HIGH severity**, pending actual matching
+callable/installing-policy evidence or an independently justified disposition of
+that unknown; do not downgrade or archive it based on these passing controls.
+
 ---
 <!-- id: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-  file: issue-20261015-120935-494-diagnose-executable-mapping-eperm-during-enforcer-.md -->
