@@ -145,9 +145,20 @@ serialization cost; the decision is `consumer_cost_identified_requires_followup`
 It does not establish a sole deadline cause, optimization gain or600 acceptance.
 Whole-client stack categories overlap, scalar fixture durations cannot locate a
 post-stop interval, and JFR itself adds work/openat events. The proposed follow-up
-is deferred public rawJson materialization with unchanged validation/ABI/ownership
-regressions; production code and all current bounds remain unchanged. See
+was deferred public rawJson materialization with unchanged validation/ABI/ownership
+regressions. See
 [actual consumer evidence](../docs/plans/2026-10-17-hotspot-consumer-readout-evidence.md).
+
+The2026-10-18follow-up now delegates public stack/frame `rawJson` getters to their
+existing immutable owners. Typed construction avoids unused frame/stack rendering;
+`toJson()` still renders aggregate diagnostics but does not force individual frame
+strings. Event argument parsing stays eager; requested raw getters preserve exact
+canonical bytes and all public descriptors. Full-public replay (including output
+I/O) retains identical bytes/counts, but timing variation and deferred render cost
+do not establish a general end-to-end gain. The fresh dense600/1ms collection still
+**rejects**278received/277paired/1pending,237/600marked pairs, with checked resource
+retirement. All current bounds and admission profiles remain unchanged. See
+[public raw diagnostic evidence](../docs/plans/2026-10-18-hotspot-public-raw-json-evidence.md).
 
 The uncalled kernel-SHA256 qualification prototype is retained only for historical
 replay at `96789e51`; it was never a production hash provider. Recover its exact

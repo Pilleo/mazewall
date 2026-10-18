@@ -105,5 +105,23 @@ deadline, native pin or profile change is justified. See
 [consumer evidence](../../plans/2026-10-17-hotspot-consumer-readout-evidence.md).
 Keep open; historical raw640 is a separate experiment and600 remains unqualified.
 
+**Public raw diagnostics2026-10-18:** The approved follow-up retains private stack/
+frame owners and delegates existing rawJson getters to their existing lazy values.
+Actual owned render counters fail before/pass after: construction leaves stack and
+both frame counters0; full public toJson renders stack1/frame0, later requested
+getters preserve canonical bytes/unknown/UTF8/unsigned/BCI and immutable snapshots.
+Eager event validation and public JVM/Kotlin descriptors remain unchanged. Focused
+56tests have0failures/errors and2environment-gated backend skips; all4new tests run.
+Three fresh alternating pinned pairs per corpus/mode include actual public
+construction/render/output I/O. Report total medians baseline/candidate are
+122.144/185.869ms (original3row),1526.159/1380.980ms (retained84row); bytes/counts
+match. Raw-getter mode shifts requested work; parse/host variation and deferred
+render cost prevent a general speedup claim. No synthetic600 corpus was used.
+Actual current dense600/1ms still **rejects**278received/277paired/1pending,
+237/600marked pairs; pending physical ownership=false and helper/client absence
+checked. Historical37,264report files rehash unchanged. Keep open for complete
+admission/dense public readout; no600promotion or bound/profile/native change. See
+[follow-up evidence](../../plans/2026-10-18-hotspot-public-raw-json-evidence.md).
+
 ---
 <!-- id: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-  file: issue-20261004-193054-174-bound-interpreter-self-profiling-asset-validation-.md -->
