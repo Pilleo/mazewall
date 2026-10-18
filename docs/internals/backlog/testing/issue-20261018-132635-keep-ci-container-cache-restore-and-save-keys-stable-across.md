@@ -55,6 +55,20 @@ Implement one shared tracked-input hash helper, mandatory real-Git regressions a
 
 Initial exact call-site inspection found only the cache task and its policy test. ADK blast-radius/full-backlog validation is unavailable and Codanna had no symbol, so impact evidence is recorded as degraded. The current root policy task passes the old workflow and does not yet catch the within-job hash drift; new regression evidence is required before implementation.
 
+## Isolated fix and local acceptance
+
+Implementation `24754b34064f4f42e66497a2077cf00b855f0258` adds the executable tracked-input helper, real-Git/error regressions, mandatory/focused verification, narrow workflow-policy mutations and one shared output per current job. The complete local branch was independently reviewed with no Critical/Important code finding. Later Markdown bookkeeping does not rename that verified executable input.
+
+- RED: the missing helper and unchanged policy's acceptance of the mutable-key mutation both failed for the expected feature reasons.
+- Focused `./gradlew -p buildSrc ciCachePolicyTest`, mandatory `verificationActionsTest` and root `checkCiCachePolicy` all passed. Real fixtures cover tracked input invalidation, generated/untracked exclusions, filenames/aliases/Git context and failed/malformed hash operations with no partial usable digest. Existing five policy rules and native-freshness functional fixtures remain.
+- `LC_ALL=C ./gradlew build --console=plain --max-workers=1` exited 0 in 21m20s; 242 tasks: 179 executed, 7 from cache, 56 up-to-date. Nested expected-negative harness failures are not failed outer verification.
+- Actual helper output before and after that real full build was identical: `2f1f0f73ac7713ba5d956a5e663b0b4e8a1208d59d5aaad8708edf1f315574b6`. Generated files no longer perturb this local identity. Source/selector data must remain stable during hashing; this is not race-proof filesystem containment or native attestation.
+- Cache layout, SHA suffixes, fallback hierarchy, image keys, permissions, ownership, job serialization, publisher bindings and uncached native outcomes remain unchanged. No cache deletion, size/performance claim or dependency/tool upgrade.
+
+Evidence is retained under `.superpowers/sdd/2026-10-18-ci-cache-key-stability/`, including exact per-task argv/log/exits, `full-build.log`/`.exit`, `local-acceptance-receipt.json` and `task-1-review.md`. Existing toolchain warnings remain explicit maintenance. Current full ADK validation is unavailable; current index validation is narrower.
+
+**Pending:** publish the approved separate PR, require remote CI, and compare actual logged restore/save primary keys for the same SHA in exercised save contexts. A skipped main-branch-only save is not observed equality. Local proof is not yet a remote cache-hit/transfer/size qualification. Keep this issue open for operator/control-plane acceptance; do not automatically merge or archive it.
+
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
