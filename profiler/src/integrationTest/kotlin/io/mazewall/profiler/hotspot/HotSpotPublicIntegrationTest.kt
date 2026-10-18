@@ -49,6 +49,7 @@ class HotSpotPublicIntegrationTest {
                     val evidence = requireNotNull(final.structuredEvidence)
                     report(fixture, "public", evidence)
                     verifyCorpus(evidence, fixture.run, pid)
+                    verifySelectedAccounting(evidence, pid)
                     assertFalse(final.coverage.complete || session.pendingOwnership)
                     assertFailsWith<IncompleteProfileException> { final.toDedicatedWorkerPolicies() }
                 }
@@ -265,6 +266,43 @@ class HotSpotPublicIntegrationTest {
             HotSpotAcceptanceHarness.runCommand(endpoint.command("rm", "-f", collector))
             HotSpotAcceptanceHarness.runCommand(endpoint.command("rm", "-f", client))
         }
+    }
+
+    private fun verifySelectedAccounting(
+        evidence: StructuredProfileEvidence,
+        pid: Int,
+    ) {
+        val selected = Json
+            .parseToJsonElement(evidence.summary.rawJson)
+            .jsonObject
+            .getValue("selected_event_accounting")
+            .jsonObject
+
+        fun number(key: String): ULong {
+            val value = selected.getValue(key).jsonPrimitive
+            assertFalse(value.isString)
+            return value.content.toULong()
+        }
+        assertEquals(1uL, number("schema_version"))
+        assertEquals("owned_openat_handler_entry", selected.getValue("scope").jsonPrimitive.content)
+        assertEquals(evidence.sessionId, selected.getValue("session_id").jsonPrimitive.content)
+        assertEquals(pid.toULong(), number("host_pid"))
+        assertEquals(
+            evidence.records
+                .first()
+                .event.processStartTicks,
+            number("process_start_ticks"),
+        )
+        assertTrue(number("map_id") > 0uL && number("possible_cpus") > 0uL)
+        val attempted = number("attempted")
+        val submitted = number("submitted")
+        assertTrue(submitted <= attempted)
+        assertEquals(attempted - submitted, number("reserve_failed"))
+        assertTrue(number("received") <= submitted)
+        assertEquals(evidence.summary.received, number("received"))
+        assertEquals(evidence.summary.received, number("terminals"))
+        assertEquals("true", selected.getValue("complete").jsonPrimitive.content)
+        assertFalse(evidence.collectionLossComplete)
     }
 
     private fun verifyCorpus(

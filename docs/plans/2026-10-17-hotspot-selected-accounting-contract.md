@@ -1,8 +1,15 @@
-# Proposed selected HotSpot accounting contract
+# Selected HotSpot accounting contract
 
-Decision: **`not_authorized_pending_operator_review`** (2026-10-17).
+Decision: **`operator_requested_scoped_implementation_qualification_pending`** (2026-10-18).
 
-Plan04 Task2 Step1 is documentation only. Independent contract review is next;
+The operator explicitly requested continuation of the reviewed map/schema/pin scope
+in the corrected Plan04 Task2 dispatch; the controller ledger records approval by
+reference. This supersedes the earlier implementation gate for that exact scope.
+The corrected early-validation/post-acquisition binding boundary below is included.
+Native qualification remains pending; this grants no broader runtime authority,
+global completeness, policy eligibility or JIT/GC/Loom/FFM/digest activation.
+
+Historical Plan04 Task2 Step1 was documentation only. Its original gate was:
 explicit operator approval of the map, optional diagnostic and provenance transition
 is required before any native/BPF/Go/Kotlin, ABI/schema/pin or generated-graph edit.
 Approval of this document's preparation is not approval to implement its proposal.
@@ -16,11 +23,12 @@ requirements and R4, and the same-plan Task1 report/progress govern this proposa
 Task1's existing `Binding`, `Snapshot` and `BindAndEvaluate` are pure host proof;
 literal identities/flags do not establish native acquisition or finality.
 
-Current canonical sources (relative to the repository root) are:
+Sources inspected at the historical documentation baseline (relative to the
+repository root) were:
 
 - `profiler/hotspot-agentless/gadgets/openat-stack/program.bpf.c`: PID/leader-birth
   selection at lines 55–64, key-zero sequence lookup at 65–69, reserve at 70–72,
-  submit at 132. There is no production `selected_counts` map today.
+  submit at 132. There was no production `selected_counts` map at that baseline.
 - `profiler/hotspot-agentless/patches/gadget-additions/pkg/operators/event_finalization.go.txt`
   and `ebpf/event_finalization_{owner,backend,native,reader}.go.txt` in that same
   additions directory: current optional drain API, ordered stop owner and reserve
@@ -175,7 +183,7 @@ completeness, or policy eligibility. Global CollectionHealth/EventLossObservatio
 LossComplete/collectionLossComplete and selected-openat policy refusal keep current
 semantics. Missing source denominators and unknown admission lanes stay unknown.
 
-## Current identities: observed, not proposed replacements
+## Historical baseline identities: observed, not replacements
 
 Read-only checks on 2026-10-17 at the baseline:
 
@@ -201,13 +209,15 @@ Read-only checks on 2026-10-17 at the baseline:
 - There is no experimental `build/assets/manifest.json` in this checkout; equality
   of patch inputs does not establish an experimental built bundle identity.
 
-**The next accepted patch digest and built image do not exist yet.** They cannot
-be honestly supplied before approved source edits and actual reproducible builds.
-Current pins/graphs and historical evidence remain unchanged now.
+At this historical baseline the next accepted patch digest and built image did
+not exist. The implementation identities below were subsequently computed from
+approved authored inputs and actual reproducible builds; historical receipts are
+retained with their original identities and linkage limitations.
 
 ### Deterministic transition required after separate approval
 
-These are future acceptance requirements, not commands authorized by this dispatch:
+These acceptance requirements were originally future work under the Step1 dispatch
+and are now within the operator-requested implementation scope:
 
 1. Resolve the review conditions below, implement only the approved sources/tests
    canonically, then mirror matching native/BPF/addition/model/test files explicitly.
@@ -299,6 +309,10 @@ No native proof is claimed by this contract. Approval alone does not satisfy the
 
 ## Approval conditions and source inconsistencies requiring review
 
+The following records the original review conditions. The scoped implementation
+below resolves acquisition timing, metadata copying, publication and sampling;
+the remaining broader qualification boundaries are still explicit.
+
 1. **Acquisition timing:** current materialized Gadget `ebpf.go` calls
    `prepareEventFinalization` at line 734, before `NewCollectionWithOptions` at 890
     and `i.collection = collection` at 899. The original brief's bind call at prepare
@@ -337,6 +351,48 @@ No native proof is claimed by this contract. Approval alone does not satisfy the
    frames4096, tracked occurrences32,768 unchanged. No dependency, host-policy,
    fallback, source budget or profile adjustment is included.
 
-Independent contract review and explicit operator resolution/approval of these
-conditions must precede any future implementation. The decision remains
-`not_authorized_pending_operator_review`.
+The operator-requested implementation above resolves the authorization gate for
+this reviewed scope. These conditions remain implementation/proof requirements;
+qualification is pending until the actual native/live and provenance gates pass.
+
+## 2026-10-18 scoped implementation and evidence
+
+The canonical implementation and exact materialized mirror now negotiate the
+optional selected capability for owned full drain. Strict metadata validation and
+by-value target copying occur in prepare. Actual map object/ID/layout and possible
+CPU binding is acquired immediately after collection assignment, before map
+publication, receiver startup and attachment. Failed binding joins its cause with
+checked collection cleanup. The write-once getter is synchronized with the existing
+instance mutex; final observation publication/deep copying uses the owner mutex.
+Final sampling follows successful detach/flush/receiver, callback, definition,
+enrichment and auxiliary joins and precedes collection retirement. Collector proof
+additionally requires the fully retired parent and final delivered statistics.
+
+Computed accepted patch (both modules):
+`270a89f6dafb03afe2131b219f98673e30be79223eb68a11a5703b66d8f6a127`.
+Actual gadget digest:
+`sha256:5c5791bb47beba9568d98216abf7af4a03abe9093d1d024d511a26e645e051e9`.
+Twice-built helper SHA256:
+`25fcd41ce47a0c6f7aae841fa2d807313c796d90d2f9ca74f82772c8a2094ef7`.
+Packed manifest SHA256:
+`1fcf764192a645ad237aed82d004162ad793a423554f2d13c4b5ce4ac813764d`.
+Repeated locked Go/builder/epoch builds matched every helper, gadget-output and
+bundle byte; complete helper/OCI graph verification passed. Old-pin admission
+remains refused. The nine baseline provenance consumers and five reviewed-source
+keys move together only after actual new-graph compile-ID characterization/source
+review. The source audit still rejects unreviewed keys and always reports production
+qualification false; no runtime lifetime/lease authority is added.
+
+Host/race and real rootful `mw_kernel` controls cover independent identities,
+actual map substitution/layout, all possible CPUs, sticky overflow, conservation,
+pre-join refusal, metadata/options ownership, held callbacks, failed acquisition
+cleanup and publication ordering. The isolated native 512-attempt pressure control
+is distinct from the actual compiled-producer public acceptance run. The public
+suite exercises the schema1 raw selected diagnostic and unchanged policy refusal;
+capture ABI2, wire2, event/ring layouts and all delivery limits stay fixed.
+
+This implements selected accounting only. Dense public readout may still reject;
+its raw failure/JFR artifacts and original identity-failure receipts remain evidence,
+not an identity repair. Global/all-source completeness and policy eligibility remain
+false. The parent issue and broader qualification remain open pending independent
+controller review and the still-missing all-source/lifetime mechanisms.

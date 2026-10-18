@@ -17,7 +17,7 @@ import (
 const maxManifest = 65536
 const maxAssetFiles = 256
 const maxAssetBytes = 512 * 1024 * 1024
-const acceptedPatch = "618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c"
+const acceptedPatch = "270a89f6dafb03afe2131b219f98673e30be79223eb68a11a5703b66d8f6a127"
 const gadgetRevision = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 const profilerRevision = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
 const gadgetImagePrefix = "ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@"

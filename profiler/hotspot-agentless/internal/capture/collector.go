@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sys/unix"
 	orasoci "oras.land/oras-go/v2/content/oci"
 
+	"io.mazewall/experiments/hotspot-agentless/internal/accounting"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 	jsonoutput "io.mazewall/experiments/hotspot-agentless/internal/output"
 	"io.mazewall/experiments/hotspot-agentless/internal/preflight"
@@ -162,6 +163,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	var callbackMu sync.Mutex
 	var callbackErr error
 	var reportedLoss datasource.ReportedLossReader
+	var expectedAccounting *accounting.Binding
 	var eventsOnly *eventsOnlyState
 	operator := simple.New("mw-structured", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		var err error
@@ -183,7 +185,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 				return err
 			}
 			if cfg.DrainFull {
-				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline, StrictFull: true, AfterReadout: func(stopCtx context.Context) error {
+				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline, StrictFull: true, Accounting: &operators.SelectedAccountingTarget{Session: sessionID, PID: uint32(cfg.PID), Birth: ticks}, AfterReadout: func(stopCtx context.Context) error {
 					if err := ownedCtx.Err(); err != nil {
 						return errors.Join(err, fatal.Err())
 					}
@@ -252,6 +254,13 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		}
 		return nil
 	}), simple.OnStart(func(gc operators.GadgetContext) error {
+		if cfg.DrainFull {
+			expected, err := selectedExpected(gc, sessionID, uint32(cfg.PID), ticks)
+			if err != nil {
+				return err
+			}
+			expectedAccounting = &expected
+		}
 		if cfg.production {
 			return writeProductionReady(ctx, sink, sessionID, uint32(cfg.PID), ticks, func() error {
 				if err := ownedCtx.Err(); err != nil {
@@ -347,6 +356,19 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if eventsOnly != nil {
 		summary.Stats = eventsOnly.stats
 		summary.TerminalAccountingComplete = err == nil && eventsOnly.stats.Received == eventsOnly.stats.Skipped
+	}
+	if cfg.DrainFull {
+		value, selectedErr := selectedFinal(gc)
+		if selectedErr == nil && expectedAccounting == nil {
+			selectedErr = fmt.Errorf("selected prepared identity missing")
+		}
+		if selectedErr == nil {
+			summary.SelectedAccounting, selectedErr = selectedDiagnostic(*expectedAccounting, *value, eventFinalization, summary.Stats)
+		}
+		err = errors.Join(err, selectedErr)
+		if selectedErr != nil {
+			summary.TerminalAccountingComplete = false
+		}
 	}
 	if err != nil {
 		summary.Errors = []string{err.Error()}

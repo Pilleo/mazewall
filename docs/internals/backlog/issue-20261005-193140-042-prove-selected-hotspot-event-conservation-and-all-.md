@@ -51,3 +51,24 @@ generated graphs and historical evidence remain unchanged by this docs-only work
 Existing delivery budgets and production profile stay fixed. Selected accounting
 completeness is neither zero loss, global collection completeness nor policy
 eligibility. Keep this issue open; host Task1 proof is not production binding proof.
+
+## 2026-10-18 operator-requested scoped implementation
+
+The operator explicitly requested continuing corrected Plan04 Task2's exact reviewed
+selected-map/optional-schema/provenance scope; controller approval is recorded by
+reference. The former `not_authorized_pending_operator_review` label is historical.
+Disposition: `operator_requested_scoped_implementation_qualification_pending`.
+Early strict target parsing/options copy and immediate post-acquisition binding
+precede publication/startup; actual native/live acceptance remains required. This
+is no broader runtime authority and never promotes global completeness or policy.
+The all-source inventory/qualification issue remains open.
+
+Scoped implementation now supplies the real acquired selected-map binding and
+optional final diagnostic, with host/race, rootful map/owner/pressure controls and
+actual compiled public acceptance evidence. Accepted patch:
+`270a89f6dafb03afe2131b219f98673e30be79223eb68a11a5703b66d8f6a127`.
+Locked repeated helper/OCI builds match and full graph verification passes. The
+contract records exact helper/image/manifest identities and unchanged global
+refusal. This does not close the definition/all-source denominator gap, promote
+dense readout, repair historical native identity failures or confer runtime lifetime
+authority. Keep open for the remaining source inventory and independent review.

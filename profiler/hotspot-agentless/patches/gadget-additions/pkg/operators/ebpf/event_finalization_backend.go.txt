@@ -65,6 +65,19 @@ func (b nativeEventStopBackend) Join(ctx context.Context) error {
 	return nil
 }
 func (b nativeEventStopBackend) Sample() (uint64, error) {
+	if b.instance.selectedAccounting != nil {
+		owner := b.instance.eventFinalizer
+		if owner.snapshot().Phase != "receiver_joined" {
+			return 0, fmt.Errorf("selected counters sampled before owned joins")
+		}
+		value, err := b.instance.selectedAccounting.sampleAfterJoin()
+		if err != nil {
+			return 0, err
+		}
+		owner.mu.Lock()
+		owner.observation.SelectedAccounting = value
+		owner.mu.Unlock()
+	}
 	for _, t := range b.instance.tracers {
 		if t.lostSampleMap == nil {
 			return 0, fmt.Errorf("owned native reserve counter missing")
@@ -143,6 +156,18 @@ func (i *ebpfInstance) prepareEventFinalization(gc operators.GadgetContext, para
 		return err
 	}
 	copy := *opts
+	if opts.Accounting != nil {
+		target := *opts.Accounting
+		copy.Accounting = &target
+		pid, hasPID := parameters["target_pid"]
+		birth, hasBirth := parameters["target_start_ticks"]
+		if !hasPID || !hasBirth || pid == nil || birth == nil {
+			return fmt.Errorf("selected target parameters missing")
+		}
+		if err := validateSelectedAccountingTarget(copy.Accounting, pid.AsString(), birth.AsString()); err != nil {
+			return err
+		}
+	}
 	i.eventStopOptions = &copy
 	i.eventFinalizer = newEventStopOwner(nativeEventStopBackend{instance: i})
 	return nil

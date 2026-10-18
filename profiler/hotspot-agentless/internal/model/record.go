@@ -15,6 +15,7 @@ type Stats struct {
 }
 
 type Summary struct {
+	SelectedAccounting          *SelectedAccountingDiagnostic `json:"selected_event_accounting,omitempty"`
 	EventFinalization           *EventFinalizationObservation `json:"event_finalization_observation,omitempty"`
 	DefinitionStop              *DefinitionStopObservation    `json:"definition_stop_observation,omitempty"`
 	Stats                       Stats                         `json:"enrichment"`
@@ -25,6 +26,23 @@ type Summary struct {
 	CollectionHealth            string                        `json:"collection_health"`
 	TerminalAccountingComplete  bool                          `json:"terminal_accounting_complete"`
 	Errors                      []string                      `json:"errors,omitempty"`
+}
+
+type SelectedAccountingDiagnostic struct {
+	SchemaVersion uint32 `json:"schema_version"`
+	Scope         string `json:"scope"`
+	SessionID     string `json:"session_id"`
+	PID           uint32 `json:"host_pid"`
+	Birth         uint64 `json:"process_start_ticks"`
+	MapID         uint32 `json:"map_id"`
+	PossibleCPUs  int    `json:"possible_cpus"`
+	Attempted     uint64 `json:"attempted"`
+	Submitted     uint64 `json:"submitted"`
+	ReserveFailed uint64 `json:"reserve_failed"`
+	Received      uint64 `json:"received"`
+	Terminals     uint64 `json:"terminals"`
+	Complete      bool   `json:"complete"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 type EventFinalizationObservation struct {
