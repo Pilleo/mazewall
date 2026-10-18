@@ -179,6 +179,7 @@ fun main() = runBlocking {
         check(Files.readString(hostOnly) == "HOST_ONLY_CANARY")
         println("THREAD_RETIREMENT captured=${observedWorkers.size} alive=0 drain=complete closed=rejected")
     }
+    println("KOOG_THREAD_V1_OK registry=upstream worker=platform fs=isolated socket=denied caller=unchanged virtual=true unconfined=true validation=pass overload=rejected cancellation=cooperative ownership=checked retirement=complete fallback=false replay=false")
 }
 
 private fun readBoundedUtf8(path: Path): String {

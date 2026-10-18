@@ -4,8 +4,8 @@
 
 `ExecutionDiagnosticsSource` identifies one explicitly configured host operation
 and provides an immutable `ExecutionDiagnostics` sample. Spring `DomainLifecycle`
-and Koog `PortalToolAdapter` implement this interface. Direct core consumers use
-`InProcessDomain.diagnostics()`; prepared Portal consumers use
+and Koog's `PortalToolAdapter` and `ThreadToolAdapter` implement this interface.
+Direct core consumers use `InProcessDomain.diagnostics()`; prepared Portal consumers use
 `PreparedPortalOperation.diagnostics()`.
 
 Diagnostics never install restrictions, prepare/start a runtime, contact a worker,
@@ -22,6 +22,11 @@ trusted collaborators.
   is the input/manifests/runtime hash tuple from successful required readiness.
   A configured profile, failed handshake, or legacy test constructor cannot
   supply a ready generation; unavailable identity is explicit.
+- `ThreadToolAdapter.diagnostics()` delegates only to its supplied domain and
+  `operationId()` is the fixed host-selected tool name. READY does not prove a
+  proposed call is admissible: owner/domain mismatch, nested dispatch, overload
+  and draining/closed ownership still reject through the core API. The adapter
+  never prepares or retires ownership as a side effect of sampling or execution.
 - A failed generation remains failed even after physical retirement. Failed
   status and `retirementComplete` describe different facts.
 - `retirementComplete` requires the owner's canonical completion boundary.
@@ -87,6 +92,14 @@ tests compare exposed generation against the actual launch/readiness tuple,
 reject unverified generation, and observe actual child retirement. Published
 consumer/showcase gates separately qualify normal dependency and packaging paths.
 
+The published Koog thread consumer checks actual filesystem/socket denials and
+host/validator/virtual/Unconfined caller boundaries on dedicated platform workers.
+Its permission classification remains inferred, not authenticated kernel
+provenance. Cancellation holds lexical cleanup to observe live unfinished work
+and incomplete drain before release, captured-thread death and canonical complete
+drain. Host summary-corruption fixtures validate evidence parsing, not native
+enforcement. See the [adapter guide](../../../../integrations/koog/README.md).
+
 ## Integration CI and source-bound delivery
 
 The dedicated optional-integration lane builds both adapters with strict module
@@ -94,9 +107,18 @@ locks/checksums and fatal configuration-cache checks, then repeats to exercise
 cache reuse. `optionalIntegrationCheck` owns its lock and uses a disposable normal
 clone, committed producer inputs and a fresh exact local publication coordinate.
 It executes actual generated Koog packaging, external constructor/public-facade
-compilation, a fresh JAR-only native Koog consumer, ordinary-JAR JDBC/Security and
-finished-Boot showcases, and finished-JAR ownership/review negatives. Historical
-consumer locks are not rewritten for the new coordinate.
+compilation, separate fresh JAR-only native Koog Portal/thread consumers,
+ordinary-JAR JDBC/Security and finished-Boot showcases, and finished-JAR
+ownership/review negatives. Historical consumer locks are not rewritten for the
+new coordinate.
+
+The thread phase follows the unchanged Portal phase as a separate child command
+and requires one exact `KOOG_THREAD_V1_OK` summary after zero exit, including
+cooperative cancellation and complete retirement. Both validated summaries enter
+the existing parent JUnit artifact. The thread JVM's permanent no-exec Tier 1
+baseline is incompatible with later Portal launches; neither probe shares that
+bootstrap with Gradle or the other probe. No fallback, replay or widened authority
+is supplied by diagnostics or a successful summary.
 
 Failure blocks the existing required core job through an explicit result guard;
 the core job cannot silently skip into a green required status. Master publication

@@ -18,6 +18,18 @@ internal fun requireKoogContainmentSummary(output: String): String {
     return summaries.single()
 }
 
+internal const val KOOG_THREAD_SUMMARY =
+    "KOOG_THREAD_V1_OK registry=upstream worker=platform fs=isolated socket=denied caller=unchanged virtual=true unconfined=true " +
+        "validation=pass overload=rejected cancellation=cooperative ownership=checked retirement=complete fallback=false replay=false"
+
+internal fun requireKoogThreadSummary(output: String): String {
+    val summaries = output.lineSequence().filter { it.startsWith("KOOG_THREAD_V1_") }.toList()
+    check(summaries.size == 1 && summaries.single() == KOOG_THREAD_SUMMARY) {
+        "Expected exactly one complete Koog thread summary; found: $summaries"
+    }
+    return summaries.single()
+}
+
 /** Real source-bound publications and consumers; fixture approval is never production authority. */
 @Tag("optional-integration")
 class OptionalIntegrationAcceptanceTest {
@@ -106,6 +118,8 @@ class OptionalIntegrationAcceptanceTest {
                 val native = run("strict-fresh-native-koog", koog + "verifyFreshNative")
                 check("KOOG_NATIVE_FRESH_OK" in native) { "Actual upstream Koog native probe did not finish" }
                 println(requireKoogContainmentSummary(native))
+                val threadNative = run("strict-fresh-native-koog-thread", koog + "verifyFreshThreadNative")
+                println(requireKoogThreadSummary(threadNative))
                 run(
                     "ordinary-jar-jdbc-security",
                     gradle +
