@@ -74,6 +74,8 @@ class HotSpotPublicIntegrationTest {
                     val evidence = requireNotNull(final.structuredEvidence)
                     assertEquals(0, evidence.records.size)
                     assertTrue(evidence.discardedOccurrences >= 100uL)
+                    assertEquals(evidence.summary.received, evidence.discardedOccurrences)
+                    assertEquals(0uL, evidence.pendingOccurrences)
                     assertTrue(evidence.terminalAccountingComplete)
                     assertFalse(evidence.retentionComplete || final.coverage.complete || session.pendingOwnership)
                     report(fixture, "retention", evidence)

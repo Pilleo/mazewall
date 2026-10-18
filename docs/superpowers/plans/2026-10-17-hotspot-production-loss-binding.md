@@ -1,12 +1,13 @@
 ---
 document_type: execution_plan
 base_revision: 8da8b4efcc0b72d9c4f06cf798e6daee0d9b1120
-status: proposed_native_contract_requires_approval
+status: completed_scoped_selected_accounting_inventory_and_identity_documentation
+completion_revision: f22a8df000d2d8f55888532a412add9f0ab3baae
 ---
 
 # Production Collector Loss Binding Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Native map/schema/pin changes require the explicit review gate in Task2.
+> **Current disposition:** The scoped tasks below are completed as recorded in the disposition table. Their original dispatch instructions, approval gates, unchecked boxes and illustrative code are historical, not new execution requests or exact transcripts of the final implementation. Do not redispatch completed work. The separate native identity allocator still requires operator design review.
 
 **Goal:** Bind selected-event conservation to the actual collector/map/target owner and make missing all-source evidence explicit without promoting policy completeness.
 
@@ -35,12 +36,38 @@ status: proposed_native_contract_requires_approval
 
 ---
 
-## File structure
+## Current disposition (2026-10-18)
 
-Task1 is already committed and reviewed at `0bf71521`; do not reimplement it.
-Task2 Step1's contract exists and is independently reviewed, but native source/
-map/schema/pin edits remain unapproved. The corrected Step4 below replaces the
-invalid prepare-time map binding; operator approval still precedes implementation.
+| Task | Current disposition | Committed implementation and durable evidence |
+| --- | --- | --- |
+| Task1: identity-bound counter proof | Complete; inherited host proof, not a native receipt | `0bf71521ff3317440f1898e5c33f2218dbf997d9`; [binding implementation](../../../profiler/hotspot-agentless/internal/accounting/binding.go), [selected contract](../../plans/2026-10-17-hotspot-selected-accounting-contract.md) |
+| Task2: actual selected owner | Complete within the explicitly approved selected-accounting map/schema/pin scope, including scoped native/public qualification | `70f5ce9e138a0b405b8421a94f5319fa9a124916`; [selected contract and implementation receipts](../../plans/2026-10-17-hotspot-selected-accounting-contract.md#2026-10-18-scoped-implementation-and-evidence) |
+| Task3: structured missing-source inventory | Complete; selected evidence admitted, four other lanes unproven; global completeness false and policy conversion refused | `8cb57bad331a382a1bdd13be8be4d4294e7f7c56`; [production inventory and retained fault/public evidence](../../plans/2026-10-17-hotspot-production-loss-evidence.md) |
+| Task4: correlation-identity research documentation/backlog | Complete; the controller-authored appendix below is deliberately retained in this consolidation | `f22a8df000d2d8f55888532a412add9f0ab3baae`; [original alias, actual-C RED/control receipts and proposed approval boundary](../../plans/2026-10-18-hotspot-correlation-identity-evidence.md) |
+| Separate identity allocator implementation | **Not approved or implemented**; exact map/layout/failure semantics require operator design review | [Open allocator issue](../../internals/backlog/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md); three expected actual-C uniqueness failures remain open-defect evidence |
+
+The related public lazy-raw follow-up is committed at
+`8672ef99b8931289f12d6f03923baa764db1507d`; it is not a reason to repeat Task1.
+Completed task commits and their reviews remain evidence. The final correction
+wave consolidates status, strengthens retention0 assertions and clarifies CPU
+cardinality; it grants no new runtime authority or native qualification task.
+
+**FFR-M03 clarification:** Task2 acquisition and final sampling use Cilium eBPF
+**v0.22.0** `PossibleCPU()`, whose `sync.OnceValues` caches the boot-fixed possible-CPU
+cardinality, including offline possible CPUs. The second call is **not** an uncached
+sysfs/permission re-probe; the original literal freshness requirement was not
+executed. Actual final map metadata/ID and counter lookup remain live operations,
+with exact slot checks. See the [corrected contract](../../plans/2026-10-17-hotspot-selected-accounting-contract.md#possible-cpu-cardinality-clarification-ffr-m03)
+and [retained 12-slot/missing-slot evidence](../../plans/2026-10-17-hotspot-production-loss-evidence.md#follow-up-evidence-clarifications-ffr-m02ffr-m03).
+No synthetic hotplug test or native source change follows from this correction.
+
+## Historical file structure and dispatch
+
+The original Task2 approval gate below was superseded for the selected-accounting
+scope by the operator-requested implementation recorded in the selected contract.
+The corrected post-acquisition binding replaced invalid prepare-time binding.
+All remaining task instructions/examples, including Task4's preserved appendix,
+are historical; the table above is the authoritative current task disposition.
 
 |Action/file|Responsibility|
 |---|---|
@@ -803,3 +830,58 @@ without its actual native admission/delivery counter and physical end.
 update the loss issue/public guide with selected scope only. Stage exact lane
 files/evidence/issue changes; commit `feat(profiler): retain structured missing loss evidence`.
 The full commit build is mandatory. Global completeness remains false after this plan.
+
+### Task 4: Retain native correlation-identity findings and a scoped approval request
+
+**Scope:** Documentation/backlog only. User-requested investigation now has actual
+original-capture and unchanged-production-C evidence. No native correction is
+authorized by this task, and no source/API/map/pin/runtime profile changes belong
+in its diff. Work from existing HEAD8cb57bad331a382a1bdd13be8be4d4294e7f7c56 on
+feat/hotspot-followups in the already authorized execution worktree.
+
+**Read first:** Same-plan identity-investigation/report.md, especially section7;
+identity-investigation/native-characterization/verification.json and attempt-2
+results/raw outputs; global-constraints.md. Paths are under this plan's
+.superpowers/sdd/2026-10-17-hotspot-production-loss-binding/ directory.
+
+**Files:** Create docs/plans/2026-10-18-hotspot-correlation-identity-evidence.md;
+scaffold one MEDIUM backlog issue using ./scripts/adkw new-issue with the actual
+authored dispatcher patch file and symbol unwind_stop; keep
+docs/internals/backlog/README.md synchronized. Append a linked corrective
+observation to docs/plans/2026-10-17-hotspot-upstream-generation-evidence.md and
+one concise known-limit link in profiler/HOTSPOT_AGENTLESS.md. Preserve all prior
+historical observations/hashes rather than rewriting the failed result.
+
+- [ ] **Step1:** Verify the research report against actual source/input/binary/run
+  receipts and original capture bytes. Use existing evidence, not a duplicate
+  characterization or new native build. Record source lines/hash, commands,
+  exact expected RED versus successful control, and local retained artifact paths.
+- [ ] **Step2:** Document the established nine-event/two-TID alias and the actual
+  unchanged C path's three distinct-key equal-clock uniqueness failures (task,
+  frame, epoch), positive distinct-clock control and same-key replay checks.
+  Clearly distinguish host-C/helper mocks from kernel/JVM/live-transport proof,
+  and a sufficient allocator defect from the unproved historical trigger. Initial
+  compiler failure is not the regression RED. No completed runtime fix or broad
+  reliability/lifetime qualification claim is permitted.
+- [ ] **Step3:** File the narrowly scoped allocator uniqueness issue and document
+  the proposed approval boundary: shared same-map-lifetime positive non-reusing
+  atomic ID allocation, reserved zero, signed legacy export compatibility,
+  saturation/explicit bounded-contention failure, unchanged key/wire/buffers,
+  independent BOOTTIME and membership pruning. The implementation and exact
+  contract remain proposed pending operator design review; do not silently choose
+  new map/layout/failure semantics or implement resolver namespace changes.
+  Required future gates include actual-C RED/GREEN/mutant, real map/context
+  ownership/concurrency, immutable resolver/recovery/pruning checks, current-source
+  qualification before fourteen pin-consumer advancement, reproducible assets,
+  legacy ABI and actual public-native evidence. Preserve existing fatal guards.
+- [ ] **Step4:** Validate references/links, backlog index and git diff --check;
+  confirm the authored native sources/current pins/asset bytes and historical
+  artifacts remain unchanged. No mirror source edit or new implementation test
+  is needed for this documentation-only task. Stage only the five declared
+  documentation/backlog files. Commit through the unmodified mandatory hook;
+  preserve /tmp/mazewall-precommit-test.log immediately, distinguishing real
+  cached/skipped suites from explicit prior native proof.
+- [ ] **Step5:** Self-review and write task-4-identity-documentation-report.md in
+  this plan's SDD workspace with files, validation commands/results, full-gate
+  evidence, concerns and commit. Do not spawn agents, merge, push, clean evidence,
+  touch operator data or modify GITHUB_TOKEN. Controller dispatches the task review.

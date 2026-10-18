@@ -162,3 +162,37 @@ rebuilding BPF. CaptureABI2/wire2, dependency pins and source epoch1790985600 st
 unchanged. This proves only the newly built bytes; historical old-helper provenance
 gaps remain inferred/unverified. Native and global loss qualification remain scoped
 as above.
+
+## Follow-up evidence clarifications (FFR-M02/FFR-M03)
+
+The consolidated correction at base `f22a8df000d2d8f55888532a412add9f0ab3baae`
+tightens only the public retention0 assertion and documentation. It reuses the
+retained Task3 native receipt, not a new native build, matrix or capture:
+`task-3-inventory-20261018-evidence/live-public-artifacts/reports/b0448d32872c4744-retention/evidence.json`
+under the local SDD directory named above. Its exact conditions are zero records,
+**502 discarded == 502 summary received**, **zero pending**, terminal accounting
+and physical drain true, selected complete true and the same four unproven lanes.
+The native test now requires equality and zero pending alongside its existing
+minimum-workload, terminal, physical-drain and pending-owner checks. Existing
+accumulator final-pairing/retention and public compatibility/ABI evidence remains
+applicable; assertion compilation is the focused executable check. This receipt
+still does not supply an independent global retention denominator.
+
+The [selected contract's corrected CPU boundary](2026-10-17-hotspot-selected-accounting-contract.md#possible-cpu-cardinality-clarification-ffr-m03)
+uses the actual selected **Cilium eBPF v0.22.0** dependency: `cpu.go` delegates to
+`cpu_other.go`'s `sync.OnceValues` sysfs read. Prepared and final rows use the
+process-cached **boot-fixed possible-CPU cardinality**, including offline possible
+CPUs; repeated `PossibleCPU()` is **not** an uncached sysfs/permission re-probe.
+Map metadata/ID checks and counter lookup are still actual final operations, and
+exact row cardinality remains required. The original literal freshness claim is
+not evidence of an executed re-probe.
+
+Retained Task2 `task-2-native-20261018-evidence/accounting-kernel-final.log:2–6`
+records actual maps **23842/23843**, **12 possible CPUs**, replacement/missing-slot
+refusal and the 512-attempt pressure/overflow control. Task3's public selected
+receipt above independently records map **26743/12 slots**; retention0 records
+**26839/12 slots**. These are reused executions, not a synthetic cardinality or
+hotplug test. The official kernel CPU-map documentation retrieved as **7.3.0-rc7**
+explains the static-after-boot possible mask; the recorded **7.2.10** host's source
+and configuration were not inspected. No native source, dependency, map, pin or
+runtime semantics are changed by this clarification.

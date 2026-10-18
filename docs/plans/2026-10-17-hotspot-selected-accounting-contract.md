@@ -1,13 +1,19 @@
 # Selected HotSpot accounting contract
 
-Decision: **`operator_requested_scoped_implementation_qualification_pending`** (2026-10-18).
+Decision: **`operator_requested_scoped_implementation_and_selected_qualification_completed`** (2026-10-18).
 
 The operator explicitly requested continuation of the reviewed map/schema/pin scope
 in the corrected Plan04 Task2 dispatch; the controller ledger records approval by
 reference. This supersedes the earlier implementation gate for that exact scope.
 The corrected early-validation/post-acquisition binding boundary below is included.
-Native qualification remains pending; this grants no broader runtime authority,
-global completeness, policy eligibility or JIT/GC/Loom/FFM/digest activation.
+The scoped implementation and retained native/public qualification are completed
+at `70f5ce9e138a0b405b8421a94f5319fa9a124916`, as recorded below and in the
+[production inventory evidence](2026-10-17-hotspot-production-loss-evidence.md).
+Historical proposal/approval/proof gates below retain their original context;
+they are not requests to rerun completed work. This grants no broader runtime
+authority, global completeness, policy eligibility or JIT/GC/Loom/FFM/digest
+activation. The separate [identity allocator](2026-10-18-hotspot-correlation-identity-evidence.md#proposed-approval-boundary-and-future-gates)
+remains unapproved and unimplemented.
 
 Historical Plan04 Task2 Step1 was documentation only. Its original gate was:
 explicit operator approval of the map, optional diagnostic and provenance transition
@@ -109,10 +115,33 @@ never mutated; subsequent reads occur after the owned runtime returns.
 
 At final sampling independently check that the collection still owns the exact
 acquired map object, its actual ID still matches prepared MapID, actual layout
-still matches the contract, and a fresh possible-CPU count equals the prepared
-count. Lookup key zero from that same live map before retirement into exactly one
-row per possible CPU (including offline possible CPUs). Reject missing/extra
-slots, substitution, unavailable IDs, changed cardinality and all read errors.
+still matches the contract, and Cilium eBPF v0.22.0's process-cached boot-fixed
+possible-CPU cardinality equals the prepared count. This repeated `PossibleCPU()`
+call is not an uncached final sysfs/permission re-probe. Metadata/ID checks and
+key-zero counter lookup remain actual final operations on that same live map
+before retirement. Require exactly one row per possible CPU, including offline
+possible CPUs. Reject missing/extra slots, substitution, unavailable IDs,
+cardinality mismatch and all actual read errors.
+
+### Possible-CPU cardinality clarification (FFR-M03)
+
+The selected dependency is **github.com/cilium/ebpf v0.22.0**, pinned in
+[`go.mod`](../../profiler/hotspot-agentless/go.mod) and selected by the prepared
+`profiler/hotspot-agentless/build/experiment.go.mod`.
+Its official tagged [`cpu.go`](https://raw.githubusercontent.com/cilium/ebpf/v0.22.0/cpu.go)
+delegates to `possibleCPU`; [`cpu_other.go`](https://raw.githubusercontent.com/cilium/ebpf/v0.22.0/cpu_other.go)
+uses `sync.OnceValues` around `/sys/devices/system/cpu/possible`. Later calls reuse
+that process-cached result (including an initial error), rather than detecting a
+new sysfs access/permission failure. The original literal freshness claim is
+corrected, not claimed executed.
+
+The official [kernel CPU-map contract](https://docs.kernel.org/core-api/cpu_hotplug.html#cpu-maps),
+retrieved as **Linux 7.3.0-rc7**, describes `cpu_possible_mask` as static after boot
+discovery, unlike online/present masks. This explains possible-CPU slot accounting;
+it does not claim inspection of the historical **7.2.10** host's source/config or
+a runtime hotplug experiment. Existing actual 12-slot acquisition/read and
+missing-slot rejection receipts are linked in the
+[production evidence clarification](2026-10-17-hotspot-production-loss-evidence.md#follow-up-evidence-clarifications-ffr-m02ffr-m03).
 
 ## Real stop ordering, ownership and failure paths
 
