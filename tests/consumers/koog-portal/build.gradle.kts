@@ -27,6 +27,7 @@ tasks.register<JavaExec>("nativeProbe") {
     classpath = sourceSets.main.get().runtimeClasspath
     mainClass.set("io.mazewall.consumer.koog.KoogPortalProbeKt")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    environment("LC_ALL", "C")
 }
 
 tasks.register<JavaExec>("verifyOperationRoot") {
@@ -47,6 +48,7 @@ tasks.register<JavaExec>("verifyFreshNative") {
     classpath = fileTree(layout.buildDirectory.dir("fresh-probe/lib")) { include("*.jar") }
     mainClass.set("io.mazewall.consumer.koog.KoogPortalProbeKt")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+    environment("LC_ALL", "C")
     outputs.upToDateWhen { false }
     outputs.cacheIf { false }
     doFirst {

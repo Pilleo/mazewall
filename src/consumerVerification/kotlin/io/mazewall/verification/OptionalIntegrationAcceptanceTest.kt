@@ -8,6 +8,16 @@ import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
+internal const val KOOG_CONTAINMENT_SUMMARY = "KOOG_CONTAINMENT_V1_OK read=denied write=denied symlink=denied network=denied process=denied controls=pass retirement=pass"
+
+internal fun requireKoogContainmentSummary(output: String): String {
+    val summaries = output.lineSequence().filter { it.startsWith("KOOG_CONTAINMENT_V1_") }.toList()
+    check(summaries.size == 1 && summaries.single() == KOOG_CONTAINMENT_SUMMARY) {
+        "Expected exactly one complete Koog containment summary; found: $summaries"
+    }
+    return summaries.single()
+}
+
 /** Real source-bound publications and consumers; fixture approval is never production authority. */
 @Tag("optional-integration")
 class OptionalIntegrationAcceptanceTest {
@@ -95,6 +105,7 @@ class OptionalIntegrationAcceptanceTest {
                 }
                 val native = run("strict-fresh-native-koog", koog + "verifyFreshNative")
                 check("KOOG_NATIVE_FRESH_OK" in native) { "Actual upstream Koog native probe did not finish" }
+                println(requireKoogContainmentSummary(native))
                 run(
                     "ordinary-jar-jdbc-security",
                     gradle +

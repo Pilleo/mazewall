@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 141 | *Total Resolved Issues:* 698
+*Total Active Issues:* 143 | *Total Resolved Issues:* 698
 
-Active status detail: 140 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 142 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261018-004800](testing/issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md) | Make vulnerable web network ceiling evidence locale independent | medium | testing |
+| [issue-20261017-230729](testing/issue-20261017-230729-add-sandboxescapebench-inspired-koog-containment-contracts.md) | Add SandboxEscapeBench-inspired Koog containment contracts | medium | testing |
 | Archived [issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-](resolved/issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-.md) | Keep container JVM preference outputs outside the source checkout | high | core |
 | Archived [issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only](resolved/issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md) | Qualify optional integrations and expose read-only execution diagnostics | high | core |
 | [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |

@@ -76,7 +76,8 @@ retains command/timeout/reap evidence and checks the original checkout unchanged
 
 The probe exercises the exact upstream registry tool, strict host JSON decoding,
 generated typed service, 64KiB text inputs, 64KiB result rejection, 128KiB request
-and response limits, completed remote filesystem denial, terminal crash/wire
+and response limits, controlled read/write/symlink, loopback-connection and process-launch
+denials with outside-worker positive controls, terminal crash/wire
 failure, pre-crash original owner/PID, independent group, coroutine cancellation
   and physical child shutdown. A focused broker native regression also samples the
 monotonic lifetime spawn count before crash and checks it after joined close, so
@@ -85,7 +86,12 @@ The denied/crash/oversized service is test-only and never advertised to the mode
 Selector-looking text is data. Host mappings/codecs remain outside protection.
 The probe additionally observes a genuine READY generation before submission,
 immutable counter snapshots, and CLOSED/retirement-complete only after actual
-runtime close. These operational observations are not denial-provenance claims.
+runtime close. Acquired worker `ProcessHandle`s must be dead after joined close.
+Only after all assertions and retirement checks does it emit `KOOG_CONTAINMENT_V1_OK`;
+the parent gate rejects missing, duplicate or altered summaries. See the
+[containment contract demonstration](../../../benchmarks/koog-containment/README.md)
+for the scenario matrix, expected summary, disposable-environment recipe and limits.
+These operational observations are not denial-provenance or general agent-isolation claims.
 
 ## Bootstrap freshness and generated packaging checks
 
