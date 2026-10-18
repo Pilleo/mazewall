@@ -71,5 +71,37 @@ path absence. Root cause, including any relationship to ACK timing, remains
 unproved. Keep this issue open; no reproduction, cleanup action, syscall allowance,
 error suppression or runtime repair is part of this documentation correction.
 
+## Distinct cold-network signature retained on 2026-10-18
+
+During A3 fix1's unchanged mandatory full hook, the fresh-JVM case
+`ProfilerIntegrationTest.first process-wide network profile completes in a cold owned JVM()`
+failed in `:profiler:integrationTestFreshJvm`. The parent timed out in
+`ProcessImpl.waitFor` after two minutes; the worker's 60s budget covered install
+and workload, and the JDK socket exception was its pre-direct-connect deadline
+check. Missing child/daemon phase traces leave the initiating stall **UNKNOWN**.
+This differs from the historical missed-hostname/ACK32 signature above. Shared
+ENOSYS cleanup symptoms do not establish a common cause or a causal ACK32 claim.
+
+Preserved first failed raw log:
+`build/kubescape-dev/task-3/fix-round-1/full-gate-attempt-1.log`, SHA256
+`8cdb999fde1de2a390b57c7501960bea76282a1d91a98748a8c064e636146057`.
+The owning XML hash is
+`d1f3e58f4ed9790d05dc70236570aba8a3056fda08c0f107188be24c315c236f`
+(15 tests, one failure, zero skips).
+
+Controller-authorized unchanged focused test passed once, exactly one selected
+case, zero skips, 2.352s. Raw log SHA256
+`ef51b41a2f0084fcef228ccd2c93b7d28d69ebd234b04e6e94e45cda699109d4`;
+XML `73a62268cbb87136e098fcba345ac6fa04a873dc2a05043436345dfcccf761f2`.
+Both live under `.superpowers/sdd/2026-10-18-hotspot-observed-provider/` with
+`cold-network-focused-attempt-1` filenames. The single conditionally authorized
+next full hook passed in 7m55s (243 tasks: 31 executed, 212 up-to-date), preserving
+`build/kubescape-dev/task-3/fix-round-1/full-gate-attempt-2.log`, SHA256
+`16b36739d04ca4eb4b365b614bb23cb5cae805143b2df80b69fbc906f5ea6e0f`.
+Its cold case passed in 4.023s; native public 8/8 skips remained skips. First failure,
+focused pass and full-hook pass remain separate facts, **not a fixed flake**.
+Real socket/directory ENOSYS retirement failures remain open; this task changes
+neither that runtime nor its budgets and does not diagnose the cold stall.
+
 ---
 <!-- id: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int  file: issue-20261003-131111-752-investigate-intermittent-process-wide-profiler-int.md -->
