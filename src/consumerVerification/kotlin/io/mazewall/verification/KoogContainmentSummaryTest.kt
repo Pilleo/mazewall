@@ -15,7 +15,9 @@ class KoogContainmentSummaryTest {
     @Test
     fun `rejects missing duplicate partial and contradictory native summaries`() {
         val invalid = listOf(
-            "", "KOOG_NATIVE_FRESH_OK", "$line\n$line",
+            "",
+            "KOOG_NATIVE_FRESH_OK",
+            "$line\n$line",
             line.substringBefore(" retirement="),
             line.replace("controls=pass", "controls=fail"),
             line.replace("retirement=pass", "retirement=fail"),
