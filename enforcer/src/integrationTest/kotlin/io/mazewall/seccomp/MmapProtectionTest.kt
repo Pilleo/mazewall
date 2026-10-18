@@ -203,6 +203,38 @@ class MmapProtectionTest : BaseIntegrationTest() {
     }
 
     @Test
+    fun `quality protection setup stays outside restricted operations`() {
+        val type = MmapProtectionTest::class.java
+        val resource = "/" + type.name.replace('.', '/') + ".class"
+        val bytes = requireNotNull(type.getResourceAsStream(resource)).use { it.readAllBytes() }
+        val model = java.lang.classfile.ClassFile.of().parse(bytes)
+        val expectedCallers = setOf(
+            "mprotect with PROT_EXEC is blocked even if mprotect syscall is allowed",
+            "pkey_mprotect with PROT_EXEC is blocked",
+        )
+        val callers = model.methods().filter { it.methodName().stringValue() in expectedCallers }
+        kotlin.test.assertEquals(expectedCallers, callers.map { it.methodName().stringValue() }.toSet())
+        val misplaced = expectedCallers.flatMap { caller ->
+            val generatedPrefix = caller.replace(' ', '_') + "\$"
+            model.methods().filter {
+                val name = it.methodName().stringValue()
+                name == caller || name.startsWith(generatedPrefix)
+            }.mapNotNull { method ->
+                val name = method.methodName().stringValue()
+                val allocations = method.code().orElseThrow().elementList()
+                    .filterIsInstance<java.lang.classfile.instruction.InvokeInstruction>()
+                    .count {
+                        it.owner().asInternalName() == "io/mazewall/seccomp/MmapProtectionTest\$Companion" &&
+                            it.name().stringValue() in setOf("anonymousMapping", "access\$anonymousMapping")
+                    }
+                val expected = if (name == caller) 1 else 0
+                if (allocations == expected) null else "$name: expected $expected setup allocations, found $allocations"
+            }
+        }
+        assertTrue(misplaced.isEmpty(), "Protection setup must run on the caller, never its restricted operation: $misplaced")
+    }
+
+    @Test
     fun `quality warmup preserves unexpected invocation failure`() {
         val failure = IllegalArgumentException("invalid invocation")
         val actual = kotlin.test.assertFails { warmMprotect { throw failure } }
@@ -412,33 +444,35 @@ class MmapProtectionTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
     fun `mprotect with PROT_EXEC is blocked even if mprotect syscall is allowed`() {
-        val attempt = ProtectionAttempt(Arch.current().mprotect)
-        val executor = Executors.newSingleThreadExecutor()
-        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
-        val capturedResult = { requireNotNull(attempt.result) }
-        val mappingBody: (Long) -> Unit = { address ->
-            attempt.result = protect(address, 0x1 or 0x4)
-            strictNativeReturn("mprotect(PROT_EXEC)", attempt.syscallNr, attempt, capturedResult)
-            throw IllegalStateException("CRITICAL SECURITY BYPASS: executable mprotect succeeded")
-        }
-        val operation = { withOwnedMapping(anonymousMapping(0x1 or 0x2), mappingBody) }
-
-        try {
-            assertFailsWith<ExecutionException> {
-                executor
-                    .submit {
-                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
-                        receipt.requireInstalled()
-                        runCatching {
-                         attempt.run(operation)
-                        }.getOrElse { throw containmentFailureForCaller(it) }
-                        }
-                    }.get(10, TimeUnit.SECONDS)
-            }.let { e ->
-                assertObservedProtectionDenial(e, attempt)
+        withOwnedMapping(anonymousMapping(0x1 or 0x2)) { address ->
+            val attempt = ProtectionAttempt(Arch.current().mprotect)
+            val executor = Executors.newSingleThreadExecutor()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
+            val capturedResult = { requireNotNull(attempt.result) }
+            val mappingBody: (Long) -> Unit = { mappingAddress ->
+                attempt.result = protect(mappingAddress, 0x1 or 0x4)
+                strictNativeReturn("mprotect(PROT_EXEC)", attempt.syscallNr, attempt, capturedResult)
+                throw IllegalStateException("CRITICAL SECURITY BYPASS: executable mprotect succeeded")
             }
-        } finally {
-            executor.close()
+            val operation = { mappingBody(address) }
+
+            try {
+                assertFailsWith<ExecutionException> {
+                    executor
+                        .submit {
+                            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                                receipt.requireInstalled()
+                                runCatching {
+                                    attempt.run(operation)
+                                }.getOrElse { throw containmentFailureForCaller(it) }
+                            }
+                        }.get(10, TimeUnit.SECONDS)
+                }.let { e ->
+                    assertObservedProtectionDenial(e, attempt)
+                }
+            } finally {
+                executor.close()
+            }
         }
     }
 
@@ -448,34 +482,36 @@ class MmapProtectionTest : BaseIntegrationTest() {
      */
     @Test
     @EnabledIfLinuxAndSupported
-        fun `pkey_mprotect with PROT_EXEC is blocked`() {
-        val attempt = ProtectionAttempt(Arch.current().pkeyMprotect)
-        val executor = Executors.newSingleThreadExecutor()
-        val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
-        val capturedResult = { requireNotNull(attempt.result) }
-        val mappingBody: (Long) -> Unit = { address ->
-            attempt.result = protect(address, 0x1 or 0x4, pkey = true)
-            strictNativeReturn("pkey_mprotect(PROT_EXEC)", attempt.syscallNr, attempt, capturedResult)
-            throw IllegalStateException("CRITICAL SECURITY BYPASS: executable pkey_mprotect succeeded")
-        }
-        val operation = { withOwnedMapping(anonymousMapping(0x1 or 0x2), mappingBody) }
-
-        try {
-            assertFailsWith<ExecutionException> {
-                executor
-                    .submit {
-                        ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
-                        receipt.requireInstalled()
-                        runCatching {
-                         attempt.run(operation)
-                        }.getOrElse { throw containmentFailureForCaller(it) }
-                        }
-                    }.get(10, TimeUnit.SECONDS)
-            }.let { e ->
-                assertObservedProtectionDenial(e, attempt)
+    fun `pkey_mprotect with PROT_EXEC is blocked`() {
+        withOwnedMapping(anonymousMapping(0x1 or 0x2)) { address ->
+            val attempt = ProtectionAttempt(Arch.current().pkeyMprotect)
+            val executor = Executors.newSingleThreadExecutor()
+            val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build()
+            val capturedResult = { requireNotNull(attempt.result) }
+            val mappingBody: (Long) -> Unit = { mappingAddress ->
+                attempt.result = protect(mappingAddress, 0x1 or 0x4, pkey = true)
+                strictNativeReturn("pkey_mprotect(PROT_EXEC)", attempt.syscallNr, attempt, capturedResult)
+                throw IllegalStateException("CRITICAL SECURITY BYPASS: executable pkey_mprotect succeeded")
             }
-        } finally {
-            executor.close()
+            val operation = { mappingBody(address) }
+
+            try {
+                assertFailsWith<ExecutionException> {
+                    executor
+                        .submit {
+                            ContainedExecutors.installOnCurrentThread(policy).use { receipt ->
+                                receipt.requireInstalled()
+                                runCatching {
+                                    attempt.run(operation)
+                                }.getOrElse { throw containmentFailureForCaller(it) }
+                            }
+                        }.get(10, TimeUnit.SECONDS)
+                }.let { e ->
+                    assertObservedProtectionDenial(e, attempt)
+                }
+            } finally {
+                executor.close()
+            }
         }
     }
 }
