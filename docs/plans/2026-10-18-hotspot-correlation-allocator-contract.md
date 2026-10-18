@@ -12,8 +12,9 @@ The original failed capture remains failed. Equal-clock allocation is an execute
 sufficient cause, not a proved historical interleaving. The correction's source
 implementation and isolated native checks are recorded in
 [Task1 evidence](2026-10-18-hotspot-correlation-allocator-evidence.md).
-Full-bundle/public-native qualification remains pending Task2; no runtime promotion
-follows from those isolated checks.
+Task2 now records byte-reproducible full bundles, actual public-native coupling and
+legacy export checks in that evidence document. Qualification remains the existing
+pinned synchronous interpreter/Serial profile; no broader runtime promotion follows.
 
 ## Kubescape compatibility boundary
 
@@ -105,5 +106,8 @@ task/epoch/frame guards remain mandatory, including negative guard controls.
 
 The [remaining-work requirements](2026-10-17-hotspot-remaining-work-spec.md) and
 their exact budgets/fail-closed rules continue to apply. The implementation plan
-owns current task dispositions; no build or successful native outcome is claimed
-by this contract alone.
+owns current task dispositions; exact build/native receipts are in the evidence
+document and owning Task2 report. Active perf/NMI nesting, exhaustive same-key
+publication/eviction interleavings, historical trigger repair and the Kubescape
+agentless bridge remain outside the qualified observations. The allocator issue
+stays open for its remaining interleaving/context criteria.

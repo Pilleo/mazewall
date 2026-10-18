@@ -23,7 +23,7 @@ lifecycle units depend on selected profiler/bridge boundaries and require separa
 review; review-unit separation is not a claim that every patch applies in isolation.
 Fault/diagnostic additions remain test-only with separate manifests.
 
-## Bounded native correlation allocator (2026-10-18, full qualification pending)
+## Bounded native correlation allocator (2026-10-18, scoped native qualification)
 
 `profiler-epoch-capture.patch` includes the shared production `correlation_ids.h`:
 one ARRAY/u32/u64/1, at most 32 CAS attempts, positive IDs through INT64_MAX.
@@ -38,7 +38,16 @@ into a test-only runnable BPF wrapper. See
 [allocator evidence](../../../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md)
 for RED/GREEN/mutants, actual multi-CPU execution, loader ownership, source controls
 and retained failures. These isolated checks do not prove HotSpot transport or
-active perf/NMI safety. Full helper/OCI/public qualification remains Task2.
+active perf/NMI safety. Task2 separately produced two byte-identical locked helpers
+and complete local OCI bundles, independently verified every asset/descriptor, and
+executed all eight public-native cases with real current assets. Observed IDs1–9
+in completed public fixture captures bind to exact tasks; zero stays unavailable.
+Rendered and serialized pdata compatibility pass at1,2^53+1,INT64_MAX. The one
+experimental six-case control includes four carrier TIDs without observed reference
+aliasing, not JIT/GC/Loom lifetime proof. Both dense600 diagnostics still reject.
+Same-key publication/eviction interleavings and active perf/NMI context coverage
+remain limited; the allocator issue is not archived. No runtime source changed in
+Task2, and the original failure/historical source linkage remains unproved.
 The R1 review correction uses distinct task/frame/epoch fixtures and exact binding
 assertions, including preservation after rejected redelivery. A definition-swap
 negative fails that oracle. Its new hashed graph preserves all native bytes and

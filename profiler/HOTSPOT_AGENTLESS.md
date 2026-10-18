@@ -125,8 +125,15 @@ and [native mechanism decision](../docs/plans/2026-10-17-hotspot-jitgc-native-me
 Known limit: the retained failure has a nine-event/two-TID correlation alias;
 unchanged actual C also fails distinct-key uniqueness under equal clocks. The
 historical trigger remains unproved. The approved bounded shared allocator is
-implemented with actual-C and isolated multi-CPU kernel checks; full-bundle and
-public-native qualification of the corrected graph is pending. Its raw positive
+implemented with actual-C and isolated multi-CPU kernel checks. The corrected
+`8212ee25…` graph now has two byte-identical locked helper/full-OCI builds and eight
+actually executed public-native cases (zero skips). The paced case accepts;
+both dense600 diagnostics still reject with retained partial evidence. Exact task
+binding, selected accounting/drain, zero-retention conservation and non-time
+rendered/pdata compatibility pass within the existing profile. An experimental
+four-carrier control observes no cross-task reference alias, without qualifying
+logical ancestry, JIT/GC/Loom lifetime, active perf/NMI or all publication/eviction
+interleavings. The allocator issue remains open for those remaining criteria. Its raw positive
 reference is not Kubescape's frame-content CallID; the existing Tier E importer
 does not consume this agentless schema-2 stream. See
 [allocator evidence](../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md)

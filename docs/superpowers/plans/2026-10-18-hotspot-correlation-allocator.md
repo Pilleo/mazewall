@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: d5874513f5c2ee2b5a3c2351061daf87a09afd96
-status: task1_source_implemented_full_runtime_qualification_pending
+status: task2_assets_public_native_qualified_commit_checkpoint_in_owning_report
 ---
 
 # Native Correlation Allocator Implementation Plan
@@ -121,7 +121,7 @@ The final runtime qualification is Task2, not implied by passing host tests.
   output hashes BEFORE execution, with `-buildvcs=false` and actual modfile.
   Re-run actual prepared compile-ID controls and both named guard mutants, inspect
   the changed source, then advance all14consumer keys. No guessed/blanket key update.
-- [ ] **Step7:** Copy exact relevant mirrors, update contract/issue as implemented
+- [x] **Step7:** Copy exact relevant mirrors, update contract/issue as implemented
   but full qualification pending, and retain a durable source/kernel/RED/GREEN
   evidence document with explicit limits and Kubescape purpose. Stage the new
   contract and this execution plan deliberately. Run focused Go race/Kotlin
@@ -132,7 +132,8 @@ The final runtime qualification is Task2, not implied by passing host tests.
 Task1 source/native/focused evidence is linked from
 `docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md`. Step7's commit-hook
 outcome is recorded after the actual attempt in the owning workspace's
-`task-1-report.md`; its raw gate log is retained there. Task2 remains pending.
+`task-1-report.md`; its raw gate log is retained there. Task1 and its R1 fix passed
+independent review at82bea3aa. Task2's actual qualification status follows.
 
 ### Task 2: Qualify full assets and public collection for the actual correction
 
@@ -141,28 +142,28 @@ outcome is recorded after the actual attempt in the owning workspace's
 qualified observations and accurate durable integration status. No new node-agent
 adapter or schema translation is part of this task.
 
-- [ ] **Step1:** Read Task1 handoff and only its concrete remaining gates. Verify
+- [x] **Step1:** Read Task1 handoff and only its concrete remaining gates. Verify
   source/mirrors/14pins, supported profiles and old artifacts without redoing valid
   source/kernel checks. Finalize any already-identified source defect before builds;
   renewed substantive source changes require scoped regression review.
-- [ ] **Step2:** Build helper and complete OCI bundle twice from the same locked
+- [x] **Step2:** Build helper and complete OCI bundle twice from the same locked
   source/Go/compiler/image graph into fresh owned destinations. Capture actual
   selected source/toolchain inputs before each build and output/bundle hashes
   before execution. No metadata digest cache, startup build or registry fallback;
   normal build permissions/errors stay fatal. Verify full reachable OCI graph,
   every asset byte, old-pin refusal and actual equality. Preserve baseline bundles.
-- [ ] **Step3:** Run explicit public HotSpot native acceptance with both rootful
+- [x] **Step3:** Run explicit public HotSpot native acceptance with both rootful
   endpoint variables and current asset path, unchanged interpreter/Serial bounds.
   Preserve every actual result, original failure and cleanup receipt. Check
   selected counters, terminal/drain/retirement, missing lanes, zero-retention
   conservation and global/policy refusal. Check observed raw IDs are positive
   non-time references and exact task identities never alias across threads.
-- [ ] **Step4:** Run one receipted multi-carrier experimental control using the
+- [x] **Step4:** Run one receipted multi-carrier experimental control using the
   existing candidate driver if needed to exercise the original cross-task shape.
   No retry-until-green, no reconstruction of missing historical clock values and
   no JIT/GC/Loom lifetime promotion. Reuse source/kernel proofs valid for this
   exact graph; default-skipped tests never replace actual native results.
-- [ ] **Step5:** Update allocator evidence, contract/plan dispositions, native
+- [x] **Step5:** Update allocator evidence, contract/plan dispositions, native
   patch review guide/public guide and existing issue with exact qualified scope.
   Record Kubescape's current agent-assisted completed-artifact contract and the
   separate future agentless bridge; no claimed node-agent test/deployment or
@@ -174,4 +175,27 @@ adapter or schema translation is part of this task.
   inherited endpoint-cleanup warnings and current ABI gates. Independent task
   review, one broad final review/consolidated fix/scoped re-review follow; retain
   evidence/worktree and operator data. User-directed fast-master integration uses
-  the existing nondefault staging path only after these scoped gates pass.
+   the existing nondefault staging path only after these scoped gates pass.
+
+### Task2 checkpoint (2026-10-18)
+
+Starting HEAD82bea3aa; current89-input/14-consumer graph8212ee25 remains unchanged.
+Two actual locked helper/full-OCI builds compare every byte and reachable descriptor;
+helperd0cc2a1d…9f3f93c, manifestb4a0ae29…874831, gadget5c5791bb…051e9. Eight
+public-native cases execute with zero skips/failures, including selected conservation,
+zero-retention502=502/pending0, physical drain and native refusal. Both dense600
+diagnostics reject and retain partials. One six-case experimental control includes
+four carrier TIDs without observed reference alias; legacy rendered and serialized
+pdata preserve1,2^53+1,INT64_MAX. No runtime source/API/profile/budget change.
+
+The allocator issue remains open for full context/publication/eviction-interleaving
+characterization; active perf/NMI and broader lifetime remain unqualified. Original
+historical failure/source linkage, deferredMinorR2 and inherited USER_NOTIF cleanup
+issue stay visible. Node-agent remains read-only; its completed agent-assisted Tier E
+content-hash importer is not an agentless bridge. See the
+[durable qualification evidence](../../plans/2026-10-18-hotspot-correlation-allocator-evidence.md#task2-full-assets-and-public-native-qualification).
+
+Step6's actual commit-hook result is necessarily recorded after that attempt in the
+owning `.superpowers/sdd/2026-10-18-hotspot-correlation-allocator/task-2-report.md`
+and progress ledger. This tracked checkpoint records completed qualification;
+it does not predeclare a hook result, task review, merge or final integration.

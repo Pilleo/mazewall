@@ -33,12 +33,13 @@ See the [source/receipt-backed identity evidence](../../plans/2026-10-18-hotspot
 for exact source lines/hashes, raw artifact paths, commands and boundaries.
 The authored target is the dispatcher patch above, not generated `build/deps`
 sources. The operator approved the [bounded allocator contract](../../plans/2026-10-18-hotspot-correlation-allocator-contract.md).
-Task1 implements the correction; full reproducible-bundle and public-native
-qualification remains pending Task2. See [allocator evidence](../../plans/2026-10-18-hotspot-correlation-allocator-evidence.md).
+Task1 implements the correction; Task2 supplies byte-reproducible full bundles,
+public-native and legacy export receipts in the current bounded profile.
+See [allocator evidence](../../plans/2026-10-18-hotspot-correlation-allocator-evidence.md#task2-full-assets-and-public-native-qualification).
 
 **Needed:**
 
-Acceptance criteria retain their original wording; current Task1 disposition follows.
+Acceptance criteria retain their original wording; current dispositions follow.
 1. Review and approve shared same-map-lifetime **positive non-reusing atomic ID
    allocation**, reserved zero and signed legacy export compatibility (at most
    `INT64_MAX`). Specify saturation and explicit bounded-contention failure, with
@@ -81,13 +82,25 @@ followed current-graph qualification. The initial graph's retained pre-advanceme
 snapshots cover only four consumers, so its all-fourteen chronology is unproved;
 the new receipts do not retroactively establish it.
 
-**Completion boundary:** this issue stays open for Task2's reproducible helper/OCI,
-legacy rendered/pdata and actual public capture qualification on the corrected
-graph. The wrapper proves isolated allocator execution, not live JVM/transport,
-same-key producer interleavings or perf/NMI safety. Existing buffers, deadlines,
-profile and fatal errors remain. Kubescape's completed Tier E content-hash importer
-still needs a separately scoped agentless bridge. Original failure and the
-unproved historical trigger remain visible; no JIT/GC/Loom/reliability promotion.
+**Task2 disposition (2026-10-18):** two independent locked Go1.26.0 builds produce
+identical helper `d0cc2a1d…9f3f93c` and every full-OCI bundle byte. Independent
+descriptor traversal and old-pin refusal pass. Eight public-native cases execute
+with zero skips/failures; selected802/802/802 conservation, exact task/non-time
+binding, physical drain, zero-retention502discarded=502received/pending0, four
+unknown lanes/globalfalse and policy refusal pass. Actual rendered and serialized
+pdata checks preserve1,2^53+1,INT64_MAX. One receipted six-case experimental control
+includes four carrier TIDs/256marked observations without observed cross-task
+reference alias. Both dense600 diagnostics still reject; all partial evidence stays.
+
+**Completion boundary:** this issue stays open for criterion3's complete admitted
+context/publication/eviction-interleaving characterization. Task2 supplies real
+helper/JVM/transport coupling, not exhaustive same-key producer interleavings or
+active perf/NMI safety. The supported synchronous kprobe profile, buffers,
+deadlines and fatal errors remain. Kubescape's agent-assisted completed Tier E
+content-hash importer still needs a separately scoped agentless bridge; no
+end-to-end import/deployment was run. Original failure and the unproved historical
+trigger remain visible; no JIT/GC/Loom/reliability promotion. The existing backlog
+index row correctly remains open; no archive is justified by these scoped results.
 
 ---
 <!-- id: issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio  file: issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md -->
