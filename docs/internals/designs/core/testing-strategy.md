@@ -159,6 +159,27 @@ distinct exhaustion result; do not add a test-only production bypass.
 
 ## Fast iteration and cache reuse
 
+CI computes `scripts/ci_cache_key.sh` once immediately after checkout in each job.
+Container Gradle restore/save keys share that immutable job output, retaining their
+OS prefixes, SHA suffixes, fallback hierarchy and dedicated cache layout. Saves
+require successful key computation as well as their existing conditions.
+
+The helper hashes current bytes and NUL-delimited relative names of Git-tracked
+Gradle/Groovy/Kotlin build scripts, root/nested `gradle.properties` and
+`gradle.lockfile`, the versions catalog, verification metadata, wrapper JAR/properties,
+Containerfiles, CI workflow and cache-key/container-runner scripts. Untracked or
+generated scripts/markers and unrelated source do not affect it. Repository-local
+Git overrides are cleared only in the child, with optional index writes disabled.
+Contained readable regular-file aliases are supported; external, dangling, cyclic,
+special, unreadable or missing inputs and Git/hash errors fail without publishing
+a digest. Computation assumes an immutable checkout, not race-proof containment.
+
+`./gradlew -p buildSrc ciCachePolicyTest --console=plain --max-workers=1` runs real
+owned-Git fixtures and workflow-policy mutations. These checks also run in mandatory
+`verificationActionsTest`, whose inputs include the helper. Cache identities are
+compatibility keys, not native protection attestations: cache isolation, ownership,
+required native freshness and publication gates are unchanged.
+
 Root verification follows source plugins rather than optional module paths.
 Non-demo grouping projects retain lazy child `build` and `check` dependencies
 without acquiring Java source sets or typed Kotlin analysis. Actual Java modules
