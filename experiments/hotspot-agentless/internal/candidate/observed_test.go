@@ -213,6 +213,71 @@ func TestObservedCapturedWorkerSwap(t *testing.T) {
 	}
 }
 
+func TestObservedOrderedRouteGate(t *testing.T) {
+	oracle, want := map[string]observedOracle{}, map[string]string{}
+	for i := 0; i < 400; i++ {
+		token := fmt.Sprintf("marked-%03d", i)
+		method := []string{"routeA", "routeB"}[i%2]
+		oracle[token] = observedOracle{Method: method, TID: uint32(101 + i%4)}
+		want[token] = method
+	}
+	pairs := make([]wire.Pair, 400)
+	for i := range pairs {
+		token := fmt.Sprintf("marked-%03d", i)
+		source := oracle[token]
+		pairs[i] = wire.Pair{
+			Event: wire.Event{Filename: "/fixture/gates/" + token, TID: source.TID},
+			Evidence: wire.StackEvidence{Attribution: "event_correlated", Frames: []wire.Frame{
+				{FunctionName: "void ObservedWorkload.leaf(java.nio.file.Path)"},
+				{FunctionName: "void ObservedWorkload." + source.Method + "(java.nio.file.Path)"},
+			}},
+		}
+	}
+	check := func(captured []wire.Pair) (int, error) {
+		routes, useful, err := observedRoutes(captured, oracle)
+		if err != nil {
+			return useful, err
+		}
+		return useful, verifyObservedMarked(routes, want, 400, 400)
+	}
+	if useful, err := check(pairs); err != nil || useful != 400 {
+		t.Fatalf("complete ordered control: useful=%d err=%v", useful, err)
+	}
+	t.Log("complete ordered control accepted: 400/400 useful, raw/terminal=400/400")
+	t.Run("genuine-unavailable-and-no-application", func(t *testing.T) {
+		captured := append([]wire.Pair{}, pairs...)
+		for i := 360; i < 380; i++ {
+			captured[i].Evidence = wire.StackEvidence{Attribution: "unavailable", Reason: "missing_reference"}
+		}
+		for i := 380; i < 400; i++ {
+			captured[i].Evidence.Frames = []wire.Frame{{FunctionName: "libc.openat"}}
+		}
+		if useful, err := check(captured); err != nil || useful != 360 {
+			t.Fatalf("genuine availability control: useful=%d err=%v", useful, err)
+		}
+	})
+	leaf, route := pairs[0].Evidence.Frames[0], pairs[0].Evidence.Frames[1]
+	for name, prefix := range map[string][]wire.Frame{
+		"reordered":         {route, leaf},
+		"duplicated-prefix": {leaf, leaf, route},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if useful, err := check(pairs); err != nil || useful != 400 {
+				t.Fatalf("pre-mutation control: useful=%d err=%v", useful, err)
+			}
+			captured := append([]wire.Pair{}, pairs...)
+			captured[0].Evidence.Frames = prefix
+			useful, err := check(captured)
+			if err == nil {
+				t.Fatalf("wrong application prefix accepted: useful=%d raw/terminal=400/400", useful)
+			}
+			if !strings.Contains(err.Error(), "marked-000") || !strings.Contains(err.Error(), "wrong or reordered application route") {
+				t.Fatalf("lost token-specific semantic error: %v", err)
+			}
+		})
+	}
+}
+
 func TestObservedRoutesRejectMissingDuplicateAndUnknown(t *testing.T) {
 	want := map[string]string{"a": "routeA", "b": "routeB"}
 	for name, routes := range map[string][]ObservedRoute{

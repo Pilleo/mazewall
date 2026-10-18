@@ -81,6 +81,12 @@ against its preexisting source oracle and exact worker TID, plus ordered
 between workers, duplicate tokens and missing tokens all fail the verifier.
 No nearest-TID, time/CPU-sampling join or inferred logical thread identity is used.
 
+A4-001 correction: semantic wrong/reordered application-prefix errors now retain
+token context instead of becoming unavailable. A pure 400-pair control detects a
+single reversed/duplicated prefix while preserving genuine unavailable outcomes.
+Corrected-verifier replay remains 372/376/384/300; the original capturing binary,
+captures and rejected verdict are frozen, not rebuilt or re-executed.
+
 Useful means the independent application route was available. It does not upgrade
 native or JVM frame precision. Ordinary marked frames include 60 out-of-range
 BCIs, 684 unavailable BCIs, 312 method-only and 372 stub lookups; 6,768 frames

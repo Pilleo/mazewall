@@ -36,7 +36,10 @@ func observedRoutes(pairs []wire.Pair, oracle map[string]observedOracle) ([]Obse
 				}
 			}
 			matched, err := routeMatches(frames, []string{"ObservedWorkload.leaf", "ObservedWorkload." + expected.Method})
-			if err == nil && matched {
+			if err != nil {
+				return routes, useful, fmt.Errorf("marked token %s: %w", token, err)
+			}
+			if matched {
 				route.Method = expected.Method
 				useful++
 			}
