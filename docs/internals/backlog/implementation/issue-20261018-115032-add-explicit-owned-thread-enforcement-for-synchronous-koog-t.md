@@ -61,6 +61,28 @@ Add a thin upstream `Tool` bound to the application's existing `ManagedRuntime` 
 - Inherited delta-filter warning debt is recorded separately as [issue-20261018-125543](../code_health/issue-20261018-125543-distinguish-delta-filter-fragments-from-effective-unsafe-prc.md), without silencing the warning or changing policy. Existing locale/toolchain/ADK limitations remain explicit.
 - Integrated full-build/committed aggregate and broad branch review remain pending at this checkpoint. This issue is not closed/archived or evidence of arbitrary-code/heap isolation or forced termination.
 
+## Committed local acceptance — 18 October 2026
+
+Tested/reviewed executable producer **`bf98ee873b31d5253efb125e192da975841f39d3`**, candidate **`0.1.0-integration.bf98ee873b31`**. Later evidence-only Markdown bookkeeping does not rename that producer.
+
+| Gate | Actual result |
+|---|---|
+| Optional Koog build with fatal configuration-cache checks, then exact repeat | Both exit 0; first stores configuration cache, repeat reuses it. Reused task results are not fresh native evidence. |
+| `LC_ALL=C ./gradlew build --console=plain --max-workers=1` | Exit 0, 6m33s, 242 actionable tasks: 31 executed / 211 up-to-date. |
+| `LC_ALL=C ./scripts/run_containerized_tests.sh :optionalIntegrationCheck --no-configuration-cache --max-workers=1` | Exit 0, 15m10s; real committed publication, separate Portal/thread JVM phases, JDBC/Security and finished-Boot/ownership negatives complete. |
+| Owning parent JUnit | 1 test, 0 failures/errors/skips; both exact Portal and thread summaries once; matching producer above. |
+| Broad independent review and completion supplement | Source/spec approved with no blocking code defect; finished full-build and committed aggregate/parent-JUnit conditions independently confirmed. |
+
+Local evidence: `.superpowers/sdd/2026-10-18-koog-thread-enforcement/` contains per-task records, `full-build.log`/`.exit`, `optional-aggregate.log`/`.exit`, `committed-aggregate.junit.xml`, `committed-aggregate-receipt.json` and `final-review.md`. Retained parent XML SHA-256: `340badf33cd8e307063d71733079447d239cc3b8b6843e083dc6065c7b51667c`. The accepted new line is:
+
+```text
+KOOG_THREAD_V1_OK registry=upstream worker=platform fs=isolated socket=denied caller=unchanged virtual=true unconfined=true validation=pass overload=rejected cancellation=cooperative ownership=checked retirement=complete fallback=false replay=false
+```
+
+The disposable container's per-child raw logs were not independently copied; parent/phase/JUnit evidence and separate per-task native records are retained. No remote thread-feature CI/upload, push or merge was performed. Benchmark PR 535 was separately authorized, green and merged before this feature began.
+
+**Remaining:** current full ADK validation is unavailable; current index validation is narrower. SpotBugs reports missing generated coroutine classes, including a new-adapter occurrence, so complete analyzer coverage is not claimed; recorded as [issue-20261018-132632](../code_health/issue-20261018-132632-qualify-spotbugs-analysis-of-generated-koog-coroutine-classe.md). Existing unsafe-prctl delta-warning and locale/toolchain limits remain separate. Operator CI-cache review also recorded [issue-20261018-132635](../testing/issue-20261018-132635-keep-ci-container-cache-restore-and-save-keys-stable-across.md), without changing CI in this feature. Keep this item open for operator/control-plane acceptance; no arbitrary-code, heap or forced-termination guarantee follows.
+
 ---
 
 **Verification:** Opt-in `:integrations:koog:test`, ktlint and typed Detekt; root consumer harness/summary/style checks; strict staged-JAR `verifyFreshThreadNative` plus unchanged Portal native gate; included-module full build and actual committed optional aggregate. Use existing current index/link/whitespace validation and retain unavailable full ADK validation separately.

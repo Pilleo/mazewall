@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 145 | *Total Resolved Issues:* 698
+*Total Active Issues:* 147 | *Total Resolved Issues:* 698
 
-Active status detail: 144 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 146 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261018-132635](testing/issue-20261018-132635-keep-ci-container-cache-restore-and-save-keys-stable-across.md) | Keep CI container cache restore and save keys stable across generated build files | medium | ci |
+| [issue-20261018-132632](code_health/issue-20261018-132632-qualify-spotbugs-analysis-of-generated-koog-coroutine-classe.md) | Qualify SpotBugs analysis of generated Koog coroutine classes | low | testing |
 | [issue-20261018-125543](code_health/issue-20261018-125543-distinguish-delta-filter-fragments-from-effective-unsafe-prc.md) | Distinguish delta filter fragments from effective unsafe prctl authority in diagnostics | low | enforcer |
 | [issue-20261018-115032](implementation/issue-20261018-115032-add-explicit-owned-thread-enforcement-for-synchronous-koog-t.md) | Add explicit owned thread enforcement for synchronous Koog tools | medium | enforcer |
 | [issue-20261018-004800](testing/issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md) | Make vulnerable web network ceiling evidence locale independent | medium | testing |
