@@ -99,3 +99,25 @@ Standalone checks: `GOWORK=off go test -race ./... -count=1`.
 Native checks: with the selected explicit `GOWORK`, run
 `go test -race -buildvcs=false ./internal/model ./internal/preflight ./internal/capture ./internal/accounting ./internal/tooling -count=1`
 in each owner.
+
+## Release isolation check
+
+Before publication, test the committed module alone in a fresh directory with no
+`profiler` sibling. All SDK test inputs, including the historical lifecycle rows
+at the start of `wire/testdata/legacy-serialized.jsonl`, ship inside this module.
+From the repository root, using the installed Go toolchain:
+
+```bash
+set -eu
+isolated=$(mktemp -d)
+git archive HEAD hotspot-bridge | tar -x -C "$isolated"
+(
+    cd "$isolated/hotspot-bridge"
+    GOWORK=off GOPROXY=off GOTOOLCHAIN=local GOFLAGS=-buildvcs=false go test -race ./... -count=1
+)
+```
+
+Keep the source inventory and test receipts. For uncommitted release preparation,
+test an exact owned copy of the SDK working-tree inventory first, then compare the
+new commit's archive inventory with those tested bytes. This is a local packaging
+check; SDK tag/push/publication still requires separate operator authorization.

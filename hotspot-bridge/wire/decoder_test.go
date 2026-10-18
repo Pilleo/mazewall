@@ -14,7 +14,7 @@ import (
 
 // This frozen native projection intentionally retains its historical provider pin.
 func TestReadyRejectsForeignProcessBirth(t *testing.T) {
-	data, err := os.ReadFile("../../profiler/src/test/resources/hotspot/production-lifecycle-projection.jsonl")
+	data, err := os.ReadFile("testdata/legacy-serialized.jsonl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,13 +24,23 @@ func TestReadyRejectsForeignProcessBirth(t *testing.T) {
 		t.Fatal(err)
 	}
 	x := Expected{Schema: 2, Profile: Strict25, Provider: ready.Lifecycle.Provider,
-		Target: Target{PID: ready.Lifecycle.PID, StartTicks: ready.Lifecycle.ProcessStartTicks + 1}}
+		Target: Target{PID: ready.Lifecycle.PID, StartTicks: ready.Lifecycle.ProcessStartTicks}}
+	control := NewDecoder(x)
+	for _, line := range lines[:2] {
+		if err := control.Accept(line); err != nil {
+			t.Fatal("historical lifecycle control rejected", err)
+		}
+	}
+	if got, ok := control.Ready(); !ok || got.PID != x.Target.PID || got.ProcessStartTicks != x.Target.StartTicks {
+		t.Fatal("historical control did not bind ready identity", got)
+	}
+	x.Target.StartTicks++
 	d := NewDecoder(x)
 	if err := d.Accept(lines[0]); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Accept(lines[1]); err == nil {
-		t.Fatal("foreign birth admitted")
+	if err := d.Accept(lines[1]); !errors.Is(err, ErrIdentity) {
+		t.Fatal("foreign birth must fail with ErrIdentity", err)
 	}
 }
 
