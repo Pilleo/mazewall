@@ -51,8 +51,13 @@ Schema3 requires explicit `policy_eligibility:false` on every row and ready's
 `upstream_generation_checks`, cgroup and mount namespace. Schema2 absence remains
 absent. Schema2 lifecycle cannot assert cgroup/mount identity: events still require
 the independently expected cgroup, so an event-bearing session needs it supplied.
-Start may omit process birth and JVM IDs; ready must bind them. Per-CPU conservation
-is validated by the native producer, not replayed from this aggregate-only wire.
+Start may omit process birth and JVM IDs; ready must bind them.
+Strict schema2 correlated success additionally requires a native-valid stable
+captured HotSpot epoch and matching checked terminal epoch/profile; zero is valid.
+Unavailable/skipped outcomes and schema3 unknown observations do not gain that claim.
+Required raw payload/frame/recovery/observation members must be present and nonnull;
+optional locations and standalone DTO round trips retain their original semantics.
+Per-CPU conservation is validated by the native producer, not replayed from this aggregate-only wire.
 Selected loss and unavailable/skipped/partial stacks can complete logically while
 definition/enrichment/wire/retention loss lanes remain unproven. No completed
 capture proves global collection completeness or policy eligibility.

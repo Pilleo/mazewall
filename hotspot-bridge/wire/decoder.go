@@ -38,6 +38,8 @@ const (
 
 type occurrence struct {
 	correlation         uint64
+	capturedEpoch       uint64
+	capturedStable      bool
 	cpu                 uint32
 	terminal, recovered bool
 	pair                *Pair
@@ -96,12 +98,13 @@ func (d *Decoder) Accept(line []byte) error {
 	if err := validateJSON(line); err != nil {
 		return d.fail(err)
 	}
+	// Check raw presence before typed decoding can erase null scalar values.
+	if err := requiredRecordFields(line); err != nil {
+		return d.fail(err)
+	}
 	var r Record
 	if err := json.Unmarshal(line, &r); err != nil {
 		return d.fail(fmt.Errorf("%w: %v", ErrJSON, err))
-	}
-	if err := requiredRecordFields(line, r); err != nil {
-		return d.fail(err)
 	}
 	if r.SchemaVersion != d.expected.Schema || (r.SchemaVersion == 3 && (r.PolicyEligibility == nil || *r.PolicyEligibility)) || (r.SchemaVersion == 2 && r.PolicyEligibility != nil) {
 		return d.fail(fmt.Errorf("%w: schema/policy", ErrIdentity))
@@ -200,6 +203,10 @@ func (d *Decoder) event(r Record, line []byte) error {
 		return fmt.Errorf("%w: tracked occurrences", ErrLimit)
 	}
 	o := &occurrence{correlation: e.CorrelationID, cpu: e.CPU, eventRow: -1}
+	// Keep only validated scalar identity when retention discards the payload.
+	if d.expected.Schema == 2 && e.HotSpotIdentity != nil && e.HotSpotIdentity.State == "stable" {
+		o.capturedEpoch, o.capturedStable = *e.HotSpotIdentity.Epoch, true
+	}
 	// Leave room for the final summary even when pair retention fills up.
 	if d.retainedPairs < d.maxPairs && len(line)+1 <= d.maxBytes-d.retainedBytes-1048577 {
 		o.pair = &Pair{Event: *e}
@@ -227,10 +234,16 @@ func (d *Decoder) terminal(r Record, line []byte) error {
 	if e.Provider != (Provider{}) && e.Provider != d.expected.Provider {
 		return fmt.Errorf("%w: terminal provider", ErrIdentity)
 	}
+	if err := validateHotSpotIdentity(e.HotSpotIdentity, true, d.expected.Profile); err != nil {
+		return err
+	}
 	switch e.Attribution {
 	case "event_correlated":
 		if o.correlation == 0 || e.Provider != d.expected.Provider || len(e.Frames) == 0 {
 			return fmt.Errorf("%w: resolved evidence", ErrIdentity)
+		}
+		if d.expected.Schema == 2 && (!o.capturedStable || e.HotSpotIdentity == nil || e.HotSpotIdentity.State != "safepoint_epoch_checked" || *e.HotSpotIdentity.Epoch != o.capturedEpoch) {
+			return fmt.Errorf("%w: strict terminal does not match captured HotSpot epoch", ErrIdentity)
 		}
 		d.counts.Resolved++
 	case "unavailable":
@@ -400,5 +413,5 @@ func (d *Decoder) validateEvent(r Record) error {
 	if e.PathTruncated != (e.ArgumentRead == 256) {
 		return fmt.Errorf("%w: filename truncation", ErrIdentity)
 	}
-	return nil
+	return validateHotSpotIdentity(e.HotSpotIdentity, false, x.Profile)
 }

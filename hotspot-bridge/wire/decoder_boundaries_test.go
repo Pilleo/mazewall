@@ -67,7 +67,7 @@ func TestDecoderRequiresPresentZeroValuedEventFields(t *testing.T) {
 			if err := acceptRecords(d, rows[:2]); err != nil {
 				t.Fatal(err)
 			}
-			if err := d.Accept(b); !errors.Is(err, ErrJSON) || !strings.Contains(err.Error(), "missing/null "+field) {
+			if err := d.Accept(b); !errors.Is(err, ErrJSON) || !strings.Contains(err.Error(), "missing/null event."+field) {
 				t.Fatalf("missing %s: %v", field, err)
 			}
 		})
@@ -335,19 +335,7 @@ func TestParseStartTicksRawPrecisionAndCommDelimiter(t *testing.T) {
 }
 
 func TestDecoderStrict2CompleteAndNoObservationFields(t *testing.T) {
-	x, r := syntheticSession()
-	x.Schema = 2
-	x.Profile = Strict25
-	for i := range r {
-		r[i].SchemaVersion = 2
-		r[i].PolicyEligibility = nil
-		if l := r[i].Lifecycle; l != nil {
-			l.RuntimeProfile = string(Strict25)
-			l.ValidationMode = ""
-			l.CgroupID = 0
-			l.MountNS = 0
-		}
-	}
+	x, r := strictSession(0)
 	d := NewDecoder(x)
 	if err := acceptRecords(d, r); err != nil {
 		t.Fatal(err)

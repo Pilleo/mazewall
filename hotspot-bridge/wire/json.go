@@ -89,55 +89,143 @@ func validateJSON(line []byte) error {
 	return nil
 }
 
-func requireFields(raw json.RawMessage, names string) (map[string]json.RawMessage, error) {
+func requireFields(raw json.RawMessage, path, names string) (map[string]json.RawMessage, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil || object == nil {
-		return nil, fmt.Errorf("%w: expected typed object", ErrJSON)
+		return nil, fmt.Errorf("%w: expected typed object at %s", ErrJSON, path)
 	}
 	for _, name := range strings.Split(names, ",") {
 		if value, ok := object[name]; !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			if path != "" {
+				name = path + "." + name
+			}
 			return nil, fmt.Errorf("%w: missing/null %s", ErrJSON, name)
 		}
 	}
 	return object, nil
 }
 
-func requiredRecordFields(line []byte, r Record) error {
-	row, err := requireFields(line, "schema_version,kind,session_id")
+func requiredRecordFields(line []byte) error {
+	row, err := requireFields(line, "", "schema_version,kind,session_id")
 	if err != nil {
 		return err
 	}
-	if r.Event != nil {
-		_, err = requireFields(row["event"], "session_id,event_id,cpu,sequence,host_pid,host_tid,process_start_ticks,cgroup_id,capture_boot_ns,clock_domain,event_kind,correlation_id,dirfd,flags,mode,filename,filename_bytes,register_read,argument_read,path_truncated")
-		if err != nil {
+	var kind string
+	if err := json.Unmarshal(row["kind"], &kind); err != nil {
+		return fmt.Errorf("%w: kind: %v", ErrJSON, err)
+	}
+	var payload string
+	switch kind {
+	case "session_started", "collector_ready", "collector_error":
+		payload = "lifecycle"
+	case "event":
+		payload = "event"
+	case "enrichment":
+		payload = "evidence"
+	case "recovery":
+		payload = "recovery"
+	case "session_summary":
+		payload = "summary"
+	}
+	if payload != "" {
+		if _, err := requireFields(line, "", payload); err != nil {
 			return err
 		}
 	}
-	if r.Lifecycle != nil {
-		l, e := requireFields(row["lifecycle"], "pid,clock_domain,boot_ns,runtime_profile,provider")
+	if kind == "event" || kind == "enrichment" || kind == "recovery" {
+		if _, err := requireFields(line, "", "event_id"); err != nil {
+			return err
+		}
+	}
+	if presentObject(row["event"]) {
+		e, err := requireFields(row["event"], "event", "session_id,event_id,cpu,sequence,host_pid,host_tid,process_start_ticks,cgroup_id,capture_boot_ns,clock_domain,event_kind,correlation_id,dirfd,flags,mode,filename,filename_bytes,register_read,argument_read,path_truncated")
+		if err != nil {
+			return err
+		}
+		if err := requiredIdentityFields(e["hotspot_identity"], "event.hotspot_identity"); err != nil {
+			return err
+		}
+	}
+	if presentObject(row["lifecycle"]) {
+		l, e := requireFields(row["lifecycle"], "lifecycle", "pid,clock_domain,boot_ns,runtime_profile,provider")
 		if e != nil {
 			return e
 		}
-		if _, e = requireFields(l["provider"], "name,gadget_revision,profiler_revision,patch_sha256"); e != nil {
+		if _, e = requireFields(l["provider"], "lifecycle.provider", "name,gadget_revision,profiler_revision,patch_sha256"); e != nil {
 			return e
 		}
 	}
-	if r.Summary != nil {
-		s, e := requireFields(row["summary"], "enrichment,collection_health,terminal_accounting_complete")
+	if presentObject(row["evidence"]) {
+		if err := requiredEvidenceFields(row["evidence"]); err != nil {
+			return err
+		}
+	}
+	if presentObject(row["recovery"]) {
+		if _, err := requireFields(row["recovery"], "recovery", "correlation_id,recovery_boot_ns,invalidated"); err != nil {
+			return err
+		}
+	}
+	if presentObject(row["summary"]) {
+		s, e := requireFields(row["summary"], "summary", "enrichment,collection_health,terminal_accounting_complete")
 		if e != nil {
 			return e
 		}
-		if _, e = requireFields(s["enrichment"], "received,resolved,unavailable,skipped,max_pending,max_pending_payload_bytes,recovery_attempts,recovery_invalidations,recovery_errors"); e != nil {
+		if _, e = requireFields(s["enrichment"], "summary.enrichment", "received,resolved,unavailable,skipped,max_pending,max_pending_payload_bytes,recovery_attempts,recovery_invalidations,recovery_errors"); e != nil {
 			return e
 		}
-		if r.Summary.EventFinalization != nil {
-			if _, e = requireFields(s["event_finalization_observation"], "scope,phase,stop_cause,producers_quiesced,buffer_drained,receiver_joined,final_counter_read,background_loss_sampler_started,resources_retired,loss_complete"); e != nil {
-				return e
+		for _, object := range []struct{ name, fields string }{
+			{"event_finalization_observation", "scope,phase,stop_cause,producers_quiesced,buffer_drained,receiver_joined,final_counter_read,background_loss_sampler_started,resources_retired,loss_complete"},
+			{"selected_event_accounting", "schema_version,scope,session_id,host_pid,process_start_ticks,map_id,possible_cpus,attempted,submitted,reserve_failed,received,terminals,complete"},
+			{"definition_stop_observation", "reader_stopped,consumer_stopped,buffers_drained,auxiliary_stopped,semantics"},
+			{"event_loss_observation", "complete,semantics"},
+			{"definition_reader_observation", "lost,no_data,read_error,buffer_bytes_per_cpu,complete,semantics"},
+		} {
+			if presentObject(s[object.name]) {
+				if _, err := requireFields(s[object.name], "summary."+object.name, object.fields); err != nil {
+					return err
+				}
 			}
 		}
-		if r.Summary.SelectedAccounting != nil {
-			if _, e = requireFields(s["selected_event_accounting"], "schema_version,scope,session_id,host_pid,process_start_ticks,map_id,possible_cpus,attempted,submitted,reserve_failed,received,terminals,complete"); e != nil {
-				return e
+	}
+	return nil
+}
+
+func presentObject(raw json.RawMessage) bool {
+	return len(raw) != 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+func requiredIdentityFields(raw json.RawMessage, path string) error {
+	if presentObject(raw) {
+		_, err := requireFields(raw, path, "state")
+		return err
+	}
+	return nil
+}
+
+func requiredEvidenceFields(raw json.RawMessage) error {
+	e, err := requireFields(raw, "evidence", "attribution,walk,scope_lookup,provider,frames")
+	if err != nil {
+		return err
+	}
+	if _, err := requireFields(e["provider"], "evidence.provider", "name,gadget_revision,profiler_revision,patch_sha256"); err != nil {
+		return err
+	}
+	if err := requiredIdentityFields(e["hotspot_identity"], "evidence.hotspot_identity"); err != nil {
+		return err
+	}
+	var frames []json.RawMessage
+	if err := json.Unmarshal(e["frames"], &frames); err != nil {
+		return fmt.Errorf("%w: evidence.frames: %v", ErrJSON, err)
+	}
+	for i, raw := range frames {
+		path := fmt.Sprintf("evidence.frames[%d]", i)
+		frame, err := requireFields(raw, path, "provider_type,frame_type,function_name,function_offset,raw_position,position_domain,error_frame")
+		if err != nil {
+			return err
+		}
+		if presentObject(frame["mapping"]) {
+			if _, err := requireFields(frame["mapping"], path+".mapping", "file_id,filename,start,end,file_offset"); err != nil {
+				return err
 			}
 		}
 	}
