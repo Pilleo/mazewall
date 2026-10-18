@@ -69,8 +69,18 @@ configurations.named(verification.runtimeOnlyConfigurationName) {
 }
 
 val verificationActionsMarker = layout.buildDirectory.file("verification/verification-actions.success")
+tasks.register<JavaExec>("ciCachePolicyTest") {
+    mainClass.set("io.mazewall.build.CiCacheKeyFunctionalTest")
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
+
 val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest") {
     mainClass.set("io.mazewall.build.VerificationActionsTest")
+    inputs.file(layout.projectDirectory.file("../scripts/ci_cache_key.sh"))
+        .withPropertyName("containerCacheKeyHelper")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file(verificationActionsMarker)
     args(verificationActionsMarker.get().asFile.absolutePath)
     doFirst { verificationActionsMarker.get().asFile.delete() }

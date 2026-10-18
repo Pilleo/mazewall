@@ -16,6 +16,11 @@ jobs:
         steps:
             - name: Checkout Code
               uses: actions/checkout@v6
+            - name: Compute Container Gradle Cache Key
+              id: container_cache_key
+              run: |
+                  hash=$(./scripts/ci_cache_key.sh)
+                  echo "hash=$hash" >> "$GITHUB_OUTPUT"
             - name: Set up JDK 25
               uses: actions/setup-java@v5
               with:
@@ -49,9 +54,9 @@ jobs:
               uses: actions/cache/restore@v4
               with:
                   path: ~/.cache/mazewall/container-gradle
-                  key: optional-container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
+                  key: optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
                   restore-keys: |
-                      optional-container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-
+                      optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
                       optional-container-gradle-${{ runner.os }}-
                       container-gradle-${{ runner.os }}-
             - name: Restore Existing Test Runner Image
@@ -80,11 +85,11 @@ jobs:
                       fi
                   done
             - name: Save Optional Container Gradle Cache
-              if: always() && steps.optional_ownership.outcome == 'success'
+              if: always() && steps.optional_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success'
               uses: actions/cache/save@v4
               with:
                   path: ~/.cache/mazewall/container-gradle
-                  key: optional-container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
+                  key: optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
             - name: Upload Optional JUnit Diagnostics
               if: always()
               uses: actions/upload-artifact@v4
@@ -110,6 +115,11 @@ jobs:
               run: test "${{ needs.optional-integrations.result }}" = success
             - name: Checkout Code
               uses: actions/checkout@v6
+            - name: Compute Container Gradle Cache Key
+              id: container_cache_key
+              run: |
+                  hash=$(./scripts/ci_cache_key.sh)
+                  echo "hash=$hash" >> "$GITHUB_OUTPUT"
             - name: Set up JDK 25
               uses: actions/setup-java@v5
               with:
@@ -137,9 +147,9 @@ jobs:
               with:
                   path: |
                       ~/.cache/mazewall/container-gradle
-                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
+                  key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
                   restore-keys: |
-                      container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-
+                      container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
                       container-gradle-${{ runner.os }}-
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
@@ -255,11 +265,11 @@ jobs:
                   if-no-files-found: ignore
             - name: Save Container Gradle Cache (Master Only)
               uses: actions/cache/save@v4
-              if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+              if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && steps.container_cache_key.outcome == 'success'
               with:
                   path: |
                       ~/.cache/mazewall/container-gradle
-                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
+                  key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
             - name: Publish to GitHub Packages
               if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: >-
