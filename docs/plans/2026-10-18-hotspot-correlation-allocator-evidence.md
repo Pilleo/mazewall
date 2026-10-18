@@ -395,6 +395,30 @@ mapped to two exact tasks. Per-case cleanup receipts check absent containers/joi
 wrappers with empty pending/failure lists. Every result is production_qualifiedfalse;
 this is not JIT/GC/Loom lifetime or historical-trigger repair.
 
+All six retained `T/candidates/{c1-serial,c2-serial,xint-g1,virtual-carriers-1,
+virtual-carriers-2,virtual-carriers-4}/collector.log` files contain this exact warning
+on line1 (Task2 M1 / final review FR-M2):
+
+```text
+This gadget was built with ig v0.56.1-0.20260929145342-7097db144ccd and it's being run with v0.0.0. Gadget could be incompatible
+```
+
+The saved `T/helper-buildinfo-correct-cwd.log:1,57–58,178–182` records Go1.26.0,
+the locked Gadget7097 dependency and local `./build/deps/gadget-8212ee25…` replacement
+(`(devel)`), trimpath, CGO0 and Linux-amd64. In that selected prepared Gadget source,
+`internal/version/version.go:30–61,124–129` reads `dep.Replace.Version`: a local
+directory replacement has an empty semantic version. Its unchecked parse leaves
+the zero semantic version, returned by `Version()`. Then
+`pkg/operators/oci-handler/oci.go:268–289` compares the image's builder-version
+annotation `v0.56.1-0.20260929145342-7097db144ccd` with that zero value and prints
+`v0.0.0`. This is a release-metadata/diagnostic limitation; the string does not
+establish a new source-version incompatibility. The exact locked selected source,
+embedded native bytes, byte-equal helper/full reachable OCI graph and actual live
+qualification above provide stronger **scoped provenance**, not blanket version
+compatibility. All six raw warnings remain retained. No runtime-version override,
+helper rebuild or native rerun is used to disposition M1; later version-metadata
+improvement belongs to its release-metadata owner. All qualification limits remain.
+
 Two immutable overlays add only virtual prepared test files; dependency/module-cache
 source is untouched. Selected race binaries are compiled, prehashed and run:
 

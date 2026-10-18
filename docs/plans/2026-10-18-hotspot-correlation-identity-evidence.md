@@ -2,9 +2,12 @@
 
 Historical investigation and approval request retained below. The operator later
 approved the [bounded contract](2026-10-18-hotspot-correlation-allocator-contract.md);
-the [Task1 allocator evidence](2026-10-18-hotspot-correlation-allocator-evidence.md)
-records the source correction and isolated checks. Full runtime qualification is
-pending Task2. None of that changes the failed capture or its unknown exact trigger.
+the [allocator evidence](2026-10-18-hotspot-correlation-allocator-evidence.md)
+records completed Task1/R1 source/isolated checks, Task2 bounded full-asset/public-native
+qualification and Task3 finite cache/publication/drain gates. Final review's minor
+corrections, scoped re-review and integration are separate in the
+[execution plan](../superpowers/plans/2026-10-18-hotspot-correlation-allocator.md).
+None of that changes the failed capture or its unknown exact trigger.
 
 ## Decision and evidence boundary
 

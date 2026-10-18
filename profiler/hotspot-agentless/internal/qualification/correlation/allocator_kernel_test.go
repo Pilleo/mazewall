@@ -141,9 +141,15 @@ func TestKernelSharedCorrelationAllocator(t *testing.T) {
 			want = last + 1
 		}
 		got, err := run(cpus[0])
+		if err != nil {
+			t.Fatal("boundary run", last, err)
+		}
 		var state uint64
-		if err != nil || m.Lookup(zero, &state) != nil || got != want || state != max(last, want) {
-			t.Fatal("boundary", last, got, state, err)
+		if err := m.Lookup(zero, &state); err != nil {
+			t.Fatal("boundary lookup", last, err)
+		}
+		if got != want || state != max(last, want) {
+			t.Fatal("boundary", last, got, state)
 		}
 	}
 	t.Logf("actual production C allocator: map_id=%d CPUs=%v unique=%d unavailable=%d; high/saturated/invalid states checked; XDP test context only", id, cpus, len(seen), unavailable)

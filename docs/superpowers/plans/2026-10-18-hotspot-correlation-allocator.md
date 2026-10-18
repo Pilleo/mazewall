@@ -1,12 +1,12 @@
 ---
 document_type: execution_plan
 base_revision: d5874513f5c2ee2b5a3c2351061daf87a09afd96
-status: task2_assets_public_native_qualified_commit_checkpoint_in_owning_report
+status: task1_r1_task2_task3_finite_gates_complete_final_correction_scoped_rereview_integration_pending
 ---
 
 # Native Correlation Allocator Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Execute the two scoped tasks continuously; do not redispatch earlier completed loss-binding tasks or create another worktree.
+> **Current status:** The three scoped tasks, including Task1/R1, Task2 and Task3 finite gates, are complete. Final review identified four minor diagnostic/docs corrections; their consolidated correction, scoped re-review and integration are separate. Do not redispatch completed tasks or create another worktree.
 
 **Goal:** Remove clock-only correlation aliasing while preserving Kubescape-facing identity, explicit missing stacks and native qualification boundaries.
 
@@ -170,7 +170,7 @@ adapter or schema translation is part of this task.
   mutation. Close/archive the allocator issue only if all its actual criteria
   have receipts, otherwise leave explicit remaining criteria open. Preserve the
   historical failed capture and source-linkage uncertainty regardless.
-- [ ] **Step6:** Focused references/backlog/whitespace and actual affected checks,
+- [x] **Step6:** Focused references/backlog/whitespace and actual affected checks,
   then exact staged commit through unchanged full hook. Preserve log/real skips,
   inherited endpoint-cleanup warnings and current ABI gates. Independent task
   review, one broad final review/consolidated fix/scoped re-review follow; retain
@@ -228,7 +228,7 @@ eviction/republish and ordered-drain receipts for the supported execution class.
   schedules, lifetime/global/dense or Kubescape deployment proof. Decide the
   issue's finite acceptance disposition from exact receipts, preserving its
   historical failure/unknown trigger even if bounded correction is complete.
-- [ ] **Step6:** Focused test compilation/format/reference/backlog/whitespace,
+- [x] **Step6:** Focused test compilation/format/reference/backlog/whitespace,
   exact mirrors and source/asset preservation; commit exact test/docs scope
   through the unchanged mandatory full hook once and immediately retain its
   raw log/dispositions. No new native full matrix or duplicate source checks.

@@ -21,7 +21,7 @@ the locked `dependencies.lock.json` Gadget builder's Clang (`-c -g -O2 -target b
 With the resulting object in `MW_CORRELATION_OBJECT`, explicitly run:
 
 ```bash
-go test -buildvcs=false -modfile build/experiment.go.mod -tags=mw_kernel -v ./internal/qualification/correlation
+go test -buildvcs=false -modfile build/experiment.go.mod -tags=mw_kernel -v -run '^TestKernelSharedCorrelationAllocator$' ./internal/qualification/correlation
 go test -buildvcs=false -modfile build/experiment.go.mod -tags=mw_kernel -v -run '^TestKernelCorrelation' go.opentelemetry.io/ebpf-profiler/tracer
 ```
 
