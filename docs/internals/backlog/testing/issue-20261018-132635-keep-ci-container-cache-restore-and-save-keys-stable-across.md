@@ -10,8 +10,15 @@ target_modules:
 target_files:
   - ".github/workflows/ci.yml"
   - "scripts/run_containerized_tests.sh"
+  - "scripts/ci_cache_key.sh"
+  - "buildSrc/src/test/java/io/mazewall/build/CiCacheKeyFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/VerificationActionsTest.java"
+  - "buildSrc/build.gradle.kts"
+  - "buildSrc/src/main/kotlin/io/mazewall/build/CheckCiCachePolicy.kt"
+  - "buildSrc/src/verification/kotlin/io/mazewall/build/CiCachePolicyTest.kt"
+  - "docs/internals/designs/core/testing-strategy.md"
 needs_kernel: false
-core_lock: false
+core_lock: true
 effort: "small"
 autonomy: "supervised"
 open_questions: false
@@ -39,6 +46,14 @@ Operator-requested read-only review of CI run `39122718255` found that the optio
 
 ## Side effects
 - CI-key correctness follow-up only; preserve required native freshness, ownership checks, protected merge gating and cache isolation. No workflow remediation is part of the current thread feature.
+
+## Assigned isolated cache-key fix
+
+The operator accepted this recommendation after green PR 536 merged as `7d84bb1c852c47e010fc57b5d0aa1ddaabf8b753`. Work is assigned to this session on `fix/ci-cache-key-stability`, separately from the completed thread feature. The local execution plan is `docs/superpowers/plans/2026-10-18-ci-cache-key-stability.md` (Git-ignored).
+
+Implement one shared tracked-input hash helper, mandatory real-Git regressions and narrow workflow-policy checks; compute one job output before Gradle and bind restore/save to it. Keep archive shape, SHA suffixes, prefixes, fallback hierarchy, job serialization and all security/native gates. `scripts/run_containerized_tests.sh` remains a read-only cache-layout dependency; no change there is planned. Existing module metadata is legacy control-plane routing, not permission for unrelated orchestrator edits.
+
+Initial exact call-site inspection found only the cache task and its policy test. ADK blast-radius/full-backlog validation is unavailable and Codanna had no symbol, so impact evidence is recorded as degraded. The current root policy task passes the old workflow and does not yet catch the within-job hash drift; new regression evidence is required before implementation.
 
 ---
 
