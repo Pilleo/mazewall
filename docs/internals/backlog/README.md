@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 144 | *Total Resolved Issues:* 698
+*Total Active Issues:* 145 | *Total Resolved Issues:* 698
 
-Active status detail: 143 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 144 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261018-125543](code_health/issue-20261018-125543-distinguish-delta-filter-fragments-from-effective-unsafe-prc.md) | Distinguish delta filter fragments from effective unsafe prctl authority in diagnostics | low | enforcer |
 | [issue-20261018-115032](implementation/issue-20261018-115032-add-explicit-owned-thread-enforcement-for-synchronous-koog-t.md) | Add explicit owned thread enforcement for synchronous Koog tools | medium | enforcer |
 | [issue-20261018-004800](testing/issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md) | Make vulnerable web network ceiling evidence locale independent | medium | testing |
 | [issue-20261017-230729](testing/issue-20261017-230729-add-sandboxescapebench-inspired-koog-containment-contracts.md) | Add SandboxEscapeBench-inspired Koog containment contracts | medium | testing |

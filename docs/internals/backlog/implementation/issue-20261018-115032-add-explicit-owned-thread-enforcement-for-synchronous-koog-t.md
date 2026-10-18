@@ -53,6 +53,14 @@ Add a thin upstream `Tool` bound to the application's existing `ManagedRuntime` 
 ## Side effects
 - Adds an explicit Koog thread-backed Tool API and separate required published native CI phase; preserves Portal and all core/native enforcement implementations.
 
+## Implementation checkpoint
+
+- `8f671221` adds the one-handle safe wait bridge; `c1bfd8a1` adds the public adapter and real native qualification; `ecb131b1` adds strict CI evidence and public guidance. Independent task reviews approved each, with no blocking findings.
+- Host evidence includes 15 adapter cases and 18 root harness cases with zero failures/errors/skips; actual separate staged-JAR thread/Portal executions passed, as did the verbatim bounded-reader example and local documentation/style checks. Native results include caller isolation, inferred filesystem/socket denials, ownership/nested/admission checks and held cancellation through actual thread death/canonical drain.
+- The optional adapter build with fatal configuration-cache checks passed; exact repeat reused configuration cache. No dependency, core/native implementation, existing Portal/benchmark or workflow change was needed.
+- Inherited delta-filter warning debt is recorded separately as [issue-20261018-125543](../code_health/issue-20261018-125543-distinguish-delta-filter-fragments-from-effective-unsafe-prc.md), without silencing the warning or changing policy. Existing locale/toolchain/ADK limitations remain explicit.
+- Integrated full-build/committed aggregate and broad branch review remain pending at this checkpoint. This issue is not closed/archived or evidence of arbitrary-code/heap isolation or forced termination.
+
 ---
 
 **Verification:** Opt-in `:integrations:koog:test`, ktlint and typed Detekt; root consumer harness/summary/style checks; strict staged-JAR `verifyFreshThreadNative` plus unchanged Portal native gate; included-module full build and actual committed optional aggregate. Use existing current index/link/whitespace validation and retain unavailable full ADK validation separately.
