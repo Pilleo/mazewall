@@ -1,5 +1,11 @@
 # Native correlation-identity evidence and pending allocator review
 
+Historical investigation and approval request retained below. The operator later
+approved the [bounded contract](2026-10-18-hotspot-correlation-allocator-contract.md);
+the [Task1 allocator evidence](2026-10-18-hotspot-correlation-allocator-evidence.md)
+records the source correction and isolated checks. Full runtime qualification is
+pending Task2. None of that changes the failed capture or its unknown exact trigger.
+
 ## Decision and evidence boundary
 
 The original four-carrier capture contains a real **nine-event/two-TID correlation

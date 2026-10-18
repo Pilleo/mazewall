@@ -30,7 +30,7 @@ internal object HotSpotChildFixture {
             objectValue(
                 text.replace(
                 "e908bb2689936481f8a696dd2347457cc44b6344c1fa78ca65b37772032703eb",
-                "270a89f6dafb03afe2131b219f98673e30be79223eb68a11a5703b66d8f6a127",
+                "962b27903e20422116ca8528b7edbc8f19eafc94f986907461bd8fb1ded9f976",
             ),
             ).toMutableMap().apply {
             put("schema_version", JsonPrimitive(2))

@@ -54,13 +54,14 @@ This verifies the actual prepared-source identity and generated native hashes,
 stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
-The current verified overlay identity is
-`618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c`.
-Moving the rebuild driver's pinned-image lookup from Python to Go changes its
-hashed source bytes. Older `e908…` bundles and recorded lifecycle projections keep
-their historical identity; current asset/protocol admission requires the rebuilt
-bundle. The generated native layouts and both architecture BPF objects remain
-byte-identical across this tooling-only transition.
+The current accepted source overlay is
+`962b27903e20422116ca8528b7edbc8f19eafc94f986907461bd8fb1ded9f976`.
+It adds the bounded shared native correlation allocator. Both architecture BPF
+objects and layouts are generated; actual-C and isolated kernel checks pass.
+Full reproducible-helper/OCI and public-native qualification is pending Task2.
+Preserved `270a…`, `618c…` and earlier bundles retain their historical evidence;
+current admission requires the new source identity and refuses those old pins.
+See [allocator evidence](../../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md).
 
 `manifest.json` locks collector version 2, production wire schema 2, capture ABI 2, Linux-amd64,
 upstream revisions and the verified overlay fingerprint. Every listed file has a

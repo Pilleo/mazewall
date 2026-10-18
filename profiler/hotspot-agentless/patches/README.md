@@ -23,6 +23,23 @@ lifecycle units depend on selected profiler/bridge boundaries and require separa
 review; review-unit separation is not a claim that every patch applies in isolation.
 Fault/diagnostic additions remain test-only with separate manifests.
 
+## Bounded native correlation allocator (2026-10-18, full qualification pending)
+
+`profiler-epoch-capture.patch` includes the shared production `correlation_ids.h`:
+one ARRAY/u32/u64/1, at most 32 CAS attempts, positive IDs through INT64_MAX.
+The actual miss path returns zero without cache/definition publication on bounded
+allocation failure; hits, full keys, trace ABI, deadlines and membership pruning
+remain intact. The existing loader acquires the allocator with the LRU and rewrites
+both unwinder variants to that same map; no new public accessor/reset is added.
+
+`tests/correlation/dispatcher.c` includes the entire prepared dispatcher and real
+layouts. `tests/correlation/allocator.bpf.c` compiles the same production header
+into a test-only runnable BPF wrapper. See
+[allocator evidence](../../../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md)
+for RED/GREEN/mutants, actual multi-CPU execution, loader ownership, source controls
+and retained failures. These isolated checks do not prove HotSpot transport or
+active perf/NMI safety. Full helper/OCI/public qualification remains Task2.
+
 ## Current strict full and retirement patches
 
 Optional structured `--drain-full` now requires acknowledged event readout,

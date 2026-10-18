@@ -124,8 +124,13 @@ and [native mechanism decision](../docs/plans/2026-10-17-hotspot-jitgc-native-me
 
 Known limit: the retained failure has a nine-event/two-TID correlation alias;
 unchanged actual C also fails distinct-key uniqueness under equal clocks. The
-historical trigger remains unproved and allocator correction awaits operator
-review. See [correlation-identity evidence](../docs/plans/2026-10-18-hotspot-correlation-identity-evidence.md).
+historical trigger remains unproved. The approved bounded shared allocator is
+implemented with actual-C and isolated multi-CPU kernel checks; full-bundle and
+public-native qualification of the corrected graph is pending. Its raw positive
+reference is not Kubescape's frame-content CallID; the existing Tier E importer
+does not consume this agentless schema-2 stream. See
+[allocator evidence](../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md)
+and the preserved [identity evidence](../docs/plans/2026-10-18-hotspot-correlation-identity-evidence.md).
 
 Fresh2026-10-17public acceptance still rejects dense600/1ms:
 275received/265paired/10pending,225/600marked tokens in paired public evidence,
