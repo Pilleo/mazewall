@@ -207,7 +207,9 @@ class MmapProtectionTest : BaseIntegrationTest() {
         val type = MmapProtectionTest::class.java
         val resource = "/" + type.name.replace('.', '/') + ".class"
         val bytes = requireNotNull(type.getResourceAsStream(resource)).use { it.readAllBytes() }
-        val model = java.lang.classfile.ClassFile.of().parse(bytes)
+        val model = java.lang.classfile.ClassFile
+            .of()
+            .parse(bytes)
         val expectedCallers = setOf(
             "mprotect with PROT_EXEC is blocked even if mprotect syscall is allowed",
             "pkey_mprotect with PROT_EXEC is blocked",
@@ -216,12 +218,17 @@ class MmapProtectionTest : BaseIntegrationTest() {
         kotlin.test.assertEquals(expectedCallers, callers.map { it.methodName().stringValue() }.toSet())
         val misplaced = expectedCallers.flatMap { caller ->
             val generatedPrefix = caller.replace(' ', '_') + "\$"
-            model.methods().filter {
+            model
+                .methods()
+                .filter {
                 val name = it.methodName().stringValue()
                 name == caller || name.startsWith(generatedPrefix)
             }.mapNotNull { method ->
                 val name = method.methodName().stringValue()
-                val allocations = method.code().orElseThrow().elementList()
+                val allocations = method
+                    .code()
+                    .orElseThrow()
+                    .elementList()
                     .filterIsInstance<java.lang.classfile.instruction.InvokeInstruction>()
                     .count {
                         it.owner().asInternalName() == "io/mazewall/seccomp/MmapProtectionTest\$Companion" &&
