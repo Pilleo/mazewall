@@ -40,7 +40,7 @@ embedding is not required for this first end-to-end slice.
 |S|`/home/leanid/Documents/code/java/stack-attribution/storage`|Not present; operator must provision/authorize a writable checkout before B|
 |Storage base|`github.com/kubescape/storage v0.0.303`, commit `d963c7941f5bd493751109324e6eba41f7d2b5af`|Cached module is read-only evidence, never the editing location|
 |Node Gadget|`06b0d12baca0e2ba61df1aa5a00dc9e449567a10`|No OTel bridge; remains unchanged in this design|
-|Collector graph|Gadget7097db144ccd; profiler replacementef6cf29492c8|Current patch8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c|
+|Collector graph|Gadget7097db144ccd; profiler replacementef6cf29492c8|Current Task3 source patch473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b; observed runtime admission remains closed|
 |Reference upstream|`open-telemetry/opentelemetry-ebpf-profiler` at36f875fd7d625a80de939a9325e1cde8fd43a9f6|Reference only, not an automatic rebase|
 
 Do not create a worktree, switch these repositories, stage prototype work, or
@@ -206,6 +206,12 @@ Existing strict tooling retains its exact accepted-version policy around this
 common validator. The new bundle has collector-version3/wire3; capture ABI2 stays.
 Expected manifest SHA comes from operator-owned deployment config, never the child.
 Assets must be operator-owned/read-only through verify and exec.
+
+Published SDK v0.1.0 at `1a6d58d2c73f5b089588add7364bf8d7913c5604`
+retains strict-only bundle verification/Expected mapping. Task3's additive
+format3 verifier support is a local candidate selected through explicit per-owner
+Go workspaces, pending separate approval/publication of a new SDK version.
+Neither published v0.1.0 nor local candidate verification admits ordinary JVMs.
 
 ### A3. Native qualification exit
 

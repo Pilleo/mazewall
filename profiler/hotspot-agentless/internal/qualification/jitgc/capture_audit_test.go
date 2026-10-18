@@ -7,7 +7,7 @@ import (
 
 func TestCompileIDPresenceDoesNotQualifyLifetime(t *testing.T) {
 	const revision = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
-	const patch = "8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c"
+	const patch = "473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b"
 	got, err := AuditCapture(2, revision, patch)
 	want := []string{"metadata_stability_through_decode", "code_lifetime_through_decode", "concurrent_reclamation_exclusion"}
 	if err != nil || got.CaptureABI != 2 || got.ProfilerRevision != revision || got.PatchSHA256 != patch ||
@@ -32,5 +32,10 @@ func TestCompileIDPresenceDoesNotQualifyLifetime(t *testing.T) {
 	}
 	if _, err := AuditCapture(2, revision, "0000000000000000000000000000000000000000000000000000000000000000"); err == nil {
 		t.Fatal("unreviewed local overlay treated as reviewed source")
+	}
+	for _, old := range []string{"8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c", "0435b207ae012c01d3a215c0d332ba7d4ab813466f7d94e45207585acb97d46c"} {
+		if _, err := AuditCapture(2, revision, old); err == nil {
+			t.Fatal("old graph accepted as current reviewed source", old)
+		}
 	}
 }

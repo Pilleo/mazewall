@@ -15,10 +15,11 @@
  type frameCacheKey struct {
 +	epoch libpf.HotSpotIdentity
  	// pid is the PID of the process if the frame had FRAME_FLAG_PID_SPECIFIC set
-@@ -45,2 +46,4 @@
+@@ -45,2 +46,5 @@
  type ProcessManager struct {
 +	epochTarget libpf.HotSpotEpochTarget
 +	epochFatal func(error)
++	observedPID libpf.PID
  	// A mutex to synchronize access to internal data within this struct.
 --- a/processmanager/manager.go
 +++ b/processmanager/manager.go
@@ -33,8 +34,39 @@
 +		return
 +	}
  	meta := &samples.TraceEventMeta{
+@@ -337,2 +341,6 @@
+-	for frames := libpf.EbpfFrame(bpfTrace.FrameData); len(frames) > 0; frames = frames[frames.Length():] {
++	for frames := libpf.EbpfFrame(bpfTrace.FrameData); len(frames) > 0; frames = frames[frames.Length():] {
++		if n := int(frames.Length()); n < 1 || n > 3 || n > len(frames) || len(bpfTrace.FrameData) > 3072 || (!frames.Flags().Error() && frames.Type().Interpreter() == libpf.HotSpot && n != 3) {
++			pm.observedFatal(pid, fmt.Errorf("invalid observed raw frame extent"))
++			return
++		}
+-		frame := frames[:frames.Length()]
++		frame := frames[:frames.Length()]
+@@ -365,2 +373,4 @@
+-				pm.frameCache.Add(key, slices.Clone(trace.Frames[oldLen:len(trace.Frames)]))
++				pm.frameCache.Add(key, slices.Clone(trace.Frames[oldLen:len(trace.Frames)]))
++			} else if pid == pm.observedPID && frame.Type().Interpreter() == libpf.HotSpot {
++				trace.HotSpotValidation = libpf.HotSpotValidation{State: libpf.HotSpotValidationUnavailable}
+-			}
++			}
+@@ -378,2 +388,3 @@
+-		if err := instance.ReleaseResources(); err != nil {
++		if err := instance.ReleaseResources(); err != nil {
++			pm.observedFatal(pid, err)
+-			log.Warnf("Failed to release resources for %d: %v", pid, err)
++			log.Warnf("Failed to release resources for %d: %v", pid, err)
+@@ -387,2 +398,3 @@
+-	if err := pm.traceReporter.ReportTraceEvent(trace, meta); err != nil {
++	if err := pm.traceReporter.ReportTraceEvent(trace, meta); err != nil {
++		if pm.epochFatal != nil { pm.epochFatal(err) }
+-		log.Errorf("Failed to report trace event: %v", err)
++		log.Errorf("Failed to report trace event: %v", err)
 --- a/processmanager/processinfo.go
 +++ b/processmanager/processinfo.go
+@@ -173,1 +173,1 @@
+-	instance, err := data.Attach(pm.ebpf, pid, bias, pr.GetRemoteMemory())
++	instance, err := pm.attachObserved(data, pid, bias, pr.GetRemoteMemory())
 @@ -179,2 +179,9 @@
 +	if pm.epochTarget.PID == pid {
 +		if capable, ok := instance.(interpreter.HotSpotEpochInstance); ok {
@@ -47,14 +79,21 @@
  	pm.assignInterpreter(pid, oid, instance)
 --- a/tracer/tracer.go
 +++ b/tracer/tracer.go
-@@ -129,2 +129,4 @@
+@@ -129,2 +129,5 @@
  type Config struct {
 +	HotSpotEpochTarget libpf.HotSpotEpochTarget
 +	OnHotSpotFatal func(error)
++	HotSpotObservedPID libpf.PID
  	// ExecutableReporter allows to configure a ExecutableReporter to hook seen executables.
-@@ -248,1 +250,6 @@
+@@ -248,1 +250,12 @@
++	processManager.ConfigureHotSpotFatal(cfg.OnHotSpotFatal)
 +	if cfg.HotSpotEpochTarget.PID != 0 {
 +		if err := processManager.ConfigureHotSpotEpochTarget(cfg.HotSpotEpochTarget, cfg.OnHotSpotFatal); err != nil {
++			return nil, err
++		}
++	}
++	if cfg.HotSpotObservedPID != 0 {
++		if err := processManager.ConfigureHotSpotObservedTarget(cfg.HotSpotObservedPID, cfg.OnHotSpotFatal); err != nil {
 +			return nil, err
 +		}
 +	}

@@ -197,7 +197,7 @@
 -		delete(o.waiters, correlationID)
 -	}
 -	o.mu.Unlock()
-+	o.storeTrace(correlationID, frames, 0, 0)
++	o.storeTrace(correlationID, frames, 123, 456)
  }
  
  // getBootTimeNs returns the current CLOCK_BOOTTIME in nanoseconds.
@@ -206,7 +206,7 @@
  	o := newTestInstance()
  	expected := makeFrames("foo", "bar")
 -	o.correlationMap[42] = expected
-+	o.storeTrace(42, expected, 0, 0)
++	o.storeTrace(42, expected, 123, 456)
  
  	start := time.Now()
  	frames, ok := o.lookupOrWait(42, 0)
@@ -219,9 +219,9 @@
 -	o.correlationMap[100] = makeFrames("func_a")
 -	o.correlationMap[200] = makeFrames("func_b")
 -	o.correlationMap[300] = makeFrames("func_c")
-+	o.storeTrace(100, makeFrames("func_a"), 0, 0)
-+	o.storeTrace(200, makeFrames("func_b"), 0, 0)
-+	o.storeTrace(300, makeFrames("func_c"), 0, 0)
++	o.storeTrace(100, makeFrames("func_a"), 123, 456)
++	o.storeTrace(200, makeFrames("func_b"), 123, 456)
++	o.storeTrace(300, makeFrames("func_c"), 123, 456)
  
  	// BPF map has 100 and 300, but not 200 (simulating LRU eviction).
  	activeBPF := map[uint64]bool{100: true, 300: true}
@@ -230,7 +230,7 @@
  	o := newTestInstance()
  
 -	o.correlationMap[100] = makeFrames("func_a")
-+	o.storeTrace(100, makeFrames("func_a"), 0, 0)
++	o.storeTrace(100, makeFrames("func_a"), 123, 456)
  
  	// First prune: 100 absent from BPF → becomes candidate.
  	o.pruneCorrelationMap(map[uint64]bool{})
@@ -240,8 +240,8 @@
  
 -	o.correlationMap[100] = makeFrames("func_a")
 -	o.correlationMap[200] = makeFrames("func_b")
-+	o.storeTrace(100, makeFrames("func_a"), 0, 0)
-+	o.storeTrace(200, makeFrames("func_b"), 0, 0)
++	o.storeTrace(100, makeFrames("func_a"), 123, 456)
++	o.storeTrace(200, makeFrames("func_b"), 123, 456)
  
  	// First prune: all become candidates.
  	o.pruneCorrelationMap(map[uint64]bool{})
@@ -250,7 +250,7 @@
  func TestPruneOldObjects_NilTracer(t *testing.T) {
  	o := newTestInstance()
 -	o.correlationMap[100] = makeFrames("func_a")
-+	o.storeTrace(100, makeFrames("func_a"), 0, 0)
++	o.storeTrace(100, makeFrames("func_a"), 123, 456)
  
  	// Should be a no-op, not panic.
  	o.PruneOldObjects(time.Now(), time.Minute)

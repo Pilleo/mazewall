@@ -1,0 +1,22 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"testing"
+)
+
+func TestUnknownDefinitionCannotRewriteCapturedTask(t *testing.T) {
+	o := fixtureResolver()
+	o.storeTrace(7, fixtureFrames(), 123, 456)
+	task := symbolizer.Task{CorrelationID: 7, Tgid: 123, PidNumbers: []symbolizer.PidNumbers{{Pid: 456}}}
+	if r, err := o.ResolveStructured(context.Background(), task); err != nil || len(r.Frames) != 2 {
+		t.Fatal("valid original", r, err)
+	}
+	o.storeTrace(7, nil, 124, 457)
+	if r, err := o.ResolveStructured(context.Background(), task); err != nil || len(r.Frames) != 2 {
+		t.Fatal("rejected redelivery rewrote original", r, err)
+	}
+}

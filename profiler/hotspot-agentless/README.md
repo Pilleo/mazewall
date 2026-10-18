@@ -55,7 +55,16 @@ stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
 The current accepted source overlay is
-`8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c`.
+`473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b`.
+
+Task3 adds a separately negotiated schema3 observation **candidate**, described in
+the [profile contract](../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
+The shipped CLI and `RunObserved*` admission remain closed pending A-OBS and
+separate operator review. `RunObservedCandidate` exists only in internal builds
+tagged `mw_hotspot_qualification`. Native modules pin actual SDKv0.1.0; its immutable
+bundle verifier does not implement the local candidate's format3 behavior. Candidate
+packing/tests require the explicit per-owner Go workspace until a separately
+approved new SDK release exists. Strict2 and the Kotlin facade retain their scope.
 It adds the bounded shared native correlation allocator. Both architecture BPF
 objects and layouts are generated; actual-C and isolated kernel checks pass.
 Task2 built two byte-identical locked Go1.26.0 helpers/full local OCI bundles and

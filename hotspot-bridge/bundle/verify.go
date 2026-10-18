@@ -30,6 +30,7 @@ var revisionPattern = regexp.MustCompile(`^[a-f0-9]{40}$`)
 type Verified struct {
 	root, collector, store, image string
 	manifest                      Manifest
+	profile                       wire.Profile
 	valid                         bool
 }
 
@@ -58,7 +59,7 @@ func (v Verified) Expected(target wire.Target) (wire.Expected, error) {
 	if !v.valid {
 		return wire.Expected{}, errors.New("unverified expected identity")
 	}
-	return wire.Expected{Target: target, Profile: wire.Strict25, Schema: v.manifest.WireSchema,
+	return wire.Expected{Target: target, Profile: v.profile, Schema: v.manifest.WireSchema,
 		Provider: wire.Provider{Name: "otel-ebpf-profiler-via-gadget", GadgetRevision: v.manifest.GadgetRevision,
 			ProfilerRevision: v.manifest.ProfilerRevision, PatchSHA256: v.manifest.PatchSHA256}}, nil
 }
@@ -255,7 +256,12 @@ func OCIGraph(store, digest string) (map[string]string, error) {
 // helper. Native consumers must additionally enforce effective execute access.
 func Verify(root, expectedManifestSHA string, profile wire.Profile) (Verified, error) {
 	var invalid Verified
-	if profile != wire.Strict25 {
+	version := 2
+	switch profile {
+	case wire.Strict25:
+	case wire.Observed25:
+		version = 3
+	default:
 		return invalid, fmt.Errorf("unsupported asset profile: %s", profile)
 	}
 	if !shaPattern.MatchString(expectedManifestSHA) {
@@ -281,7 +287,7 @@ func Verify(root, expectedManifestSHA string, profile wire.Profile) (Verified, e
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return invalid, err
 	}
-	if manifest.SchemaVersion != 1 || manifest.CollectorVersion != "2" || manifest.CaptureABI != 2 || manifest.WireSchema != 2 || manifest.Platform != "linux-amd64" || !revisionPattern.MatchString(manifest.GadgetRevision) || !revisionPattern.MatchString(manifest.ProfilerRevision) || !shaPattern.MatchString(manifest.PatchSHA256) {
+	if manifest.SchemaVersion != 1 || manifest.CollectorVersion != fmt.Sprint(version) || manifest.CaptureABI != 2 || manifest.WireSchema != version || manifest.Platform != "linux-amd64" || !revisionPattern.MatchString(manifest.GadgetRevision) || !revisionPattern.MatchString(manifest.ProfilerRevision) || !shaPattern.MatchString(manifest.PatchSHA256) {
 		return invalid, fmt.Errorf("unsupported asset version/ABI/provenance")
 	}
 	if len(manifest.Files) == 0 || len(manifest.Files) > maxAssetFiles {
@@ -356,5 +362,5 @@ func Verify(root, expectedManifestSHA string, profile wire.Profile) (Verified, e
 	if index.SchemaVersion != 2 || !found {
 		return invalid, fmt.Errorf("gadget digest absent from OCI index")
 	}
-	return Verified{root: root, collector: collector, store: store, image: gadgetImagePrefix + manifest.GadgetDigest, manifest: manifest, valid: true}, nil
+	return Verified{root: root, collector: collector, store: store, image: gadgetImagePrefix + manifest.GadgetDigest, manifest: manifest, profile: profile, valid: true}, nil
 }

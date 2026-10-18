@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"os"
 	"strings"
 )
@@ -104,6 +105,7 @@ func Run(root string, args []string) error {
 		return nil
 	case "pack":
 		flags := flag.NewFlagSet("pack", flag.ContinueOnError)
+		profile := flags.String("runtime-profile", string(wire.Strict25), "bundle format only; not runtime admission")
 		collector := flags.String("collector", "", "actual collector executable")
 		store := flags.String("store", "", "local OCI store")
 		image := flags.String("image", "", "digest-selected gadget image")
@@ -114,7 +116,7 @@ func Run(root string, args []string) error {
 		if flags.NArg() != 0 || *collector == "" || *store == "" || *image == "" || *output == "" {
 			return fmt.Errorf("pack requires collector/store/image/output")
 		}
-		return packAssets(*collector, *store, *image, *output)
+		return packProfileAssets(*collector, *store, *image, *output, wire.Profile(*profile))
 	case "verify", "install", "release":
 		flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 		bundle := flags.String("bundle", "", "existing asset bundle")

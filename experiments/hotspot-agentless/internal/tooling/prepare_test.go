@@ -12,7 +12,7 @@ func TestPreparationIdentityMatchesAcceptedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c" {
+	if id != "473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b" {
 		t.Fatalf("accepted preparation identity changed: %s", id)
 	}
 	identity, err := patchID(root, identityObservations)

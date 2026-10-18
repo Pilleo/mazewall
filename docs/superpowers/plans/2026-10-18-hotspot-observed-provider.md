@@ -111,7 +111,12 @@ experimental owner, set OWNER to M/experiments/hotspot-agentless and generate it
 own workspace/replacements; do not add it to the canonical workspace. Container
 builds must mount the same source/workspace graph. After the separate operator-approved SDK publication gate,
 normal native commands use `GOWORK=off` plus build/experiment.go.mod with the real
-released dependency. Never let an implicit workspace select other code.
+released dependency for its existing behavior. v0.1.0 was actually published at
+`1a6d58d2c73f5b089588add7364bf8d7913c5604`; its bundle verifier rejects Observed25.
+Task3's additive format3/Expected support is an explicit local candidate, so its
+checks and packing retain the per-owner workspace above until a new SDK release
+is separately approved and published. GOWORK=off does not select candidate SDK
+behavior. Never let an implicit workspace select other code.
 
 ### Task 1: Extract shared bundle verification without weakening admission
 

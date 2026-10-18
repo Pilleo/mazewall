@@ -29,12 +29,14 @@ type gadgetLookup struct {
 }
 
 func (l gadgetLookup) Lookup(ctx context.Context, ref model.StackRef) (model.StackEvidence, error) {
+	if l.execBarrier != nil {
+		if err := l.execBarrier.Check(); err != nil {
+			return model.StackEvidence{}, err
+		}
+	}
 	if l.strictEpoch {
 		if l.execBarrier == nil {
 			return model.StackEvidence{}, fmt.Errorf("strict lookup missing exec barrier")
-		}
-		if err := l.execBarrier.Check(); err != nil {
-			return model.StackEvidence{}, err
 		}
 		if err := ref.HotSpotIdentity.Validate(); err != nil {
 			return model.StackEvidence{}, err
@@ -57,7 +59,7 @@ func (l gadgetLookup) Lookup(ctx context.Context, ref model.StackRef) (model.Sta
 		return model.StackEvidence{}, fmt.Errorf("stack reference session/process generation mismatch")
 	}
 	result, err := l.symbolizer.ResolveStructured(ctx, symbolizer.Task{Tgid: ref.PID, PidNumbers: []symbolizer.PidNumbers{{Pid: ref.TID}}, CorrelationID: ref.CorrelationID, EventBootTimestamp: ref.CaptureBootNS, HotSpotIdentity: ref.HotSpotIdentity})
-	if l.strictEpoch {
+	if l.execBarrier != nil {
 		if barrierErr := l.execBarrier.Check(); barrierErr != nil {
 			return model.StackEvidence{}, barrierErr
 		}
@@ -91,12 +93,14 @@ func (l gadgetLookup) Lookup(ctx context.Context, ref model.StackRef) (model.Sta
 }
 
 func (l gadgetLookup) RecoverDefinition(ctx context.Context, ref model.StackRef) (bool, error) {
+	if l.execBarrier != nil {
+		if err := l.execBarrier.Check(); err != nil {
+			return false, err
+		}
+	}
 	if l.strictEpoch {
 		if l.execBarrier == nil {
 			return false, fmt.Errorf("strict recovery missing exec barrier")
-		}
-		if err := l.execBarrier.Check(); err != nil {
-			return false, err
 		}
 	}
 	if ref.SessionID != l.sessionID || ref.PID != l.pid || ref.ProcessStartTicks != l.startTicks {

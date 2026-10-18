@@ -2,15 +2,19 @@
 
 Module `github.com/Pilleo/mazewall/hotspot-bridge` uses Go 1.26 and only the
 standard library. It supplies bundle verification, plain wire DTOs, bounded
-schema2/3 consumption and canonical observed-stack content IDs. It is unpublished.
-Schema3 DTO/decoder support does not admit a native producer or runtime profile;
-the current collector and verified bundle remain strict schema2.
+schema2/3 consumption and canonical observed-stack content IDs. Published v0.1.0
+is immutable at `1a6d58d2c73f5b089588add7364bf8d7913c5604`. This checkout adds
+**local candidate** format3 bundle negotiation; it is not the published v0.1.0.
+Neither DTO/decoder nor bundle support admits a native runtime profile.
 
 `bundle.Verify(root, expectedManifestSHA, wire.Strict25)` checks the actual
 manifest bytes against an independently trusted SHA256 before parsing, hashes
 every listed file, and verifies the selected transitive local OCI graph. It does
 not run the collector or trust helper self-verification. Limits remain 65,536
-JSON bytes, 256 files and 512 MiB. Observed25 bundles remain rejected.
+JSON bytes, 256 files and 512 MiB. The local candidate also accepts
+`wire.Observed25` with collector-version3/wire3 and capture ABI2, and binds that
+profile in `Verified.Expected`. Strict2 and observed3 bundles refuse cross-profile
+verification. Published v0.1.0 rejects Observed25 and maps Expected to Strict25.
 
 The opaque `Verified` result has checked `Collector`, `Store`, `Image`,
 `Expected(target)` and `Manifest` getters. Zero/failed results are unusable.
@@ -28,13 +32,14 @@ business validator. Hash/JSON readers retain joined read and close error causes.
 `ManifestSHA256` uses the bounded reader for the legacy native packaging wrapper;
 its local checksum is not an independently trusted deployment pin.
 
-Before publication, use an **explicit local workspace** with this module and
+For candidate behavior, use an **explicit local workspace** with this module and
 one native owner, plus the owner's actual prepared replacements. Canonical and
 experimental owners share a module path and require separate workspaces. Follow
 the governing plan's setup, setting `GOWORK` to the generated `go.work` after
 `go work init` and before `go work edit`.
-Never combine workspace mode with `-modfile`. No registry version or absolute
-replacement has been added to release module declarations.
+Never combine workspace mode with `-modfile`. Native modules pin real v0.1.0;
+GOWORK=off selects those released bytes, not this candidate's new bundle behavior.
+No absolute replacement is committed in release module declarations.
 Native source distributions include the selected bridge source from that graph.
 
 ## Wire consumer
@@ -91,9 +96,12 @@ identity/offset and every other typed frame/quality/BCI field remain significant
 It rejects empty/error-frame stacks and never mutates caller frames or mappings.
 It groups provider observations, not universal class-loader/method identities.
 
-Publishing/tagging `hotspot-bridge/v0.1.0` remains a separate operator gate. Later
-hermetic release consumers need an actual published commit/sum; these local
-workspace checks do not supply registry provenance or native qualification.
+The v0.1.0 module Sum is `h1:tWCzIDVBquWo6tWwuqIT5oKlfRPP+XMshdJ8B7hFcIs=`;
+GoModSum is `h1:FEiVroH+pQOmKfe6YXTFkvkpAF3z799E4hFDPza6e/s=`.
+The candidate requires a separately approved new release (proposed v0.2.0) before
+hermetic consumers can use its format3 bundle behavior. No new tag/publication is
+authorized by Task3. Local workspace checks supply neither a released candidate
+dependency nor native qualification.
 
 Standalone checks: `GOWORK=off go test -race ./... -count=1`.
 Native checks: with the selected explicit `GOWORK`, run

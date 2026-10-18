@@ -1,0 +1,43 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package processmanager
+
+import (
+	"fmt"
+
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+)
+
+// ConfigureHotSpotFatal connects legacy unknown-identity reporter failures too.
+// The tracer calls this once before any discovery or consumer work starts.
+func (pm *ProcessManager) ConfigureHotSpotFatal(fatal func(error)) { pm.epochFatal = fatal }
+
+// Configuration precedes process discovery; both profile modes are immutable.
+func (pm *ProcessManager) ConfigureHotSpotObservedTarget(pid libpf.PID, fatal func(error)) error {
+	if pid == 0 || fatal == nil || pm.epochTarget.PID != 0 || pm.observedPID != 0 {
+		return fmt.Errorf("invalid observed target/fatal owner")
+	}
+	pm.observedPID, pm.epochFatal = pid, fatal
+	return nil
+}
+
+type observedAttacher interface {
+	AttachObserved(interpreter.EbpfHandler, libpf.PID, libpf.Address, remotememory.RemoteMemory, func(error)) (interpreter.Instance, error)
+}
+
+func (pm *ProcessManager) attachObserved(data interpreter.Data, pid libpf.PID, bias libpf.Address, rm remotememory.RemoteMemory) (interpreter.Instance, error) {
+	if pid == pm.observedPID {
+		if d, ok := data.(observedAttacher); ok {
+			return d.AttachObserved(pm.ebpf, pid, bias, rm, pm.epochFatal)
+		}
+	}
+	return data.Attach(pm.ebpf, pid, bias, rm)
+}
+
+func (pm *ProcessManager) observedFatal(pid libpf.PID, err error) {
+	if err != nil && pm.observedPID == pid && pm.epochFatal != nil {
+		pm.epochFatal(err)
+	}
+}

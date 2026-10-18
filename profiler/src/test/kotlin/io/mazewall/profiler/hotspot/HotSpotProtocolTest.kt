@@ -91,6 +91,6 @@ class HotSpotProtocolTest {
         "jvm_sha256":"5e0fb6e83a5676090f28ff0b453e9199df06af1ff90d473c1b9837e41096114c",
         "provider":{"name":"otel-ebpf-profiler-via-gadget","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
         "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
-        "patch_sha256":"8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c"}}}
+        "patch_sha256":"473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b"}}}
     """.trimIndent().replace("\n", "")
 }

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const acceptedPatch = "8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c"
+const acceptedPatch = "473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b"
 const gadgetRevision = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 const profilerRevision = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
 const gadgetImagePrefix = "ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@"
@@ -41,6 +41,10 @@ func verifyAssets(root string) (assetManifest, error) {
 }
 
 func verifyAssetsWithAccess(root string, access func(string, uint32) error) (assetManifest, error) {
+	return verifyProfileAssets(root, wire.Strict25, access)
+}
+
+func verifyProfileAssets(root string, profile wire.Profile, access func(string, uint32) error) (assetManifest, error) {
 	var manifest assetManifest
 	// Legacy tooling pins native provenance; deployment callers supply their own trusted SHA.
 	manifestSHA, err := bundle.ManifestSHA256(root)
@@ -55,7 +59,7 @@ func verifyAssetsWithAccess(root string, access func(string, uint32) error) (ass
 	if err := access(collector, unix.X_OK); err != nil {
 		return manifest, fmt.Errorf("collector is not executable: %w", err)
 	}
-	verified, err := bundle.Verify(root, manifestSHA, wire.Strict25)
+	verified, err := bundle.Verify(root, manifestSHA, profile)
 	if err != nil {
 		return manifest, err
 	}
@@ -70,6 +74,10 @@ func verifyAssetsWithAccess(root string, access func(string, uint32) error) (ass
 }
 
 func publishAssets(output string, populate func(string) error) (failure error) {
+	return publishProfileAssets(output, wire.Strict25, populate)
+}
+
+func publishProfileAssets(output string, profile wire.Profile, populate func(string) error) (failure error) {
 	if output == "" {
 		return fmt.Errorf("explicit destination required")
 	}
@@ -100,7 +108,7 @@ func publishAssets(output string, populate func(string) error) (failure error) {
 	if err := populate(staged); err != nil {
 		return err
 	}
-	if _, err := verifyAssets(staged); err != nil {
+	if _, err := verifyProfileAssets(staged, profile, unix.Access); err != nil {
 		return err
 	}
 	// Linux no-replace publication also preserves a raced empty operator directory.
@@ -127,6 +135,18 @@ func copyAsset(source, destination, name string) error {
 }
 
 func packAssets(collector, store, image, output string) error {
+	return packProfileAssets(collector, store, image, output, wire.Strict25)
+}
+
+func packProfileAssets(collector, store, image, output string, profile wire.Profile) error {
+	version := 2
+	switch profile {
+	case wire.Strict25:
+	case wire.Observed25:
+		version = 3
+	default:
+		return fmt.Errorf("unsupported bundle profile")
+	}
 	collector, err := filepath.Abs(collector)
 	if err != nil {
 		return err
@@ -175,7 +195,7 @@ func packAssets(collector, store, image, output string) error {
 	if selected == nil {
 		return fmt.Errorf("gadget absent from source OCI index")
 	}
-	return publishAssets(output, func(staged string) error {
+	return publishProfileAssets(output, profile, func(staged string) error {
 		if err := copyAsset(filepath.Dir(collector), staged, filepath.Base(collector)); err != nil {
 			return err
 		}
@@ -221,7 +241,7 @@ func packAssets(collector, store, image, output string) error {
 		if err != nil {
 			return err
 		}
-		manifest := assetManifest{SchemaVersion: 1, CollectorVersion: "2", CaptureABI: 2, WireSchema: 2, Platform: "linux-amd64", GadgetRevision: gadgetRevision, ProfilerRevision: profilerRevision, PatchSHA256: acceptedPatch, GadgetDigest: digest, Files: files}
+		manifest := assetManifest{SchemaVersion: 1, CollectorVersion: fmt.Sprint(version), CaptureABI: 2, WireSchema: version, Platform: "linux-amd64", GadgetRevision: gadgetRevision, ProfilerRevision: profilerRevision, PatchSHA256: acceptedPatch, GadgetDigest: digest, Files: files}
 		return writeJSON(filepath.Join(staged, "manifest.json"), manifest)
 	})
 }

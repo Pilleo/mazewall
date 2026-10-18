@@ -16,7 +16,7 @@ type CaptureAudit struct {
 
 func AuditCapture(abi uint32, profilerRevision string, patchSHA256 string) (CaptureAudit, error) {
 	if abi != 2 || profilerRevision != "ef6cf29492c8a980f889052903fa2dd0c0765cc0" ||
-		patchSHA256 != "8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c" {
+		patchSHA256 != "473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b" {
 		return CaptureAudit{}, fmt.Errorf("unreviewed capture ABI/profiler source")
 	}
 	return CaptureAudit{
