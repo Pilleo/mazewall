@@ -93,6 +93,7 @@ def go(*args):
     return subprocess.check_output(['go', *args], cwd=work, env=env, text=True)
 mods = json.loads(go('mod', 'edit', '-json', str(owner/'build/experiment.go.mod')))
 go('work', 'init', str(m/'hotspot-bridge'), str(owner))
+env['GOWORK'] = str(work/'go.work')
 for replacement in mods.get('Replace', []):
     def ref(v): return v['Path'] + ('@'+v['Version'] if v.get('Version') else '')
     new = replacement['New']

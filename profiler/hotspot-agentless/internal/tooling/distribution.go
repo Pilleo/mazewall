@@ -193,7 +193,12 @@ type graphModule struct {
 }
 
 func moduleGraph(root string) (map[string]graphModule, error) {
-	child := exec.Command("go", "list", "-modfile", "build/experiment.go.mod", "-m", "-json", "all")
+	args := []string{"list", "-buildvcs=false"}
+	if work := os.Getenv("GOWORK"); work == "" || work == "off" {
+		args = append(args, "-modfile", "build/experiment.go.mod")
+	}
+	args = append(args, "-m", "-json", "all")
+	child := exec.Command("go", args...)
 	child.Dir = root
 	child.Stderr = os.Stderr
 	data, err := child.Output()
@@ -214,6 +219,17 @@ func moduleGraph(root string) (map[string]graphModule, error) {
 		modules[module.Path] = module
 	}
 	return modules, nil
+}
+
+func bridgeSource(graph map[string]graphModule) (string, error) {
+	module, ok := graph["github.com/Pilleo/mazewall/hotspot-bridge"]
+	if module.Replace != nil {
+		module = *module.Replace
+	}
+	if !ok || module.Dir == "" {
+		return "", fmt.Errorf("missing actual hotspot-bridge source")
+	}
+	return module.Dir, nil
 }
 
 func verifiedPreparationIdentity(root string) (string, error) {
@@ -431,6 +447,10 @@ func releaseDistribution(engine, bundle, output, libraryVersion string) (failure
 	if !ok || profilerModule.Replace == nil {
 		return fmt.Errorf("missing actual patched profiler source")
 	}
+	bridge, err := bridgeSource(graph)
+	if err != nil {
+		return err
+	}
 	if err := os.Mkdir(filepath.Join(root, "licenses/mazewall"), 0755); err != nil {
 		return err
 	}
@@ -444,7 +464,7 @@ func releaseDistribution(engine, bundle, output, libraryVersion string) (failure
 	for _, copy := range []struct {
 		from, to  string
 		generated bool
-	}{{engine, "mazewall-hotspot", true}, {gadget, "inspektor-gadget", false}, {profilerModule.Replace.Dir, "opentelemetry-ebpf-profiler", false}} {
+	}{{engine, "mazewall-hotspot", true}, {bridge, "hotspot-bridge", true}, {gadget, "inspektor-gadget", false}, {profilerModule.Replace.Dir, "opentelemetry-ebpf-profiler", false}} {
 		if err := copySourceTree(copy.from, filepath.Join(sourceRoot, copy.to), copy.generated); err != nil {
 			return err
 		}

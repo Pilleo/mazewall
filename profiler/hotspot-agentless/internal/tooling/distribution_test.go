@@ -124,3 +124,44 @@ func TestDistributionArchivesAreReproducibleAndNeverOverwrite(t *testing.T) {
 		t.Fatal("existing archive overwritten")
 	}
 }
+
+func TestModuleGraphUsesExplicitDevelopmentWorkspace(t *testing.T) {
+	root := t.TempDir()
+	module := filepath.Join(root, "sdk")
+	if err := os.Mkdir(module, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(module, "go.mod"), []byte("module example.test/local-sdk\n\ngo 1.26.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Join(root, "go.work")
+	if err := os.WriteFile(work, []byte("go 1.26.0\n\nuse ./sdk\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOWORK", work)
+	graph, err := moduleGraph(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if graph["example.test/local-sdk"].Dir != module {
+		t.Fatal("explicit workspace module absent from release provenance")
+	}
+}
+
+func TestDistributionIncludesActualBridgeSource(t *testing.T) {
+	const path = "github.com/Pilleo/mazewall/hotspot-bridge"
+	for _, tc := range []struct {
+		graph map[string]graphModule
+		want  string
+	}{
+		{map[string]graphModule{}, ""},
+		{map[string]graphModule{path: {}}, ""},
+		{map[string]graphModule{path: {Dir: "/workspace/sdk"}}, "/workspace/sdk"},
+		{map[string]graphModule{path: {Dir: "/wrong", Replace: &graphModule{Dir: "/selected/sdk"}}}, "/selected/sdk"},
+	} {
+		got, err := bridgeSource(tc.graph)
+		if got != tc.want || (err != nil) != (tc.want == "") {
+			t.Fatalf("bridge source = %q, %v; want %q", got, err, tc.want)
+		}
+	}
+}

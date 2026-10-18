@@ -183,6 +183,11 @@ unavailable/skipped stacks, selected loss, and unknown global lanes.
 The `bundle` package exports `Verify(root, expectedManifestSHA string, profile
 wire.Profile) (Verified, error)`. `Verified` has private fields and checked getters
 `Collector()`, `Store()`, `Image()`, `Expected(target)`; zero values are invalid.
+The checked `Manifest()` getter returns an owned deep copy for the native strict
+policy and install file inventory; it cannot mutate the verified token. Native
+packing/distribution reuse exported path, bounded-JSON, hash and OCI-graph helpers
+instead of maintaining another verifier. Portable executable-mode checks do not
+replace native `unix.Access(..., unix.X_OK)` or its EACCES/EPERM causes.
 Move the existing Go full-byte/OCI-graph validation rather than duplicate it.
 Existing strict tooling retains its exact accepted-version policy around this
 common validator. The new bundle has collector-version3/wire3; capture ABI2 stays.

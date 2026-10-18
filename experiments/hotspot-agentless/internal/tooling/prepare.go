@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Pilleo/mazewall/hotspot-bridge/bundle"
 )
 
 type preparationMode uint8
@@ -252,16 +254,7 @@ func markerMatches(path string, expected map[string]any) (bool, error) {
 }
 
 func fileHash(path string) (string, error) {
-	input, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer input.Close()
-	digest := sha256.New()
-	if _, err := io.Copy(digest, input); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(digest.Sum(nil)), nil
+	return bundle.FileHash(path)
 }
 
 func verifyEpochArtifacts(directory string) error {
