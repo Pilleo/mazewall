@@ -219,3 +219,28 @@ The [JIT/GC issue](../internals/backlog/issue-20261005-193139-440-qualify-pinned
 stays open. Publication of the corrected
 [accounting proposal](2026-10-17-hotspot-selected-accounting-contract.md) leaves
 B's native map/schema/pin implementation explicitly **not authorized**.
+
+## Corrective correlation-identity observation — 2026-10-18
+
+Subsequent analysis of the **original unchanged failed bytes** establishes that
+correlation ID **516936189570219** appears in nine events for PID **621929**,
+TIDs **622909 / 622910**. The first affected enrichment retains the fatal task
+identity mismatch; the original **261 received / 227 resolved / 34 unavailable /
+zero recovery attempts / `terminal_accounting_complete:false`** remains refused.
+The earlier statement that stderr alone did not identify the conflicting field
+remains accurate; JSONL analysis now establishes the cross-task alias independently.
+
+Offline characterization of the unchanged actual production C additionally shows
+three distinct-key equal-clock uniqueness **RED exits 1** (task, frame, epoch),
+passing same-key replays and one passing distinct-clock control. The initial
+harness compiler failure is not the regression RED. Host-C/helper mocks establish
+a sufficient allocator defect, not historical clock values, real kernel/JVM/live
+transport behavior or a fixed production allocator. All original observations and
+hashes above remain historical, including the later successful matrix control.
+
+See the [source-backed correlation-identity evidence](2026-10-18-hotspot-correlation-identity-evidence.md)
+for receipts and the [scoped allocator approval request](../internals/backlog/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md).
+The proposed shared same-map-lifetime positive non-reusing atomic allocation and
+its exact contract remain pending operator design review. No native/map/layout/
+resolver namespace/pin change or broader lifetime/reliability qualification is
+authorized by this corrective documentation.
