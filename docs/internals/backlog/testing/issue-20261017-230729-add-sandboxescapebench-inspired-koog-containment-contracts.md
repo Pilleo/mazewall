@@ -57,6 +57,27 @@ The local reviewed plan/spec are `docs/superpowers/plans/2026-10-18-sandbox-esca
 - Current `validateBacklogIndex` passes. ADK is unavailable; the legacy full-backlog validator rejects unrelated post-migration schemas and is not passing current-backlog evidence.
 - Default-locale full build exposed the unchanged web-demo fixture's locale limitation; recorded separately as [issue-20261018-004800](issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md). The focused C-locale control passes. Final C-locale full build, committed container aggregate and broad branch review remain pending at this checkpoint; this item is not closed or archived.
 
+## Committed acceptance evidence — 18 October 2026
+
+The previously pending executable checks completed on reviewed source **`8e843ae137f3a546ecd3f50a3d87c48f4878a81b`**. This later evidence-only bookkeeping update does not rename that tested producer or its candidate `0.1.0-integration.8e843ae137f3`.
+
+| Gate | Actual result |
+|---|---|
+| `LC_ALL=C ./gradlew build --console=plain --max-workers=1` | Exit 0; 227 actionable tasks: 58 executed, 1 cached, 168 up-to-date. This does not claim all cached/optional cases freshly executed. |
+| `LC_ALL=C ./scripts/run_containerized_tests.sh :optionalIntegrationCheck --no-configuration-cache --max-workers=1` | Exit 0; actual committed publications, strict fresh native Koog, JDBC/Security, finished Boot showcase and ownership/negative controls completed. Gradle reported success in 22m15s. |
+| Parent `OptionalIntegrationAcceptanceTest` JUnit | 1 test, 0 failures, 0 errors, 0 skipped; exact accepted Koog summary once; aggregate producer matches the revision above. |
+| Whole-branch review and evidence supplement | Independent reviewer approved all implementation changes with no Critical/Important defects; accepted existing warning debt as non-blocking maintenance. Aggregate/JUnit acceptance conditions were independently checked after completion. |
+
+Retained parent evidence is under `.superpowers/sdd/2026-10-18-sandbox-escape-bench/`: `full-build-c-locale.log`/`.exit`, `optional-aggregate.log`/`.exit`, `committed-aggregate.junit.xml`, `committed-aggregate-receipt.json`, per-task native reports/logs and `final-review.md`. The retained parent XML SHA-256 is `8045594b033ddcdad6b41b40f5fe57358d8df019e9eaf3f6d9c8ceda9197781d`. These records include:
+
+```text
+KOOG_CONTAINMENT_V1_OK read=denied write=denied symlink=denied network=denied process=denied controls=pass retirement=pass
+```
+
+The container's child-command raw files were disposable; the retained parent log/JUnit records successful actual phases and the validated summary, not an independently retained copy of every child log. CI artifact-upload wiring is present, but no remote GitHub CI run/upload, push or merge was performed.
+
+**Remaining:** current full ADK/backlog validation is unavailable; the current index-only validator is passing but is not equivalent. The default-locale web fixture follow-up and pre-existing toolchain warnings remain separate. Keep this issue open for operator/control-plane acceptance rather than archiving it on an unavailable gate. No arbitrary-agent, kernel-exploit, cgroup/OOM or general hostile-code containment claim follows.
+
 ---
 
 **Verification:** `./gradlew consumerHarnessTest --tests '*Koog*'`, focused published-only `verifyFreshNative`, `./gradlew build`, and `./scripts/run_containerized_tests.sh :optionalIntegrationCheck --no-configuration-cache --max-workers=1`. Run the existing backlog validator without changing unrelated issues; distinguish legacy-validator incompatibility from current ADK validation.

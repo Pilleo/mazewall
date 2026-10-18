@@ -22,7 +22,7 @@ has_side_effects: false
 # 🟢 [Severity: LOW]: Make vulnerable web network ceiling evidence locale independent
 
 **Context:**
-The full build while implementing Koog containment contracts failed in the unchanged `learned network calls cannot relax the explicit service ceiling` case. Its typed behavior/zero-request assertion succeeded, but lines 105-107 recognize only English permission phrases or numeric errno. On this host the real response ended with the Belarusian `дзеяньне не дазволена`, so the fixture correctly refused to call a generic fetch error containment proof, but incorrectly rejected a locale-specific permission diagnostic.
+The full build while implementing Koog containment contracts failed in the unchanged `learned network calls cannot relax the explicit service ceiling` case. Its zero-request assertion succeeded, but lines 105-107 recognize only English permission phrases or numeric errno. On this host the real response ended with the Belarusian `дзеяньне не дазволена`, so the fixture correctly refused to call a generic fetch error containment proof, but incorrectly rejected a locale-specific permission diagnostic.
 
 The owning demo, enforcement modules and shared native harness are unchanged from `8b1f8391df5321e606fef9636f45e68edb98b4e4`. The exact focused case passed with only `LC_ALL=C` changed. This follow-up records the existing fixture limitation; no demo/enforcement change is part of the Koog benchmark branch.
 
