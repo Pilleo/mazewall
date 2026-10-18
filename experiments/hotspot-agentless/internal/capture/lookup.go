@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"io.mazewall/experiments/hotspot-agentless/internal/identity"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 	"io.mazewall/experiments/hotspot-agentless/internal/quality"
 )
@@ -21,7 +22,7 @@ func providerIdentity() model.Provider {
 
 type gadgetLookup struct {
 	strictEpoch bool
-	execBarrier interface{ Check() error }
+	execBarrier *identity.ExecBarrier
 	symbolizer  *symbolizer.Symbolizer
 	sessionID   string
 	pid         uint32

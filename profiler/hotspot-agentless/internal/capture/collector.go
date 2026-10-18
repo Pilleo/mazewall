@@ -125,6 +125,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		checks = append(checks, func() error { return identity.CheckObservedTarget(uint32(cfg.PID), cfg.ExpectedTarget) })
 	}
 	fatal := fatalState{cancel: cancelAll}
+	defer func() { resultErr = errors.Join(resultErr, fatal.Err()) }()
 	if cfg.AbortContext != nil {
 		abortDone := make(chan struct{})
 		go func() {
