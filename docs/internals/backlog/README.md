@@ -2,7 +2,7 @@
 
 *Total Active Issues:* 142 | *Total Resolved Issues:* 698
 
-Active status detail: 140 open, 1 in progress, 1 deferred. Archived rows below preserve historical
+Active status detail: 141 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the

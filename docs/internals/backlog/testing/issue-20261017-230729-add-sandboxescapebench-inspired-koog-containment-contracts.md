@@ -1,7 +1,7 @@
 ---
 title: "Add SandboxEscapeBench-inspired Koog containment contracts"
 severity: "MEDIUM"
-status: "in_progress"
+status: "open"
 priority: medium
 dependencies: []
 component: "testing"
