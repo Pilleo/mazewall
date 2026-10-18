@@ -75,3 +75,11 @@ fixture guests remain local test artifacts, outside the advertised registry and
 normal release selection. Native gates still require the documented Linux host
 and outer-runtime permissions. Production reviewer/launch/cgroup authority and
 human usability are separate from these known-fixture engineering checks.
+
+The [containment contract demonstration](../../benchmarks/koog-containment/README.md)
+documents controlled read/write/symlink, loopback-connection and process-launch
+denials with outside-worker positive controls and physical worker-retirement checks.
+The required parent gate rejects missing, duplicate or altered containment summaries.
+Dangerous methods remain test-only; `uppercase_ascii` is still the sole advertised
+production tool. This is bounded contract evidence, not an AISI benchmark score or
+general AI-agent containment.

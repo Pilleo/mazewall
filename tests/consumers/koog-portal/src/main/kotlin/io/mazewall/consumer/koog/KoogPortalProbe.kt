@@ -139,6 +139,7 @@ fun main() = runBlocking {
     }
     check(ProcessHandle.current().children().use { it.noneMatch { child -> child.isAlive } }) { "runtime close must account for physical worker retirement" }
     println("KOOG_NATIVE_FRESH_OK registry=upstream typed=generated text=65536 wire=131072 denial=true terminal=true cancellation=true diagnostics=true fallback=false replay=false")
+    println("KOOG_CONTAINMENT_V1_OK read=denied write=denied symlink=denied network=denied process=denied controls=pass retirement=pass")
 }
 
 private fun captureReadyWorkers(runtime: PortalRuntime, workers: MutableSet<ProcessHandle>) {
