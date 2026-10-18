@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"github.com/cilium/ebpf"
 	"sync"
 	"time"
@@ -90,7 +91,7 @@ func (e *Enricher) Submit(event model.Event) error {
 		return e.err
 	}
 	e.stats.Received++
-	if err := e.write(model.Record{Kind: "event", SessionID: event.SessionID, EventID: event.EventID, Event: &event}); err != nil {
+	if err := e.write(model.Record{Kind: "event", SessionID: event.SessionID, EventID: event.EventID, Event: (*wire.Event)(&event)}); err != nil {
 		return err
 	}
 	reason := ""

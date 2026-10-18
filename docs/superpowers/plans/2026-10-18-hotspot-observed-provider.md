@@ -109,7 +109,7 @@ Run only after Task1 creates the module; record actual Go/compiler/source inputs
 Use `go test` without -modfile while this explicit workspace is active. For the
 experimental owner, set OWNER to M/experiments/hotspot-agentless and generate its
 own workspace/replacements; do not add it to the canonical workspace. Container
-builds must mount the same source/workspace graph. After SDK publication in Task2,
+builds must mount the same source/workspace graph. After the separate operator-approved SDK publication gate,
 normal native commands use `GOWORK=off` plus build/experiment.go.mod with the real
 released dependency. Never let an implicit workspace select other code.
 
@@ -400,9 +400,11 @@ func CanonicalStackID(scope Scope, frames []Frame) (string, error) {
     owned := append([]Frame(nil), frames...)
     for i := range owned {
         if owned[i].ErrorFrame { return "", errors.New("error frame is not a useful stack") }
+        owned[i].Extensions = nil // Unknown raw fields may contain occurrence IDs.
         if owned[i].Mapping != nil {
             m := *owned[i].Mapping
             m.Start, m.End = 0, 0
+            m.Extensions = nil
             owned[i].Mapping = &m
         }
     }
@@ -432,6 +434,10 @@ git commit -m "feat(profiler): add bounded shared HotSpot stream validation"
 
 Use a frozen real schema2 projection for old-client parity; do not rewrite its
 provider hash as if historical input were new. No new schema is admitted here.
+The SDK also returns bounded original rows in Capture.RawJSONL for outer/provider
+extension fidelity; RawSHA256 covers all accepted delimiter-free rows plus one LF
+each, even when retention discards a pair. Public errors.Is classes and this raw
+carrier complete the A2 parser contract without a new configuration framework.
 Before Task3 consumes the SDK in hermetic release builds, obtain operator approval
 to publish the tested `hotspot-bridge/v0.1.0` module and record its actual commit/
 sum. Update native module requirements to that real version and regenerate normal

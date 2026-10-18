@@ -158,6 +158,7 @@ type Capture struct {
     Summary Summary
     Discarded uint64
     RawSHA256 string
+    RawJSONL []byte
 }
 func NewDecoder(expected Expected) *Decoder
 func (d *Decoder) Accept(line []byte) error
@@ -170,10 +171,22 @@ one ready/summary, exact event and terminal pairing, no conflicting/duplicate ID
 integer overflow checks, all event fields and filename-byte consistency, original
 clock/scope, limits and final native flags. `session_started` may have birth0 and
 empty build IDs because it declares a request; ready must bind real target/build.
-Summary is last; EOF plus successful child Wait is also required. There is no
-invented `session_stopped` record. Unknown extension fields are retained as raw
-bytes; invalid UTF8, duplicate JSON keys, trailing data and excessive nesting64
-are rejected. Typed uint64 decoding preserves values above2^53.
+Summary is last; EOF plus successful child Wait is also required. `Finish` is the
+input owner's declaration that it observed actual EOF, joined readers and performed
+Wait; the SDK checks logical completion and cannot observe OS pipe state. The later
+Supervisor owns that physical proof. There is no invented `session_stopped` record.
+Unknown extension fields are retained as raw bytes; invalid UTF8, duplicate JSON
+keys, trailing data and excessive nesting64 are rejected. Typed uint64 decoding
+preserves values above2^53. Plain DTOs carry owned `Extensions` raw-value maps;
+the original comparable four-field Provider remains unchanged. Capture.RawJSONL
+also retains original outer/provider fields and whitespace within the shared32MiB
+wire-payload budget. Discarded pair/recovery rows can be absent from RawJSONL;
+RawSHA256 covers every accepted line plus one LF per line, including discarded rows.
+Accept takes one row without its line-ending delimiter. Schema2 ready cannot prove
+cgroup identity; event-bearing captures still require an independently expected
+cgroup. Error classes are errors.Is sentinels ErrJSON/ErrLimit/ErrIdentity/ErrOrder/
+ErrPairing/ErrAccounting/ErrFinality/ErrCollector/ErrProcess, retaining original
+collector message/errno and Wait causes. These are parser contracts, not admission.
 
 Retain at most4096 pairs/32MiB, track at most32768 occurrences/65536 wire rows;
 all discarded pairs still count and reconcile. A failure keeps diagnostic prefix
@@ -270,8 +283,10 @@ Capture/raw retention remains32MiB; no unbounded per-event files or infinite his
 
 CallID is SHA256 of a canonical struct containing identity scope
 `otel-observed-provider-frames/v1`, image/JVM/provider revisions/profile and ordered
-observable frame content. Exclude session/event/correlation IDs, host IDs and
-absolute mapping placement. Equal observable symbols may coalesce; unknown class
+observable typed frame content. Exclude session/event/correlation IDs, host IDs,
+unknown raw extensions and absolute mapping placement (Mapping.Start/End only).
+Unknown extensions remain in raw/typed capture evidence, not the content ID.
+Equal observable symbols may coalesce; unknown class
 loader identity is not silently upgraded to universal Java-method identity.
 Retain full typed/raw evidence separately. Native FileID uses genuine mapping
 identity, Lineno only genuine source line, FrameType preserves provider type.

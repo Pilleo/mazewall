@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"strings"
 	"testing"
 
@@ -22,7 +23,7 @@ func TestReadinessRequiresEveryRouteAndCheckedEpoch(t *testing.T) {
 					continue
 				}
 				id := fmt.Sprint(route)
-				event := model.Event{EventID: id, PID: m.PID, Filename: fmt.Sprintf("/fixture/mw-ready-%s-%06d-r%d", m.Run, route, route)}
+				event := wire.Event{EventID: id, PID: m.PID, Filename: fmt.Sprintf("/fixture/mw-ready-%s-%06d-r%d", m.Run, route, route)}
 				if kind == "wrong_pid" {
 					event.PID++
 				}

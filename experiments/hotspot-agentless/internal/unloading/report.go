@@ -167,7 +167,7 @@ func analyze(manifest, records, unloadLog, diagnostics io.Reader, pid uint32, st
 			if _, ok := events[row.EventID]; ok {
 				return r, fmt.Errorf("duplicate event")
 			}
-			events[row.EventID] = *row.Event
+			events[row.EventID] = model.Event(*row.Event)
 		case "enrichment":
 			if row.Evidence == nil {
 				return r, fmt.Errorf("missing evidence")
