@@ -50,6 +50,13 @@ The local reviewed plan/spec are `docs/superpowers/plans/2026-10-18-sandbox-esca
 ## Side effects
 - Extends only the native test fixture API and required Koog consumer evidence; production tools, policies and public APIs remain unchanged.
 
+## Implementation and verification checkpoint
+
+- Implemented filesystem controls/retained worker owners in `c804efa3`, network/process probes in `61d40c42`, and strict CI summary/public guide in `50e61493`; independent per-task reviews approved all three. Formatting correction `2a752008` and canonical-status metadata correction `6f7e69be` also received scoped re-review.
+- Host harness: 15 tests, zero failures/errors/skips. Actual JAR-only native staging reached both the original and new exact completion summaries after controls, denials and physical retirement. Production/fixture packaging separation was checked with the existing verifier.
+- Current `validateBacklogIndex` passes. ADK is unavailable; the legacy full-backlog validator rejects unrelated post-migration schemas and is not passing current-backlog evidence.
+- Default-locale full build exposed the unchanged web-demo fixture's locale limitation; recorded separately as [issue-20261018-004800](issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md). The focused C-locale control passes. Final C-locale full build, committed container aggregate and broad branch review remain pending at this checkpoint; this item is not closed or archived.
+
 ---
 
 **Verification:** `./gradlew consumerHarnessTest --tests '*Koog*'`, focused published-only `verifyFreshNative`, `./gradlew build`, and `./scripts/run_containerized_tests.sh :optionalIntegrationCheck --no-configuration-cache --max-workers=1`. Run the existing backlog validator without changing unrelated issues; distinguish legacy-validator incompatibility from current ADK validation.
