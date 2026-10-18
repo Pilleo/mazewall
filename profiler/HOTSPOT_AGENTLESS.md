@@ -227,6 +227,19 @@ Native physical drain, parent resource completion and whole-session collection
 completeness are separate facts. Diagnostics are retained separately from JSONL,
 with explicit discarded byte counts.
 
+Full owned captures may include `selected_event_accounting` in
+`evidence.summary.rawJson`. Its `complete=true` proves scoped selected openat
+conservation using the acquired session/PID/birth/map/CPU binding and final native
+owner; it does not mean zero loss or complete collection. The optional
+`unproven_collection_sources` array currently contains exactly `definitions`,
+`enrichment`, `wire`, `retention` when selected proof succeeds. Missing or invalid
+selected proof also leaves `selected_events` unproven. Definition/auxiliary reader
+joins, zero loss metrics and terminal counts cannot prove those independent source
+denominators. Early partial snapshots may omit the diagnostic; omission is not
+completeness. Even retaining zero client records can preserve selected accounting
+while `retention` remains unproven. See the
+[production inventory evidence](../docs/plans/2026-10-17-hotspot-production-loss-evidence.md).
+
 `HotSpotProfilingException` retains its original cause, optional partial result,
 native errno observations, diagnostics and pending cleanup ownership. Explicit
 `retryCleanup()` retries retained resources; it does not make failed collection

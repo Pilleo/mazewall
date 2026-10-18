@@ -1,6 +1,10 @@
 package model
 
-import "context"
+import (
+	"context"
+
+	"io.mazewall/experiments/hotspot-agentless/internal/accounting"
+)
 
 type Stats struct {
 	Received              uint64 `json:"received"`
@@ -15,6 +19,7 @@ type Stats struct {
 }
 
 type Summary struct {
+	UnprovenCollectionSources   []accounting.Lane             `json:"unproven_collection_sources,omitempty"`
 	SelectedAccounting          *SelectedAccountingDiagnostic `json:"selected_event_accounting,omitempty"`
 	EventFinalization           *EventFinalizationObservation `json:"event_finalization_observation,omitempty"`
 	DefinitionStop              *DefinitionStopObservation    `json:"definition_stop_observation,omitempty"`

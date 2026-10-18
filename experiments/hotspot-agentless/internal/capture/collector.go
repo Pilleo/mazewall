@@ -359,12 +359,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	}
 	if cfg.DrainFull {
 		value, selectedErr := selectedFinal(gc)
-		if selectedErr == nil && expectedAccounting == nil {
-			selectedErr = fmt.Errorf("selected prepared identity missing")
-		}
-		if selectedErr == nil {
-			summary.SelectedAccounting, selectedErr = selectedDiagnostic(*expectedAccounting, *value, eventFinalization, summary.Stats)
-		}
+		selectedErr = errors.Join(selectedErr, applyCollectionInventory(expectedAccounting, value, eventFinalization, &summary))
 		err = errors.Join(err, selectedErr)
 		if selectedErr != nil {
 			summary.TerminalAccountingComplete = false

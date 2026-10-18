@@ -9,6 +9,7 @@ target_modules: [profiler]
 target_files:
   - "profiler/hotspot-agentless/internal/accounting"
   - "docs/plans/2026-10-05-hotspot-loss-accounting-evidence.md"
+  - "docs/plans/2026-10-17-hotspot-production-loss-evidence.md"
 target_symbols:
   - "Evaluate"
 open_questions: false
@@ -72,3 +73,23 @@ contract records exact helper/image/manifest identities and unchanged global
 refusal. This does not close the definition/all-source denominator gap, promote
 dense readout, repair historical native identity failures or confer runtime lifetime
 authority. Keep open for the remaining source inventory and independent review.
+
+## 2026-10-18 Plan04 Task3 structured production inventory
+
+The controller-authorized optional raw-summary `unproven_collection_sources` now
+uses structured Binding/Final/Counts lane evidence at full owned finalization.
+Only Task2's actual independently expected selected-map binding, final native
+rows/parent and checked delivery can prove `selected_events`. Invalid/missing
+selected proof retains that unknown lane. Healthy native/public runs report exactly
+`definitions`, `enrichment`, `wire`, `retention` as unproven; reader joins, zero
+loss and selected terminal counts cannot prove their independent admission.
+
+Fresh installed public proof preserves802 selected occurrences/12CPUs, selected
+complete=true, globalfalse and checked retirement. Actual definition-drop,
+held-reader/auxiliary, broken native stdout, retention0 and target-exec controls,
+host/race and Kotlin ABI/copy/refusal checks are recorded in the
+[production inventory evidence](../../plans/2026-10-17-hotspot-production-loss-evidence.md).
+Two locked Go1.26.0 helper builds and complete existing-OCI bundles match; authored
+patch270a remains unchanged. Keep **open** until actual all-source admission and
+delivery proof exists. This diagnostic does not promote global completeness,
+policy eligibility, dense readout or runtime lifetime/identity qualification.

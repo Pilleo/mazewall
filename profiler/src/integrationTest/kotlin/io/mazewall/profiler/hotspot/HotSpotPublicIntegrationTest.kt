@@ -12,6 +12,7 @@ import io.mazewall.profiler.testing.tierE.EnabledIfTierERootfulAvailable
 import io.mazewall.testing.containers.ContainerEndpoint
 import jdk.jfr.consumer.RecordingFile
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
@@ -66,16 +67,17 @@ class HotSpotPublicIntegrationTest {
         HotSpotAcceptanceHarness(endpoint, directory).use { fixture ->
             fixture.start(100)
             profiler().use { profiler ->
-                profiler.attach(Pid(fixture.pid), fixture.options(retained = 1)).use { session ->
+                profiler.attach(Pid(fixture.pid), fixture.options(retained = 0)).use { session ->
                     fixture.prepare()
                     fixture.measure()
                     val final = session.finish()
                     val evidence = requireNotNull(final.structuredEvidence)
-                    assertEquals(1, evidence.records.size)
-                    assertTrue(evidence.discardedOccurrences >= 99uL)
+                    assertEquals(0, evidence.records.size)
+                    assertTrue(evidence.discardedOccurrences >= 100uL)
                     assertTrue(evidence.terminalAccountingComplete)
                     assertFalse(evidence.retentionComplete || final.coverage.complete || session.pendingOwnership)
                     report(fixture, "retention", evidence)
+                    verifyUnprovenSources(evidence)
                 }
             }
             fixture.assertCollectorsGone()
@@ -302,6 +304,29 @@ class HotSpotPublicIntegrationTest {
         assertEquals(evidence.summary.received, number("received"))
         assertEquals(evidence.summary.received, number("terminals"))
         assertEquals("true", selected.getValue("complete").jsonPrimitive.content)
+        assertFalse(evidence.collectionLossComplete)
+        verifyUnprovenSources(evidence)
+    }
+
+    private fun verifyUnprovenSources(evidence: StructuredProfileEvidence) {
+        val summary = Json.parseToJsonElement(evidence.summary.rawJson).jsonObject
+        assertEquals(
+            listOf("definitions", "enrichment", "wire", "retention"),
+            summary
+                .getValue("unproven_collection_sources")
+                .jsonArray
+                .map { it.jsonPrimitive.content },
+        )
+        assertEquals(
+            "true",
+            summary
+                .getValue("selected_event_accounting")
+                .jsonObject
+                .getValue("complete")
+                .jsonPrimitive
+                .content,
+        )
+        assertTrue(evidence.summary.physicalDrainComplete)
         assertFalse(evidence.collectionLossComplete)
     }
 
