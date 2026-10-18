@@ -71,8 +71,15 @@ new cache/definition publication on missing/invalid/saturated/contended state.
 Actual-C GREEN/clock-mutant RED, edge/helper-fault checks, real eight-CPU allocator
 execution, acquired loader-map ownership and non-time resolver/guard controls have
 receipts. Both embedded architectures/layouts were generated from ordered patch
-`962b27903e20422116ca8528b7edbc8f19eafc94f986907461bd8fb1ded9f976`;
-all fourteen source/asset consumers advance only after renewed source controls.
+`8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c`.
+R1 corrects indistinguishable reordered-definition fixtures with exact binding and
+rejected-redelivery preservation assertions plus a failing definition-swap control.
+This changes only one hashed test input from the initial `962b…` graph; native
+source/layout/embedded bytes remain identical and isolated native receipts are
+reused. Fresh complete snapshots prove all fourteen current pin advancements
+followed current-graph qualification. The initial graph's retained pre-advancement
+snapshots cover only four consumers, so its all-fourteen chronology is unproved;
+the new receipts do not retroactively establish it.
 
 **Completion boundary:** this issue stays open for Task2's reproducible helper/OCI,
 legacy rendered/pdata and actual public capture qualification on the corrected

@@ -1,5 +1,12 @@
 # Bounded native correlation allocator — Task1 evidence
 
+**Current R1-reviewed source graph:**
+`8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c`.
+The [review-fix evidence below](#r1-review-correction-and-fresh-pin-chronology)
+records the discriminating regression and complete current-graph pin chronology.
+The initial implementation graph and its original native receipts remain below;
+the new graph has byte-identical native source, layouts and embedded objects.
+
 ## Disposition
 
 The [approved contract](2026-10-18-hotspot-correlation-allocator-contract.md) is
@@ -62,7 +69,7 @@ remain fatal. Legacy `storeTrace` overwrite hardening remains separate.
 
 The ordered recipe in `internal/tooling/prepare.go:50–101` hashes 89 actual named
 inputs, in order, as `name + NUL + bytes`. Actual preparation and independent
-inventory agree on:
+inventory agreed on the initial implementation graph:
 
 `962b27903e20422116ca8528b7edbc8f19eafc94f986907461bd8fb1ded9f976`
 
@@ -102,12 +109,16 @@ Current-source controls pass, and separately removing either guard fails the
 expected invariant. These observations preserve source audit truth; they do not
 prove metadata/code lifetime through concurrent reclamation.
 
-Only after that current-graph inspection/characterization were all fourteen literal
-consumers advanced: canonical/mirror tooling assets and preparation tests(4),
-canonical/mirror JIT/GC audit source/tests(4), experimental candidate fixture(1),
-Kotlin assets/protocol(2), and Kotlin assets/protocol/child fixtures(3). The accepted
-pin check was not weakened for preparation; old-bundle verification still refuses
-the preserved `270a…` bundle (`unsupported asset version/ABI/provenance`, exit1).
+The initial graph's final fourteen literal pins and current-source controls are
+verified. Its retained pre-advancement snapshots independently establish old bytes
+for only four canonical Go consumers: **all-fourteen ordering is not proved**.
+This is incomplete chronology evidence, not evidence that the other ten advanced
+early. The fresh R1 chronology below covers all fourteen files: canonical/mirror
+tooling assets and preparation tests(4), canonical/mirror JIT/GC audit source/tests(4),
+experimental candidate fixture(1), Kotlin assets/protocol(2), and Kotlin
+assets/protocol/child fixtures(3). The accepted pin check was not weakened for
+preparation; the original old-bundle refusal remains retained (`unsupported asset
+version/ABI/provenance`, exit1).
 
 ## Executed checks and retained receipts
 
@@ -195,8 +206,86 @@ public-capture coupling, concurrent same-key producer cache publication, evictio
 under capture, drain correctness or active perf/NMI nesting. No new lifetime,
 global/dense, reliability or policy completeness qualification follows.
 
-Task2 consumes the exact962b graph, preserves baseline assets/results and performs
+Task2 consumes the current reviewed graph, preserves baseline assets/results and performs
 full locked helper/OCI reproducibility, legacy rendered/pdata compatibility and
 explicit public-native collection. It must retain the original failed capture,
 unknown exact trigger and any actual cleanup errors. Cached/default-skipped
 acceptance suites cannot supply that pending runtime evidence.
+
+## R1 review correction and fresh pin chronology
+
+Review finding ImportantR1 identified a real regression-test gap: all three
+definitions had identical task, epoch and frames, and the reordered lookup checked
+only success/frame count. It did not identify a production allocator defect.
+
+The canonical/mirrored authored `correlation_ids_test.go.txt` now uses four fixtures:
+
+| Reference | PID/TID | Stable epoch | Ordered frames |
+|---|---|---|---|
+| 1 | 123/456 | 2 | nativeLeaf/pathA |
+| 2^53+1 | 123/456 | 2 | otherNativeLeaf/pathB |
+| INT64_MAX−1 | 123/457 | 2 | nativeLeaf/pathA |
+| INT64_MAX | 123/456 | 4 | nativeLeaf/pathA |
+
+Insert order is indices3,1,2,0; resolve order is0,2,3,1. Each lookup asserts exact
+PID, TID, complete HotSpot identity, validation and ordered frame sequence. Wrong
+PID/TID/epoch lookup and redelivery are refused; conflicting-frame redelivery is
+refused. The original exact definition is rechecked after every rejected
+redelivery. Membership pruning and zero-unavailable assertions remain.
+
+The test-only swap control exchanges the two first fixtures' published frame
+definitions while keeping their references and identical task/epoch/validation.
+The prepared resolver returns success (`err=<nil>`), but the exact binding oracle
+fails for reference1. Correct source passes. This is a discriminating frame-binding
+negative rather than another length or wrong-task-guard check.
+
+Only this test input changes the 89-input recipe, deriving current graph
+`8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c`.
+Both owners were prepared normally. All384 checked profiler source/layout/embedded
+files per owner match the initial962b graph byte-for-byte, including the production
+header/dispatcher, both architectures, Go bindings, loader and decoder. The80
+original actual-C selected inputs and both original native binary/object receipts
+were revalidated. Their isolated results are reused, not rerun as a new matrix.
+
+Fresh receipts are under `E/fix-round1` (`F` below). Exact full contents and SHA256
+of **every one of the fourteen** old962b consumers were captured before edits,
+then again after current8212 preparation/qualification but before any advancement.
+All three decoder controls and both named compile-ID negatives ran against the
+actual newly prepared decoder. Corrected resolver GREEN, exact-definition swap
+RED and task/epoch guard-removal REDs ran at the actual prepared resolver boundary.
+Build/source-selection/overlay receipts precede compilation; retained test binaries
+are hashed before execution. Every control verifies all fourteen old files remain
+unchanged before and after it runs.
+
+Sequence timestamps (`time_ns`, actual recorded values):
+
+1. Initial all-fourteen snapshot completed1792302987564652333.
+2. Current-graph qualification completed1792303266240469779.
+3. Qualified-but-still-old all-fourteen snapshot completed1792303287636756245.
+4. Advancement boundary recorded1792303336851864343.
+5. All-fourteen new8212 snapshot completed1792303387590988945.
+
+The after snapshot differs from the before snapshot by exactly one literal pin
+replacement in each named file. `F/final-pin-and-ordering.json` independently
+checks that relationship, sequence, actual89-input digest and exact mirrors.
+
+| Receipt | SHA256 |
+|---|---|
+| `before-consumers/receipt.json` | `5aab57d30a86c6a647fd1df7c7804b20889958c922ae2758bbedbe9db83c94ec` |
+| `qualification-complete.json` | `327d0da95b1d184282c438ef9735f4e92b1b49882b7b00af4a3ff3cd0266ef13` |
+| `qualified-before-advancement/receipt.json` | `969fe45c95c67f26afc7081e3575f9b9c51cc260d44cdb1c3d3572cd375a7816` |
+| `after-consumers/receipt.json` | `d141a92b967d14cc41d3ea4ebfce77fbab32c19c2e9b3af6d0cbdd0e5c33d4de` |
+| `native-equality-and-reuse.json` | `7d5c13269e7f20f8d29a69ce02a8c5a77c32fad87ba3f4a6b4c2cc78222be6d9` |
+| `final-pin-and-ordering.json` | `4db639cccbfd870cda80f40ec2b4d622c6675096d5b3572acf58c6073b30f9a1` |
+
+Post-advancement focused Go race binaries pass for canonical tooling/audit, mirror
+tooling/audit/candidate and the complete actual prepared OTel resolver suite.
+JDK25 compile, `checkKotlinAbi`, ktlint and assets/protocol tests pass with raw
+warnings/cached dispositions retained. The unchanged mandatory hook's actual
+post-attempt outcome is appended to the same owning `task-1-report.md` with its
+immediately preserved raw log. No separate full build is used.
+
+The new receipts establish only this fresh graph's chronology. They do not repair
+or invent missing historical evidence for962b. DeferredMinorR2 is unchanged for
+final broad-review triage. Original failures, cleanup concerns and Task2's pending
+helper/OCI/public-native qualification remain unchanged.

@@ -55,10 +55,14 @@ stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
 The current accepted source overlay is
-`962b27903e20422116ca8528b7edbc8f19eafc94f986907461bd8fb1ded9f976`.
+`8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c`.
 It adds the bounded shared native correlation allocator. Both architecture BPF
 objects and layouts are generated; actual-C and isolated kernel checks pass.
 Full reproducible-helper/OCI and public-native qualification is pending Task2.
+The R1 review correction makes reordered-definition regression fixtures distinct;
+its hashed test input changes the graph from `962b…` without changing native source,
+generated layouts or either embedded architecture. Fresh all-fourteen pin-ordering
+receipts accompany the correction; older chronology limits remain documented.
 Preserved `270a…`, `618c…` and earlier bundles retain their historical evidence;
 current admission requires the new source identity and refuses those old pins.
 See [allocator evidence](../../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md).

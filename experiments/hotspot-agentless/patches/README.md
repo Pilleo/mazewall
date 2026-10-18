@@ -39,6 +39,11 @@ into a test-only runnable BPF wrapper. See
 for RED/GREEN/mutants, actual multi-CPU execution, loader ownership, source controls
 and retained failures. These isolated checks do not prove HotSpot transport or
 active perf/NMI safety. Full helper/OCI/public qualification remains Task2.
+The R1 review correction uses distinct task/frame/epoch fixtures and exact binding
+assertions, including preservation after rejected redelivery. A definition-swap
+negative fails that oracle. Its new hashed graph preserves all native bytes and
+reuses the original isolated native receipts; current all-fourteen advancement
+chronology is recorded separately from the older incomplete chronology evidence.
 
 ## Current strict full and retirement patches
 

@@ -208,7 +208,7 @@ class HotSpotAssetsTest {
             {"schema_version":1,"collector_version":"2","capture_abi":2,"wire_schema":2,
              "platform":"linux-amd64","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
              "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
-             "patch_sha256":"962b27903e20422116ca8528b7edbc8f19eafc94f986907461bd8fb1ded9f976",
+             "patch_sha256":"8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c",
              "gadget_digest":"sha256:$blobHash","files":{$files}}
         """.trimIndent(),
         )
