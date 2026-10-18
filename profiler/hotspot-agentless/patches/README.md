@@ -45,9 +45,13 @@ in completed public fixture captures bind to exact tasks; zero stays unavailable
 Rendered and serialized pdata compatibility pass at1,2^53+1,INT64_MAX. The one
 experimental six-case control includes four carrier TIDs without observed reference
 aliasing, not JIT/GC/Loom lifetime proof. Both dense600 diagnostics still reject.
-Same-key publication/eviction interleavings and active perf/NMI context coverage
-remain limited; the allocator issue is not archived. No runtime source changed in
-Task2, and the original failure/historical source linkage remains unproved.
+Task3 adds an optional real kprobe wrapper around the complete production cache/
+send path:376calls/366exact definitions/0reported loss, two equal-key miss IDs,
+membership-proven LRU eviction/republish, native saturation and ordered nine-packet
+drain/all-owner retirement. This closes finite supported-context acceptance and
+archives the scoped allocator issue. Synthetic frame/task entry seeds complement
+Task2's JVM coupling; exhaustive schedules and active perf/NMI remain unqualified.
+No runtime source changed in Task2/3; original failure/historical linkage stays unproved.
 The R1 review correction uses distinct task/frame/epoch fixtures and exact binding
 assertions, including preservation after rejected redelivery. A definition-swap
 negative fails that oracle. Its new hashed graph preserves all native bytes and

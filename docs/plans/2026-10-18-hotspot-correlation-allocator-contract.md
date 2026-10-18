@@ -12,9 +12,10 @@ The original failed capture remains failed. Equal-clock allocation is an execute
 sufficient cause, not a proved historical interleaving. The correction's source
 implementation and isolated native checks are recorded in
 [Task1 evidence](2026-10-18-hotspot-correlation-allocator-evidence.md).
-Task2 now records byte-reproducible full bundles, actual public-native coupling and
-legacy export checks in that evidence document. Qualification remains the existing
-pinned synchronous interpreter/Serial profile; no broader runtime promotion follows.
+Task2 records byte-reproducible full bundles, actual public-native coupling and
+legacy export checks. Task3 adds the finite full-path native cache/definition,
+eviction/republish and ordered-drain checks in that evidence document. Qualification
+remains the pinned synchronous interpreter/Serial profile; no broader promotion follows.
 
 ## Kubescape compatibility boundary
 
@@ -102,12 +103,25 @@ task/epoch/frame guards remain mandatory, including negative guard controls.
 6. Reproducible locked helper and full OCI bundle, legacy rendered/pdata/API/ABI
    compatibility and explicit public-native runs in the existing pinned
    interpreter/Serial profile. Dense, global and lifetime qualifications stay
-   independent. Report cached/skipped suites accurately.
+    independent. Report cached/skipped suites accurately.
+7. Finite complete-production-path kprobe fixture: repeat-key hits without extra
+   definitions; concurrent different keys and controlled equal keys across verified
+   CPUs; actual LRU256 eviction selected by absent membership, fresh republication
+   without reset and an outstanding old reference retaining its exact definition;
+   native saturated hits plus zero/no-definition miss; known packet/loss accounting
+   and quiesce/detach before reader Flush/join, callback join, final sampling and
+   checked retirement of every owner. Synthetic entry/frame seeds are fixture data,
+   not JVM metadata proof. This makes criterion3's remaining finite check explicit.
 
 The [remaining-work requirements](2026-10-17-hotspot-remaining-work-spec.md) and
 their exact budgets/fail-closed rules continue to apply. The implementation plan
 owns current task dispositions; exact build/native receipts are in the evidence
-document and owning Task2 report. Active perf/NMI nesting, exhaustive same-key
-publication/eviction interleavings, historical trigger repair and the Kubescape
-agentless bridge remain outside the qualified observations. The allocator issue
-stays open for its remaining interleaving/context criteria.
+document and owning task reports. Task3's receipted376calls/366exact definitions,
+real eviction/republish and ordered nine-packet tail discharge the finite supported-
+context gate; the scoped allocator issue is resolved. The actual source/loader
+shares per-CPU scratch/return maps between typed variants, but the supported helper
+uses synchronous kprobe entry and does not attach active perf sampling. Loaded
+perf entry availability is not mixed-context qualification or a scratch lease.
+Active perf/NMI nesting, exhaustive schedules, historical trigger repair, JVM
+metadata lifetime and the Kubescape agentless bridge remain separate unsupported
+scopes. They are not unfulfilled finite allocator acceptance criteria.

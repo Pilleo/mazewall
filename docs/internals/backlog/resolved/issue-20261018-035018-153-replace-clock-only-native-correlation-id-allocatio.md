@@ -1,7 +1,7 @@
 ---
 title: "Replace clock-only native correlation ID allocation with reviewed uniqueness contract"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: medium
 dependencies: []
 component: "profiler"
@@ -10,7 +10,7 @@ target_files:
   - "profiler/hotspot-agentless/patches/profiler-epoch-capture.patch"
 target_symbols:
   - "unwind_stop"
-open_questions: true
+open_questions: false
 ---
 
 # 🟡 [Severity: MEDIUM]: Replace clock-only native correlation ID allocation with reviewed uniqueness contract
@@ -21,7 +21,7 @@ The original failed capture has nine events sharing correlation ID
 `stack definition task identity mismatch` and
 `terminal_accounting_complete:false` remain correct refusals.
 
-The unchanged production `unwind_stop` miss path uses `bpf_ktime_get_ns()` alone
+At investigation time the production `unwind_stop` miss path used `bpf_ktime_get_ns()` alone
 for an ID consumed by ID-only resolver dictionaries. Actual included C under
 controlled equal clocks has **three expected uniqueness RED exits 1**: distinct
 task, same-task distinct frame, same-task distinct epoch. Same-key replay passes
@@ -29,13 +29,13 @@ in every case; a distinct-clock control passes with exit 0. The initial diagnost
 compiler failure is not that RED. This is a sufficient source defect, not proof
 of the historical helper values, real map concurrency or live transport behavior.
 
-See the [source/receipt-backed identity evidence](../../plans/2026-10-18-hotspot-correlation-identity-evidence.md)
+See the [source/receipt-backed identity evidence](../../../plans/2026-10-18-hotspot-correlation-identity-evidence.md)
 for exact source lines/hashes, raw artifact paths, commands and boundaries.
 The authored target is the dispatcher patch above, not generated `build/deps`
-sources. The operator approved the [bounded allocator contract](../../plans/2026-10-18-hotspot-correlation-allocator-contract.md).
+sources. The operator approved the [bounded allocator contract](../../../plans/2026-10-18-hotspot-correlation-allocator-contract.md).
 Task1 implements the correction; Task2 supplies byte-reproducible full bundles,
 public-native and legacy export receipts in the current bounded profile.
-See [allocator evidence](../../plans/2026-10-18-hotspot-correlation-allocator-evidence.md#task2-full-assets-and-public-native-qualification).
+See [allocator evidence](../../../plans/2026-10-18-hotspot-correlation-allocator-evidence.md#task2-full-assets-and-public-native-qualification).
 
 **Needed:**
 
@@ -92,15 +92,35 @@ pdata checks preserve1,2^53+1,INT64_MAX. One receipted six-case experimental con
 includes four carrier TIDs/256marked observations without observed cross-task
 reference alias. Both dense600 diagnostics still reject; all partial evidence stays.
 
-**Completion boundary:** this issue stays open for criterion3's complete admitted
-context/publication/eviction-interleaving characterization. Task2 supplies real
-helper/JVM/transport coupling, not exhaustive same-key producer interleavings or
-active perf/NMI safety. The supported synchronous kprobe profile, buffers,
-deadlines and fatal errors remain. Kubescape's agent-assisted completed Tier E
-content-hash importer still needs a separately scoped agentless bridge; no
-end-to-end import/deployment was run. Original failure and the unproved historical
-trigger remain visible; no JIT/GC/Loom/reliability promotion. The existing backlog
-index row correctly remains open; no archive is justified by these scoped results.
+**Resolution (Task3, 2026-10-18):** the remaining finite criterion3 gate passes
+through the included complete production dispatcher/cache/send path on a real
+TGID-filtered kprobe. Synthetic valid task/frame entry seeds are not JVM metadata
+proof. Actual allocator/LRU256/per-CPU scratch+return map IDs/layouts, helper CPUs0/1,
+repeat hits, concurrent distinct keys and two equal-key misses are checked. Real
+LRU pressure selects an absent key; old48/new356 retain exact independent packet
+bindings, counter355→356 without reset. Native saturation preserves8hits while a
+new miss returns0/no definition. **376admitted=376observed,366exact native definition
+packets,0reported loss**;9unread perf packets drain after quiesce/detach, before
+reader/callback joins, final samples and checked program/all21map retirement.
+See [finite native receipts and context limits](../../../plans/2026-10-18-hotspot-correlation-allocator-evidence.md#task3-finite-native-cache-publication-and-drain).
+
+| Acceptance | Disposition |
+|---|---|
+|1 reviewed bounded non-reusing allocation/lifetime|Approved contract and Task1/R1 implementation/edge receipts; no reset/API/namespace change.|
+|2 key/ABI/budgets/fatal immutable binding|Unchanged production bytes; Task1 guards and Task2 exact non-time/public/legacy results retained.|
+|3 actual-C/shared ownership/concurrency/publication/eviction/context|Reviewed Task1 native/source/host-fault proofs plus Task3 complete-path native finite cases/drain; no modeled algorithm.|
+|4 resolver/reordered/waiter/recovery/pruning/negative controls|Reviewed discriminating R1 and original native error/guard controls retained; old definition remains exact across actual native eviction/republish.|
+|5 source-before14pins/full assets/native public/compatibility|Current8212 full chronology and Task2 byte-equal locked helper/OCI/public8/legacy receipts reused only after exact equality audit.|
+
+The scoped allocator correction is complete; independent controller/final review
+and integration remain separate. Active perf/NMI nesting and exhaustive schedules
+are unsupported scopes, not a promise of scratch leases. Existing synchronous
+interpreter/Serial profile, budgets/deadlines/fatal guards remain. Original capture
+failure/historical trigger and older962b all14chronology remain unproved. There is
+no JIT/GC/Loom/TID-lifetime, dense/global/loss/reliability promotion. Kubescape's
+completed agent-assisted TierE content-hash importer still requires a separate
+agentless bridge; no deployment/import or node-agent mutation occurred. Deferred
+MinorR2/M1 and USER_NOTIF shutdown issue20261003-131111-752 retain their owners.
 
 ---
 <!-- id: issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio  file: issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md -->

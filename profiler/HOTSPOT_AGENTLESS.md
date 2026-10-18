@@ -133,7 +133,11 @@ binding, selected accounting/drain, zero-retention conservation and non-time
 rendered/pdata compatibility pass within the existing profile. An experimental
 four-carrier control observes no cross-task reference alias, without qualifying
 logical ancestry, JIT/GC/Loom lifetime, active perf/NMI or all publication/eviction
-interleavings. The allocator issue remains open for those remaining criteria. Its raw positive
+interleavings. Task3's complete-production-path native kprobe fixture closes the
+finite supported-context cache/definition/eviction/drain gate:376calls,366exact
+definitions,0reported loss, actual eviction/republish and checked all-owner retirement.
+Synthetic entry seeds complement the existing real JVM captures; the allocator
+issue is resolved within that scope. Its raw positive
 reference is not Kubescape's frame-content CallID; the existing Tier E importer
 does not consume this agentless schema-2 stream. See
 [allocator evidence](../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md)

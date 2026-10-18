@@ -175,7 +175,65 @@ adapter or schema translation is part of this task.
   inherited endpoint-cleanup warnings and current ABI gates. Independent task
   review, one broad final review/consolidated fix/scoped re-review follow; retain
   evidence/worktree and operator data. User-directed fast-master integration uses
-   the existing nondefault staging path only after these scoped gates pass.
+  the existing nondefault staging path only after these scoped gates pass.
+
+### Task 3: Close the finite native cache-publication acceptance gap
+
+**Authority:** The approved allocator contract's native publication/eviction/drain
+criterion remains open after Task2. Complete its finite supported-context checks
+without adding a runtime mechanism, active perf/NMI producer or new bridge.
+
+**Files:** Add test-only `profiler/hotspot-agentless/tests/correlation/cache.bpf.c`
+and `internal/qualification/correlation/cache_kernel_test.go`; update the existing
+correlation test README and exact experimental counterparts. Update allocator
+evidence/contract/this plan/current issue/public guidance only as the resulting
+receipts justify. No authored runtime patch/addition,14pin, helper or OCI delta is
+expected: these optional tests do not enter the production helper's selected graph.
+
+**Consumes:** Reviewed Task1 actual-C/source/native allocator proof and Task2
+reproducible8212bundle/actual public-native transport/legacy/multi-carrier results.
+**Produces:** Real finite native cache/definition publication, concurrency,
+eviction/republish and ordered-drain receipts for the supported execution class.
+
+- [x] **Step1:** Inspect exact current `unwind_stop`, its context/maps/helper
+  requirements, existing real filtered-kprobe/perf-reader test patterns and open
+  criterion3 wording. Keep already-valid native8case/bundle results. Derive the
+  minimal test fixture around the complete actual production path; do not model
+  or copy the allocator/cache algorithm.
+- [x] **Step2:** Compile a test-only wrapper including/calling the actual complete
+  dispatcher/cache/send path with its actual layouts/helper. Prefer a real
+  TGID-filtered kprobe and owned marker syscall, matching the admitted program
+  class and supported helper set; XDP helper availability must not be assumed.
+  Synthetic frame/task inputs may seed a valid unwind-stop entry, explicitly
+  labelled fixture data rather than live JVM metadata. Use real shared allocator,
+  LRU256, per-CPU scratch/return maps and real definition perf output/reader.
+  No new public test API or source edit in generated dependencies.
+- [x] **Step3:** Exercise repeat-key hits with no extra definition; concurrent
+  distinct keys across verified CPUs with no cross-key reference alias; controlled
+  equal-key callers with one or multiple unique miss references bound to that same
+  exact fixture; fill/evict the actual256entry LRU, select a demonstrably evicted
+  key and republish it under a fresh ID without resetting the counter. Assert
+  exact task/frames/reference bytes from actual definition packets and final
+  allocator state, not density or presumed eviction order.
+- [x] **Step4:** Check valid hits survive native saturation while a new miss
+  returns zero and emits no definition. Account real perf packets and loss,
+  quiesce/detach the fixture producer, flush/join reader/callback owners and check
+  all link/program/map/reader retirement. Preserve failures and permission causes.
+  Existing host insertion/output fault controls remain distinct from native
+  error evidence; do not force host OOM or invent permission observations.
+- [x] **Step5:** Bind source/compiler/image/object/test-binary receipts before
+  build/run. Reuse Task2 bundles/public captures only after demonstrating no
+  production selected input/pin/asset changes. Explain actual supported kprobe
+  context versus unexercised mixed perf/NMI nesting; do not claim exhaustive
+  schedules, lifetime/global/dense or Kubescape deployment proof. Decide the
+  issue's finite acceptance disposition from exact receipts, preserving its
+  historical failure/unknown trigger even if bounded correction is complete.
+- [ ] **Step6:** Focused test compilation/format/reference/backlog/whitespace,
+  exact mirrors and source/asset preservation; commit exact test/docs scope
+  through the unchanged mandatory full hook once and immediately retain its
+  raw log/dispositions. No new native full matrix or duplicate source checks.
+  Write owning task-3-report.md with files, actual results/limits, remaining issue
+  criteria, gate log/commit and self-review. Controller independently reviews.
 
 ### Task2 checkpoint (2026-10-18)
 
@@ -199,3 +257,27 @@ Step6's actual commit-hook result is necessarily recorded after that attempt in 
 owning `.superpowers/sdd/2026-10-18-hotspot-correlation-allocator/task-2-report.md`
 and progress ledger. This tracked checkpoint records completed qualification;
 it does not predeclare a hook result, task review, merge or final integration.
+
+### Task3 native checkpoint (2026-10-18)
+
+BASE7b66a71f; actual unchanged full production dispatcher/cache/send path loaded and
+executed via TGID-filtered getpgid kprobe with valid synthetic entry seeds. Final
+native result376admitted=376observed/366exact definition packets/0reported loss,
+verified CPUs0/1; equal-key calls produce35/34, both exact. Actual LRU256 eviction
+selects old48, republishes356 with state355→356/no reset; old definition stays exact.
+Native final allocationINT64_MAX,8hits and zero/no-definition new miss pass. Nine
+unread native packets drain after producer quiesce/detach, reader Flush/join and
+held callback join; program29800/all21maps retire with checked closes/kernel IDs.
+
+The finite supported-context criterion3 gate is complete and the scoped issue is
+archived with all5acceptance dispositions.89inputs/8212graph,14pins,selected native
+dependencies and every Task2bundle byte remain identical; reuse actual public8,
+legacy and6candidate receipts. Source/helper/OCI/profile/budgets remain unchanged.
+Active perf/NMI, exhaustive schedules, JIT/GC/Loom/lifetime, dense/global and future
+Kubescape bridge remain separate unsupported scopes. Historical failure/old962b
+chronology, DeferredMinorR2/M1 and USER_NOTIF shutdown issue remain visible.
+
+Step6's post-attempt hook/commit/cache/skip/cleanup result is recorded in the owning
+`.superpowers/sdd/2026-10-18-hotspot-correlation-allocator/task-3-report.md` and progress
+ledger after the single unchanged mandatory attempt. No independent review/merge
+or integration result is predeclared here.

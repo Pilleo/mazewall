@@ -239,7 +239,7 @@ transport behavior or a fixed production allocator. All original observations an
 hashes above remain historical, including the later successful matrix control.
 
 See the [source-backed correlation-identity evidence](2026-10-18-hotspot-correlation-identity-evidence.md)
-for receipts and the [scoped allocator approval request](../internals/backlog/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md).
+for receipts and the [scoped allocator approval request](../internals/backlog/resolved/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md).
 The proposed shared same-map-lifetime positive non-reusing atomic allocation and
 its exact contract remain pending operator design review. No native/map/layout/
 resolver namespace/pin change or broader lifetime/reliability qualification is

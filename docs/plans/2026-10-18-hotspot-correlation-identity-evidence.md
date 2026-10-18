@@ -17,7 +17,7 @@ remains refused; its later successful control does not repair it.
 
 This is a documentation/backlog follow-up at base
 `8cb57bad331a382a1bdd13be8be4d4294e7f7c56`, branch `feat/hotspot-followups`.
-The [scoped MEDIUM issue](../internals/backlog/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md)
+The [scoped MEDIUM issue](../internals/backlog/resolved/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md)
 requests operator design review before any allocator/map/layout/failure-semantics
 implementation or pin advancement. Existing fatal identity guards remain required.
 Production remains pinned Temurin25.0.4.1+1-LTS, `-Xint -XX:+UseSerialGC`,

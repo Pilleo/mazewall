@@ -16,7 +16,10 @@ architectures/layouts and renewed decoder/guard characterization have passed the
 scoped checks. **Task2 now supplies full reproducible helper/OCI and actual
 public-native qualification of this graph** in the unchanged supported profile;
 see [current results](#task2-full-assets-and-public-native-qualification).
-The allocator issue remains open for its broader interleaving/context criteria.
+**Task3 closes the finite supported-context publication/eviction/drain gate** with
+the complete production path and real native perf transport; see
+[new native evidence](#task3-finite-native-cache-publication-and-drain). The scoped
+allocator issue is resolved without qualifying active perf/NMI or exhaustive schedules.
 
 The original failed capture remains failed. The three unchanged-C equal-clock REDs
 establish a sufficient allocator defect, not its historical trigger. Original
@@ -423,7 +426,7 @@ wrong frames or supply missing frame semantics. Agentless schema2/kind/BOOTTIME
 is a separate input. Task2 does not access/mutate/build/test node-agent or claim a
 deployed adapter, saved profile, end-to-end attribution or completed bridge.
 
-Task2's scoped full-asset/public qualification is complete. The issue stays open
+At the Task2 checkpoint, scoped full-asset/public qualification was complete; the issue stayed open
 for full admitted-context/publication/eviction-interleaving characterization;
 synchronous live observations do not exhaust same-key races or eviction/recovery
 schedules. Active perf/NMI remains unqualified. No new JIT/GC/TID-reuse/Loom,
@@ -431,3 +434,114 @@ dense/global/loss or policy authority follows. DeferredMinorR2 remains for final
 broad review. Inherited USER_NOTIF shutdown ENOSYS/cleanup issue20261003-131111-752
 is not fixed. The owning Task2 report records the actual mandatory full hook's
 raw log/cache/skip/warning dispositions after the commit; no duplicate full gate.
+
+## Task3 finite native cache publication and drain
+
+BASE7b66a71f91b6305d3457b5615ed1b6c96c47e58b, same authorized checkout/branch.
+Only optional `tests/correlation/cache.bpf.c`, `internal/qualification/correlation/cache_kernel_test.go`,
+their exact experimental mirrors and documentation/status change. The test README
+has explicit locked/offline compilation and native execution commands. There is
+no runtime patch, public API, pin, helper, OCI, dependency, profile or budget change.
+
+Let `N` be `.superpowers/sdd/2026-10-18-hotspot-correlation-allocator/evidence/task3`.
+Before every build, `cache-N-actual-selected-inputs-before.json`, actual Clang image/
+compiler receipts, and `cache-go-N-{selection,inputs-before}.json` plus actual locked
+Go compiler/image receipts bind the chosen source graph. Before each execution,
+`native-*-binary-object-before-execution.json` hashes the actual object/binary.
+Final `native-final.log` SHA256 **69085f4b66ff8270cf7cabed289a23a46b3fb4ef5e68daa7160a32defac32022**.
+
+### Actual path, helpers and source context
+
+The wrapper includes the entire unmodified prepared8212 production dispatcher,
+native allocator/header, `Trace`/`TraceCache`/`PerCPURecord`, pristine-record/frame
+helpers and `send_trace`. It suppresses generated multi-use entry declarations,
+supplies the actual extern-map declarations from HotSpot/Go-label units and adds
+one real TGID-filtered `__x64_sys_getpgid` kprobe. No copied cache/allocator algorithm
+or mocked helper is used. Actual map operations, CAS, kernel reads, CPU/PID helpers
+and perf output load and execute on Linux-amd64 kernel7.2.10-x64v3-xanmod1.
+The HotSpot/Go-label/APM maps are empty; seeded stable epoch/task/native frames
+are synthetic valid entry fixtures, not a Java walker or live JVM metadata proof.
+
+Production `tracemgmt.h:MULTI_USE_FUNC` generates perf/kprobe variants; the loader
+rewrites their LRU/allocator/scratch/return references to shared acquired maps.
+Gadget's actual `pkg/symbolizer/otel/otel.go:112–121,223–233,447–512` exports both
+typed entries but never calls `AttachTracer` for active CPU sampling. The selected
+`gadgets/openat-stack/program.bpf.c` uses synchronous `openat_handler_entry`; its
+return-slot lifetime is that synchronous chain. `OffCPUThreshold:0` does not load
+the off-CPU unwinder entries. The separately attached `sched_process_free` monitor
+is process cleanup, not an unwind producer and does not use these scratch/return
+maps (`tracer/tracepoints.go:31–41`, `support/ebpf/sched_monitor.ebpf.c`).
+The fixture executes one admitted
+kprobe chain per owned calling thread, pins/verifies distinct CPUs, and deliberately
+uses equal synthetic keys across them. That probes cache races; a real task is not
+running simultaneously on two CPUs. No claim of arbitrary mixed entries, active
+perf/NMI nesting, exhaustive kernel schedules, scratch leases or JVM lifetime follows.
+
+### Real measured cases
+
+Final native invocation is `cache-go-5.test -test.v -test.count=1 -test.timeout=60s
+-test.run=^TestKernelCorrelationCachePublication$`, locked Go image, rootful Docker,
+`--privileged --pid=host --network=none --pull=never`, read-only checkout/output/
+module-cache mounts and `MW_CORRELATION_CACHE_OBJECT=N/cache-2.o`. Both endpoint
+variables equal unix:///var/run/docker.sock. The Go build uses actual
+`build/experiment.go.mod`, offline dependencies and `-buildvcs=false`.
+
+Builder **dba339d2…c77aa / Clang18.1.8**, Go image **fb612b78…47b84 / Go1.26.0**
+are unchanged locked images, inspected before compilation. Final object SHA256
+**6c8f6c01e3cf4f4d13f42a54cfa92f695a03395638144ea3a20758911d243cc6**;
+test binary **67876a39cc395fad80a5665ac42bc1cbf07f940f986a369543d758deb755d3e0**.
+No source/dependency download, compiler substitution, sysctl or permission fallback.
+
+| Gate | Actual final observation |
+|---|---|
+| Layout/map ownership | Program29800 references all21 acquired map IDs. Allocator30203 ARRAY/u32/u64/1; LRU30193 key24600/value8/capacity256; record30208 perCPU/value26600; scratch30209 perCPU/value24600; return30198 perCPU/value8; perf30195/12CPUs. All actual specs/IDs checked. |
+| Repeat key | Initial miss reference1; repeat returns1, trace miss-reference0, counter remains1; no extra packet. |
+| Different keys | 16 paired calls on helper-verified CPUs0/1: task and frame distinctions, unique positive references, no cross-key alias. |
+| Equal key | Two barrier-released calls actually miss, producing references35/34; both packets bind the same exact PID621929/TID622909/epoch4/frame21/file1337. Earlier setup control observed a hit/miss pair34/34; neither schedule is presumed universal. |
+| Evict/republish | 320 distinct native fills pressure the actual LRU256. Select an actually absent key, not a predicted victim: old reference48, new356, state355→356 with no reset. Old retained packet remains exact; new reference is independently exact for that key. |
+| Saturation | After all calls join, forward-only fixture seedINT64_MAX−1; actual miss issuesINT64_MAX. Eight hits reuse it without definitions; a new miss returns0, inserts nothing, emits nothing and leaves counter atINT64_MAX. |
+| Raw packets/accounting | **376 admitted=376 observed;366 unique definitions;0 reported perf loss**. Every760-byte logical packet exactly matches task/epoch/reference/frame and all other seeded/zero fields using actual BTF offsets. Raw samples are764bytes, including4perf padding bytes; every full raw hex/hash is retained. Final251 LRU entries each match exact recorded bindings (kernel per-CPU LRU batching does not promise256 resident entries). |
+| Ordered drain | Reader and callback held by separate channels;9 native output packets remain unread in perf rings. Producers quiesce and restore affinity, link detaches, Flush precedes reader release/join. Callback is proved still held, then released/joined before final counts/loss/cache sampling. |
+| Retirement | Checked link/reader/program/all21map closes, worker/reader/callback joins. Actual program/map IDs becomeENOENT within one shared2s RCU-reclamation budget; no GC-dependent live Variable mmap owners. Final testPASS/0skips in0.18s. |
+
+Test-specific limits:376calls,2workers, fixture input/result maps8entries each,
+callback queue32,9queuedtail packets,2s explicit waits and shared2s kernel-ID
+retirement budget/1ms polling,60s outer timeout. Production perf524288bytes/possible
+CPU, LRU256 and all existing buffers/deadlines remain unchanged. This is finite
+successful-path publication and drain evidence; original host insertion/output-fault
+controls still characterize those boundary outcomes. No host OOM or native output/
+permission failure is fabricated, and observed errors are retained.
+
+### Reuse, failures and issue disposition
+
+Before/after equality audits derive the same89ordered inputs/8212digest and14pins,
+check547 prepared dependency files from Task2's helper receipt and every installed
+bundle byte against the retained byte-equal Task2build2 bundle. The optional files
+are outside the helper's selected production graph: actual locked Go `list -deps`
+selects the identical7412paths, with6060locally readable selected files rehashed
+against Task2 and standard sources bound by the same locked Go image. Reuse the reviewed Task1 source/
+kernel/loader/guard proofs and Task2 actual8public-native+legacy+6candidate results;
+do not repeat their full matrix or infer that default hook skips executed natively.
+
+Retained fixture setup errors: first Go compilation used removed RewriteConstants
+(selected cilium0.22 requires VariableSpec.Set); first two native attempts reject
+ELF perf-size/data-map-flag normalization assertions before attachment, with initial
+immediate kernel-ID retirement failures retained; third native attempt attaches but
+admits0calls because a private PID namespace mismatched BPF host TGIDs. Corrected
+runtime uses explicit host PID namespace. No verifier/helper/permission error was
+observed or hidden. A passing intermediate run precedes the final explicit held-
+reader tail improvement. All source/tool/object/binary/error receipts remain inN.
+
+Criterion3's finite supported-context publication/eviction/drain gate is discharged.
+Together with reviewed Task1/R1 and Task2, all five scoped issue acceptance criteria
+are met; archive the allocator issue with its original failure/unknown trigger and
+chronology limits intact. Unsupported active perf/NMI, exhaustive schedules,
+JIT/GC/Loom/TID lifetime, dense/global/loss qualification and the future Kubescape
+agentless bridge remain separate. Node-agent is untouched/read-only; content-hash
+CallIDs are not native counters. DeferredMinorR2/M1 and inherited USER_NOTIF shutdown
+issue20261003-131111-752 remain for their existing owners/final review.
+
+The owning `task-3-report.md` records focused reference/backlog/mirror/format checks,
+the single unchanged mandatory commit-hook outcome, raw log and exact cached/skipped/
+cleanup dispositions after that attempt; no duplicate same-code full gate. Controller
+review/final broad review/integration remain separate from this native task evidence.
