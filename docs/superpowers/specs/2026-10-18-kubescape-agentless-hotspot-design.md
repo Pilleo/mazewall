@@ -40,7 +40,7 @@ embedding is not required for this first end-to-end slice.
 |S|`/home/leanid/Documents/code/java/stack-attribution/storage`|Not present; operator must provision/authorize a writable checkout before B|
 |Storage base|`github.com/kubescape/storage v0.0.303`, commit `d963c7941f5bd493751109324e6eba41f7d2b5af`|Cached module is read-only evidence, never the editing location|
 |Node Gadget|`06b0d12baca0e2ba61df1aa5a00dc9e449567a10`|No OTel bridge; remains unchanged in this design|
-|Collector graph|Gadget7097db144ccd; profiler replacementef6cf29492c8|Current Task3 source patch473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b; observed runtime admission remains closed|
+|Collector graph|Gadget7097db144ccd; profiler replacementef6cf29492c8|Owned-drain repair source89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50; original Task3 source473 retained in evidence; observed runtime admission remains closed|
 |Reference upstream|`open-telemetry/opentelemetry-ebpf-profiler` at36f875fd7d625a80de939a9325e1cde8fd43a9f6|Reference only, not an automatic rebase|
 
 Do not create a worktree, switch these repositories, stage prototype work, or

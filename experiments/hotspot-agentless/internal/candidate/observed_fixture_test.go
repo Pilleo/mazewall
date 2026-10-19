@@ -4,6 +4,7 @@ package candidate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,9 @@ import (
 	"time"
 
 	"github.com/Pilleo/mazewall/hotspot-bridge/bundle"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
+	"golang.org/x/sys/unix"
+	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 )
 
 type observedCompilerReceipt struct {
@@ -76,5 +80,69 @@ func TestObservedFixtureMountPoint(t *testing.T) {
 	info, err := os.Stat(filepath.Join(output, "fixture/gates"))
 	if err != nil || !info.IsDir() {
 		t.Fatalf("target's read-only fixture lacks nested gate mount point: %v", err)
+	}
+}
+
+type observedPermissionReceipt struct {
+	observedCompilerReceipt
+	present   bool
+	queries   int
+	startErr  error
+	removeErr error
+}
+
+func (d *observedPermissionReceipt) Output(timeout time.Duration, args ...string) (string, error) {
+	switch args[0] {
+	case "start":
+		return "native denial fixture", d.startErr
+	case "ps":
+		d.queries++
+		if d.present {
+			return fmt.Sprintf("%064x", d.next), nil
+		}
+		return "", nil
+	case "rm":
+		if d.removeErr != nil {
+			return "", d.removeErr
+		}
+		d.present = false
+		return "", nil
+	default:
+		return d.observedCompilerReceipt.Output(timeout, args...)
+	}
+}
+
+func TestObservedPermissionCollectorRetiresBeforeReturn(t *testing.T) {
+	dir := t.TempDir()
+	docker := &observedPermissionReceipt{present: true}
+	err := observedPermissionControl(docker, driver.NewContainerOwners(docker), dir, dir, dir, "test-image", wire.Target{PID: 123})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if docker.present || docker.queries < 2 {
+		t.Fatal("permission control returned before confirming collector absence")
+	}
+}
+
+func TestObservedPermissionCollectorFailureRetainsPendingOwners(t *testing.T) {
+	dir := t.TempDir()
+	docker := &observedPermissionReceipt{present: true, startErr: unix.EACCES, removeErr: unix.EPERM}
+	err := observedPermissionControl(docker, driver.NewContainerOwners(docker), dir, dir, dir, "test-image", wire.Target{PID: 123})
+	var pending interface{ HasPendingOwners() bool }
+	if !errors.Is(err, unix.EACCES) || !errors.Is(err, unix.EPERM) || !errors.As(err, &pending) || !pending.HasPendingOwners() {
+		t.Fatal("collector failure lost a cause or unresolved remote ownership", err)
+	}
+}
+
+func TestObservedPermissionCollectorKeepsErrorAfterConfirmedRetirement(t *testing.T) {
+	dir := t.TempDir()
+	docker := &observedPermissionReceipt{present: true, startErr: unix.EACCES}
+	err := observedPermissionControl(docker, driver.NewContainerOwners(docker), dir, dir, dir, "test-image", wire.Target{PID: 123})
+	if !errors.Is(err, unix.EACCES) || docker.present || docker.queries < 2 {
+		t.Fatal("original error or confirmed collector retirement was lost", err)
+	}
+	var pending interface{ HasPendingOwners() bool }
+	if errors.As(err, &pending) && pending.HasPendingOwners() {
+		t.Fatal("retired collector incorrectly retained as pending", err)
 	}
 }

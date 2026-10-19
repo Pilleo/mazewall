@@ -7,7 +7,7 @@ import (
 
 func TestCompileIDPresenceDoesNotQualifyLifetime(t *testing.T) {
 	const revision = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
-	const patch = "473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b"
+	const patch = "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"
 	got, err := AuditCapture(2, revision, patch)
 	want := []string{"metadata_stability_through_decode", "code_lifetime_through_decode", "concurrent_reclamation_exclusion"}
 	if err != nil || got.CaptureABI != 2 || got.ProfilerRevision != revision || got.PatchSHA256 != patch ||

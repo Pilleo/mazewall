@@ -20,7 +20,7 @@ private const val MAX_MANIFEST_JSON_DEPTH = 2
 private const val OCI_SCHEMA = 2
 private const val GADGET_REVISION = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 private const val PROFILER_REVISION = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
-private const val PATCH_SHA256 = "473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b"
+private const val PATCH_SHA256 = "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"
 private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
 
 /** Local integrity/version admission. The operator supplies a trusted manifest and owns installation. */

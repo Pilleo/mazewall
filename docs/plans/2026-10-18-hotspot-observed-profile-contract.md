@@ -14,8 +14,11 @@ Strict schema2 remains pinned Temurin25.0.4.1+1-LTS, `-Xint -XX:+UseSerialGC`,
 stable safepoint epoch and full owned drain. Its Kotlin API/ABI, absent schema3
 fields and decoder/admission rules stay schema2. Schema1 remains a separate
 experimental branch. The current source patch is
-`473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b`;
+`89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50`;
 this source identity does not qualify ordinary-JVM runtime behavior.
+The initial Task3 source473 and rejected Task4 captures remain frozen in their
+evidence. The subsequent [owned-drain repair](2026-10-19-hotspot-observed-drain-evidence.md)
+does not change admission or the observation claim.
 
 ## Request, identity and lifetime
 
@@ -114,8 +117,10 @@ candidate's new SDK bundle behavior.
 Task3 host/source checks are separate from A-OBS. A4 must build/hash actual
 candidate assets from its recorded graph and run the ordinary tiered/G1, code-cache
 churn, class unloading, exec/exit and permission cases with the required route
-denominators; then preserve the real qualified/rejected verdict. No such capture,
-two-bundle reproducibility, SDK candidate publication or admission is claimed here.
+denominators; then preserve the real qualified/rejected verdict. The initial Task4
+rejection and subsequent owned-drain repair have separate evidence: three repaired
+controlled cases now complete, but the full A-OBS verdict still rejects. Candidate
+bundle reproducibility is not SDK publication or runtime admission.
 The unchanged inherited USER_NOTIF ENOSYS socket/directory shutdown investigation
 remains open under issue20261003-131111-752.
 

@@ -5,6 +5,7 @@ package candidate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,6 +17,27 @@ import (
 	"io.mazewall/experiments/hotspot-agentless/internal/capture"
 	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 )
+
+// Only the explicitly tagged qualification binary has this internal process entry.
+func TestObservedCollectorProcess(t *testing.T) {
+	input := os.Getenv("MW_OBSERVED_CAPTURE_INPUT")
+	if input == "" {
+		return
+	}
+	var cfg observedCollectorInput
+	err := driver.ReadJSON(input, &cfg)
+	if err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		err = capture.RunObservedCandidate(ctx, capture.Config{PID: int(cfg.Target.PID), ExpectedTarget: cfg.Target, DrainFull: true, Image: cfg.Image, Store: cfg.Store}, os.Stdout, os.Stdin)
+		cancel()
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	// Exit directly: test-runner PASS text is not part of the JSONL protocol.
+	os.Exit(0)
+}
 
 func TestObservedMatrixNative(t *testing.T) {
 	assets, output := os.Getenv("MW_HOTSPOT_ASSETS"), os.Getenv("MW_OBSERVED_OUTPUT")

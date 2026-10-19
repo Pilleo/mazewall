@@ -55,7 +55,14 @@ stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
 The current accepted source overlay is
-`473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b`.
+`89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50`.
+
+The [owned-drain repair](../../docs/plans/2026-10-19-hotspot-observed-drain-evidence.md)
+wires actual auxiliary ownership for both HotSpot modes without fabricating an
+epoch lease. It preserves strict admission and native budgets; ordinary-JVM
+qualification remains rejected overall. The historical allocator/helper evidence
+below is not a release/admission receipt for the new source graph. Existing asset
+bundles must be rebuilt and fully verified for the current fingerprint.
 
 Task3 adds a separately negotiated schema3 observation **candidate**, described in
 the [profile contract](../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).

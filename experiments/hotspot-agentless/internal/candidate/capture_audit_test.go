@@ -11,7 +11,7 @@ import (
 )
 
 const auditManifestJSON = `{"capture_abi":2,"profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",` +
-	`"patch_sha256":"473acb5ab31168cdba2ad390c105ca83a163e91d9443e53ce45cfecd6f30c58b"}`
+	`"patch_sha256":"89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"}`
 
 func TestSourceAuditCannotBecomeRuntimeQualification(t *testing.T) {
 	assets, out := t.TempDir(), t.TempDir()

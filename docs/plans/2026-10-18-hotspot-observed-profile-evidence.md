@@ -1,5 +1,10 @@
 # Ordinary HotSpot observational qualification — rejected
 
+Continuation: [2026-10-19 owned-drain repair](2026-10-19-hotspot-observed-drain-evidence.md)
+records new source and new native captures separately. The original report,
+artifact hashes and rejection below remain frozen; the overall A-OBS gate is still
+rejected, not silently upgraded by the three subsequently completed cases.
+
 ## Decision
 
 **A-OBS is rejected. Production admission remains closed.** The first real

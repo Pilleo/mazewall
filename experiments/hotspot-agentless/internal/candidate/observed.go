@@ -21,7 +21,6 @@ import (
 	"github.com/Pilleo/mazewall/hotspot-bridge/bundle"
 	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"golang.org/x/sys/unix"
-	"io.mazewall/experiments/hotspot-agentless/internal/capture"
 	"io.mazewall/experiments/hotspot-agentless/internal/driver"
 	"io.mazewall/experiments/hotspot-agentless/internal/identity"
 	"io.mazewall/experiments/hotspot-agentless/internal/preflight"
@@ -37,8 +36,10 @@ type observedCaseResult struct {
 	Error                  string
 	Target                 wire.Target
 	Raw, Terminals, Useful int
-	Summary                *wire.Summary `json:",omitempty"`
-	Capture                *wire.Capture `json:",omitempty"`
+	Summary                *wire.Summary        `json:",omitempty"`
+	Capture                *wire.Capture        `json:",omitempty"`
+	Collector              *observedProcessExit `json:",omitempty"`
+	pending                error
 }
 
 // RunObservedMatrix is qualification-only. A report cannot change runtime admission.
@@ -114,12 +115,19 @@ func RunObservedMatrix(ctx context.Context, assets, output string) (ObservedVerd
 		return v, err
 	}
 	results := []observedCaseResult{}
+	var pending error
 	for _, name := range []string{"ordinary", "compiled-churn", "class-unload", "target-exit", "permission-denial"} {
 		result := runObservedCase(ctx, docker, name, root, output, assets, store, image, lock.Images, verified)
 		results = append(results, result)
+		if result.pending != nil {
+			pending = result.pending
+			break
+		}
 	}
-	execResult := observedExecControl(ctx, output)
-	results = append(results, execResult)
+	if pending == nil {
+		execResult := observedExecControl(ctx, output)
+		results = append(results, execResult)
+	}
 	qualified := true
 	for _, result := range results {
 		if result.Status != "qualified" && result.Status != "safe-control" {
@@ -129,7 +137,7 @@ func RunObservedMatrix(ctx context.Context, assets, output string) (ObservedVerd
 	if qualified {
 		v.Status = "qualified"
 	}
-	return v, driver.WriteJSON(v.ReportPath, map[string]any{"verdict": v, "cases": results, "production_admission": false, "policy_eligibility": false, "scope": "controlled observational routes only", "unqualified": []string{"global collection", "GC/code/metadata reclamation ownership", "virtual threads", "logical TID lifetime", "policy completeness"}})
+	return v, errors.Join(pending, driver.WriteJSON(v.ReportPath, map[string]any{"verdict": v, "cases": results, "production_admission": false, "policy_eligibility": false, "scope": "controlled observational routes only", "unqualified": []string{"global collection", "GC/code/metadata reclamation ownership", "virtual threads", "logical TID lifetime", "policy completeness"}}))
 }
 
 func observedRoot() (string, error) {
@@ -329,7 +337,19 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 	owners := driver.NewContainerOwners(docker)
 	var logs []*os.File
 	var target *driver.OwnedCommand
+	var collector *exec.Cmd
 	defer func() {
+		if result.Collector != nil && result.Collector.PID != 0 && !result.Collector.Reaped {
+			result.pending = &observedPendingOwners{collector: collector, targets: owners, logs: logs, cause: result.Collector.cause}
+		}
+		if result.pending != nil {
+			result.Status = "rejected"
+			result.Error = result.pending.Error()
+			if err := driver.WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
+				result.pending = errors.Join(result.pending, err)
+			}
+			return
+		}
 		err := os.WriteFile(filepath.Join(gates, "release"), []byte("release"), 0644)
 		if target != nil {
 			err = errors.Join(err, target.Wait(5*time.Second))
@@ -441,9 +461,13 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 		return
 	}
 	if name == "permission-denial" {
-		err = observedPermissionControl(docker, owners, dir, root, assets, images["go"], result.Target)
+		err = observedPermissionControl(docker, driver.NewContainerOwners(docker), dir, root, assets, images["go"], result.Target)
 		if err != nil {
 			fail(err)
+			var pending interface{ HasPendingOwners() bool }
+			if errors.As(err, &pending) && pending.HasPendingOwners() {
+				result.pending = &observedPendingOwners{targets: owners, logs: logs, cause: err}
+			}
 			return
 		}
 		result.Status = "safe-control"
@@ -470,6 +494,35 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 	defer send.Close()
 	ctx, cancel := context.WithTimeout(parent, 12*time.Second)
 	defer cancel()
+	binary, err := os.Executable()
+	if err != nil {
+		fail(err)
+		return
+	}
+	input := filepath.Join(dir, "collector-input.json")
+	if err := driver.WriteJSON(input, observedCollectorInput{Target: result.Target, Image: image, Store: store}); err != nil {
+		fail(err)
+		return
+	}
+	collectorLog, err := os.Create(filepath.Join(dir, "collector.log"))
+	if err != nil {
+		fail(err)
+		return
+	}
+	logs = append(logs, collectorLog)
+	collector = exec.CommandContext(ctx, binary, "-test.run=^TestObservedCollectorProcess$", "-test.timeout=20s")
+	collector.Env = append(os.Environ(), "MW_OBSERVED_CAPTURE_INPUT="+input)
+	collector.Stdin, collector.Stdout, collector.Stderr = control, io.MultiWriter(raw, write), collectorLog
+	collector.WaitDelay = time.Second
+	binaryHash, err := driver.HashFile(binary)
+	if err != nil {
+		fail(err)
+		return
+	}
+	if err := driver.WriteJSON(filepath.Join(dir, "collector-process-input.json"), map[string]any{"argv": collector.Args, "binary_sha256": binaryHash, "input": input}); err != nil {
+		fail(err)
+		return
+	}
 	ready := make(chan struct{}, 1)
 	decoded := make(chan observedDecoded, 1)
 	go func() {
@@ -510,11 +563,9 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 		}
 		decoded <- observedDecoded{decoder: d, err: errors.Join(decodeErr, s.Err()), raw: len(marked), terminals: terminalCount, summary: summary}
 	}()
-	runDone := make(chan error, 1)
+	runDone := make(chan observedProcessExit, 1)
 	go func() {
-		err := capture.RunObservedCandidate(ctx, capture.Config{PID: pid, ExpectedTarget: result.Target, DrainFull: true, Image: image, Store: store}, io.MultiWriter(raw, write), control)
-		write.Close()
-		runDone <- err
+		runDone <- runObservedCollectorProcess(collector, write)
 	}()
 	var d observedDecoded
 	started := false
@@ -545,7 +596,12 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 		}
 		d = <-decoded
 	}
-	runErr := <-runDone
+	exit := <-runDone
+	result.Collector = &exit
+	runErr := exit.cause
+	if err := driver.WriteJSON(filepath.Join(dir, "collector-exit.json"), exit); err != nil {
+		runErr = errors.Join(runErr, err)
+	}
 	result.Raw, result.Terminals, result.Summary = d.raw, d.terminals, d.summary
 	captured, decodeErr := d.decoder.Finish(runErr)
 	if err := errors.Join(workErr, d.err, decodeErr, runErr); err != nil {
@@ -645,7 +701,12 @@ func observedExecControl(ctx context.Context, output string) (result observedCas
 	return
 }
 
-func observedPermissionControl(docker candidateDocker, owners *driver.ContainerOwners, dir, root, assets, image string, target wire.Target) error {
+func observedPermissionControl(docker candidateDocker, owners *driver.ContainerOwners, dir, root, assets, image string, target wire.Target) (failure error) {
+	cleanup := filepath.Join(dir, "permission-collector")
+	if err := os.Mkdir(cleanup, 0755); err != nil {
+		return err
+	}
+	defer func() { failure = owners.Finish(cleanup, failure) }()
 	binary, err := os.Executable()
 	if err != nil {
 		return err

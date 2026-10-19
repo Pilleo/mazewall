@@ -21,6 +21,14 @@ after the six-document handoff approves P0 implementation/design scope by refere
 A awaits Task0 review; ordinary-JVM qualification/admission and SDK publication
 still require their separate named gates. No ordinary-JVM support is yet qualified.
 
+**Execution checkpoint (2026-10-19):** A1/A2/A3 and the initial rejected A4 corpus
+are committed; SDKv0.1.0 remains immutable. The subsequent
+[owned-drain repair](../../plans/2026-10-19-hotspot-observed-drain-evidence.md)
+completes three controlled native captures but leaves the overall A-OBS verdict
+rejected. A4 admission and A5 publication/handoff remain blocked. Do not redispatch
+the completed extraction/decoder/negotiation work or promote successful route
+prefixes to a lifetime proof.
+
 ## Global Constraints
 
 - JDK25 idioms; library compatibility floor JDK22. Supported host Linux-amd64.

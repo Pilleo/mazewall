@@ -140,6 +140,9 @@ func (e *containerCleanupError) Error() string {
 }
 func (e *containerCleanupError) Unwrap() error { return e.cause }
 
+// Allows callers to keep a dependent target alive when remote retirement is unproved.
+func (e *containerCleanupError) HasPendingOwners() bool { return !e.report.ResourcesRetired }
+
 func (o *ContainerOwners) retire() (cleanupReport, error) {
 	deadline := time.Now().Add(20 * time.Second)
 	report := cleanupReport{PendingContainers: []string{}, PendingAcquisitions: []containerReceipt{}, PendingWrappers: []int{}, Failures: []string{}}
