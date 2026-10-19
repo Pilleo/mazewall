@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 16fab8e6f36f3f1fdb57964003affd30a420219c
-status: p0_approved_pending_a_b_c_and_separate_cluster_approval
+status: pending_released_a_b_c_handoffs_native_vm_preflight_verified_retired
 ---
 
 # Kubescape Agentless HotSpot Kubernetes Acceptance Implementation Plan
@@ -15,6 +15,19 @@ status: p0_approved_pending_a_b_c_and_separate_cluster_approval
 **Tech Stack:** Existing Go1.27 Docker build, static Go collector, approved local Kubernetes cluster, pinned Temurin25, generated storage client/protobuf, standard Go example commands.
 
 **Spec:** [Governing design, D](../specs/2026-10-18-kubescape-agentless-hotspot-design.md#d-end-to-end-exit).
+
+**2026-10-19 checkpoint:** The operator approved a disposable local4vCPU/8GiB/
+30GiB KVM VM with Ubuntu26.04/K3sv1.35.8+k3s1. Actual initial PID namespace,
+cgroupv2/BTF/BPF/uprobe kernel options and CA-verified Ready node preflight passed.
+Existing MicroK8s and Multipass VMs were not touched. This is not D execution:
+required SDK review/publication, storage release provenance, real consumer pins
+and the ordinary node image are still unavailable. C1–C5 host-side wiring is
+locally committed/tested, not a release-ready C handoff. Both owned disposable
+test environments were subsequently retired with checked physical/container
+ownership and retained receipts, rather than left idle while release review is
+pending. See [executed companion evidence](../../plans/2026-10-19-hotspot-companion-local-evidence.md).
+Future D setup must acquire new actual node/process/image identities after the
+required handoffs exist; historical Ready receipts cannot stand in for them.
 
 ## Global Constraints
 

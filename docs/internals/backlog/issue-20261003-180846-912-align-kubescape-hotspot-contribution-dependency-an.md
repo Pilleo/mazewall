@@ -84,5 +84,17 @@ independent empty profile inventory are checked. Original failed captures and
 setup failures remain frozen; storage release provenance, C runtime wiring and
 final D acceptance still prevent closing this overall integration issue.
 
+**Subsequent companion work:** C1–C5 host-side implementation is committed locally
+through node-agent72034696, with independently exported source/race/build receipts
+and the original prototype preserved/excluded. The checked publication path and
+existing disk-backed save queue retain typed symbols without policy promotion.
+The separately approved disposable native VM reaches initial-PID/BTF/cgroupv2
+preflight and a CA-verified Ready K3s node, but no final native capture runs ahead
+of actual release handoffs. PR540 still has no required review; immutable SDK
+v0.2.0 publication, storage release/image identity, hermetic consumer pins, ordinary
+node image and final D acceptance remain uncompleted. Host units and Ready
+environments do not close this issue. See the updated companion evidence for exact
+commits, retained failures and disposable-resource custody/retirement.
+
 ---
 <!-- id: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an  file: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md -->

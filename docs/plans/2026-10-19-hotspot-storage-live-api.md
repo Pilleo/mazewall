@@ -52,11 +52,19 @@ No clean full-race result is claimed.
 Storage's separate `build/hotspot-schema-handoff-live-20261019.json` records
 `b3LocalAPIAccepted:true`, **releaseReady:false**, real server provenance and null
 unpublished module/version fields. The prior incomplete handoff stays frozen.
-The isolated cluster/server remain owned for follow-up: profile deletion is not
-cluster retirement, and no existing cluster was touched.
+At the API checkpoint the isolated cluster/server remained owned for follow-up;
+profile deletion alone was not claimed as cluster retirement. After companion
+host-side checks, required release review still blocked final native acceptance.
+The exact owned kind container ID/node UID and empty ContainerProfile inventory
+were rechecked, then scoped deletion retired this node/server. No owned cluster
+containers remain and all recorded foreign container IDs are preserved; see
+`build/kubescape-dev/local-cluster/retire-result.json`. Images, raw receipts and
+rejected evidence remain retained. An initial missing ambient Podman socket failure
+occurred before mutation and stays separate; cleanup used the original explicit
+Docker endpoint, not changed host configuration. No existing cluster was touched.
 
 No bridgev0.2.0 tag, published storage module/image, ready provider release handoff,
-node-agent runtime/capability integration or final native Kubernetes acceptance is
+packaged native node-agent runtime qualification or final Kubernetes acceptance is
 claimed. [PR540](https://github.com/Pilleo/mazewall/pull/540) still requires the
 prescribed review before SDK publication.
 

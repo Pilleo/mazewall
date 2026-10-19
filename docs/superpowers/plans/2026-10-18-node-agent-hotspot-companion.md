@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 1c4fb954cdd51edb98a2ad4100be392cd806e44e
-status: current_prototype_baseline_approved_c1_local_unit_verified
+status: c1_c2_c3_c4_c5_local_host_wiring_verified_pending_released_pins_image_native
 ---
 
 # Node-Agent HotSpot Companion Implementation Plan
@@ -23,6 +23,20 @@ records commit94bce485, exact-index race checks and byte-preservation proof for 
 34original files. Development uses a recorded Go1.27.0 workspace with reviewed
 local A/B source. Runtime wiring and published dependency/release handoffs are not
 claimed. Do not discard or reimplement the preserved Tier E prototype.
+
+**Later local execution:** C2bf44378e and C3 prerequisite/streaming/controller
+commits e7c9ab51,15b9db85,3aa32df6 pass independently exported staged-tree race
+checks without the prototype. [Executed companion evidence](../../plans/2026-10-19-hotspot-companion-local-evidence.md)
+records ownership, pending cleanup, atomic evidence, restart claims and exact limits.
+The newly approved disposable VM has an initial PID namespace and verified BPF/BTF/
+cgroupv2 kernel support; guest-only K3s is Ready with CA verification. Existing
+MicroK8s remains untouched. This is environment preflight, not final native D
+acceptance or SDK publication. C4e1d0c368 now adds checked profile publication and
+policy-index exclusion; its exact exported tree passes connected race checks with
+zero skips. C5 commit72034696 adds local startup/disabled-baseline wiring, explicit
+admission/error ownership and terminal status, with independently checked source
+and binary receipts. Ordinary image/actual released pins and final native D remain
+open; host-side checks do not establish a running native companion.
 
 ## Global Constraints
 
@@ -344,10 +358,16 @@ reject stale image/container, true policy/global claims and partial failed captu
 accepted symbols/order/pointers must survive `getCallStacks`/save conversion.
 - [ ] **Step2: Implement one checked publish operation.** `ReadyForHotSpot`
   checks current watched container/image. `PublishHotSpot` rechecks inside one
-  withContainer transaction, validates source evidence, computes existing manager
+  map/entry transaction, validates source evidence, computes existing manager
   dedup keys and stores owned deep copies under the existing profile-size budget.
   Return errors directly; do not call public ReportIdentifiedCallStack recursively
   while holding its container lock. No profile from failed decoder/Wait/retirement.
+  Inspection found that `Close` holds map then entry locks, while `withContainer`
+  releases its map lock before entering the callback. The new publication path
+  must therefore keep map-read then entry-write ownership throughout its checked
+  batch, not reacquire a map lock inside `withContainer` or permit a stale detached
+  entry to receive an accepted publication. Pre-check the existing size budget
+  before any mutation; do not enter the old over-budget split-channel send path.
 - [ ] **Step3: Make hashes/keys symbol-aware only for new typed data.** Preserve
   exact legacy CalculateSHA256CallStackHash output when Symbol/Evidence are nil.
   For new data, hash canonical length-delimited JSON of typed frame/evidence data;
@@ -368,7 +388,8 @@ record explicit skips, run required new pure tests uncached, do not hide failure
 
 ### Task 5: Wire startup/lifecycle/stop and release handoff
 
-**Files:** cmd/main.go/new helper/tests, exact config/docs/dependency wiring.
+**Files:** cmd/main.go/new helper/tests, exact config/docs/dependency wiring,
+Makefile and normal/debug Docker package-build entrypoints.
 **Interfaces:** the following private cmd helper; its types are actual existing
 interfaces plus the Sink declared above. The helper owns no target agent.
 
@@ -376,12 +397,25 @@ interfaces plus the Sink declared above. The helper owns no target agent.
 func startAgentlessHotspot(ctx context.Context, cfg config.Config,
     watcher containerwatcher.ContainerWatcher, processTree processtree.ProcessTreeManager,
     sink hotspot.Sink, storageClient storageapi.StorageClient,
-) (stop func(context.Context) error, err error)
+) (*agentlessHotspotFeature, error)
 ```
 
 Imports in cmd/hotspot.go use `storageapi` for pkg/storage; avoid colliding with
 main.go's existing v1 storage alias. The concrete manager implements Sink without
 importing the hotspot package, avoiding a package cycle.
+
+The private handle owns the controller, failure channel and idempotent receiver
+unregistration/stop; returning only a stop closure would lose asynchronous errors
+or require global state. `Controller.WaitForAdmission` distinguishes completed
+storage/assets/evidence checks from constructed Discovering state and native
+collector_ready. Terminal status receipts are bounded, retain pending ownership,
+and never invent target/session identity. Unadmitted failures cannot pretend a
+filesystem receipt was written. These are internal wiring choices, not new native
+qualification or a public fake process API.
+
+Existing Make and both Dockerfiles build only cmd/main.go; switch those three
+node-agent entrypoints to ./cmd so the new helper participates. Keep the separate
+SBOM scanner entrypoint, gadget sources/locks and release dependency gate unchanged.
 
 - [ ] **Step1: Add disabled/no-side-effect and enabled/failure wiring tests.**
   A private constructor counter must stay0 when disabled, even with nonexistent
