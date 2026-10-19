@@ -195,6 +195,7 @@ func DigestName(digest string) (string, error) {
 func OCIGraph(store, digest string) (map[string]string, error) {
 	pending := []ociDescriptor{{Digest: digest}}
 	found := map[string]string{}
+	mediaByDigest := map[string]string{}
 	var total int64
 	for len(pending) > 0 {
 		descriptor := pending[len(pending)-1]
@@ -214,6 +215,13 @@ func OCIGraph(store, digest string) (map[string]string, error) {
 		if descriptor.Size != nil && *descriptor.Size != info.Size() {
 			return nil, fmt.Errorf("OCI descriptor size mismatch: %s", name)
 		}
+		media := "application/vnd.oci.image.index.v1+json"
+		if descriptor.MediaType != nil {
+			media = *descriptor.MediaType
+		}
+		if prior, ok := mediaByDigest[name]; ok && prior != media {
+			return nil, fmt.Errorf("conflicting OCI media type: %s", name)
+		}
 		if _, ok := found[name]; ok {
 			continue
 		}
@@ -229,10 +237,7 @@ func OCIGraph(store, digest string) (map[string]string, error) {
 			return nil, fmt.Errorf("OCI blob checksum mismatch: %s", name)
 		}
 		found[name] = path
-		media := "application/vnd.oci.image.index.v1+json"
-		if descriptor.MediaType != nil {
-			media = *descriptor.MediaType
-		}
+		mediaByDigest[name] = media
 		if media == "application/vnd.oci.image.index.v1+json" || media == "application/vnd.oci.image.manifest.v1+json" {
 			var data ociDocument
 			if err := BoundedJSON(path, &data); err != nil {
