@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 148 | *Total Resolved Issues:* 698
+*Total Active Issues:* 149 | *Total Resolved Issues:* 698
 
-Active status detail: 147 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 148 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261018-200356-681](issue-20261018-200356-681-await-first-execution-end-before-sequential-owned-.md) | Await first execution end before sequential owned scoping submissions | high | enforcer |
 | [issue-20261018-173748-642](issue-20261018-173748-642-prevent-cold-mmap-linkage-from-aborting-strict-pro.md) | Prevent cold mmap linkage from aborting strict protection tests | high | enforcer |
 | [issue-20261018-132635](testing/issue-20261018-132635-keep-ci-container-cache-restore-and-save-keys-stable-across.md) | Keep CI container cache restore and save keys stable across generated build files | medium | ci |
 | [issue-20261018-132632](code_health/issue-20261018-132632-qualify-spotbugs-analysis-of-generated-koog-coroutine-classe.md) | Qualify SpotBugs analysis of generated Koog coroutine classes | low | testing |
