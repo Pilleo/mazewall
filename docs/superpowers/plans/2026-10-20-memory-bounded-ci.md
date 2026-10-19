@@ -44,7 +44,8 @@ base_revision: 38943a8c2c362d234bc4391da7513a1135638683
 
 | Task | Create/modify | Responsibility |
 |---|---|---|
-| 1 | Create `gradle/pitest-limits.gradle.kts` | One shared configuration for thread resolution and PIT parent/minion caps; use the existing plugin classpath, no new dependency |
+| 1 | Create `gradle/pitest-limits.gradle` | One shared Groovy Gradle configuration for thread resolution and PIT parent/minion caps; configure the existing extension without adding a plugin dependency |
+| 1 | Modify `gradle.properties:24` | Remove the redundant project-property default so legacy `-D` is not masked; the shared script owns default2 |
 | 1 | Modify `enforcer/build.gradle.kts:273-276`, `platform/build.gradle.kts:137-140`, `profiler/build.gradle.kts:848-851` | Apply the shared limits after each existing PIT block; remove conflicting local thread/JVM setters, keep all targets/floors |
 | 1 | Create `buildSrc/src/test/java/io/mazewall/build/PitestLimitsFunctionalTest.java` | Real plugin/TestKit fixture for the shared limits across three projects |
 | 1 | Modify `buildSrc/build.gradle.kts`, `buildSrc/src/test/java/io/mazewall/build/VerificationActionsTest.java` | Focused `pitestLimitsTest` and mandatory regression entrypoint |
@@ -68,10 +69,10 @@ Read-only references: `gradle.properties`, `BuildPolicy.kt`, `TestKitCacheFuncti
 
 **Interfaces:**
 - Consumes: existing PIT1.19.0 `PitestPluginExtension.threads`, `jvmArgs`, `mainProcessJvmArgs` provider properties.
-- Produces: `gradle/pitest-limits.gradle.kts`, applied by each owning module after its existing `pitest` block; no new public/library API.
+- Produces: `gradle/pitest-limits.gradle`, applied by each owning module after its existing `pitest` block; no new public/library API.
 - Test entrypoints: `PitestLimitsFunctionalTest.main(String[])` and `verify(Path repository)`; focused task `pitestLimitsTest` passes the repository root, as existing focused executable tests do.
 
-- [ ] **Step 1: Write the failing real configuration tests.** The fixture copies the actual shared limits script, uses the existing PIT plugin version and three minimal projects, and prints each resolved extension. Do not assert script text. Pin these cases:
+- [ ] **Step 1: Write the failing real configuration tests.** The fixture copies the actual shared limits script and root gradle.properties, uses the existing PIT plugin version and three minimal projects, and prints each resolved extension. Do not assert script text. Pin these cases:
 
   | Arguments | Expected thread count in each project |
   |---|---:|
@@ -84,7 +85,7 @@ Read-only references: `gradle.properties`, `BuildPolicy.kt`, `TestKitCacheFuncti
   Assert exact parent/minion flags from Global Constraints, the native-access flag, and unchanged values of unrelated extension properties. Run the property-change case with configuration cache twice to reject stale provider values.
 
 - [ ] **Step 2: Run RED.** `./gradlew -p buildSrc pitestLimitsTest --console=plain --max-workers=1`; expect the missing production script/configuration assertion, not an unrelated dependency/toolchain failure.
-- [ ] **Step 3: Implement the shared limits and apply it in all three modules.** Use lazy Gradle project/system-property providers with the stated precedence. Use the already available fully qualified PIT extension type in the applied script; add no plugin dependency. Remove only the superseded local setters. Preserve thresholds `(coverage, mutation, strength)`: enforcer `(89,61,76)`, platform `(97,61,98)`, profiler `(93,65,75)` and their entire target/exclusion/timeout selections.
+- [ ] **Step 3: Implement the shared Groovy Gradle limits script and apply it in all three modules.** Use lazy Gradle project/system-property providers with the stated precedence and configure the existing `pitest` extension through Groovy's normal DSL; add no plugin dependency, reflection or classloader workaround. Remove only superseded local setters and the redundant `mazewall.pitest.threads=2` entry from gradle.properties. Preserve thresholds `(coverage, mutation, strength)`: enforcer `(89,61,76)`, platform `(97,61,98)`, profiler `(93,65,75)` and their entire target/exclusion/timeout selections.
 - [ ] **Step 4: Run GREEN.** Run `pitestLimitsTest` and the existing `ciCachePolicyTest`. Add the regression to `VerificationActionsTest`; keep its fixture independent of the real repository build to prevent recursive buildSrc verification. Update the canonical documentation command to:
 
   ```bash
