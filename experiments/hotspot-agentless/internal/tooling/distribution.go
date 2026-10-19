@@ -291,7 +291,8 @@ func copySourceTree(source, destination string, excludeGenerated bool) error {
 			return err
 		}
 		if entry.IsDir() {
-			return os.Mkdir(target, info.Mode().Perm())
+			// Staging directories need owner access for copying and cleanup; file modes stay verbatim.
+			return os.Mkdir(target, info.Mode().Perm()|0700)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported source member: %s", path)

@@ -63,7 +63,7 @@ epoch lease. It preserves strict admission and native budgets; ordinary-JVM
 candidate qualification is completed by the separate
 [coupled JVM exec evidence](../../docs/plans/2026-10-19-hotspot-coupled-exec-evidence.md),
 followed by operator-approved [scoped admission](../../docs/plans/2026-10-19-hotspot-observed-admission.md).
-SDK publication remains closed. The historical allocator/helper evidence
+SDKv0.2.0 is published; host distribution qualification remains open. The historical allocator/helper evidence
 below is not a release/admission receipt for the new source graph. Existing asset
 bundles must be rebuilt and fully verified for the current fingerprint.
 
@@ -71,10 +71,11 @@ Task3 adds a separately negotiated schema3 observation profile, described in
 the [profile contract](../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
 The rebuilt CLI and `RunObserved*` now use the qualified owned implementation after
 explicit operator approval. Strict2 and false policy eligibility are unchanged.
-`RunObservedCandidate` is only a tagged compatibility alias. Native modules pin actual SDKv0.1.0; its immutable
-bundle verifier does not implement the local candidate's format3 behavior. Candidate
-packing/tests require the explicit per-owner Go workspace until a separately
-approved new SDK release exists. Strict2 and the Kotlin facade retain their scope.
+`RunObservedCandidate` is only a tagged compatibility alias. Native modules pin released SDKv0.2.0.
+Use `GOWORK=off` with the owner's prepared `build/experiment.go.mod`; the SDK must
+resolve to that released module, not a local workspace replacement. Existing helper
+bundles do not qualify the new graph; rebuild and verify their embedded module
+provenance before distribution. Strict2 and the Kotlin facade retain their scope.
 It adds the bounded shared native correlation allocator. Both architecture BPF
 objects and layouts are generated; actual-C and isolated kernel checks pass.
 Task2 built two byte-identical locked Go1.26.0 helpers/full local OCI bundles and
