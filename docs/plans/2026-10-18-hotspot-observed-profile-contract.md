@@ -91,6 +91,25 @@ Original event/terminal identity and summary finality/unknown-global flags are
 preserved. Neither selected accounting nor successful retirement grants policy,
 global collection, GC/code/metadata or virtual-thread ownership.
 
+Failed owned schema2/schema3 sessions return their original error tree to the
+existing wrapper **without** publishing a failed `session_summary` first; otherwise
+sticky decoder rejection could mask the later typed `collector_error` errno.
+Successful summaries and schema1 diagnostic summaries retain their existing
+behavior. The pending-readout no-write guard still precedes wrapper publication;
+a timeout is not retirement or permission to re-enter a held writer.
+
+Only schema3 `collector_error` may carry optional `lifecycle.errno_causes`
+(`Lifecycle.ErrnoCauses []int`): one to three unique Linux errnos in1..4095,
+matching primary `errno` first, with only retained EPERM/EACCES afterward. Native
+emission omits it for zero/single errno; the primary errno/message and original Go
+error tree remain intact. Explicit null/empty/non-array/oversized lists, null or
+duplicate entries, noninteger/out-of-range/contradictory values and schema2 or
+non-error uses fail closed. The SDK validates schema/session/provider/target
+binding before joining numeric causes, owns the slice on copy, never parses
+messages for errno, and retains reader/Wait causes with an empty failed Capture.
+This is bounded permission fidelity, not transport of every error-tree cause or
+typed cancellation. See [exact fix evidence](2026-10-19-pr540-failure-fidelity-evidence.md).
+
 The common byte/OCI verifier negotiates strict collector2/wire2 separately from
 observed collector3/wire3, both capture ABI2. `Verified.Expected(target)` binds the
 verified profile and an owned target value. Native strict verify/install/release
@@ -103,8 +122,9 @@ Published `hotspot-bridge/v0.1.0` is immutable at
 `h1:tWCzIDVBquWo6tWwuqIT5oKlfRPP+XMshdJ8B7hFcIs=`, GoModSum
 `h1:FEiVroH+pQOmKfe6YXTFkvkpAF3z799E4hFDPza6e/s=`. It rejects observed
 bundles and hardcodes Strict25 in Expected. Native go.mod/go.sum pin those actual
-released bytes; Task3's common verifier/Expected changes are an explicit local
-candidate, not altered v0.1.0. A new candidate SDK release (proposed v0.2.0) needs
+released bytes; Task3's common verifier/Expected changes and PR540 follow-up's
+bounded compound-failure DTO/decoder are an explicit local candidate, not altered
+v0.1.0. A new candidate SDK release (proposed v0.2.0) needs
 separate operator approval/publication before hermetic format3 release use.
 
 Use one explicit workspace per canonical/experimental owner, with the local SDK
@@ -127,6 +147,13 @@ the controlled candidate gate, preserving all earlier rejected reports. Candidat
 qualification/bundle reproducibility is not SDK publication or runtime admission.
 The unchanged inherited USER_NOTIF ENOSYS socket/directory shutdown investigation
 remains open under issue20261003-131111-752.
+PR540 follow-up Task3's original full hook failed when the5s socket wall budget
+expired before direct connect, not at the worker/child deadline. One unchanged
+focused diagnostic passed1/0/0 in2.208s and still emitted real ENOSYS cleanup
+exceptions; the initiating delay and endpoint retirement remain unproved. One
+authorized complete unchanged checkpoint is pending at authoring, with its actual
+outcome recorded locally. Neither that diagnostic nor a later passing checkpoint
+would repair the root cause, prove retirement or qualify changed Go helper bytes.
 
 Governing [spec A1/A2](../superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a1-profiles-and-wire-versions)
 and [execution plan](../superpowers/plans/2026-10-18-hotspot-observed-provider.md#task-3-add-the-separately-negotiated-observation-profile)

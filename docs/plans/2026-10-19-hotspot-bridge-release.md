@@ -13,13 +13,24 @@ an existing immutable tag. No default-branch push or broad orchestrator dispatch
 
 - Module `github.com/Pilleo/mazewall/hotspot-bridge`, Go1.26, no external dependency.
 - New subdirectory tag `hotspot-bridge/v0.2.0`; never change `v0.1.0`.
-- Relative to v0.1.0, the functional delta is only `bundle/verify.go` and its
-  `bundle/observed_test.go`; README describes format3 and the release boundary.
-  No decoder semantics, native ABI, buffer budget or strict-profile expansion.
-- SDK code at admitted commit93837185 has already passed isolated archived-source
-  race tests (452test/subtest passes,0skips) and dependency isolation. Preparation
-  changes documentation only; compare release archive code bytes to those tested
-  before reusing that evidence. A local tag is not remote publication.
+- Relative to v0.1.0, the SDK delta includes format3 bundle verification/Expected
+  binding and the bounded schema3 `Lifecycle.ErrnoCauses` DTO, validation,
+  error-joining, deep-copy and regression tests added by PR540 follow-up Task2.
+  Decoder failure semantics therefore change; native ABI, buffer budgets, strict
+  schema2 emission/admission and policy eligibility do not expand.
+- Provider Task1 (`5b9d85e7`) also suppresses failed owned summaries before the
+  existing error wrapper. Task2 (`be3987a6`) transports primary plus retained
+  EPERM/EACCES without manufacturing success. These change Go collector bytes,
+  not the native patch/BPF fingerprint.
+- The admitted93837185 archive's452passes remain historical, not an inventory-
+  equivalence claim for this changed SDK. Candidate SDK subtree
+  `c2d85585e636daf56748519264196a00888c0503` at
+  `be3987a686dfbe49262b294c7edb253e9e8d2172` has its own complete standalone race
+  evidence and dependency-isolation proof; see
+  [failure-fidelity evidence](2026-10-19-pr540-failure-fidelity-evidence.md).
+  Compare any later release archive to that exact28-file inventory before reuse.
+  Old helper hashes/native receipts do not qualify the changed Go helper; fresh
+  released-graph build/runtime gates below still apply. A local tag is not remote publication.
 
 ## Ordered gates
 
@@ -43,4 +54,13 @@ Documentation consulted: Context7 Go1.26.0 module tag/download behavior and
 [official Go publishing guidance](https://go.dev/doc/modules/publishing).
 
 **Current status:** release preparation; no v0.2.0 publication or provider handoff
-is claimed by this document. Actual review/publication receipts must follow.
+is claimed by this document. Tasks1–2 have task-scoped independent PASS/APPROVED
+reviews; local Task3 verification/documentation is not the separate exact-source
+release/control-plane approval. Actual review/publication receipts must follow.
+
+**Task3 checkpoint, pending at authoring:** independent broad code/documentation
+review is PASS/APPROVED, not release approval. The original full hook failed;
+the subsequent exact focused diagnostic passed1/0/0 in2.208s, with real ENOSYS
+cleanup errors and the initiating pre-direct-connect delay still unproved. One
+controller-authorized unchanged full commit-hook checkpoint is pending; its actual
+result/SHA belong to the local Task3 report, not a predicted success in these docs.
