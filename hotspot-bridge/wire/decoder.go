@@ -124,6 +124,11 @@ func (d *Decoder) Accept(line []byte) error {
 		if l.Errno != 0 {
 			cause = errors.Join(cause, syscall.Errno(l.Errno))
 		}
+		if len(l.ErrnoCauses) > 1 {
+			for _, errno := range l.ErrnoCauses[1:] {
+				cause = errors.Join(cause, syscall.Errno(errno))
+			}
+		}
 		return d.fail(fmt.Errorf("%w: %s (errno %d)", cause, l.Message, l.Errno))
 	}
 	var err error

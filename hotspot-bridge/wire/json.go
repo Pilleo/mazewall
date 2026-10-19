@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 )
 
@@ -153,6 +155,20 @@ func requiredRecordFields(line []byte) error {
 		}
 		if _, e = requireFields(l["provider"], "lifecycle.provider", "name,gadget_revision,profiler_revision,patch_sha256"); e != nil {
 			return e
+		}
+		if raw, present := l["errno_causes"]; present {
+			var schema, primary int
+			var causes []int
+			if json.Unmarshal(row["schema_version"], &schema) != nil || schema != 3 || kind != "collector_error" ||
+				json.Unmarshal(l["errno"], &primary) != nil || json.Unmarshal(raw, &causes) != nil ||
+				len(causes) < 1 || len(causes) > 3 || causes[0] != primary {
+				return fmt.Errorf("%w: lifecycle.errno_causes shape/schema/primary", ErrJSON)
+			}
+			for i, cause := range causes {
+				if cause < 1 || cause > 4095 || slices.Contains(causes[:i], cause) || i > 0 && cause != int(syscall.EPERM) && cause != int(syscall.EACCES) {
+					return fmt.Errorf("%w: lifecycle.errno_causes value", ErrJSON)
+				}
+			}
 		}
 	}
 	if presentObject(row["evidence"]) {

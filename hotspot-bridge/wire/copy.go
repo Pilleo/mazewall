@@ -31,7 +31,11 @@ func cloneIdentity(p *HotSpotIdentity) *HotSpotIdentity {
 	}
 	return v
 }
-func cloneLifecycle(v Lifecycle) Lifecycle { v.Extensions = cloneExtensions(v.Extensions); return v }
+func cloneLifecycle(v Lifecycle) Lifecycle {
+	v.ErrnoCauses = slices.Clone(v.ErrnoCauses)
+	v.Extensions = cloneExtensions(v.Extensions)
+	return v
+}
 func clonePair(v Pair) Pair {
 	v.Event.HotSpotIdentity = cloneIdentity(v.Event.HotSpotIdentity)
 	v.Event.FilenameBytes = bytes.Clone(v.Event.FilenameBytes)

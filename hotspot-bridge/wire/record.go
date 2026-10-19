@@ -31,6 +31,7 @@ type Lifecycle struct {
 	Provider          Provider   `json:"provider"`
 	Message           string     `json:"message,omitempty"`
 	Errno             int        `json:"errno,omitempty"`
+	ErrnoCauses       []int      `json:"errno_causes,omitempty"`
 	ValidationMode    string     `json:"validation_mode,omitempty"`
 	CgroupID          uint64     `json:"cgroup_id,omitempty"`
 	MountNS           uint64     `json:"mount_namespace,omitempty"`

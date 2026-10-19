@@ -18,7 +18,7 @@ func (v Record) MarshalJSON() ([]byte, error) {
 func (v *Lifecycle) UnmarshalJSON(b []byte) error {
 	type plain Lifecycle
 	var p plain
-	x, err := unmarshalExtended(b, &p, "pid,process_start_ticks,clock_domain,boot_ns,runtime_profile,jvm_build_id,jvm_sha256,provider,message,errno,validation_mode,cgroup_id,mount_namespace")
+	x, err := unmarshalExtended(b, &p, "pid,process_start_ticks,clock_domain,boot_ns,runtime_profile,jvm_build_id,jvm_sha256,provider,message,errno,errno_causes,validation_mode,cgroup_id,mount_namespace")
 	if err == nil {
 		*v = Lifecycle(p)
 		v.Extensions = x

@@ -50,6 +50,10 @@ func runObserved(ctx context.Context, cfg Config, writer io.Writer) error {
 	if err == nil || errors.Is(err, errReadoutPending) {
 		return err
 	}
+	return writeObservedFailure(cfg, sink, err)
+}
+
+func writeObservedFailure(cfg Config, sink model.Sink, err error) error {
 	r, clockErr := observedLifecycleRecord("collector_error", cfg.sessionID, cfg.ExpectedTarget, "", "")
 	if clockErr != nil {
 		return errors.Join(err, clockErr)
@@ -58,6 +62,15 @@ func runObserved(ctx context.Context, cfg Config, writer io.Writer) error {
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
 		r.Lifecycle.Errno = int(errno)
+		causes := []int{int(errno)}
+		for _, permission := range []syscall.Errno{syscall.EPERM, syscall.EACCES} {
+			if permission != errno && errors.Is(err, permission) {
+				causes = append(causes, int(permission))
+			}
+		}
+		if len(causes) > 1 {
+			r.Lifecycle.ErrnoCauses = causes
+		}
 	}
 	return errors.Join(err, sink.Write(context.Background(), r))
 }

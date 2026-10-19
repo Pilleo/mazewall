@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 145 | *Total Resolved Issues:* 714
+*Total Active Issues:* 146 | *Total Resolved Issues:* 714
 
-Active status detail: 144 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 145 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau](issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau.md) | Preserve compound HotSpot collector permission causes across schema3 wire; PR540 Task2 review pending | high | profiler |
 | [issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col](issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col.md) | Suppress failed owned HotSpot summaries before collector error publication; PR540 Task1 review pending | high | profiler |
 | [issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th](issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th.md) | Preserve HotSpot terminal status write failures through pending cleanup; verified in companion72034696, review pending | high | core |
 | [issue-20261019-113411-720-repair-node-agent-legacy-package-guard-target-afte](issue-20261019-113411-720-repair-node-agent-legacy-package-guard-target-afte.md) | Repair node-agent legacy guard target; independent guards/binary pass in72034696, review pending | high | core |

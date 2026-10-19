@@ -87,6 +87,11 @@ the stricter stream/trust-boundary checks belong to Decoder.
 Use `errors.Is` with `ErrJSON`, `ErrLimit`, `ErrIdentity`, `ErrOrder`, `ErrPairing`,
 `ErrAccounting`, `ErrFinality`, `ErrCollector` and `ErrProcess`. Collector messages
 and errno causes, and the original Wait error, are retained rather than downgraded.
+Only schema3 `collector_error` may carry optional `lifecycle.errno_causes`:
+one to three unique Linux errno integers (1..4095), primary `errno` first,
+with only EPERM/EACCES as supplemental causes. Null, empty, contradictory or
+otherwise malformed values fail closed. Producers omit it for zero/single errno;
+the original primary errno/message and strict schema2 emission stay unchanged.
 `ParseStartTicks` is the same pure field22 parser used by native preflight.
 
 `CanonicalStackID(Scope, []Frame)` hashes ordered **typed observable content** with
