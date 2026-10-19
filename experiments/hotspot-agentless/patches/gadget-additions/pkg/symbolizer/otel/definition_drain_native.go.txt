@@ -30,8 +30,8 @@ func (o *otelResolverInstance) ownedDefinitionDrain() *definitionDrainOwner {
 	return o.definitionDrain
 }
 func (o *otelResolverInstance) DrainDefinitions(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
-	if o.options.HotSpotEpochTarget.PID == 0 || o.trc == nil || o.consumerDone == nil {
-		return symbolizer.DefinitionStopObservation{}, fmt.Errorf("owned definition drain requires strict initialized profiler")
+	if (o.options.HotSpotEpochTarget.PID == 0 && o.options.HotSpotObservedPID == 0) || o.trc == nil || o.consumerDone == nil {
+		return symbolizer.DefinitionStopObservation{}, fmt.Errorf("owned definition drain requires initialized HotSpot profiler")
 	}
 	o.definitionDrainMu.Lock()
 	if o.definitionDrain == nil {

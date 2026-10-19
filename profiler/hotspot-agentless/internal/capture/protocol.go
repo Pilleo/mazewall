@@ -61,6 +61,16 @@ func writeProductionReady(ctx context.Context, sink model.Sink, session string, 
 // RunProduction explicitly selects the schema-2 strict, owned production scope.
 // Schema-1 experiment entrypoints remain available through Run only.
 func RunProduction(ctx context.Context, cfg Config, writer io.Writer) error {
+	if err := validateProductionConfig(cfg); err != nil {
+		return err
+	}
+	return runProduction(ctx, cfg, writer)
+}
+
+func validateProductionConfig(cfg Config) error {
+	if cfg.profile != "" && cfg.profile != "temurin25_xint_serial" {
+		return fmt.Errorf("production capture requires strict profile")
+	}
 	if !cfg.StrictEpoch || !cfg.DrainFull || cfg.EventsOnly || cfg.DrainEvents {
 		return fmt.Errorf("production capture requires strict epoch and full owned drain")
 	}
@@ -70,6 +80,10 @@ func RunProduction(ctx context.Context, cfg Config, writer io.Writer) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	return nil
+}
+
+func runProduction(ctx context.Context, cfg Config, writer io.Writer) error {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {
 		return err
@@ -108,6 +122,16 @@ func RunProduction(ctx context.Context, cfg Config, writer io.Writer) error {
 // Stdin is an explicitly borrowed parent-lifetime pipe. Its owner keeps it open
 // through finalization, sends exactly stop\n for graceful drain, and closes it on loss.
 func RunProductionControlled(ctx context.Context, cfg Config, writer io.Writer, control *os.File) (result error) {
+	if err := validateProductionConfig(cfg); err != nil {
+		return err
+	}
+	return runControlled(ctx, cfg, writer, control, runProduction)
+}
+
+func runControlled(ctx context.Context, cfg Config, writer io.Writer, control *os.File, run func(context.Context, Config, io.Writer) error) (result error) {
+	if control == nil {
+		return fmt.Errorf("owned capture requires parent control pipe")
+	}
 	request, stopRequest := context.WithCancel(ctx)
 	defer stopRequest()
 	abort, fail := context.WithCancelCause(context.Background())
@@ -119,5 +143,5 @@ func RunProductionControlled(ctx context.Context, cfg Config, writer io.Writer, 
 	}()
 	defer func() { stopWatch(); result = errors.Join(result, <-done) }()
 	cfg.AbortContext = abort
-	return RunProduction(request, cfg, writer)
+	return run(request, cfg, writer)
 }

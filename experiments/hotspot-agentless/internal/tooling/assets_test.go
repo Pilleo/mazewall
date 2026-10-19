@@ -4,9 +4,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Pilleo/mazewall/hotspot-bridge/bundle"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
+	"golang.org/x/sys/unix"
 )
 
 type assetFixture struct{ root, store, collector, bundle, layer, digest string }
@@ -190,5 +196,85 @@ func TestAssetPublicationPreservesDestinationCreatedDuringPopulation(t *testing.
 	}
 	if !os.SameFile(acquired, actual) {
 		t.Fatal("unknown destination identity changed")
+	}
+}
+
+func TestNativePolicyRejectsOtherVerifiedProvenance(t *testing.T) {
+	for _, field := range []string{"gadget_revision", "profiler_revision", "patch_sha256"} {
+		t.Run(field, func(t *testing.T) {
+			f := newAssetFixture(t)
+			f.pack(t)
+			path := filepath.Join(f.bundle, "manifest.json")
+			manifest, err := jsonFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			length := 40
+			if field == "patch_sha256" {
+				length = 64
+			}
+			manifest[field] = strings.Repeat("1", length) // Synthetic, not a native acceptance pin.
+			if err := writeJSON(path, manifest); err != nil {
+				t.Fatal(err)
+			}
+			digest, err := fileHash(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, err := bundle.Verify(f.bundle, digest, wire.Strict25)
+			if err != nil {
+				t.Fatal("portable verifier rejected well-formed, test-pinned provenance", err)
+			}
+			var metadata assetManifest
+			metadata, err = v.Manifest() // Compile-check native/SDK manifest compatibility.
+			if err != nil || metadata.GadgetDigest != f.digest {
+				t.Fatal("native manifest contract differs", err)
+			}
+			if _, err := verifyAssets(f.bundle); err == nil {
+				t.Fatal("native acceptance pins widened")
+			}
+		})
+	}
+}
+
+func TestNativeExecuteAccessRetainsPermissionCause(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root execute access differs from unprivileged ownership")
+	}
+	f := newAssetFixture(t)
+	f.pack(t)
+	collector := filepath.Join(f.bundle, "mw-hotspot-collector")
+	// Other execute bits do not grant the file owner execute access.
+	if err := os.Chmod(collector, 0411); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := fileHash(filepath.Join(f.bundle, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bundle.Verify(f.bundle, digest, wire.Strict25); err != nil {
+		t.Fatal("structural executable check rejected test control", err)
+	}
+	if _, err := verifyAssets(f.bundle); !errors.Is(err, unix.EACCES) {
+		t.Fatal("native verification lost effective access denial", err)
+	}
+	if err := packAssets(collector, f.store, gadgetImagePrefix+f.digest, filepath.Join(f.root, "denied")); !errors.Is(err, unix.EACCES) {
+		t.Fatal("native packing lost effective access denial", err)
+	}
+}
+
+func TestNativeVerificationPreservesExecuteSyscallCauses(t *testing.T) {
+	f := newAssetFixture(t)
+	f.pack(t)
+	for _, cause := range []error{unix.EACCES, unix.EPERM} {
+		_, err := verifyAssetsWithAccess(f.bundle, func(path string, mode uint32) error {
+			if path != filepath.Join(f.bundle, "mw-hotspot-collector") || mode != unix.X_OK {
+				t.Fatal("wrong native execute check")
+			}
+			return cause
+		})
+		if !errors.Is(err, cause) {
+			t.Fatal("native verification swallowed execute syscall cause", err)
+		}
 	}
 }

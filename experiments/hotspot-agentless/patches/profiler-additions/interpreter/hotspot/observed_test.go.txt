@@ -1,0 +1,122 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import (
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"io"
+	"math"
+	"os"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+)
+
+type failingReader struct{ err error }
+
+// ProcessVirtualMemory forwards process_vm_readv's negative count on native failure.
+func (r *failingReader) ReadAt([]byte, int64) (int, error) { return -1, r.err }
+
+func TestObservedReadPermissionIsFatal(t *testing.T) {
+	for _, errno := range []error{syscall.EPERM, syscall.EACCES, syscall.EIO} {
+		cause := &os.PathError{Op: "read", Path: "/proc/123/mem", Err: errno}
+		var fatal error
+		r := newObservedReader(&failingReader{cause}, func(err error) { fatal = err })
+		_, err := r.ReadAt(make([]byte, 8), 0)
+		if !errors.Is(err, errno) || fatal != cause {
+			t.Fatal("lost original cause", err, fatal)
+		}
+	}
+}
+
+func TestObservedReaderRetainsPermissionAfterEarlierReadFailure(t *testing.T) {
+	base := &failingReader{err: io.ErrUnexpectedEOF}
+	var fatal error
+	r := newObservedReader(base, func(err error) { fatal = errors.Join(fatal, err) })
+	_, _ = r.ReadAt(make([]byte, 8), 0)
+	base.err = &os.PathError{Op: "read", Path: "/proc/123/mem", Err: syscall.EACCES}
+	_, _ = r.ReadAt(make([]byte, 8), 0)
+	if !errors.Is(fatal, io.ErrUnexpectedEOF) || !errors.Is(fatal, syscall.EACCES) {
+		t.Fatal("lost native cause after first failure", fatal)
+	}
+}
+
+func TestObservedReaderPositiveBoundsAndSynchronizedFirstCause(t *testing.T) {
+	var calls atomic.Int32
+	r := newObservedReader(bytes.NewReader([]byte("metadata")), func(error) { calls.Add(1) })
+	b := make([]byte, 8)
+	if n, err := r.ReadAt(b, 0); err != nil || n != 8 || string(b) != "metadata" || calls.Load() != 0 {
+		t.Fatal(n, err, b, calls.Load())
+	}
+	if _, err := r.ReadAt(b, -1); err == nil {
+		t.Fatal("negative address")
+	}
+	if _, err := r.ReadAt(b, math.MaxInt64-2); err == nil {
+		t.Fatal("overflow address")
+	}
+	if calls.Load() != 1 {
+		t.Fatal("first cause must be reported once", calls.Load())
+	}
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = r.ReadAt(b[:0], -1) }()
+	}
+	wg.Wait()
+	if calls.Load() != 1 {
+		t.Fatal("repeated callback", calls.Load())
+	}
+	r = newObservedReader(&shortObservedReader{}, func(err error) {
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Error(err)
+		}
+	})
+	if _, err := r.ReadAt(b, 0); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatal("silent short read", err)
+	}
+}
+
+type shortObservedReader struct{}
+
+func (*shortObservedReader) ReadAt([]byte, int64) (int, error) { return 0, nil }
+
+func TestObservedActualJITReadPreservesCauseDespiteUpstreamFormatting(t *testing.T) {
+	ii, _ := qualityInstance(t)
+	cause := &os.PathError{Op: "read", Path: "/proc/123/mem", Err: syscall.EACCES}
+	var fatal error
+	instance, err := ii.d.AttachObserved(nil, 123, 0, remotememory.RemoteMemory{ReaderAt: &failingReader{cause}}, func(err error) { fatal = err })
+	if err != nil {
+		t.Fatal(err)
+	}
+	ii = instance.(*hotspotInstance)
+	_, err = ii.getJITInfo(libpf.Address(0x400), 7)
+	if err == nil || fatal != cause || !errors.Is(fatal, syscall.EACCES) {
+		t.Fatal(err, fatal)
+	}
+}
+
+func TestObservedRetainsActualUpstreamCompileIDCacheAndFreshCheck(t *testing.T) {
+	ii, m := qualityInstance(t)
+	jit := qualityJIT(m)
+	jit.compileID = 7
+	ii.addrToJITInfo.Add(0x400, jit)
+	if got, err := ii.getJITInfo(0x400, 7); err != nil || got != jit {
+		t.Fatal("matching cache", got, err)
+	}
+	mem := make([]byte, 0x408)
+	binary.LittleEndian.PutUint32(mem[0x400:], 9)
+	ii.rm.ReaderAt = bytes.NewReader(mem)
+	if got, err := ii.getJITInfo(0x400, 8); err == nil || got != nil {
+		t.Fatal("fresh mismatched compileID returned stale cache", got, err)
+	}
+	ii.addrToJITInfo.Purge()
+	if got, err := ii.getJITInfo(0x400, 8); err == nil || got != nil {
+		t.Fatal("fresh mismatch accepted", got, err)
+	}
+}

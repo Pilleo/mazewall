@@ -13,6 +13,7 @@ const EventFinalizationOptionsKey = "mw.event-finalization-options"
 type EventFinalizationOptions struct {
 	HardDeadline time.Time
 	StrictFull   bool
+	ObservedFull bool
 	AfterReadout func(context.Context) error
 	Accounting   *SelectedAccountingTarget
 }

@@ -17,6 +17,7 @@ The experiment bundle contains several independent review families:
 | Definition/event drain | `profiler-definition-drain.patch`, `gadget-definition-drain.patch`, `gadget-finalization.patch`, additions | Native queued tails8/5000, ordered callback completion and deadline retention |
 | Checked metadata retirement | `profiler-metadata-retirement.patch`, processmanager additions | Native cause/failed-owner retention and checked reader-join regressions |
 | Auxiliary/prune worker ownership | `profiler-auxiliary-ownership.patch`, `gadget-auxiliary-ownership.patch`, additions | Scoped cancellation/join/finalizers, native perf/netlink controls and fresh strict reports |
+| Observed-reader/callback support (Task3 candidate only) | HotSpot/processmanager observed additions, existing epoch/structured patches | Actual reader and reporter-cause host/race controls; no ordinary-JVM qualification or CLI admission |
 
 These units are local overlays, not standalone upstream PRs yet. Epoch and
 lifecycle units depend on selected profiler/bridge boundaries and require separate
@@ -262,6 +263,13 @@ Retained partial frames carry actual diagnostics; failures before emitting a
 frame still have only the existing log/placeholder evidence. Interpreted method
 lookup ignores the captured check argument; its identity gap is separately
 tracked, while existing compiled-ID checking remains intact.
+
+Those are historical pre-identity/observation limitations. The identity patch below
+retains the interpreted pointer guards. Task3's separately selected observed reader
+routes original native read causes to the fatal owner before formatting can erase
+them; logical missing metadata becomes unavailable, and unknown-definition reporter
+conflicts also reach the actual consumer's fatal route. This source support remains
+unadmitted; see the [observed contract](../../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
 
 ## Interpreted identity patch (local, not submitted upstream)
 

@@ -13,8 +13,9 @@ const JVMSHA256 = "5e0fb6e83a5676090f28ff0b453e9199df06af1ff90d473c1b9837e410961
 const ProfileName = "temurin25_xint_serial"
 
 type Profile struct {
-	BuildID, SHA256          string
-	UseSerialGC, UseCompiler bool
+	BuildID, SHA256            string
+	UseSerialGC, UseCompiler   bool
+	useG1GC, tieredCompilation bool
 }
 type Target struct {
 	PID                                             uint32
