@@ -32,6 +32,14 @@ provider handoff. Writable storage provisioning, the node-agent prototype baseli
 and cluster access remain separately controlled. No B/C/D implementation or end-to-end
 Kubescape integration is claimed by the candidate result.
 
+**Read-only cross-project checkpoint (2026-10-19):** The separate storage checkout
+now exists at `61f0be2f51c54abac7abd3d405f662c550e0ecae`, with local schema,
+aggregation and opt-in API gate preparation. Its own handoff explicitly has
+`b3Accepted:false`; real API/rollout/release evidence remains missing. Do not
+reprovision S or redispatch B1/B2. The node-agent prototype remains dirty and
+operator-owned. See the [specific remaining gates](../../plans/2026-10-19-hotspot-integration-gate-checkpoint.md)
+before selecting more work; this observation grants no external edit or cluster authority.
+
 ## Global Constraints
 
 - JDK25 idioms; library compatibility floor JDK22. Supported host Linux-amd64.

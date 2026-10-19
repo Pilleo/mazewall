@@ -10,6 +10,8 @@ target_files:
   - "docs/plans/2026-10-03-hotspot-kubescape-contribution-proposal.md"
   - "docs/superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md"
   - "docs/superpowers/plans/2026-10-18-kubescape-agentless-hotspot.md"
+  - "docs/superpowers/plans/2026-10-18-kubescape-stack-evidence-schema.md"
+  - "docs/plans/2026-10-19-hotspot-integration-gate-checkpoint.md"
 target_symbols: []
 open_questions: false
 ---
@@ -51,6 +53,19 @@ Evidence data would also be lost. The storage subplan includes a discriminating
 typed-value preservation regression and the real protobuf/OpenAPI/API gates.
 Keep this issue open: plans, old fork inspections and completed allocator checks
 do not constitute node-agent integration, ordinary-JVM admission or storage rollout.
+
+**Read-only integration checkpoint (2026-10-19):**
+The [six-case provider candidate](../../plans/2026-10-19-hotspot-coupled-exec-evidence.md)
+now qualifies its controlled observational corpus; the actual production CLI still
+refuses admission and published bridge v0.1.0 stays immutable. A separate storage
+checkout now contains local typed-schema/aggregation/API-gate preparation at
+`61f0be2f51c54abac7abd3d405f662c550e0ecae`; its handoff explicitly declares
+`b3Accepted:false` with no reviewed live-server/context/release/image identities.
+The dirty node-agent prototype is unchanged. These observations supersede the
+planning-time missing-checkout blocker, not the real API and operator gates.
+The [current review checkpoint](../../plans/2026-10-19-hotspot-integration-gate-checkpoint.md)
+records the exact remaining decisions and local isolated SDK packaging evidence.
+Keep this issue open; no ready provider handoff or end-to-end acceptance exists.
 
 ---
 <!-- id: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an  file: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md -->

@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: d963c7941f5bd493751109324e6eba41f7d2b5af
-status: p0_approved_blocked_on_writable_storage_provisioning
+status: local_preparation_observed_pending_live_api_and_release_review
 ---
 
 # Kubescape Typed Stack Evidence Implementation Plan
@@ -15,6 +15,17 @@ status: p0_approved_blocked_on_writable_storage_provisioning
 **Tech Stack:** Existing storage v0.0.303 API, Go>=1.25.8, Kubernetes code-generator0.35, existing gogo protobuf/OpenAPI/file-storage test infrastructure.
 
 **Spec:** [Governing design, B](../specs/2026-10-18-kubescape-agentless-hotspot-design.md#b-additive-storage-contract).
+
+**Read-only checkpoint (2026-10-19):** S now exists on
+`feat/agentless-hotspot-stack-evidence`, HEAD
+`61f0be2f51c54abac7abd3d405f662c550e0ecae`. Commits `2c7c691`/`1e9d93a` contain
+typed schema and value-preserving aggregation; `61f0be2` prepares the opt-in API
+gate. Its `build/hotspot-schema-handoff.json` explicitly remains incomplete with
+`b3Accepted:false`: no approved live context/server, API receipts or release/image
+identities. Existing build receipts and external work are untouched. This local
+checkpoint does not independently certify that worker's checks or authorize B3.
+Do not repeat provisioning/B1/B2; follow the
+[operator gate checkpoint](../../plans/2026-10-19-hotspot-integration-gate-checkpoint.md).
 
 ## Global Constraints
 
