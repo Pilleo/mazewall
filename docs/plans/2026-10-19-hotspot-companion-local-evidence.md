@@ -317,15 +317,67 @@ actual failing host controls, not native acceptance:
 - [Publication after final save](../internals/backlog/issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi.md)
   can return success while the actual disk-queue/storage payload contains no stacks.
 
-All three remain open and **unfixed**; the development port requires corrections
-and production-boundary regressions, including real unregister/replay ordering,
-retained late-error ownership and final-save linearization. Existing disabled and
-normal save/queue controls pass, but do not disprove these reachable failures.
-The strict/observed guidance mismatch also needs correction without relaxing the
-production pin. A clean local merge simulation onto upstream main`02f0bf7b` is only
-port preparation, not current-main compatibility, release or native qualification.
+Those original failures remain historical evidence. The initial current-main
+correction `2fd19c150b7ad916ff9d25bf370d9b2256528c4d` passed525connected race
+parent/subtest status records, but its complete53-file review was **SpecFAIL /
+QualityNOTAPPROVED**: I1 still replayed Add after a pre-registration Remove while
+the pinned collection retained its pointer for another held subscriber. I2's late
+original-cause delivery and I3's final-save linearization passed that review;
+the old525receipt does not prove the missing interleaving or become retrospective
+approval. Original failing proofs, fixture failures and earlier temp-path failures
+remain retained separately.
+
+The scoped correction is local, unpushed node-agent
+`fd108c3b410dbc06e53984e311b6abc9b9a0fe29`, sole parent `2fd19c15`, tree
+`709498df846316ed786cc78717dbbfb7f6d02348`. Its five existing paths repair the shared
+watcher boundary: private current membership, registration, selected initial replay
+and live submissions order under the existing mutex/queue; no raw stale collection
+replay or command wrapper mutex remains. Genuine assembled watcher/pinned-collection
+barriers cover both filter modes and a positive initial-replay control, including
+the pre-delete window. The original assembled proof goes3fail→3pass. Unregister,
+selectors/host exemption, independent callbacks and baseline delivery remain intact.
+No API, time/buffer budget, dependency or authority expansion follows.
+
+Scoped re-review is **I1ADDRESSED / SpecPASS / QualityAPPROVED**,0findings, retaining
+the whole-feature review for unchanged code. All three node issues are locally
+addressed but remain **open**, not published/merged. Actual final-source host gates:
+529connected and30covering race PASS records including parents/subtests,
+0failures/0skips, actual RuntimeController/late-EACCES/terminal/Completed-host controls,
+ordinary binary and both guards pass (legacy guard explicitly from Go's cache).
+Publication after the final real-container snapshot rejects without mutation;
+accepted-before-final data reaches the actual disk queue/storage interface, and
+the monitored Completed-host exception remains. Queue acceptance is **not** server
+acknowledgment. Strict/observed guidance is corrected without relaxing production
+pins or false policy/global-completeness limits.
+
+The complete53-path feature is based on actual upstream main
+`02f0bf7b21fd98da0d6f6935d3c49503d6978738`, still current in the retained remote
+snapshot. It excludes the preserved dirty Tier E prototype. Go1.27.0 development
+checks select immutable SDK `ed0c3f9628c55ae80b61eab3741a154ab709220d`, subtree
+`7472a715b8aab93fb71c5e0ff9f1c55b3de73fe2`, and local storage
+`4c2e1cf1b64b6169b02b7a9b0ceacafd985aad5f`, tree
+`6c1a84c22005bd123aaddb99a1cefbd255790cae`. SDK's30files/26Go files match current
+`7a714bfe` except its newly added LICENSE is absent from this old immutable input;
+no new released SDK was selected. Node `go.mod`/`go.sum` still equal upstream and
+contain no new SDK requirement. These are explicit workspace inputs, not release
+pins or GOWORK=off evidence. Original N/S HEADs, raw indexes, refs/prototype and
+immutable exports remain protected; the local feature ref is separate from HEAD.
+
+Local execution evidence is in `.superpowers/sdd/2026-12-16-shared-hotspot-forward/`:
+`task-C2-report.md`, the original failed `task-C2-review.md`, approved
+`task-C2-fix1-review.md`, `C2-fix1-candidate-committed.json`, covering/connected race,
+selected-module/guard/binary receipts and original C1 proofs. Local SHAs/source
+paths identify unpublished inputs; no working GitHub blob links are presumed.
 
 The [shared SDK/host contract](2026-10-18-hotspot-observed-profile-contract.md#shared-contract-and-ownership)
 and [current release limits](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
-retain independent host ownership, missing license/release approval and real pins.
-No ready C handoff, ordinary image, new environment or default-branch merge is claimed.
+retain independent host ownership, locally packaged existing license terms and
+separate exact-source release approval/real pins. The final configured M/portal
+source gate passed tree `6d3b6a639ff5314a60e050a097f98122d91f0944`; its cache/skip,
+operator-configuration and unresolved ENOSYS qualifications are recorded there,
+not claimed as node native acceptance. Real released SDK/storage origin/sums and
+workspace-off gates, full privileged upstream CI/security, ordinary/derived images
+and actual native/K8s persisted-profile acceptance remain unproved. Upstream
+publication access is READ; `Pilleo/node-agent` does not exist. No fork/new native
+environment is approved or assumed. Future identities/handoffs remain null/false/
+blocked; no ready C handoff, image, remote PR update or default-branch merge occurred.

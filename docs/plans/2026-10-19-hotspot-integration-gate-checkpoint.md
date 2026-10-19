@@ -16,10 +16,29 @@ API, node-agent baseline and cluster gates are not approved by that answer.
 [maintained contract](2026-10-18-hotspot-observed-profile-contract.md#shared-contract-and-ownership)
 now records reviewed Go/Kotlin OCI and shared provider-guard repairs. The
 [current release checkpoint](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
-keeps license approval, combined root/portal verification and actual release/native
-handoffs open. [Whole-node review](2026-10-19-hotspot-companion-local-evidence.md#subsequent-whole-feature-review)
-reproduced three still-unfixed integration defects; all six new issues remain open.
+records locally reviewed license packaging and a completed configured root/portal
+source gate, not release/native handoffs. [Whole-node review](2026-10-19-hotspot-companion-local-evidence.md#subsequent-whole-feature-review)
+and its scoped correction approve the current-main development feature; all three
+defects are locally addressed, but all six new issues remain open/unpublished.
 The dated state and exact-source receipts below are history, not newer qualification.
+
+**Latest configured source checkpoint:** docs `20dbaeebcd8fdfa049dc63dcac9adda564191a78`
+plus reviewed collector `1f89ea42829efff873b11a80590542e6f593e19e` produce exact tree
+`6d3b6a639ff5314a60e050a097f98122d91f0944`. The unchanged full hook selected build
+and portal integration/unit and passed in7m50s:243actionable/31executed/212up-to-date,
+no degraded flag. Available XML:3615tests/0failures/0errors/42skips,68reports written
+during the run; cache reuse and skips remain explicit. Inputs/modes and protected
+custody were stable with the original operator configuration, not pristine/default
+equivalence. The exact external1596-byte untracked CLAUDE delta and original staged
+deletion/index remain preserved, not claimed original absence. The separate20dbaeeb
+20m38sPASS predates A3 and does not qualify its changed helper bytes.
+
+The current full log still contains real ENOSYS child-shutdown socket/directory
+cleanup pairs at750/771/786/807/821/842. Endpoint retirement and the original
+cold-network initiating cause are not proved fixed. The source gate and local
+delegated Apache-material check are not actual released-provider/native/K8s
+acceptance, publication/title guarantees or authority to reopen retired resources.
+Actual SDK/storage tags/sums/pins, images and ready handoffs remain blocked.
 
 ## Observed state on 2026-10-19
 
