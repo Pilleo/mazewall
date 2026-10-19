@@ -303,6 +303,38 @@ func copySourceTree(source, destination string, excludeGenerated bool) error {
 	})
 }
 
+func selectedModuleLicenses(modulePath, directory string) ([]string, error) {
+	var names []string
+	err := filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(entry.Name())
+		for _, prefix := range []string{"license", "copying", "notice", "copyright"} {
+			if strings.HasPrefix(name, prefix) {
+				relative, err := filepath.Rel(directory, path)
+				if err != nil {
+					return err
+				}
+				names = append(names, filepath.ToSlash(relative))
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("missing selected-module license: %s", modulePath)
+	}
+	return names, nil
+}
+
 func releaseDistribution(engine, bundle, output, libraryVersion string) (failure error) {
 	if output == "" || libraryVersion == "" {
 		return fmt.Errorf("explicit release destination/library version required")
@@ -368,33 +400,9 @@ func releaseDistribution(engine, bundle, output, libraryVersion string) (failure
 		if replacement.Dir == "" {
 			return fmt.Errorf("missing selected module source: %s", module.Path)
 		}
-		var names []string
-		err := filepath.WalkDir(replacement.Dir, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			name := strings.ToLower(entry.Name())
-			for _, prefix := range []string{"license", "copying", "notice", "copyright"} {
-				if strings.HasPrefix(name, prefix) {
-					relative, err := filepath.Rel(replacement.Dir, path)
-					if err != nil {
-						return err
-					}
-					names = append(names, filepath.ToSlash(relative))
-					break
-				}
-			}
-			return nil
-		})
+		names, err := selectedModuleLicenses(module.Path, replacement.Dir)
 		if err != nil {
 			return err
-		}
-		sort.Strings(names)
-		if len(names) == 0 {
-			return fmt.Errorf("missing selected-module license: %s", module.Path)
 		}
 		for _, name := range names {
 			destination := filepath.Join(root, "licenses", module.Path, filepath.FromSlash(name))
