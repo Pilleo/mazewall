@@ -3,7 +3,7 @@ module io.mazewall/experiments/hotspot-agentless
 go 1.26.0
 
 require (
-	github.com/Pilleo/mazewall/hotspot-bridge v0.1.0
+	github.com/Pilleo/mazewall/hotspot-bridge v0.2.0
 	github.com/cilium/ebpf v0.22.0
 	github.com/inspektor-gadget/inspektor-gadget v0.56.1-0.20260929145342-7097db144ccd
 	github.com/opencontainers/go-digest v1.0.0

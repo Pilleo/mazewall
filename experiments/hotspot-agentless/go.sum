@@ -21,6 +21,8 @@ github.com/PaesslerAG/jsonpath v0.1.1 h1:c1/AToHQMVsduPAa4Vh6xp2U0evy4t8SWp8imEs
 github.com/PaesslerAG/jsonpath v0.1.1/go.mod h1:lVboNxFGal/VwW6d9JzIy56bUsYAP6tH/x80vjnCseY=
 github.com/Pilleo/mazewall/hotspot-bridge v0.1.0 h1:tWCzIDVBquWo6tWwuqIT5oKlfRPP+XMshdJ8B7hFcIs=
 github.com/Pilleo/mazewall/hotspot-bridge v0.1.0/go.mod h1:FEiVroH+pQOmKfe6YXTFkvkpAF3z799E4hFDPza6e/s=
+github.com/Pilleo/mazewall/hotspot-bridge v0.2.0 h1:DdL2A5gyxJL2Yub9h+bacrgJXpD5kCKrENzWZVXRYeU=
+github.com/Pilleo/mazewall/hotspot-bridge v0.2.0/go.mod h1:FEiVroH+pQOmKfe6YXTFkvkpAF3z799E4hFDPza6e/s=
 github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e h1:4dAU9FXIyQktpoUAgOJK3OTFc/xug0PCXYCqU0FgDKI=
 github.com/alexbrainman/sspi v0.0.0-20250919150558-7d374ff0d59e/go.mod h1:cEWa1LVoE5KvSD9ONXsZrj0z6KqySlCCNKHlLzbqAt4=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
