@@ -155,7 +155,7 @@ authorized complete unchanged checkpoint is pending at authoring, with its actua
 outcome recorded locally. Neither that diagnostic nor a later passing checkpoint
 would repair the root cause, prove retirement or qualify changed Go helper bytes.
 
-Governing [spec A1/A2](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a1-profiles-and-wire-versions)
-and [execution plan](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-18-hotspot-observed-provider.md#task-3-add-the-separately-negotiated-observation-profile)
+Governing [spec A1/A2](../superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a1-profiles-and-wire-versions)
+and [execution plan](../superpowers/plans/2026-10-18-hotspot-observed-provider.md#task-3-add-the-separately-negotiated-observation-profile)
 retain all later gates. Local detailed Task3 evidence lives in the owning SDD
 `task-3-report.md` and `build/kubescape-dev/task-3/`.

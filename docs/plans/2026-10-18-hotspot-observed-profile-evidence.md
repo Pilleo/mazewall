@@ -132,7 +132,7 @@ Container retirement does **not** establish native collector retirement. On the
 pending-error path the harness releases its target after Run returns although
 native resources remain retained; this lifetime-coupling gap is part of the
 rejection, not successful finalization. It is tracked with the drain blocker in
-[issue-20261018-212457-115](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/internals/backlog/resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md).
+[issue-20261018-212457-115](../internals/backlog/resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md).
 
 The controller's writable owned-output bind also covered its candidate bundle
 subtree. Post-run complete-byte checks still match the pre-run manifest, and target

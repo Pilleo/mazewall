@@ -21,7 +21,7 @@ eligibility stay unchanged. No new dependency, native patch/ABI or release pin.
 - [x] Accurate guidance and scoped connected-code review. Commit must use the
   unchanged configured full-build hook.
 
-[Owning issue](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/internals/backlog/resolved/issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a.md).
+[Owning issue](../internals/backlog/resolved/issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a.md).
 [Qualification basis](2026-10-19-hotspot-coupled-exec-evidence.md).
 No global completeness, code/metadata lease, logical identity or policy authority.
 

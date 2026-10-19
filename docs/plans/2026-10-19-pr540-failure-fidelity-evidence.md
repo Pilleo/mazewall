@@ -64,5 +64,5 @@ No publication, PR mutation, provisioning or Tasks4–6 implementation occurred.
 Both owned disposable VM/kind resources are RETIRED; no current Ready environment
 is claimed. Actual released SDK origin/sums, rebuilt bundles, native attach/real
 child Wait/retirement, provider handoffs and Kubernetes acceptance remain separate
-[release](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/plans/2026-10-19-hotspot-bridge-release.md) and
-[follow-up plan](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-19-pr540-review-next-steps.md) gates.
+[release](2026-10-19-hotspot-bridge-release.md) and
+[follow-up plan](../superpowers/plans/2026-10-19-pr540-review-next-steps.md) gates.
