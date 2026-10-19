@@ -83,7 +83,7 @@ public object TierERealPidReuseProbe {
                         break
                     }
                 } finally {
-                    if (held !== candidate) {
+                    if (held == null) {
                         candidate.destroy()
                         check(candidate.waitFor(2, TimeUnit.SECONDS)) { "PID reuse candidate did not exit: ${candidate.pid()}" }
                     }

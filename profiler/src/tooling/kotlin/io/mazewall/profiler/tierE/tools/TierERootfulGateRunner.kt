@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.tools
 
+import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.runContainerCommand
 import kotlinx.serialization.json.buildJsonObject
@@ -411,7 +412,7 @@ public object TierERootfulGateRunner {
                 try {
                     owner.finish(primary == null)
                 } catch (cleanup: Throwable) {
-                    if (primary == null) primary = cleanup else primary.addSuppressed(cleanup)
+                    primary = CleanupFailures.merge(primary, cleanup)
                 }
             }
             Files.writeString(
@@ -438,7 +439,7 @@ public object TierERootfulGateRunner {
             if (Files.exists(artifacts.resolve("benchmark-container.log"))) {
                 Files.copy(artifacts.resolve("benchmark-container.log"), runnerLog)
             }
-            if (primary != null) throw primary
+            primary?.let { throw it }
         }
     }
 }

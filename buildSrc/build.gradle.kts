@@ -17,6 +17,10 @@ tasks.withType<JavaCompile>().configureEach {
 
 gradlePlugin {
     plugins {
+        create("spotbugsToolchain") {
+            id = "io.mazewall.spotbugs-toolchain"
+            implementationClass = "io.mazewall.build.SpotBugsToolchainPlugin"
+        }
         create("testHealth") {
             id = "io.mazewall.test-health"
             implementationClass = "io.mazewall.build.TestHealthPlugin"
@@ -69,8 +73,28 @@ configurations.named(verification.runtimeOnlyConfigurationName) {
 }
 
 val verificationActionsMarker = layout.buildDirectory.file("verification/verification-actions.success")
+tasks.register<JavaExec>("spotbugsReportTest") {
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    mainClass.set("io.mazewall.build.SpotBugsReportTest")
+}
+tasks.register<JavaExec>("spotbugsSourcePatchTest") {
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    mainClass.set("io.mazewall.build.SpotBugsSourcePatchTest")
+}
+tasks.register<JavaExec>("ciCachePolicyTest") {
+    mainClass.set("io.mazewall.build.CiCacheKeyFunctionalTest")
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
+
 val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest") {
     mainClass.set("io.mazewall.build.VerificationActionsTest")
+    inputs.file(layout.projectDirectory.file("../scripts/ci_cache_key.sh"))
+        .withPropertyName("containerCacheKeyHelper")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file(verificationActionsMarker)
     args(verificationActionsMarker.get().asFile.absolutePath)
     doFirst { verificationActionsMarker.get().asFile.delete() }
@@ -102,6 +126,12 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(layout.projectDirectory.file("../gradle/libs.versions.toml"))
         .withPropertyName("rootVerificationPluginCatalog")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(layout.projectDirectory.file("../config/spotbugs/exclude.xml"))
+        .withPropertyName("rootSpotbugsExclusions")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(layout.projectDirectory.dir("../config/spotbugs/patches"))
+        .withPropertyName("spotbugsToolPatches")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.dir(layout.projectDirectory.dir("../profiler/src/main/kotlin/io/mazewall/profiler/triage"))
         .withPropertyName("productionTriageSources")

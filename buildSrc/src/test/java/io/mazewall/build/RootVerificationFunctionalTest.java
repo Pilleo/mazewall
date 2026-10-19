@@ -23,7 +23,13 @@ final class RootVerificationFunctionalTest {
                 """);
             write(fixture, "gradle/libs.versions.toml",
                 Files.readString(repository.resolve("gradle/libs.versions.toml")));
-            write(fixture, "config/spotbugs/exclude.xml", "<FindBugsFilter/>\n");
+            write(fixture, "config/spotbugs/exclude.xml",
+                Files.readString(repository.resolve("config/spotbugs/exclude.xml")));
+            try (var patches = Files.list(repository.resolve("config/spotbugs/patches"))) {
+                for (Path patch : patches.toList()) {
+                    write(fixture, "config/spotbugs/patches/" + patch.getFileName(), Files.readString(patch));
+                }
+            }
             write(fixture, "config/detekt/fixture.yml", """
                 exceptions:
                   active: true
@@ -39,7 +45,8 @@ final class RootVerificationFunctionalTest {
                     java
                     alias(libs.plugins.kotlin) apply false
                     alias(libs.plugins.detekt)
-                    alias(libs.plugins.spotbugs)
+                    id("com.github.spotbugs")
+                    id("io.mazewall.spotbugs-toolchain")
                     alias(libs.plugins.ktlint) apply false
                 }
                 allprojects { repositories { mavenCentral() } }
@@ -99,6 +106,51 @@ final class RootVerificationFunctionalTest {
                     }
                     """);
             }
+            write(fixture, "core/src/main/kotlin/io/mazewall/enforcer/api/Platform.kt", """
+                package io.mazewall.enforcer.api
+
+                object Platform {
+                    var isCpuCetSupportedOverride: Boolean? = null
+                }
+                """);
+            write(fixture, "core/src/main/kotlin/io/mazewall/platform/native/LinuxNative.kt", """
+                package io.mazewall.platform.native
+
+                object LinuxNative {
+                    private var engine: Any? = null
+
+                    fun setEngine(value: Any) {
+                        engine = value
+                    }
+
+                    fun resetToDefault() {
+                        engine = null
+                    }
+
+                    fun currentEngine(): Any? = engine
+                }
+                """);
+            write(fixture, "core/src/main/kotlin/io/mazewall/enforcer/diagnostics/MazewallEvents.kt", """
+                package io.mazewall.enforcer.diagnostics
+
+                object MazewallEvents {
+                    var failOnListenerError: Boolean = false
+                }
+                """);
+            write(fixture, "core/src/main/kotlin/io/mazewall/profiler/internal/engine/ProfilerDaemon.kt", """
+                package io.mazewall.profiler.internal.engine
+
+                object ProfilerDaemon {
+                    var runner: Any? = null
+                }
+                """);
+            write(fixture, "core/src/main/kotlin/io/mazewall/profiler/iterative/IterativeProfiler.kt", """
+                package io.mazewall.profiler.iterative
+
+                object IterativeProfiler {
+                    var taskExecutor: Any? = null
+                }
+                """);
             write(fixture, "portals/build.gradle.kts", "plugins { base }\n");
 
             BuildResult selected = run(fixture, false,
@@ -145,18 +197,109 @@ final class RootVerificationFunctionalTest {
                 throw new AssertionError("Lost source-free Java starter check");
             }
 
-            write(fixture, "integrations/spring/java-leaf/src/main/java/io/mazewall/Broken.java", """
-                package io.mazewall;
-                public final class Broken {
-                    public static String value() {
-                        Object value = null;
-                        return value.toString();
+            for (String namespace : List.of("io.mazewall", "io.mazewall.nested", "demo.vulnapp", "demo.vulnapp.nested")) {
+                String brokenPath = "integrations/spring/java-leaf/src/main/java/"
+                    + namespace.replace('.', '/') + "/Broken.java";
+                write(fixture, brokenPath, """
+                    package %s;
+                    public final class Broken {
+                        public static String value() {
+                            Object value = null;
+                            return value.toString();
+                        }
                     }
+                    """.formatted(namespace));
+                BuildResult javaFailure = run(fixture, true, ":unitCheck");
+                outcome(javaFailure, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.FAILED);
+                Files.delete(fixture.resolve(brokenPath));
+            }
+
+            String eventSeam = Files.readString(fixture.resolve(
+                    "core/src/main/kotlin/io/mazewall/enforcer/diagnostics/MazewallEvents.kt"));
+            write(fixture, "core/src/main/kotlin/io/mazewall/enforcer/diagnostics/MazewallEvents.kt",
+                    eventSeam.replace("var failOnListenerError: Boolean = false",
+                            "var failOnListenerError: Boolean = false\n    var unrelatedState: Boolean = false"));
+            BuildResult unlistedState = run(fixture, true, ":core:spotbugsMain");
+            outcome(unlistedState, ":core:spotbugsMain", TaskOutcome.FAILED);
+            if (!Files.readString(fixture.resolve("core/build/reports/spotbugs/main.xml")).contains("unrelatedState")) {
+                throw new AssertionError("Exact-field exception hid unrelated singleton state: " + unlistedState.getOutput());
+            }
+            write(fixture, "core/src/main/kotlin/io/mazewall/enforcer/diagnostics/MazewallEvents.kt", eventSeam);
+
+            Path javaBuild = fixture.resolve("integrations/spring/java-leaf/build.gradle.kts");
+            String javaBuildSource = Files.readString(javaBuild);
+            write(fixture, "integrations/spring/java-leaf/src/main/java/io/mazewall/OptionalDependency.java",
+                    "package io.mazewall; public class OptionalDependency {}\n");
+            write(fixture, "integrations/spring/java-leaf/src/main/java/io/mazewall/MissingUse.java",
+                    "package io.mazewall; public class MissingUse { public Object create() { return new OptionalDependency(); } }\n");
+            Files.writeString(javaBuild, javaBuildSource + """
+                tasks.withType<com.github.spotbugs.snom.SpotBugsTask>().configureEach {
+                    dependsOn("classes")
+                    classes = files(layout.buildDirectory.file("classes/java/main/io/mazewall/MissingUse.class"))
+                    auxClassPaths.setFrom(configurations.named("compileClasspath"))
                 }
                 """);
-            BuildResult javaFailure = run(fixture, true, ":unitCheck");
-            outcome(javaFailure, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.FAILED);
-            Files.delete(fixture.resolve("integrations/spring/java-leaf/src/main/java/io/mazewall/Broken.java"));
+            BuildResult incomplete = run(fixture, true, ":integrations:spring:java-leaf:spotbugsMain");
+            outcome(incomplete, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.FAILED);
+            contains(incomplete, "Incomplete SpotBugs analysis");
+            if (!Files.readString(fixture.resolve("integrations/spring/java-leaf/build/reports/spotbugs/main.xml"))
+                    .contains("<MissingClass>io.mazewall.OptionalDependency</MissingClass>")) {
+                throw new AssertionError("Missing-class control did not reach real analysis");
+            }
+            Files.writeString(javaBuild, javaBuildSource);
+            Files.delete(fixture.resolve("integrations/spring/java-leaf/src/main/java/io/mazewall/OptionalDependency.java"));
+            Files.delete(fixture.resolve("integrations/spring/java-leaf/src/main/java/io/mazewall/MissingUse.java"));
+
+            Path coreBuild = fixture.resolve("core/build.gradle.kts");
+            String coreBuildSource = Files.readString(coreBuild);
+            Files.writeString(coreBuild, coreBuildSource + """
+                dependencies { compileOnly("com.google.code.findbugs:jsr305:3.0.2") }
+                tasks.withType<com.github.spotbugs.snom.SpotBugsTask>().configureEach {
+                    reportLevel.set(com.github.spotbugs.snom.Confidence.LOW)
+                }
+                """);
+            write(fixture, "core/src/main/java/io/mazewall/ReachableAnalyzerControls.java", """
+                package io.mazewall;
+                public final class ReachableAnalyzerControls {
+                    private ReachableAnalyzerControls() {}
+                    public static int impossibleChar(char value) { if (value > 65535) return 5; return 2; }
+                    public static int contradictoryRange(int value) {
+                        if (value > 0) { if (value < 0) return 5; return 2; } return 3;
+                    }
+                    public static void discardedArray() { int[] values = new int[1]; values[0] = 1; }
+                    public static void discardedBuilder() { StringBuilder value = new StringBuilder(); value.append("unused"); }
+                    public static String impossibleCast(Object value) {
+                        if (value instanceof Integer) return (String) value; return "";
+                    }
+                    public static int needsValue(@javax.annotation.Nonnull String value) { return value.length(); }
+                    public static int nullArgument() { return needsValue(null); }
+                }
+                """);
+            BuildResult reachable = run(fixture, true, ":core:spotbugsMain");
+            outcome(reachable, ":core:spotbugsMain", TaskOutcome.FAILED);
+            Path controlReport = fixture.resolve("core/build/reports/spotbugs/main.xml");
+            VerifySpotBugsReport.validate(controlReport);
+            String controlXml = Files.readString(controlReport);
+            for (String type : List.of("UC_USELESS_CONDITION", "UC_USELESS_CONDITION_TYPE", "UC_USELESS_OBJECT",
+                    "BC_IMPOSSIBLE_CAST", "NP_NONNULL_PARAM_VIOLATION")) {
+                if (!controlXml.contains("type=\"" + type + "\"")) throw new AssertionError("Analyzer patch lost reachable control: " + type);
+            }
+            try (var overlay = new java.util.zip.ZipFile(fixture.resolve("build/tools/spotbugs/mazewall-spotbugs-tool-only.jar").toFile())) {
+                var classes = overlay.stream().map(java.util.zip.ZipEntry::getName).filter(name -> name.endsWith(".class")).toList();
+                var families = List.of("edu/umd/cs/findbugs/classfile/engine/bcel/ValueRangeAnalysisFactory",
+                        "edu/umd/cs/findbugs/ba/deref/UnconditionalValueDerefAnalysis",
+                        "edu/umd/cs/findbugs/detect/FindUselessObjects", "edu/umd/cs/findbugs/detect/FindBadCast2");
+                if (classes.size() != 22 || classes.stream().anyMatch(name -> families.stream()
+                        .noneMatch(family -> name.equals(family + ".class") || name.startsWith(family + "$")))) {
+                    throw new AssertionError("Unexpected analyzer overlay classes: " + classes);
+                }
+                if (overlay.getEntry("META-INF/spotbugs-LICENSE.html") == null
+                        || overlay.stream().filter(entry -> entry.getName().endsWith(".java")).count() != 4) {
+                    throw new AssertionError("Analyzer source/license provenance is incomplete");
+                }
+            }
+            Files.writeString(coreBuild, coreBuildSource);
+            Files.delete(fixture.resolve("core/src/main/java/io/mazewall/ReachableAnalyzerControls.java"));
 
             Path javaTest = fixture.resolve("integrations/spring/java-leaf/src/test/java/io/mazewall/AnswerTest.java");
             String passingTest = Files.readString(javaTest);
@@ -478,10 +621,44 @@ final class RootVerificationFunctionalTest {
         if (result.task(task) != null) throw new AssertionError("Fabricated source-module gate: " + task);
     }
 
-    private static BuildResult run(Path fixture, boolean fail, String... tasks) {
+    static void verifyEscapedClasspathLocation() {
+        try {
+            Path directory = Files.createTempDirectory("testkit-classpath-").resolve("classes with spaces #");
+            String resource = ClasspathLocationFixture.class.getName().replace('.', '/') + ".class";
+            Path bytecode = directory.resolve(resource);
+            Files.createDirectories(bytecode.getParent());
+            try (var input = ClasspathLocationFixture.class.getClassLoader().getResourceAsStream(resource)) {
+                if (input == null) throw new AssertionError("Missing classpath location fixture");
+                Files.copy(input, bytecode);
+            }
+            try (var loader = new java.net.URLClassLoader(new java.net.URL[] {directory.toUri().toURL()}, null)) {
+                Class<?> fixture = loader.loadClass(ClasspathLocationFixture.class.getName());
+                Path actual = classpathEntry(fixture).toPath();
+                if (!actual.equals(directory)) throw new AssertionError("TestKit classpath URL was not decoded: " + actual);
+            } finally {
+                try (var files = Files.walk(directory.getParent())) {
+                    for (Path file : files.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(file);
+                }
+            }
+        } catch (Exception failure) {
+            throw new AssertionError("Escaped TestKit classpath verification failed", failure);
+        }
+    }
+
+    private static final class ClasspathLocationFixture {}
+
+    private static java.io.File classpathEntry(Class<?> type) throws java.net.URISyntaxException {
+        return Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI()).toFile();
+    }
+
+    private static BuildResult run(Path fixture, boolean fail, String... tasks) throws java.net.URISyntaxException {
         var arguments = new java.util.ArrayList<>(List.of(tasks));
         arguments.addAll(List.of("--no-configuration-cache", "--max-workers=2", "--stacktrace"));
-        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments).forwardOutput();
+        var pluginClasspath = List.of(
+                classpathEntry(SpotBugsToolchainPlugin.class),
+                classpathEntry(com.github.spotbugs.snom.SpotBugsTask.class),
+                new java.io.File("build/resources/main").getAbsoluteFile());
+        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withPluginClasspath(pluginClasspath).withArguments(arguments).forwardOutput();
         return fail ? runner.buildAndFail() : runner.build();
     }
 
