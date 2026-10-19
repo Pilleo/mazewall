@@ -292,6 +292,8 @@ def main(argv: Sequence[str]) -> int:
     started = time.monotonic()
     samples = []
     interrupted = 0
+    child = None
+    retirement_attempted = False
     exit_code = None
     result = 1
 
@@ -344,6 +346,7 @@ def main(argv: Sequence[str]) -> int:
                                 sample()
                 finally:
                     if interrupted or child.returncode is None:
+                        retirement_attempted = True
                         cleanup_error = _retire(child, interrupted or signal.SIGTERM)
                 code = child.returncode
                 exit_code = None if code is None else (128 - code if code < 0 else code)
@@ -356,14 +359,23 @@ def main(argv: Sequence[str]) -> int:
                     result = result or 1
                 if exit_code:
                     reason = f"command exited {exit_code}; " + reason
-        if interrupted:
-            result = 128 + interrupted
-            if exit_code is None:
-                verdict = MemoryVerdict.UNKNOWN
-            reason = f"interrupted by {signal.Signals(interrupted).name}; " + reason
-        if not save(verdict, reason):
-            result = result or 1
-        return result
+        while True:
+            handled_signal = interrupted
+            if handled_signal:
+                if child is not None and not retirement_attempted:
+                    retirement_attempted = True
+                    cleanup_error = _retire(child, handled_signal)
+                    if cleanup_error:
+                        reason += "; " + cleanup_error
+                result = 128 + handled_signal
+                if exit_code is None:
+                    verdict = MemoryVerdict.UNKNOWN
+                reason = f"interrupted by {signal.Signals(handled_signal).name}; " + reason
+            if not save(verdict, reason):
+                result = result or 1
+            # A signal during publication still needs group retirement and a cancellation receipt.
+            if interrupted == handled_signal:
+                return result
     finally:
         for signum, handler in handlers.items():
             signal.signal(signum, handler)

@@ -365,6 +365,69 @@ class OwnedCommandTest(LinuxFixtureTest):
         self.assertIsNone(data["command_exit_code"])
         self.assertEqual(data["qualification"], "unknown")
 
+    def test_sigterm_during_final_collection_retires_owned_group(self):
+        receipt = self.root / "receipt.json"
+        pids = self.root / "pids.json"
+        initial = self.collect()
+        collections = 0
+        owned = []
+
+        def collect():
+            nonlocal collections
+            collections += 1
+            if collections == 2:
+                owned.extend(json.loads(pids.read_text()))
+                os.kill(os.getpid(), signal.SIGTERM)
+            return initial
+
+        code = (
+            "import json, os, subprocess, sys; from pathlib import Path; "
+            "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+            f"Path({str(pids)!r}).write_text(json.dumps([os.getpid(), p.pid])); "
+            "raise SystemExit(42)"
+        )
+        started = time.monotonic()
+        try:
+            with patch.object(probe, "collect_sample", collect):
+                status = probe.main(["--output", str(receipt), "--", sys.executable, "-c", code])
+            self.assertEqual(status, 143)
+            self.assertLess(time.monotonic() - started, 8)
+            data = json.loads(receipt.read_text())
+            self.assertEqual(data["command_exit_code"], 42)
+            self.assertIn("SIGTERM", data["reason"])
+            stat = Path(f"/proc/{owned[1]}/stat")
+            if stat.exists():
+                self.assertEqual(stat.read_text().split(") ", 1)[1][0], "Z")
+        finally:
+            if not owned and pids.exists():
+                owned = json.loads(pids.read_text())
+            if owned:
+                try:
+                    os.killpg(owned[0], signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def test_sigterm_during_final_receipt_returns_143(self):
+        receipt = self.root / "receipt.json"
+        write_text = Path.write_text
+        writes = 0
+
+        def write(path, *args, **kwargs):
+            nonlocal writes
+            result = write_text(path, *args, **kwargs)
+            if path == receipt:
+                writes += 1
+                if writes == 2:
+                    os.kill(os.getpid(), signal.SIGTERM)
+            return result
+
+        with patch.object(probe, "_PROC", self.proc), patch.object(Path, "write_text", write):
+            status = probe.main(["--output", str(receipt), "--", sys.executable, "-c", "raise SystemExit(0)"])
+        self.assertEqual(status, 143)
+        data = json.loads(receipt.read_text())
+        self.assertEqual(data["command_exit_code"], 0)
+        self.assertIn("SIGTERM", data["reason"])
+
     def test_sigterm_receipt_preserves_cooperative_child_exit(self):
         ready = self.root / "ready"
         pending = self.root / "pending"
