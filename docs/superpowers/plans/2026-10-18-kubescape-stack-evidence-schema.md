@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: d963c7941f5bd493751109324e6eba41f7d2b5af
-status: local_preparation_observed_pending_live_api_and_release_review
+status: local_live_api_verified_pending_published_release_handoff
 ---
 
 # Kubescape Typed Stack Evidence Implementation Plan
@@ -26,6 +26,16 @@ identities. Existing build receipts and external work are untouched. This local
 checkpoint does not independently certify that worker's checks or authorize B3.
 Do not repeat provisioning/B1/B2; follow the
 [operator gate checkpoint](../../plans/2026-10-19-hotspot-integration-gate-checkpoint.md).
+
+**Later authorized execution:** The operator approved an isolated local kind
+environment and explicitly selected full ContainerProfile Create responses after
+the first real gate failed on metadata-only output. Storage46c8444a implements the
+scoped correction; both real JSON/protobuf Create/Get and checked profile cleanup
+now pass. [Executed B3 evidence](../../plans/2026-10-19-hotspot-storage-live-api.md)
+records exact source/image identities, original failures and the separate baseline
+race finding. Storage docs commit2beffe7 records the result. The separate local
+handoff has `b3LocalAPIAccepted:true` and `releaseReady:false`; original incomplete
+handoff bytes remain frozen. No storage module/image publication is claimed.
 
 ## Global Constraints
 

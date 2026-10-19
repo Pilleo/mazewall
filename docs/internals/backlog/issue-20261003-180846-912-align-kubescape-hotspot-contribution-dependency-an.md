@@ -12,6 +12,9 @@ target_files:
   - "docs/superpowers/plans/2026-10-18-kubescape-agentless-hotspot.md"
   - "docs/superpowers/plans/2026-10-18-kubescape-stack-evidence-schema.md"
   - "docs/plans/2026-10-19-hotspot-integration-gate-checkpoint.md"
+  - "docs/superpowers/plans/2026-10-18-node-agent-hotspot-companion.md"
+  - "docs/plans/2026-10-19-hotspot-companion-local-evidence.md"
+  - "docs/plans/2026-10-19-hotspot-storage-live-api.md"
 target_symbols: []
 open_questions: false
 ---
@@ -66,6 +69,20 @@ planning-time missing-checkout blocker, not the real API and operator gates.
 The [current review checkpoint](../../plans/2026-10-19-hotspot-integration-gate-checkpoint.md)
 records the exact remaining decisions and local isolated SDK packaging evidence.
 Keep this issue open; no ready provider handoff or end-to-end acceptance exists.
+
+The operator subsequently approved continuing release/integration, selected the
+current dirty node-agent baseline and approved an isolated disposable local kind
+environment for the reviewed storage server. [C1 evidence](../../plans/2026-10-19-hotspot-companion-local-evidence.md)
+records a scoped local config/projection commit with independent staged-tree race
+checks and preservation of all original prototype bytes. SDK release review is
+PR540; no pending review, API or end-to-end gate is represented as passed.
+
+The subsequent [local B3 API gate](../../plans/2026-10-19-hotspot-storage-live-api.md)
+passes JSON/protobuf Create/Get against exact storage46c8444a image bytes after the
+operator-approved full Create-response correction. Both-format cleanup and an
+independent empty profile inventory are checked. Original failed captures and
+setup failures remain frozen; storage release provenance, C runtime wiring and
+final D acceptance still prevent closing this overall integration issue.
 
 ---
 <!-- id: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an  file: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md -->

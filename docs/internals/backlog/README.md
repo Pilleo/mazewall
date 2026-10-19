@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 140 | *Total Resolved Issues:* 713
+*Total Active Issues:* 142 | *Total Resolved Issues:* 714
 
-Active status detail: 139 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 141 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-084828-251-investigate-tier-e-delayed-artifact-coverage-dropp](issue-20261019-084828-251-investigate-tier-e-delayed-artifact-coverage-dropp.md) | Investigate retained Tier E delayed-artifact71/72 coverage failure | medium | profiler |
+| Archived [issue-20261019-082935-929-return-persisted-containerprofile-payload-from-cre](resolved/issue-20261019-082935-929-return-persisted-containerprofile-payload-from-cre.md) | Full ContainerProfile Create payload and checked live JSON/protobuf gate | medium | profiler |
+| [issue-20261019-083248-888-fix-pre-existing-storage-watcher-identity-test-dat](issue-20261019-083248-888-fix-pre-existing-storage-watcher-identity-test-dat.md) | Fix baseline storage watcher-test deep-reflection race | medium | profiler |
 | [issue-20261019-071745-155-release-hotspot-bridge-v0-2-0-and-pin-actual-provi](issue-20261019-071745-155-release-hotspot-bridge-v0-2-0-and-pin-actual-provi.md) | Release bridge v0.2.0 through review and pin actual provider handoff | medium | profiler |
 | Archived [issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a](resolved/issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a.md) | Scoped observed admission approved; actual CLI and strict regression gates pass | medium | profiler |
 | Archived [issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi](resolved/issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md) | Retain asynchronous enrichment causes before pending readout returns; native cause and strict regression gates pass | high | profiler |

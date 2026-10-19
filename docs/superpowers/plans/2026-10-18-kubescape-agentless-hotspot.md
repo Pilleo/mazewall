@@ -46,6 +46,16 @@ has new executable/manifest/native receipts, not relabeled candidate artifacts.
 SDK publication, B3 live API, C's dirty baseline and D's cluster gates remain
 separate. No external-repository edits or deployment follow implicitly.
 
+**Subsequent continuation authority:** After those gates were explained, the
+operator requested continuation, selected the current dirty node-agent baseline
+and explicitly approved a disposable local kind environment. [C1 local evidence](../../plans/2026-10-19-hotspot-companion-local-evidence.md)
+records exact-index Go1.27.0 race verification and preservation of all34prototype
+files. The [local B3 JSON/protobuf API gate](../../plans/2026-10-19-hotspot-storage-live-api.md)
+now passes against storage46c8444a after a separately approved full Create-response
+correction, with exact server image provenance and independently checked cleanup.
+Bridge release review is PR540; no publication, ready A/B release handoff, C runtime
+integration or D native acceptance is inferred from these local successes.
+
 ## Global Constraints
 
 - JDK25 idioms; library compatibility floor JDK22. Supported host Linux-amd64.

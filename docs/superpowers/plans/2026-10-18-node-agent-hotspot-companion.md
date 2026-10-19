@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 1c4fb954cdd51edb98a2ad4100be392cd806e44e
-status: p0_approved_pending_provider_storage_and_operator_baseline
+status: current_prototype_baseline_approved_c1_local_unit_verified
 ---
 
 # Node-Agent HotSpot Companion Implementation Plan
@@ -15,6 +15,14 @@ status: p0_approved_pending_provider_storage_and_operator_baseline
 **Tech Stack:** Node-agent Go1.27, standard exec/JSON/filesystem, existing container/process caches, bridge A and storage B. Current Gadget06b0d12baca0 stays pinned.
 
 **Spec:** [Governing design, C](../specs/2026-10-18-kubescape-agentless-hotspot-design.md#c-node-agent-integration-contract).
+
+**Execution checkpoint (2026-10-19):** The operator explicitly selected the current
+dirty Tier E prototype at1c4fb954 as baseline, with recoverable custody and exclusion
+of all pre-existing work from commits. [C1 local evidence](../../plans/2026-10-19-hotspot-companion-local-evidence.md)
+records commit94bce485, exact-index race checks and byte-preservation proof for all
+34original files. Development uses a recorded Go1.27.0 workspace with reviewed
+local A/B source. Runtime wiring and published dependency/release handoffs are not
+claimed. Do not discard or reimplement the preserved Tier E prototype.
 
 ## Global Constraints
 
