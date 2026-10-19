@@ -36,6 +36,20 @@ class HotSpotProtocolTest {
     }
 
     @Test
+    fun `provider alias cannot hide a contradictory canonical patch pin`() {
+        val expected = "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"
+        assertFailsWith<IllegalArgumentException> {
+            protocol.controlEvent(
+                row(
+                    "collector_ready",
+                    "\"patch_sha256\":\"$expected\"",
+                    "\"patch_sha256\":\"${"9".repeat(64)}\",\"PATCH_SHA256\":\"$expected\"",
+                ),
+            )
+        }
+    }
+
+    @Test
     fun `permission errno is preserved as a typed collector failure`() {
         for (errno in listOf(1u, 13u)) {
             val record = row("collector_error", "\"pid\":123", "\"pid\":123,\"message\":\"native failure\",\"errno\":$errno")

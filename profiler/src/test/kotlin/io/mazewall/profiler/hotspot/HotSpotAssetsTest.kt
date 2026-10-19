@@ -177,6 +177,49 @@ class HotSpotAssetsTest {
     }
 
     @Test
+    fun `conflicting media types cannot suppress required graph expansion`() {
+        for (opaqueFirst in listOf(false, true)) {
+            fixture()
+            val opaque = rootDescriptor.replace(
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.gadget.config.v1+json",
+            )
+            val descriptors = if (opaqueFirst) "$opaque,$rootDescriptor" else "$rootDescriptor,$opaque"
+            val index = directory.resolve("oci/index.json")
+            val old = Files.readString(index)
+            val updated = """{"schemaVersion":2,"manifests":[$descriptors]}"""
+            Files.writeString(index, updated)
+            val manifest = directory.resolve("manifest.json")
+            Files.writeString(
+                manifest,
+                Files.readString(manifest).replace(
+                    "\"oci/index.json\":\"${hash(old)}\"",
+                    "\"oci/index.json\":\"${hash(updated)}\"",
+                ),
+            )
+            assertFailsWith<IllegalArgumentException>("opaqueFirst=$opaqueFirst") { HotSpotAssets.load(directory) }
+        }
+    }
+
+    @Test
+    fun `same media shared OCI document remains admissible`() {
+        fixture()
+        val index = directory.resolve("oci/index.json")
+        val old = Files.readString(index)
+        val updated = """{"schemaVersion":2,"manifests":[$rootDescriptor,$rootDescriptor]}"""
+        Files.writeString(index, updated)
+        val manifest = directory.resolve("manifest.json")
+        Files.writeString(
+            manifest,
+            Files.readString(manifest).replace(
+                "\"oci/index.json\":\"${hash(old)}\"",
+                "\"oci/index.json\":\"${hash(updated)}\"",
+            ),
+        )
+        HotSpotAssets.load(directory)
+    }
+
+    @Test
     @EnabledIfEnvironmentVariable(named = "MW_HOTSPOT_ASSET_TEST_DIR", matches = ".+")
     fun `installed native bundle passes Kotlin admission`() {
         val installed = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))
