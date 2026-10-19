@@ -180,7 +180,7 @@ func projectRunExit(t *testing.T, cwd, temp string, replacements map[string]stri
 	}
 	var out bytes.Buffer
 	out.WriteString(`package capture
-import("context";"errors";"fmt";"io.mazewall/experiments/hotspot-agentless/internal/model")
+import("errors";"fmt";"io.mazewall/experiments/hotspot-agentless/internal/model")
 func projectedRunExit(fatal *fatalState, runErr, eventFinalizationErr error, eventFinalization *model.EventFinalizationObservation, sink model.Sink) (resultErr error) {
 cfg := Config{DrainFull:true}
 retainFullResources := false

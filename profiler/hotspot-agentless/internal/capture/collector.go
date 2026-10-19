@@ -414,6 +414,14 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if err != nil {
 		summary.Errors = []string{err.Error()}
 	}
-	writeErr := sink.Write(context.Background(), model.Record{SchemaVersion: 1, Kind: "session_summary", SessionID: sessionID, Summary: &summary})
-	return errors.Join(err, writeErr)
+	return writeSessionSummary(cfg, sink, sessionID, summary, err)
+}
+
+func writeSessionSummary(cfg Config, sink model.Sink, session string, summary model.Summary, cause error) error {
+	if cause != nil && (cfg.production || cfg.profile == wire.Observed25) {
+		return cause
+	}
+	return errors.Join(cause, sink.Write(context.Background(), model.Record{
+		SchemaVersion: 1, Kind: "session_summary", SessionID: session, Summary: &summary,
+	}))
 }
