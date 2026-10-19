@@ -1,15 +1,18 @@
 package accounting
 
-import "sort"
+import (
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
+	"sort"
+)
 
-type Lane string
+type Lane = wire.Lane
 
 const (
-	SelectedEvents Lane = "selected_events"
-	Definitions    Lane = "definitions"
-	Enrichment     Lane = "enrichment"
-	Wire           Lane = "wire"
-	Retention      Lane = "retention"
+	SelectedEvents Lane = wire.SelectedEvents
+	Definitions    Lane = wire.Definitions
+	Enrichment     Lane = wire.Enrichment
+	Wire           Lane = wire.Wire
+	Retention      Lane = wire.Retention
 )
 
 // LaneEvidence is a scoped model, not proof that native admission was observed.

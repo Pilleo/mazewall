@@ -39,7 +39,7 @@ func ObserveReadiness(m RunManifest, records io.Reader) (ReadinessObservation, e
 			if _, found := events[row.EventID]; found {
 				return ReadinessObservation{}, fmt.Errorf("duplicate readiness event")
 			}
-			events[row.EventID] = *row.Event
+			events[row.EventID] = model.Event(*row.Event)
 		case "enrichment":
 			if row.Evidence == nil {
 				return ReadinessObservation{}, fmt.Errorf("missing readiness evidence")

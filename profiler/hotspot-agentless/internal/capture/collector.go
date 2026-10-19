@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"io"
 	"io.mazewall/experiments/hotspot-agentless/internal/identity"
@@ -59,6 +60,11 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if GadgetPatchSHA == "" {
 		return fmt.Errorf("structured collector requires the provenance-pinned make build")
 	}
+	if cfg.profile == wire.Observed25 {
+		if err := identity.CheckObservedTarget(uint32(cfg.PID), cfg.ExpectedTarget); err != nil {
+			return err
+		}
+	}
 	report := preflight.Check(preflight.Observe(cfg.PID))
 	if !report.Ready {
 		return errors.Join(fmt.Errorf("preflight refused capture: %v", report.Failures), report.NativeError)
@@ -84,8 +90,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	}
 	var execBarrier *identity.ExecBarrier
 	var epochTarget libpf.HotSpotEpochTarget
+	var observedTarget identity.ObservedTarget
 	var checks []func() error
-	if cfg.StrictEpoch {
+	if cfg.StrictEpoch || cfg.DrainFull {
 		execBarrier, err = identity.NewExecBarrier(cfg.PID)
 		if err != nil {
 			return err
@@ -96,6 +103,8 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			}
 		}()
 		checks = append(checks, execBarrier.Check)
+	}
+	if cfg.StrictEpoch {
 		target, err := identity.Discover(cfg.PID, ticks)
 		if err != nil {
 			return err
@@ -105,7 +114,18 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		}
 		epochTarget = libpf.HotSpotEpochTarget{PID: libpf.PID(target.PID), ProcessStartTicks: ticks, CounterAddress: libpf.Address(target.CounterAddress), InitialEpoch: target.InitialEpoch}
 	}
+	if cfg.profile == wire.Observed25 {
+		observedTarget, err = identity.ObserveProfile(uint32(cfg.PID), cfg.ExpectedTarget)
+		if err != nil {
+			return err
+		}
+		if err := execBarrier.Check(); err != nil {
+			return err
+		}
+		checks = append(checks, func() error { return identity.CheckObservedTarget(uint32(cfg.PID), cfg.ExpectedTarget) })
+	}
 	fatal := fatalState{cancel: cancelAll}
+	defer func() { resultErr = errors.Join(resultErr, fatal.Err()) }()
 	if cfg.AbortContext != nil {
 		abortDone := make(chan struct{})
 		go func() {
@@ -144,6 +164,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if cfg.production {
 		rawSink = newProductionSink(writer)
 	}
+	if cfg.profile == wire.Observed25 {
+		rawSink = newObservedSink(writer)
+	}
 	sink := providerSink{rawSink}
 	rt := local.New()
 	if err := rt.Init(nil); err != nil {
@@ -173,19 +196,23 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline})
 			}
 		} else {
-			sym, err = symbolizer.NewSymbolizer(symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ownedCtx, HotSpotEpochTarget: epochTarget, OnHotSpotFatal: fatal.Record})
+			options := symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ownedCtx, HotSpotEpochTarget: epochTarget, OnHotSpotFatal: fatal.Record}
+			if cfg.profile == wire.Observed25 {
+				options.HotSpotObservedPID = libpf.PID(cfg.PID)
+			}
+			sym, err = symbolizer.NewSymbolizer(options)
 			if err != nil {
 				return err
 			}
 			for name, replacement := range sym.GetEbpfReplacements() {
 				gc.SetVar(name, replacement)
 			}
-			enrichment, err = NewEnricher(ownedCtx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks, strictEpoch: cfg.StrictEpoch, execBarrier: execBarrier}, sink, LinuxBootClock{}, cancelAll)
+			enrichment, err = newEnricher(ownedCtx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks, strictEpoch: cfg.StrictEpoch, execBarrier: execBarrier}, sink, LinuxBootClock{}, cancelAll, fatal.Record)
 			if err != nil {
 				return err
 			}
 			if cfg.DrainFull {
-				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline, StrictFull: true, Accounting: &operators.SelectedAccountingTarget{Session: sessionID, PID: uint32(cfg.PID), Birth: ticks}, AfterReadout: func(stopCtx context.Context) error {
+				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline, StrictFull: cfg.StrictEpoch, ObservedFull: cfg.profile == wire.Observed25, Accounting: &operators.SelectedAccountingTarget{Session: sessionID, PID: uint32(cfg.PID), Birth: ticks}, AfterReadout: func(stopCtx context.Context) error {
 					if err := ownedCtx.Err(); err != nil {
 						return errors.Join(err, fatal.Err())
 					}
@@ -230,6 +257,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 					return callbackErr
 				}
 				event, err := decoder.Decode(data)
+				if err == nil && cfg.profile == wire.Observed25 {
+					err = validateObservedEvent(cfg.ExpectedTarget, event)
+				}
 				if err == nil {
 					if eventsOnly != nil {
 						err = eventsOnly.Submit(eventDeliveryContext(ctx, cfg), event)
@@ -261,8 +291,8 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			}
 			expectedAccounting = &expected
 		}
-		if cfg.production {
-			return writeProductionReady(ctx, sink, sessionID, uint32(cfg.PID), ticks, func() error {
+		if cfg.production || cfg.profile == wire.Observed25 {
+			check := func() error {
 				if err := ownedCtx.Err(); err != nil {
 					return errors.Join(err, fatal.Err())
 				}
@@ -284,8 +314,24 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 				if err != nil || current != ticks {
 					return errors.Join(fmt.Errorf("target generation changed before readiness"), err)
 				}
+				if cfg.profile == wire.Observed25 {
+					if err := identity.CheckObservedTarget(uint32(cfg.PID), cfg.ExpectedTarget); err != nil {
+						return err
+					}
+				}
 				return fatal.Err()
-			})
+			}
+			if cfg.profile == wire.Observed25 {
+				if err := check(); err != nil {
+					return err
+				}
+				r, err := observedLifecycleRecord("collector_ready", sessionID, observedTarget.Target, observedTarget.JVMBuildID, observedTarget.JVMSHA256)
+				if err != nil {
+					return err
+				}
+				return sink.Write(ctx, r)
+			}
+			return writeProductionReady(ctx, sink, sessionID, uint32(cfg.PID), ticks, check)
 		}
 		return sink.Write(ctx, model.Record{SchemaVersion: 1, Kind: "collector_attached", SessionID: sessionID})
 	}))
@@ -368,6 +414,14 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if err != nil {
 		summary.Errors = []string{err.Error()}
 	}
-	writeErr := sink.Write(context.Background(), model.Record{SchemaVersion: 1, Kind: "session_summary", SessionID: sessionID, Summary: &summary})
-	return errors.Join(err, writeErr)
+	return writeSessionSummary(cfg, sink, sessionID, summary, err)
+}
+
+func writeSessionSummary(cfg Config, sink model.Sink, session string, summary model.Summary, cause error) error {
+	if cause != nil && (cfg.production || cfg.profile == wire.Observed25) {
+		return cause
+	}
+	return errors.Join(cause, sink.Write(context.Background(), model.Record{
+		SchemaVersion: 1, Kind: "session_summary", SessionID: session, Summary: &summary,
+	}))
 }

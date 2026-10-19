@@ -177,6 +177,84 @@ class HotSpotAssetsTest {
     }
 
     @Test
+    fun `conflicting media types cannot suppress required graph expansion`() {
+        for (opaqueFirst in listOf(false, true)) {
+            fixture()
+            val opaque = rootDescriptor.replace(
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.gadget.config.v1+json",
+            )
+            val descriptors = if (opaqueFirst) "$opaque,$rootDescriptor" else "$rootDescriptor,$opaque"
+            val index = directory.resolve("oci/index.json")
+            val old = Files.readString(index)
+            val updated = """{"schemaVersion":2,"manifests":[$descriptors]}"""
+            Files.writeString(index, updated)
+            val manifest = directory.resolve("manifest.json")
+            Files.writeString(
+                manifest,
+                Files.readString(manifest).replace(
+                    "\"oci/index.json\":\"${hash(old)}\"",
+                    "\"oci/index.json\":\"${hash(updated)}\"",
+                ),
+            )
+            assertFailsWith<IllegalArgumentException>("opaqueFirst=$opaqueFirst") { HotSpotAssets.load(directory) }
+        }
+    }
+
+    @Test
+    fun `same media shared OCI document remains admissible`() {
+        fixture()
+        val index = directory.resolve("oci/index.json")
+        val old = Files.readString(index)
+        val updated = """{"schemaVersion":2,"manifests":[$rootDescriptor,$rootDescriptor]}"""
+        Files.writeString(index, updated)
+        val manifest = directory.resolve("manifest.json")
+        Files.writeString(
+            manifest,
+            Files.readString(manifest).replace(
+                "\"oci/index.json\":\"${hash(old)}\"",
+                "\"oci/index.json\":\"${hash(updated)}\"",
+            ),
+        )
+        HotSpotAssets.load(directory)
+    }
+
+    @Test
+    fun `selected root refuses opaque media and incorrect size`() {
+        for (descriptor in listOf(
+            rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.gadget.config.v1+json"),
+            rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.gadget.ebpf.program.v1+binary"),
+            rootDescriptor.replace("\"size\":${blob.length}", "\"size\":1"),
+        )) {
+            fixture()
+            replaceRootDescriptors(descriptor)
+            assertFailsWith<IllegalArgumentException>(descriptor) { HotSpotAssets.load(directory) }
+        }
+    }
+
+    @Test
+    fun `selected root accepts OCI index media`() {
+        fixture()
+        replaceRootDescriptors(rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.index.v1+json"))
+        HotSpotAssets.load(directory)
+    }
+
+    private fun replaceRootDescriptors(descriptors: String) {
+        val index = directory.resolve("oci/index.json")
+        val old = Files.readString(index)
+        val updated = """{"schemaVersion":2,"manifests":[$descriptors]}"""
+        Files.writeString(index, updated)
+        val manifest = directory.resolve("manifest.json")
+        Files.writeString(
+            manifest,
+            Files.readString(manifest).replace(
+                "\"oci/index.json\":\"${hash(old)}\"",
+                "\"oci/index.json\":\"${hash(updated)}\"",
+            ),
+        )
+    }
+
+    @Test
     @EnabledIfEnvironmentVariable(named = "MW_HOTSPOT_ASSET_TEST_DIR", matches = ".+")
     fun `installed native bundle passes Kotlin admission`() {
         val installed = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))
@@ -208,7 +286,7 @@ class HotSpotAssetsTest {
             {"schema_version":1,"collector_version":"2","capture_abi":2,"wire_schema":2,
              "platform":"linux-amd64","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
              "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
-             "patch_sha256":"8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c",
+             "patch_sha256":"89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50",
              "gadget_digest":"sha256:$blobHash","files":{$files}}
         """.trimIndent(),
         )

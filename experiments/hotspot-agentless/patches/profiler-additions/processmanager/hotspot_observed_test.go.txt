@@ -1,0 +1,75 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package processmanager
+
+import (
+	"errors"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	"syscall"
+	"testing"
+)
+
+func TestObservedActualConsumerRoutesReporterFailureToFatalOwner(t *testing.T) {
+	pm, _, reporter := epochPM(t)
+	pm.epochTarget = libpf.HotSpotEpochTarget{}
+	var fatal error
+	if err := pm.ConfigureHotSpotObservedTarget(123, func(err error) { fatal = err }); err != nil {
+		t.Fatal(err)
+	}
+	pm.HandleTrace(&libpf.EbpfTrace{PID: 123, TID: 456})
+	if fatal != nil || reporter.trace == nil {
+		t.Fatal("positive consumer", fatal)
+	}
+	reporter.err = syscall.EACCES
+	pm.HandleTrace(&libpf.EbpfTrace{PID: 123, TID: 456})
+	if !errors.Is(fatal, syscall.EACCES) {
+		t.Fatal("logged and lost reporter cause", fatal)
+	}
+}
+
+func TestObservedMissingMetadataUnavailableAndMalformedExtentFatal(t *testing.T) {
+	pm, _, reporter := epochPM(t)
+	pm.epochTarget = libpf.HotSpotEpochTarget{}
+	var fatal error
+	if err := pm.ConfigureHotSpotObservedTarget(123, func(err error) { fatal = err }); err != nil {
+		t.Fatal(err)
+	}
+	delete(pm.interpreters, 123)
+	raw := epochRaw(0)
+	raw.HotSpotIdentity = libpf.HotSpotIdentity{}
+	pm.HandleTrace(raw)
+	if fatal != nil || reporter.trace == nil || reporter.trace.HotSpotValidation.State != libpf.HotSpotValidationUnavailable {
+		t.Fatal("missing metadata invented success", fatal, reporter.trace)
+	}
+	raw.FrameData = []uint64{0}
+	pm.HandleTrace(raw)
+	if fatal == nil {
+		t.Fatal("malformed frame silently bypassed")
+	}
+}
+
+func TestObservedConfigurationCannotMixStrictOrLoseFatalOwner(t *testing.T) {
+	pm, _, _ := epochPM(t)
+	if err := pm.ConfigureHotSpotObservedTarget(123, func(error) {}); err == nil {
+		t.Fatal("mixed strict/observed")
+	}
+	pm = &ProcessManager{}
+	if err := pm.ConfigureHotSpotObservedTarget(123, nil); err == nil {
+		t.Fatal("no fatal owner")
+	}
+}
+
+func TestObservedOneWordErrorFrameIsNotAMalformedJavaFrame(t *testing.T) {
+	pm, _, reporter := epochPM(t)
+	pm.epochTarget = libpf.HotSpotEpochTarget{}
+	var fatal error
+	if err := pm.ConfigureHotSpotObservedTarget(123, func(err error) { fatal = err }); err != nil {
+		t.Fatal(err)
+	}
+	raw := &libpf.EbpfTrace{PID: 123, TID: 456, NumFrames: 1, FrameData: libpf.NewEbpfFrame(libpf.HotSpotFrame, libpf.FrameFlags(support.FrameFlagError), 1, 7)}
+	pm.HandleTrace(raw)
+	if fatal != nil || reporter.trace == nil || len(reporter.trace.Frames) != 1 || !reporter.trace.Frames[0].Value().Type.IsError() {
+		t.Fatal("valid error frame rejected as metadata frame", fatal, reporter.trace)
+	}
+}

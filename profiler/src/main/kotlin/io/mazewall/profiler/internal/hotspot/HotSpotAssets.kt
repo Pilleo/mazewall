@@ -20,7 +20,7 @@ private const val MAX_MANIFEST_JSON_DEPTH = 2
 private const val OCI_SCHEMA = 2
 private const val GADGET_REVISION = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 private const val PROFILER_REVISION = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
-private const val PATCH_SHA256 = "8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c"
+private const val PATCH_SHA256 = "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"
 private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
 
 /** Local integrity/version admission. The operator supplies a trusted manifest and owns installation. */
@@ -175,8 +175,14 @@ private fun verifyOciGraph(
 ) {
     val index = readOciDocument(ownedFile(root, "oci/index.json"))
     require(index.manifests.any { it.digest == manifest.gadgetDigest }) { "Gadget digest absent from OCI index" }
+    require(
+        index.manifests.filter { it.digest == manifest.gadgetDigest }.all {
+            it.mediaType in setOf("application/vnd.oci.image.index.v1+json", "application/vnd.oci.image.manifest.v1+json")
+        },
+    ) { "Unsupported selected OCI root media type" }
     val pending = ArrayDeque(index.manifests)
     val visited = mutableSetOf<String>()
+    val mediaByDigest = mutableMapOf<String, String>()
     while (pending.isNotEmpty()) {
         require(pending.size + visited.size <= MAX_ASSET_FILES) { "OCI graph exceeds descriptor limit" }
         val descriptor = pending.removeFirst()
@@ -186,6 +192,8 @@ private fun verifyOciGraph(
         require(manifest.files[name] == hash) { "Unlisted required OCI blob: $name" }
         val path = ownedFile(root, name)
         require(descriptor.size >= 0 && Files.size(path) == descriptor.size) { "OCI descriptor size mismatch" }
+        val previous = mediaByDigest.putIfAbsent(hash, descriptor.mediaType)
+        require(previous == null || previous == descriptor.mediaType) { "Conflicting OCI media type: $hash" }
         if (visited.add(hash) && descriptor.mediaType in setOf("application/vnd.oci.image.index.v1+json", "application/vnd.oci.image.manifest.v1+json")) {
             val document = readOciDocument(path)
             pending.addAll(document.manifests)

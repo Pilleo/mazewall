@@ -1,0 +1,26 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package processmanager
+
+import (
+	"errors"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"syscall"
+	"testing"
+)
+
+func TestLegacyUnknownActualConsumerDoesNotLogAndLoseReporterCause(t *testing.T) {
+	pm, _, reporter := epochPM(t)
+	pm.epochTarget = libpf.HotSpotEpochTarget{}
+	var fatal error
+	pm.epochFatal = func(err error) { fatal = err }
+	pm.HandleTrace(&libpf.EbpfTrace{PID: 123, TID: 456})
+	if fatal != nil || reporter.trace == nil {
+		t.Fatal("positive consumer", fatal)
+	}
+	reporter.err = syscall.EACCES
+	pm.HandleTrace(&libpf.EbpfTrace{PID: 123, TID: 456})
+	if !errors.Is(fatal, syscall.EACCES) {
+		t.Fatal("lost original reporter cause", fatal)
+	}
+}

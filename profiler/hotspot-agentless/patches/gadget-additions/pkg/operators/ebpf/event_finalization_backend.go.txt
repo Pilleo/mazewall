@@ -54,7 +54,7 @@ func (b nativeEventStopBackend) Join(ctx context.Context) error {
 		}
 	}
 	b.instance.wg.Wait()
-	if opts := b.instance.eventStopOptions; opts != nil && opts.StrictFull {
+	if opts := b.instance.eventStopOptions; opts != nil && (opts.StrictFull || opts.ObservedFull) {
 		if opts.AfterReadout == nil {
 			return fmt.Errorf("strict definition finalization hook missing")
 		}
@@ -144,15 +144,23 @@ func (i *ebpfInstance) prepareEventFinalization(gc operators.GadgetContext, para
 	if !hasU || !hasO || !hasTrace || trace.AsBool() {
 		return fmt.Errorf("unsupported event finalization parameters")
 	}
+	if opts.StrictFull && opts.ObservedFull {
+		return fmt.Errorf("conflicting full drain profiles")
+	}
 	if opts.StrictFull {
 		counter, hasCounter := parameters["target_safepoint_counter"]
 		if opts.AfterReadout == nil || !hasCounter || counter.AsUint64() == 0 {
 			return fmt.Errorf("strict full drain identity/handoff missing")
 		}
+	} else if opts.ObservedFull {
+		counter, hasCounter := parameters["target_safepoint_counter"]
+		if opts.AfterReadout == nil || opts.Accounting == nil || !hasCounter || counter == nil || counter.AsUint64() != 0 {
+			return fmt.Errorf("observed full drain identity/handoff missing")
+		}
 	} else if opts.AfterReadout != nil {
 		return fmt.Errorf("event-only drain cannot own definitions")
 	}
-	if err := validateEventFinalizationProfile(i, u.AsBool(), o.AsBool(), opts.StrictFull); err != nil {
+	if err := validateEventFinalizationProfile(i, u.AsBool(), o.AsBool(), opts.StrictFull || opts.ObservedFull); err != nil {
 		return err
 	}
 	copy := *opts

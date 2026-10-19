@@ -1,0 +1,64 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package hotspot
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"sync"
+	"syscall"
+
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+)
+
+type observedReader struct {
+	base                 io.ReaderAt
+	fatal                func(error)
+	first, eperm, eacces sync.Once
+	cause                error
+}
+
+func newObservedReader(base io.ReaderAt, fatal func(error)) io.ReaderAt {
+	return &observedReader{base: base, fatal: fatal}
+}
+
+func (r *observedReader) ReadAt(p []byte, off int64) (n int, err error) {
+	if off < 0 || len(p) > 1<<20 || int64(len(p)) > math.MaxInt64-off {
+		err = fmt.Errorf("invalid observed metadata read bounds")
+	} else {
+		n, err = r.base.ReadAt(p, off)
+		if n < 0 || n > len(p) {
+			n = 0
+			if err == nil {
+				err = fmt.Errorf("invalid observed metadata read count")
+			}
+		}
+		if err == nil && n != len(p) {
+			err = io.ErrUnexpectedEOF
+		}
+	}
+	if err != nil {
+		r.first.Do(func() { r.cause = err; r.fatal(err) })
+		if errors.Is(err, syscall.EPERM) && !errors.Is(r.cause, syscall.EPERM) {
+			r.eperm.Do(func() { r.fatal(err) })
+		}
+		if errors.Is(err, syscall.EACCES) && !errors.Is(r.cause, syscall.EACCES) {
+			r.eacces.Do(func() { r.fatal(err) })
+		}
+	}
+	return n, err
+}
+
+// AttachObserved wraps the actual instance reader before any runtime metadata read.
+// It owns no descriptor: the original process RemoteMemory retains native ownership.
+func (d *hotspotData) AttachObserved(ebpf interpreter.EbpfHandler, pid libpf.PID, bias libpf.Address, rm remotememory.RemoteMemory, fatal func(error)) (interpreter.Instance, error) {
+	if fatal == nil || rm.ReaderAt == nil {
+		return nil, fmt.Errorf("observed HotSpot requires reader and fatal owner")
+	}
+	rm.ReaderAt = newObservedReader(rm.ReaderAt, fatal)
+	return d.Attach(ebpf, pid, bias, rm)
+}

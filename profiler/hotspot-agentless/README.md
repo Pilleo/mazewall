@@ -55,7 +55,27 @@ stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
 The current accepted source overlay is
-`8212ee25dc2fb58f070c235e30eb01666a492286763df318d90576b742372a4c`.
+`89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50`.
+
+The [owned-drain repair](../../docs/plans/2026-10-19-hotspot-observed-drain-evidence.md)
+wires actual auxiliary ownership for both HotSpot modes without fabricating an
+epoch lease. It preserves strict admission and native budgets; ordinary-JVM
+candidate qualification is completed by the separate
+[coupled JVM exec evidence](../../docs/plans/2026-10-19-hotspot-coupled-exec-evidence.md),
+followed by operator-approved [scoped admission](../../docs/plans/2026-10-19-hotspot-observed-admission.md).
+SDKv0.2.0 is published; host distribution qualification remains open. The historical allocator/helper evidence
+below is not a release/admission receipt for the new source graph. Existing asset
+bundles must be rebuilt and fully verified for the current fingerprint.
+
+Task3 adds a separately negotiated schema3 observation profile, described in
+the [profile contract](../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
+The rebuilt CLI and `RunObserved*` now use the qualified owned implementation after
+explicit operator approval. Strict2 and false policy eligibility are unchanged.
+`RunObservedCandidate` is only a tagged compatibility alias. Native modules pin released SDKv0.2.0.
+Use `GOWORK=off` with the owner's prepared `build/experiment.go.mod`; the SDK must
+resolve to that released module, not a local workspace replacement. Existing helper
+bundles do not qualify the new graph; rebuild and verify their embedded module
+provenance before distribution. Strict2 and the Kotlin facade retain their scope.
 It adds the bounded shared native correlation allocator. Both architecture BPF
 objects and layouts are generated; actual-C and isolated kernel checks pass.
 Task2 built two byte-identical locked Go1.26.0 helpers/full local OCI bundles and
