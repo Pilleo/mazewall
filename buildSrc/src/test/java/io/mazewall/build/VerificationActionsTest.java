@@ -17,7 +17,14 @@ public final class VerificationActionsTest {
             writeSuccessMarker(successMarker);
             return;
         }
+        RootVerificationFunctionalTest.verifyEscapedClasspathLocation();
         PublicCompileClasspathFunctionalTest.verify(rootBuild.getParent());
+        try {
+            SpotBugsReportTest.main(new String[0]);
+            SpotBugsSourcePatchTest.main(new String[0]);
+        } catch (Exception failure) {
+            throw new AssertionError("SpotBugs report contract failed", failure);
+        }
         String xml = "<file name=\"module/Example.kt\">\n"
             + "<error line=\"12\" column=\"4\" severity=\"warning\" message=\"first\nsecond\" source=\"detekt.Example\" />\n</file>";
         List<String> normalized = DetektWarningRatchetAction.normalize(xml.lines().toList());
@@ -36,6 +43,7 @@ public final class VerificationActionsTest {
         equal(true, malformedRejected);
         verifiesFreshJvmClassMetadata();
         CiCachePolicyTest.run();
+        CiCacheKeyFunctionalTest.verify(rootBuild.getParent());
         GradleSourceGuardTest.run();
         GradleSourceInventoryTest.run();
         verifiesBacklogContracts();

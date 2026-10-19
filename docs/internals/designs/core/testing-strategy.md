@@ -159,6 +159,47 @@ distinct exhaustion result; do not add a test-only production bypass.
 
 ## Fast iteration and cache reuse
 
+CI computes `scripts/ci_cache_key.sh` once immediately after checkout in each validation job.
+Container Gradle restore/save keys share that immutable job output, retaining their
+OS prefixes, SHA suffixes and dedicated cache layout. Saves
+require successful key computation as well as their existing conditions.
+
+The main container restore first tries its matching build identity, then matching
+and broad optional-container entries before its older broad main fallback. This
+reuses the compatible PR container home already saved by optional acceptance,
+without adding another per-PR archive or mixing host/container cache directories.
+
+The helper hashes current bytes and NUL-delimited relative names of Git-tracked
+Gradle/Groovy/Kotlin build scripts, root/nested `gradle.properties` and
+`gradle.lockfile`, the versions catalog, verification metadata, wrapper JAR/properties,
+Containerfiles, CI workflow and cache-key/container-runner scripts. Untracked or
+generated scripts/markers and unrelated source do not affect it. Repository-local
+Git overrides are cleared only in the child, with optional index writes disabled.
+Contained readable regular-file aliases are supported; external, dangling, cyclic,
+special, unreadable or missing inputs and Git/hash errors fail without publishing
+a digest. Computation assumes an immutable checkout, not race-proof containment.
+
+`./gradlew -p buildSrc ciCachePolicyTest --console=plain --max-workers=1` runs real
+owned-Git fixtures and workflow-policy mutations. These checks also run in mandatory
+`verificationActionsTest`, whose inputs include the helper. Cache identities are
+compatibility keys, not native protection attestations: cache isolation, ownership,
+required native freshness and publication gates are unchanged.
+
+The optional integration acceptance and main quality jobs run on independent
+runners in parallel; both existing required check names are retained. Publication
+is a separate default-branch-push-only job with `needs` edges to BOTH validations.
+Its normal success condition prevents publication after a failed, skipped or
+cancelled prerequisite. It consumes the main job's computed cache identity and
+uses the same container runner and publication command; it does not rerun host
+quality checks as another publication gate.
+
+Superseded PR runs cancel within their PR-specific concurrency group. Push events
+use unique run-ID groups and do not cancel or replace separate release runs.
+Serial merge handling remains with the existing operator/orchestrator control
+plane. Fresh native tests remain uncached; parallel scheduling and cached build
+inputs must not be described as reuse of old native pass results. Measure actual
+hosted job overlap and durations before claiming an end-to-end speed improvement.
+
 Root verification follows source plugins rather than optional module paths.
 Non-demo grouping projects retain lazy child `build` and `check` dependencies
 without acquiring Java source sets or typed Kotlin analysis. Actual Java modules

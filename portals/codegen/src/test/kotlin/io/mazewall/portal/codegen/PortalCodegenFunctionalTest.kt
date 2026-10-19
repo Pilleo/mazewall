@@ -265,6 +265,41 @@ class PortalCodegenFunctionalTest {
     }
 
     @Test
+    fun `generated sources round trip primitive and boxed Boolean is accessors`() {
+        val apiJar = compileApiJar(projectDir)
+        writeFixture(apiJar, listOf("fixture.BooleanPojoService"), compileGenerated = true)
+        projectDir.resolve("src/portalWorker/kotlin/fixture/Main.kt").writeText(
+            """
+            package fixture
+            import io.mazewall.portal.PortalCodec
+            import io.mazewall.portal.PortalMethod
+            fun main() {
+                val implementation = object : BooleanPojoService {
+                    override fun invert(value: BooleanPojo) =
+                        BooleanPojo(!value.isPrimitiveEnabled(), !value.isBoxedEnabled())
+                }
+                val method = PortalMethod.Generated(
+                    (("fixture.BooleanPojoService#invert#fixture.BooleanPojo").hashCode() and Int.MAX_VALUE) % 1_000_000_000 + 1_000,
+                )
+                for (value in listOf(false, true)) {
+                    val payload = PortalCodec.concat(listOf(PortalCodec.encodeBoolean(value), PortalCodec.encodeBoolean(!value)))
+                    val response = BooleanPojoServicePortalDispatcher.handle(implementation, method, payload, emptyList())
+                    val reader = PortalCodec.Reader(response)
+                    check(reader.boolean() == !value)
+                    check(reader.boolean() == value)
+                }
+                println("BOOLEAN_IS_ACCESSORS_OK")
+            }
+            """.trimIndent(),
+        )
+
+        val result = runner("roundTrip").build()
+
+        assertEquals(TaskOutcome.SUCCESS, result.task(":compilePortalWorkerKotlin")?.outcome)
+        assertTrue(result.output.contains("BOOLEAN_IS_ACCESSORS_OK"), result.output)
+    }
+
+    @Test
     fun `generation synchronizes A B to A to empty without stale outputs`() {
         val apiJar = compileApiJar(projectDir)
         writeFixture(apiJar, listOf("fixture.A", "fixture.B"))
@@ -720,6 +755,24 @@ class PortalCodegenFunctionalTest {
             }
             """.trimIndent(),
         )
+        sources.resolve("BooleanPojo.java").writeText(
+            """
+            package fixture;
+            public final class BooleanPojo {
+                private final boolean primitiveEnabled;
+                private final Boolean boxedEnabled;
+                public BooleanPojo(boolean primitiveEnabled, Boolean boxedEnabled) {
+                    this.primitiveEnabled = primitiveEnabled;
+                    this.boxedEnabled = boxedEnabled;
+                }
+                public boolean isPrimitiveEnabled() { return primitiveEnabled; }
+                public Boolean isBoxedEnabled() { return boxedEnabled; }
+            }
+            """.trimIndent(),
+        )
+        sources.resolve("BooleanPojoService.java").writeText(
+            "package fixture; public interface BooleanPojoService { BooleanPojo invert(BooleanPojo value); }",
+        )
         sources.resolve("NestedDtos.java").writeText(
             """
             package fixture;
@@ -760,6 +813,8 @@ class PortalCodegenFunctionalTest {
                 sources.resolve("DiamondLeft.java").toString(),
                 sources.resolve("DiamondRight.java").toString(),
                 sources.resolve("SamplePojo.java").toString(),
+                sources.resolve("BooleanPojo.java").toString(),
+                sources.resolve("BooleanPojoService.java").toString(),
                 sources.resolve("NestedDtos.java").toString(),
                 sources.resolve("CollisionOuter.java").toString(),
                 sources.resolve("Nested_14_CollisionOuter_7_Service.java").toString(),

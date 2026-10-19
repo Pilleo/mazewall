@@ -265,6 +265,7 @@ without excluding `check`; any failed verification blocks the commit. See
 |---|---|---|
 | `:enforcer` | Core runtime — zero dependencies beyond Kotlin stdlib | Experimental; evaluate only with an explicit threat-model and supported-platform review |
 | `:profiler` | Developer tool — profiles a workload and generates a minimal policy | Experimental policy discovery; generated policies require validation |
+| `:integrations:koog` | [Explicit owned thread and process-Portal Koog tools](integrations/koog/README.md) | Optional adapter; trusted synchronous thread bodies or bounded process services |
 | `:demos:cli-demo` | Interactive CLI exploits showcase | 🚫 Demo only |
 | `:demos:agent-sandbox-demo` | Custom supervised tool compartments and offline JUnit controls | Experimental demo |
 | `:demos:koog-contained-tool` | Generated bounded process-Portal tool | Optional Koog demo |

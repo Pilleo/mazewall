@@ -17,6 +17,95 @@ boundary proof. The accepted Task6c raw matrix uses immutable library producer
 [committed local acceptance](../../docs/internals/reviews/2026-10-12-integration-contract-completion.md)
 for source/JAR identities, actual results and remaining release prerequisites.
 
+## Fast host-only checks from any checkout
+
+The standalone `check` task now runs the existing `--selfcheck` and
+`--selectioncheck` entry points. They exercise bounded local work, overload/wait
+controls and manifest/health/timing selection. They do not install containment,
+launch Portal workers or collect benchmark measurements.
+
+Run from the repository root with JDK25 and the exact Maven repository for the
+selected publication. A separate strict lock is retained for the already-existing
+local thread-tool test publication below; it is **not** P617 or a released version.
+No lock generation is needed during checking:
+
+```bash
+: "${BOUNDARY_REPOSITORY:?Set the absolute Maven repository containing this publication}"
+version=0.1.0-thread-task3.c1bfd8a12b61.288b844cceb6
+
+# Existing publication verifier requires configuration cache to be disabled.
+./gradlew -p benchmarks/integration-boundaries \
+  -PconsumerVersion="$version" -PconsumerRepository="$BOUNDARY_REPOSITORY" \
+  verifyPublishedClosure --no-configuration-cache
+
+# Both controls execute on each check, including configuration-cache reuse.
+./gradlew -p benchmarks/integration-boundaries \
+  -PconsumerVersion="$version" -PconsumerRepository="$BOUNDARY_REPOSITORY" \
+  check --configuration-cache --configuration-cache-problems=fail
+```
+
+Require both `selfcheck PASS` (tab-separated in the log) and
+`selectioncontrols PASS`. This checks the selected published closure and host
+controls, not fresh registry installation, publication authenticity, kernel
+enforcement or historical P617 measurement custody. The P617 lock and accepted
+raw identities below are unchanged.
+
+## Fresh native checking with separate custody
+
+For a new checking run, first run `verifyPublishedClosure installDist` with the
+same version/repository properties and `--no-configuration-cache`. Independently
+freeze and verify the selected publication metadata/JARs, installed consumer
+source/classes/JAR, strict lock and embedded worker bundle hash **before** native
+execution. The raw validator's custody JSON requires `workerBundleSha256`; that
+field alone authenticates neither the repository nor the rest of the freeze.
+
+The following Linux/JDK25 recipe uses that separately verified freeze and a new
+absolute output directory. It preserves the harness's existing policies, finite
+limits and actual physical-end assertions; it does not run Koog/Spring adapter
+calls or establish comparable isolation/performance across modes.
+
+```bash
+set -eu
+: "${BOUNDARY_CUSTODY:?Set the independently verified publication/source freeze JSON}"
+: "${BOUNDARY_EVIDENCE:?Set a fresh absolute output directory}"
+: "${BOUNDARY_TMP:?Set an existing short absolute writable temporary directory}"
+case "$BOUNDARY_EVIDENCE" in /*) ;; *) exit 1 ;; esac
+case "$BOUNDARY_TMP" in /*) ;; *) exit 1 ;; esac
+test -d "$BOUNDARY_TMP"
+test -w "$BOUNDARY_TMP"
+test -f "$BOUNDARY_CUSTODY"
+root="$(pwd -P)"
+lock="$(git rev-parse --path-format=absolute --git-common-dir)/mazewall/verification.lock"
+mkdir -p "$(dirname "$lock")"
+test ! -e "$BOUNDARY_EVIDENCE"
+mkdir "$BOUNDARY_EVIDENCE"
+
+native_status=0
+(
+  cd "$BOUNDARY_EVIDENCE" || exit 1
+  LC_ALL=C TMPDIR="$BOUNDARY_TMP" flock -w 600 "$lock" \
+    timeout --kill-after=30s 240s java -Xmx256m --enable-native-access=ALL-UNNAMED \
+    -Djava.io.tmpdir="$BOUNDARY_TMP" -Dbenchmark.cache="$BOUNDARY_EVIDENCE/worker-cache" \
+    -cp "$root/benchmarks/integration-boundaries/build/install/integration-boundaries/lib/*" \
+    io.mazewall.benchmark.BoundariesKt \
+    --samples 2 --size 22 --pressure 3 --seconds 60 --concurrency 1
+) > "$BOUNDARY_EVIDENCE/raw.log" 2>&1 || native_status=$?
+printf '%s\n' "$native_status" > "$BOUNDARY_EVIDENCE/native.exit"
+test "$native_status" -eq 0
+
+./gradlew verifyIntegrationBoundaryEvidence --console=plain \
+  -PboundaryRaw="$BOUNDARY_EVIDENCE/raw.log" -PboundaryCustody="$BOUNDARY_CUSTODY"
+```
+
+A nonzero/timed-out command is a failed run, never accepted partial data. Retain
+the exact argv, source/JAR/lock hashes, log, exit and acquired-owner end receipts;
+do not reuse a previous output directory/cache. Fresh local checks at1/22/1024/65536
+bytes used the separate thread-task3 publication, not P617. They do not replace
+historical measurements or prove current registry installation/authenticity.
+The operator owns `BOUNDARY_TMP`; for example, create a private short directory
+with `mktemp -d /tmp/mwb.XXXXXXXX` and remove it only after all owned processes end.
+No pre-existing harness-specific temporary directory is assumed.
+
 ## Current P617 repository, strict resolution and accepted raw evidence
 
 Use the existing publication, not a new publication or a label derived from the

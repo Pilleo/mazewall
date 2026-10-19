@@ -527,15 +527,15 @@ internal class TierEDaemonService(
                 "ambient_inactive=${afterResultDelivery.profile.integrity.ambientInactiveObservations} " +
                 "ring_loss=${afterResultDelivery.profile.integrity.observedLosses}",
         )
-        val afterCoverageManifest = if (coverageManifestSink == null ||
+        val coverageSink = coverageManifestSink
+        val afterCoverageManifest = if (coverageSink == null ||
             runCatching {
-                val configuration = requireNotNull(coverageManifestSink)
-                configuration.sink.accept(
+                coverageSink.sink.accept(
                     TierECoverageManifest.from(
                         afterResultDelivery,
                         report,
-                        configuration.expectedOracleSha256,
-                        configuration.expectedSyscallNumber,
+                        coverageSink.expectedOracleSha256,
+                        coverageSink.expectedSyscallNumber,
                     ),
                 )
             }.isSuccess
@@ -544,11 +544,12 @@ internal class TierEDaemonService(
         } else {
             afterResultDelivery.withTerminalDeliveryFailure()
         }
-        val afterOperationManifest = if (operationManifestSink == null ||
+        val operationSink = operationManifestSink
+        val afterOperationManifest = if (operationSink == null ||
             (
                 target != null &&
                 runCatching {
-                operationManifestSink?.accept(TierESplitOperationManifest.from(afterCoverageManifest, target))
+                operationSink.accept(TierESplitOperationManifest.from(afterCoverageManifest, target))
             }.isSuccess
             )
         ) {

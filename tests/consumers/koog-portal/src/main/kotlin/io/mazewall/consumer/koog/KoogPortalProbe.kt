@@ -42,8 +42,9 @@ fun main() = runBlocking {
     check(config.limits.maxRequestBytes == 131_072 && config.limits.maxResponseBytes == 131_072)
     check(config.workerArtifacts.isNotEmpty())
     var observedTool: PortalToolAdapter<TextArguments, String>? = null
-    PortalRuntime.open(config).use { runtime ->
+    PortalRuntime.open(config).useWithWorkerRetirement { runtime, workers ->
         val registry = TextTools.registry(runtime)
+        captureReadyWorkers(runtime, workers)
         check(registry.tools.map { it.name } == listOf("uppercase_ascii"))
         check(registry.getToolOrNull("test-denied") == null)
         val tool = registry.getTool<PortalToolAdapter<TextArguments, String>>()
@@ -80,6 +81,9 @@ fun main() = runBlocking {
         expectFailure<ClassNotFoundException> { Class.forName("io.mazewall.demo.koog.worker.AsciiTextTransformer") }
         expectFailure<ClassNotFoundException> { Class.forName("io.mazewall.portal.TestPreparedOperations") }
         val denied = boundProbe(runtime, "test_read") { service, args -> service.read(args.value) }
+        captureReadyWorkers(runtime, workers)
+        verifyFilesystemContainment(runtime, directory)
+        check(tool.execute(TextArguments("after filesystem denial")) == "AFTER FILESYSTEM DENIAL")
         val denial = expectFailure<PortalRemoteCallException> { denied.execute(ProbeArguments(forbidden.toString())) }
         check(denial.remoteType == "java.nio.file.AccessDeniedException") { "unexpected remote failure: $denial" }
         check(denial.evidence == PortalInvocationEvidence.COMPLETED)
@@ -91,6 +95,8 @@ fun main() = runBlocking {
         expectFailure<IllegalArgumentException> { oversized.execute(ProbeArguments("")) }
         // An application-size result rejection is completed, not state loss or a replay.
         expectFailure<PortalRemoteCallException> { denied.execute(ProbeArguments(forbidden.toString())) }
+        verifyNetworkAndProcessContainment(runtime)
+        check(tool.execute(TextArguments("after network and process denial")) == "AFTER NETWORK AND PROCESS DENIAL")
         val crash = boundProbe(runtime, "test_crash") { service, _ -> service.crash() }
         val ownerBefore = runtime.health().single { it.isolationGroup == "test-denied" }
         check(ownerBefore.state == PortalServiceHealthState.AVAILABLE && ownerBefore.workerPids.size == 1)
@@ -109,8 +115,9 @@ fun main() = runBlocking {
     check(closed.state == ExecutionDiagnosticState.CLOSED && closed.retirementComplete && closed.liveWorkers == 0)
     check(closed.invocations.admitted > 0 && closed.invocations.ended > 0)
     // Explicit new runtime is the only way to recreate the test singleton after loss.
-    PortalRuntime.open(config).use { runtime ->
+    PortalRuntime.open(config).useWithWorkerRetirement { runtime, workers ->
         val waiting = boundProbe(runtime, "test_wait") { service, _ -> service.waitForever() }
+        captureReadyWorkers(runtime, workers)
         val result = async(start = CoroutineStart.UNDISPATCHED) { waiting.execute(ProbeArguments("")) }
         repeat(100) {
             if (ProcessHandle.current().children().use { it.anyMatch { child -> child.isAlive } }) return@repeat
@@ -123,17 +130,45 @@ fun main() = runBlocking {
         check(result.isCancelled)
         expectFailure<PortalStateLostException> { waiting.execute(ProbeArguments("")) }
     }
-    PortalRuntime.open(config).use { runtime ->
+    PortalRuntime.open(config).useWithWorkerRetirement { runtime, workers ->
         val tooLarge = boundProbe(runtime, "test_wire") { service, _ -> service.oversizedWire() }
+        captureReadyWorkers(runtime, workers)
         val failure = expectFailure<PortalCallException> { tooLarge.execute(ProbeArguments("")) }
         check(failure.evidence == PortalInvocationEvidence.UNKNOWN_COMPLETION)
         expectFailure<PortalStateLostException> { tooLarge.execute(ProbeArguments("")) }
     }
     check(ProcessHandle.current().children().use { it.noneMatch { child -> child.isAlive } }) { "runtime close must account for physical worker retirement" }
     println("KOOG_NATIVE_FRESH_OK registry=upstream typed=generated text=65536 wire=131072 denial=true terminal=true cancellation=true diagnostics=true fallback=false replay=false")
+    println("KOOG_CONTAINMENT_V1_OK read=denied write=denied symlink=denied network=denied process=denied controls=pass retirement=pass")
 }
 
-private fun boundProbe(
+private fun captureReadyWorkers(runtime: PortalRuntime, workers: MutableSet<ProcessHandle>) {
+    for (health in runtime.health()) {
+        for (pid in health.workerPids) {
+            val worker = ProcessHandle.of(pid).orElseThrow { IllegalStateException("ready worker $pid disappeared") }
+            workers.add(worker)
+            check(health.state == PortalServiceHealthState.AVAILABLE && worker.isAlive)
+        }
+    }
+    check(workers.isNotEmpty()) { "expected an actual ready worker" }
+}
+
+private inline fun PortalRuntime.useWithWorkerRetirement(action: (PortalRuntime, MutableSet<ProcessHandle>) -> Unit) {
+    val workers = mutableSetOf<ProcessHandle>()
+    val outcome = runCatching { use { runtime -> action(runtime, workers) } }
+    var failure = outcome.exceptionOrNull()
+    for (worker in workers) {
+        val retirementFailure = runCatching {
+            check(!worker.isAlive) { "worker ${worker.pid()} is still alive after runtime close" }
+        }.exceptionOrNull()
+        if (retirementFailure != null) {
+            if (failure == null) failure = retirementFailure else failure.addSuppressed(retirementFailure)
+        }
+    }
+    failure?.let { throw it }
+}
+
+internal fun boundProbe(
     runtime: PortalRuntime,
     name: String,
     mapping: (DeniedResourceService, ProbeArguments) -> String,
@@ -143,7 +178,7 @@ private fun boundProbe(
     { require(it.value.length <= 4096) }, { require(it.length <= 65_536) },
 )
 
-private suspend inline fun <reified T : Throwable> expectFailure(action: () -> Unit): T {
+internal suspend inline fun <reified T : Throwable> expectFailure(action: () -> Unit): T {
     try {
         action()
     } catch (failure: Throwable) {

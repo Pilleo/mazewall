@@ -160,6 +160,36 @@ The first example is a deterministic first-party parser/transformer with no netw
 
 Host and worker may differ in capabilities and classpaths, but use a reviewed matching protocol/artifact generation. The first package does not include an entire Spring application context or Koog runtime in the worker unless its implementation actually requires it.
 
+### 7.1 Thread extension — 18 October 2026
+
+The historical first-release Portal scope above remains unchanged. The additive
+`ThreadToolAdapter<A, R>` explicitly binds an application-owned `ManagedRuntime`
+and its already-prepared fixed `InProcessDomain` to trusted synchronous `(A) -> R`
+code. The application installs its reviewed process-wide Tier 1 baseline at
+platform-thread bootstrap and retains preparation, finite admission, drain and
+close. The adapter does not create another backend, choose policy from arguments,
+intercept arbitrary suspend tools, retry/replay or fall back from Portal.
+
+Submission stays on the original coroutine caller so ownership and nested guards
+remain effective. Only the synchronous action runs on dedicated restricted
+platform workers; JSON, validators and continuation delivery remain in the host.
+Waiting occupies one host IO thread per concurrently waiting admitted invocation.
+Cancellation requests the original handle cooperatively, not forced termination;
+only canonical drain and actual worker retirement establish complete shutdown.
+Shared heap, helper executors, open FDs, detached/lazy work, hard CPU/RAM budgets
+and arbitrary Java/ACE isolation remain outside this contract.
+
+The [Koog guide](koog/README.md#explicit-thread-backed-tools) provides the bounded
+strict UTF-8 reader and explicit owner/domain example. The
+[published consumer](../tests/consumers/koog-portal/README.md#separate-thread-backed-qualification)
+qualifies real filesystem/socket/caller boundaries, ownership, finite admission,
+cooperative cancellation and retirement, then emits the required exact thread
+summary. It runs in a separate fresh JVM after the unchanged Portal qualification:
+its permanent `Policy.NO_EXEC_HOTSPOT` host baseline forbids subsequent Portal
+child launches. Neither policy weakening nor closing the owner reconciles that
+bootstrap incompatibility. Permission-failure classification is inferred, not
+authenticated kernel provenance; passive diagnostics add no permission authority.
+
 ## 8. Monorepo layout and migration
 
 Keep existing core modules. Put minimal framework-neutral coordination in `enforcer/.../execution/` initially; do not introduce an extra runtime Gradle module until dependency or artifact isolation requires it. Continue using existing optional coroutine support, avoiding new mandatory Reactor/Spring dependencies.

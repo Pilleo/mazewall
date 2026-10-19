@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.tools
 
+import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.testing.containers.ContainerEndpoint
 import io.mazewall.testing.containers.ContainerEngine
 import io.mazewall.testing.containers.runContainerCommand
@@ -254,10 +255,10 @@ public object TierERootfulPhaseProbe {
                 try {
                     owner.finish(primary == null)
                 } catch (cleanup: Throwable) {
-                    if (primary == null) primary = cleanup else primary.addSuppressed(cleanup)
+                    primary = CleanupFailures.merge(primary, cleanup)
                 }
             }
-            if (primary != null) throw primary
+            primary?.let { throw it }
         }
     }
 }

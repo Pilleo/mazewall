@@ -257,7 +257,7 @@ internal object BoundaryTypes {
             buildList {
                 add(component)
                 add("get$suffix")
-                if (expectedType == Boolean::class.javaPrimitiveType || expectedType == Boolean::class.java) add("is$suffix")
+                if (expectedType == Boolean::class.javaPrimitiveType || expectedType == Boolean::class.javaObjectType) add("is$suffix")
             }
         val methods =
             type.methods.filter {
