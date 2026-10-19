@@ -138,6 +138,7 @@ jobs:
                           - 'gradle/libs.versions.toml'
                           - '**/gradle.lockfile'
                           - 'gradle/verification-metadata.xml'
+                          - 'config/spotbugs/**'
                           - '**/gradle.properties'
                           - '**/Containerfile'
                           - 'scripts/**'

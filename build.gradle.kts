@@ -9,6 +9,7 @@ fun Project.skipsKotlinStyleTools(): Boolean = path.startsWith(":demos") || path
 
 plugins {
     id("mazewall.quality-conventions")
+    id("io.mazewall.spotbugs-toolchain")
     id("mazewall.publishing-conventions")
     alias(libs.plugins.dependencyCheck)
     alias(libs.plugins.pitest) apply false
@@ -278,6 +279,11 @@ val consumerVerification =
         runtimeClasspath += output + compileClasspath
     }
 
+tasks.named<com.github.spotbugs.snom.SpotBugsTask>("spotbugsConsumerVerification") {
+    // JUnit's compile-only API annotations are absent from the consumer harness's runtime-derived classpath.
+    auxClassPaths.from(configurations.testCompileClasspath)
+}
+
 tasks.register<Test>("consumerHarnessTest") {
     group = "verification"
     description = "Checks portable consumer harness ownership without requiring published applications."
@@ -487,7 +493,8 @@ subprojects {
             showProgress.set(false)
             effort.set(com.github.spotbugs.snom.Effort.DEFAULT)
             reportLevel.set(com.github.spotbugs.snom.Confidence.HIGH)
-            onlyAnalyze.set(listOf("io.mazewall.*", "demo.vulnapp.*"))
+            // SpotBugs uses .- for recursive package prefixes; .* stops at one package.
+            onlyAnalyze.set(listOf("io.mazewall.-", "demo.vulnapp.-"))
             excludeFilter.set(file("$rootDir/config/spotbugs/exclude.xml"))
         }
 

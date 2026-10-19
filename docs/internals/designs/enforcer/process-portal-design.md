@@ -380,6 +380,10 @@ KotlinPoet is a **plugin** dependency. Ask before adding it; do not put it on `:
 
 Marker interface + factory, fail closed if the stub class is missing. Host stub: serialize args, attach FDs, wait for result. Worker dispatcher: deserialize, call impl, serialize result. Boundary types validated at generate time (primitives, `String`, records/POJOs, `byte[]`, `Capability.ReadFd` only).
 
+Constructor-backed POJOs may expose Boolean components through `isX()` readers
+for both primitive `boolean` and boxed `java.lang.Boolean`; both retain the same
+Boolean wire encoding. This does not admit `isX()` readers for non-Boolean types.
+
 The generator compiles each requested service into one immutable schema before emitting either
 side. The schema contains the effective inherited method set, resolves overrides, validates every
 constructor component against a public type-compatible reader, and assigns IDs from the root

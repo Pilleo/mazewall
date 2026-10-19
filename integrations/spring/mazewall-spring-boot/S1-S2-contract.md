@@ -70,8 +70,10 @@ Incomplete drain retains the runtime/owner and is retried explicitly; no physica
 claim is made from a caller result or bounded stop callback.
 
 Production binding compares the selected actual Class/loader, finished-JAR digest and
-actual deployment generation, and checks effective member origin. The metadata-only
-lifecycle constructor has been removed under the approved migration. There is no
+actual deployment generation, and checks effective member origin. Origin comparison
+uses URI value identity without URL-handler/DNS equivalence; different loader
+identities and missing/malformed locations reject. The metadata-only lifecycle
+constructor has been removed under the approved migration. There is no
 fallback when resource resolution or strong preparation rejects. The renamed helper
 `classResourceSha256` belongs only to explicit uncontained host characterization;
 its hash is never substituted for a production JAR hash. Covered phases and expected

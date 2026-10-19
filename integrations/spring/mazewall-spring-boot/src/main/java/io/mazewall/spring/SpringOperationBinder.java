@@ -272,8 +272,15 @@ public final class SpringOperationBinder {
     private static boolean sameOrdinaryJarOrigin(Class<?> selected, Class<?> declaring) {
         var selectedSource = selected.getProtectionDomain().getCodeSource();
         var declaringSource = declaring.getProtectionDomain().getCodeSource();
-        return selected.getClassLoader() == declaring.getClassLoader() && selectedSource != null && declaringSource != null
-                && selectedSource.getLocation().equals(declaringSource.getLocation());
+        if (selected.getClassLoader() != declaring.getClassLoader() || selectedSource == null || declaringSource == null) return false;
+        var selectedLocation = selectedSource.getLocation();
+        var declaringLocation = declaringSource.getLocation();
+        if (selectedLocation == null || declaringLocation == null) return false;
+        try {
+            return selectedLocation.toURI().equals(declaringLocation.toURI());
+        } catch (java.net.URISyntaxException malformedOrigin) {
+            return false;
+        }
     }
 
     private static IllegalStateException rejected(String message) {

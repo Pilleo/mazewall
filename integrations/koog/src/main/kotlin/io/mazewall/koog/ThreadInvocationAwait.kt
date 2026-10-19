@@ -12,24 +12,32 @@ import java.util.concurrent.CompletionException
 import java.util.concurrent.ExecutionException
 
 @OptIn(MazewallInternal::class)
-@Suppress("TooGenericExceptionCaught", "InjectDispatcher") // Host IO is required; retain all cancellation cleanup failures, including fatal errors.
-internal suspend fun <R> awaitThreadInvocation(submit: () -> InvocationHandle<R>): R {
-    val caller = currentCoroutineContext()
-    caller.ensureActive()
-    val handle = submit()
-    try {
-        return runInterruptible(Dispatchers.IO) { handle.result().toCompletableFuture().get() }
-    } catch (failure: Throwable) {
-        // Unwrap outside runInterruptible: a body InterruptedException is not wait cancellation.
-        val cause = unwrapFutureFailure(failure)
-        if (!caller.isActive) {
-            try {
-                handle.requestCancellation()
-            } catch (requestFailure: Throwable) {
-                throw CleanupFailures.merge(cause, requestFailure)
+internal suspend fun <R> awaitThreadInvocation(submit: () -> InvocationHandle<R>): R = ThreadInvocationAwait(submit).await()
+
+// A retained receiver avoids the compiler's null submit-parameter placeholder on coroutine reentry.
+@OptIn(MazewallInternal::class)
+private class ThreadInvocationAwait<R>(
+    private val submit: () -> InvocationHandle<R>,
+) {
+    @Suppress("TooGenericExceptionCaught", "InjectDispatcher") // Host IO is required; retain all cancellation cleanup failures, including fatal errors.
+    suspend fun await(): R {
+        val caller = currentCoroutineContext()
+        caller.ensureActive()
+        val handle = submit()
+        try {
+            return runInterruptible(Dispatchers.IO) { handle.result().toCompletableFuture().get() }
+        } catch (failure: Throwable) {
+            // Unwrap outside runInterruptible: a body InterruptedException is not wait cancellation.
+            val cause = unwrapFutureFailure(failure)
+            if (!caller.isActive) {
+                try {
+                    handle.requestCancellation()
+                } catch (requestFailure: Throwable) {
+                    throw CleanupFailures.merge(cause, requestFailure)
+                }
             }
+            throw cause
         }
-        throw cause
     }
 }
 
