@@ -102,10 +102,13 @@ environments do not close this issue. See the updated companion evidence for exa
 commits, retained failures and disposable-resource custody/retirement.
 
 The [subsequent shared-review checkpoint](../../plans/2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
-supersedes PR540 routing above: Go/Kotlin OCI and shared provider guards are locally
-repaired, license approval remains missing, and whole-node review reproduced three
-still-unfixed host integration defects. This issue and all six new review issues
-remain open; no native, released-graph or default-branch merge gate is waived.
+supersedes PR540 routing above: the delegated existing-Apache check is recorded,
+shared provider guards and the three local node integration remedies are addressed,
+and the prior configured source gate passed at its recorded revision. That pass
+does not qualify the subsequent selected-root fixes before their final source gate.
+This issue and all six review issues remain open; exact-source SDK release review,
+actual SDK/storage publication and consumer pins, released-graph/native qualification
+and default-branch merge gates remain blocked.
 
 ---
 <!-- id: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an  file: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md -->

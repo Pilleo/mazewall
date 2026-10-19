@@ -35,5 +35,19 @@ for receipts and cache/configuration/native limits. This issue stays open for
 control-plane handling: fixes are unpushed, published v0.1.0 unchanged; exact-source
 release approval and real released-graph/native qualification remain gates.
 
+The subsequent PR542/543 review found a separate selected-root boundary gap:
+Go ignored matching top-level descriptors' size/media; Kotlin already rejected
+wrong sizes and conflicting references but admitted a sole opaque-media root.
+The scoped follow-up now feeds every selected Go root reference through existing
+graph validation and requires supported document-root media in both loaders.
+Public Go Verify regressions cover strict/observed profiles, index/manifest roots,
+optional Go media/size defaults, same-media sharing, size/media contradictions and
+old trusted-pin rejection. The real Gradle HotSpotAssetsTest class covers the
+opaque-root rejection and existing sharing/size/conflict controls while preserving
+opaque config/BPF children. Focused checks and the full SDK race suite pass;
+the prior configured source-gate receipt above is not qualification of these new
+bytes. Independent scoped review and the final configured gate remain pending,
+alongside the unchanged publication, pins and released-graph/native gates.
+
 ---
 <!-- id: issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d  file: issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d.md -->

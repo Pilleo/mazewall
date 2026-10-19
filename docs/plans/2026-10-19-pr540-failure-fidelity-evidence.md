@@ -68,7 +68,10 @@ child Wait/retirement, provider handoffs and Kubernetes acceptance remain separa
 [shared ownership](2026-10-18-hotspot-observed-profile-contract.md#shared-contract-and-ownership) gates.
 
 The [subsequent shared-review checkpoint](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
-records the new Go/Kotlin OCI repairs and provider guards, their actual host checks,
-six still-open issues and missing license approval. It does not reuse this older
-SDK inventory/full-hook receipt for the changed sources; the combined configured
-root/portal gate and released-graph/native qualification remain pending.
+records the Go/Kotlin OCI repairs and provider guards, the delegated existing-Apache
+check and three locally addressed node defects. All six review issues remain open.
+The prior combined configured root/portal source gate passed at its recorded
+revision, not for the subsequent selected-root fixes awaiting their final source
+gate. Neither that pass nor this older SDK inventory/full-hook receipt qualifies
+new helper bytes; actual SDK/storage publication, consumer pins and released-graph/native
+qualification remain blocked.
