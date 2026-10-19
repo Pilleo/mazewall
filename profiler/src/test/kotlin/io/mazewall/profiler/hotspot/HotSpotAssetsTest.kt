@@ -220,6 +220,41 @@ class HotSpotAssetsTest {
     }
 
     @Test
+    fun `selected root refuses opaque media and incorrect size`() {
+        for (descriptor in listOf(
+            rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.gadget.config.v1+json"),
+            rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.gadget.ebpf.program.v1+binary"),
+            rootDescriptor.replace("\"size\":${blob.length}", "\"size\":1"),
+        )) {
+            fixture()
+            replaceRootDescriptors(descriptor)
+            assertFailsWith<IllegalArgumentException>(descriptor) { HotSpotAssets.load(directory) }
+        }
+    }
+
+    @Test
+    fun `selected root accepts OCI index media`() {
+        fixture()
+        replaceRootDescriptors(rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.index.v1+json"))
+        HotSpotAssets.load(directory)
+    }
+
+    private fun replaceRootDescriptors(descriptors: String) {
+        val index = directory.resolve("oci/index.json")
+        val old = Files.readString(index)
+        val updated = """{"schemaVersion":2,"manifests":[$descriptors]}"""
+        Files.writeString(index, updated)
+        val manifest = directory.resolve("manifest.json")
+        Files.writeString(
+            manifest,
+            Files.readString(manifest).replace(
+                "\"oci/index.json\":\"${hash(old)}\"",
+                "\"oci/index.json\":\"${hash(updated)}\"",
+            ),
+        )
+    }
+
+    @Test
     @EnabledIfEnvironmentVariable(named = "MW_HOTSPOT_ASSET_TEST_DIR", matches = ".+")
     fun `installed native bundle passes Kotlin admission`() {
         val installed = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))

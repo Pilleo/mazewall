@@ -175,6 +175,11 @@ private fun verifyOciGraph(
 ) {
     val index = readOciDocument(ownedFile(root, "oci/index.json"))
     require(index.manifests.any { it.digest == manifest.gadgetDigest }) { "Gadget digest absent from OCI index" }
+    require(
+        index.manifests.filter { it.digest == manifest.gadgetDigest }.all {
+            it.mediaType in setOf("application/vnd.oci.image.index.v1+json", "application/vnd.oci.image.manifest.v1+json")
+        },
+    ) { "Unsupported selected OCI root media type" }
     val pending = ArrayDeque(index.manifests)
     val visited = mutableSetOf<String>()
     val mediaByDigest = mutableMapOf<String, String>()
