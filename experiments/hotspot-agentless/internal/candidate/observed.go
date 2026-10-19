@@ -82,7 +82,7 @@ func RunObservedMatrix(ctx context.Context, assets, output string) (ObservedVerd
 	}
 	input := sha256.New()
 	inputs := map[string]string{}
-	for _, path := range []string{filepath.Join(assets, "manifest.json"), filepath.Join(root, "dependencies.lock.json"), filepath.Join(root, "src/ObservedWorkload.java"), executable} {
+	for _, path := range []string{filepath.Join(assets, "manifest.json"), filepath.Join(root, "dependencies.lock.json"), filepath.Join(root, "src/ObservedWorkload.java"), filepath.Join(root, "src/ObservedExecWorkload.java"), executable} {
 		hash, err := driver.HashFile(path)
 		if err != nil {
 			return v, err
@@ -116,17 +116,13 @@ func RunObservedMatrix(ctx context.Context, assets, output string) (ObservedVerd
 	}
 	results := []observedCaseResult{}
 	var pending error
-	for _, name := range []string{"ordinary", "compiled-churn", "class-unload", "target-exit", "permission-denial"} {
+	for _, name := range []string{"ordinary", "compiled-churn", "class-unload", "target-exec", "target-exit", "permission-denial"} {
 		result := runObservedCase(ctx, docker, name, root, output, assets, store, image, lock.Images, verified)
 		results = append(results, result)
 		if result.pending != nil {
 			pending = result.pending
 			break
 		}
-	}
-	if pending == nil {
-		execResult := observedExecControl(ctx, output)
-		results = append(results, execResult)
 	}
 	qualified := true
 	for _, result := range results {
@@ -168,12 +164,16 @@ func compileObserved(docker candidateDocker, root, output, image string) (failur
 	if err := os.Mkdir(filepath.Join(fixture, "gates"), 0755); err != nil {
 		return err
 	}
-	source, err := os.ReadFile(filepath.Join(root, "src/ObservedWorkload.java"))
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join(fixture, "ObservedWorkload.java"), source, 0644); err != nil {
-		return err
+	sources := map[string]string{}
+	for _, name := range []string{"ObservedWorkload.java", "ObservedExecWorkload.java"} {
+		source, err := os.ReadFile(filepath.Join(root, "src", name))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(fixture, name), source, 0644); err != nil {
+			return err
+		}
+		sources[name] = fmt.Sprintf("%x", sha256.Sum256(source))
 	}
 	owners := driver.NewContainerOwners(docker)
 	defer func() { failure = owners.Finish(fixture, failure) }()
@@ -188,8 +188,8 @@ func compileObserved(docker candidateDocker, root, output, image string) (failur
 	if err := os.WriteFile(filepath.Join(fixture, "javac-version-before-compile.txt"), []byte(version), 0644); err != nil {
 		return err
 	}
-	args := []string{"--pull=never", "--network=none", "--mount", "type=bind,src=" + fixture + ",dst=/fixture", image, "javac", "-d", "/fixture/classes", "/fixture/ObservedWorkload.java"}
-	if err := driver.WriteJSON(filepath.Join(fixture, "compiler-inputs.json"), map[string]any{"image": image, "argv": args, "source_sha256": fmt.Sprintf("%x", sha256.Sum256(source))}); err != nil {
+	args := []string{"--pull=never", "--network=none", "--mount", "type=bind,src=" + fixture + ",dst=/fixture", image, "javac", "-d", "/fixture/classes", "/fixture/ObservedWorkload.java", "/fixture/ObservedExecWorkload.java"}
+	if err := driver.WriteJSON(filepath.Join(fixture, "compiler-inputs.json"), map[string]any{"image": image, "argv": args, "sources_sha256": sources}); err != nil {
 		return err
 	}
 	id, err := owners.Create("observed-javac", args...)
@@ -356,8 +356,14 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 		}
 		err = owners.Finish(dir, err, logs...)
 		if err != nil {
-			result.Status = "rejected"
+			if name != "target-exit" || result.Status != "safe-control" || !onlyExpectedTargetKill(err) {
+				result.Status = "rejected"
+			}
 			result.Error = errors.Join(errors.New(result.Error), err).Error()
+			var pending interface{ HasPendingOwners() bool }
+			if errors.As(err, &pending) && pending.HasPendingOwners() {
+				result.pending = err
+			}
 		}
 		if err := driver.WriteJSON(filepath.Join(dir, "result.json"), result); err != nil {
 			result.Status = "rejected"
@@ -386,7 +392,11 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 	}
 	args := []string{"--pull=never", "--network=none", "--user", "65534:65534", "--pid=host", "--cgroupns=host", "--mount", "type=bind,src=" + filepath.Join(output, "fixture") + ",dst=/fixture,readonly", "--mount", "type=bind,src=" + gates + ",dst=/fixture/gates", images["jdk"], "java"}
 	args = append(args, flags...)
-	args = append(args, "-cp", "/fixture/classes", "ObservedWorkload", "/fixture/gates", "400", "4", "20")
+	mainClass := "ObservedWorkload"
+	if name == "target-exec" {
+		mainClass = "ObservedExecWorkload"
+	}
+	args = append(args, "-cp", "/fixture/classes", mainClass, "/fixture/gates", "400", "4", "20")
 	if err := driver.WriteJSON(filepath.Join(dir, "target-inputs.json"), map[string]any{"argv": args, "jdk": images["jdk"], "warmups": 40, "marked": 400, "workers": 4, "pace_ms": 20}); err != nil {
 		fail(err)
 		return
@@ -586,12 +596,16 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 		if workErr == nil {
 			workErr = driver.WaitUntil(5*time.Second, "400 marked calls", func() (bool, error) { return driver.Exists(filepath.Join(gates, "done")) })
 		}
-		if name == "target-exit" {
-			_, workErr = docker.Output(5*time.Second, "kill", "--signal=KILL", id)
+		if workErr == nil {
+			if name == "target-exit" {
+				workErr = observeTargetKill(docker, dir, id)
+			} else if name == "target-exec" {
+				workErr = observeJVMExec(docker, id, dir, gates, result.Target)
+			}
 		}
 		if workErr != nil {
 			cancel()
-		} else if name != "target-exit" {
+		} else if name != "target-exit" && name != "target-exec" {
 			_, workErr = send.Write([]byte("stop\n"))
 		}
 		d = <-decoded
@@ -606,9 +620,18 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 	captured, decodeErr := d.decoder.Finish(runErr)
 	if err := errors.Join(workErr, d.err, decodeErr, runErr); err != nil {
 		fail(err)
-		if name == "target-exit" && started && runErr != nil {
-			result.Error = "target loss correctly rejected: " + err.Error()
-			result.Status = "safe-control"
+		if workErr == nil && (name == "target-exit" || name == "target-exec") {
+			var failure observedCollectorFailure
+			proofErr := driver.ReadJSON(filepath.Join(dir, "collector-failure.json"), &failure)
+			if proofErr == nil {
+				proofErr = verifyObservedControl(name, started, exit, failure, d.summary, decodeErr)
+			}
+			if proofErr == nil {
+				result.Error = "target change correctly rejected: " + err.Error()
+				result.Status = "safe-control"
+			} else {
+				result.Error = errors.Join(err, proofErr).Error()
+			}
 		}
 		return
 	}
@@ -638,66 +661,11 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 			return
 		}
 	}
-	if name == "target-exit" {
-		fail(fmt.Errorf("target exit accepted as successful capture"))
+	if name == "target-exit" || name == "target-exec" {
+		fail(fmt.Errorf("target change accepted as successful capture"))
 		return
 	}
 	result.Status = "qualified"
-	return
-}
-
-func observedExecControl(ctx context.Context, output string) (result observedCaseResult) {
-	result = observedCaseResult{Name: "target-exec", Status: "rejected"}
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", "read token; exec /bin/true")
-	in, err := cmd.StdinPipe()
-	if err != nil {
-		result.Error = err.Error()
-		return
-	}
-	defer in.Close()
-	if err := cmd.Start(); err != nil {
-		result.Error = err.Error()
-		return
-	}
-	defer cmd.Process.Kill()
-	barrier, err := identity.NewExecBarrier(cmd.Process.Pid)
-	if err != nil {
-		in.Close()
-		cmd.Wait()
-		result.Error = err.Error()
-		return
-	}
-	defer func() {
-		if err := barrier.Close(); err != nil {
-			result.Status = "rejected"
-			result.Error += err.Error()
-		}
-	}()
-	if err := barrier.Check(); err != nil {
-		in.Close()
-		cmd.Wait()
-		result.Error = err.Error()
-		return
-	}
-	if err := driver.WriteJSON(filepath.Join(output, "exec-before.json"), map[string]any{"pid": cmd.Process.Pid, "argv": cmd.Args, "barrier_initial": "clear"}); err != nil {
-		in.Close()
-		cmd.Wait()
-		result.Error = err.Error()
-		return
-	}
-	_, writeErr := in.Write([]byte("exec\n"))
-	err = errors.Join(writeErr, cmd.Wait())
-	if err != nil {
-		result.Error = err.Error()
-		return
-	}
-	err = barrier.Check()
-	if !errors.Is(err, identity.ErrTargetExec) {
-		result.Error = fmt.Sprintf("exec not rejected: %v", err)
-		return
-	}
-	// This shell control proves the real poison path, not JVM exec during full readout.
-	result.Error = "actual same-PID exec barrier rejected; JVM/full-readout exec coupling unavailable"
 	return
 }
 

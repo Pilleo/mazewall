@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 	"io.mazewall/experiments/hotspot-agentless/internal/capture"
 	"io.mazewall/experiments/hotspot-agentless/internal/driver"
+	"io.mazewall/experiments/hotspot-agentless/internal/identity"
 )
 
 // Only the explicitly tagged qualification binary has this internal process entry.
@@ -32,6 +33,8 @@ func TestObservedCollectorProcess(t *testing.T) {
 		cancel()
 	}
 	if err != nil {
+		failure := observedCollectorFailure{Error: err.Error(), TargetExec: errors.Is(err, identity.ErrTargetExec), TargetExit: capture.ObservedTargetExited(err)}
+		err = errors.Join(err, driver.WriteJSON(filepath.Join(filepath.Dir(input), "collector-failure.json"), failure))
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

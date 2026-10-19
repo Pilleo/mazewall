@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 140 | *Total Resolved Issues:* 710
+*Total Active Issues:* 139 | *Total Resolved Issues:* 712
 
-Active status detail: 139 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 138 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,7 +50,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
-| [issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition](issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md) | Observed HotSpot capture rejects native definition drain at strict-only guard; actual A-OBS verdict rejected | high | profiler |
+| Archived [issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi](resolved/issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md) | Retain asynchronous enrichment causes before pending readout returns; native cause and strict regression gates pass | high | profiler |
+| Archived [issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition](resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md) | Observed native drain/custody repaired; controlled A-OBS qualified, operator admission remains closed | high | profiler |
 | [issue-20261018-172609-510-preserve-unknown-identity-hotspot-reporter-failure](issue-20261018-172609-510-preserve-unknown-identity-hotspot-reporter-failure.md) | Preserve unknown-identity HotSpot reporter failures through the fatal owner; Task3 source remedy awaits independent review | high | profiler |
 | Archived [issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio](resolved/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md) | Replace clock-only native correlation ID allocation with reviewed uniqueness contract | medium | profiler |
 | [issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo](issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo.md) | Record qualification source receipts and linked-worktree Go VCS limitations | high | profiler |

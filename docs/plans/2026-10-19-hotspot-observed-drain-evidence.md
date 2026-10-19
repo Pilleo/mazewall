@@ -1,5 +1,9 @@
 # Observed HotSpot owned-drain repair
 
+Subsequent [coupled JVM exec qualification](2026-10-19-hotspot-coupled-exec-evidence.md)
+completes the controlled candidate gate. The initial rejected repair matrix below
+is retained unchanged; candidate qualification is not production admission.
+
 Continuation from `be1ac8ca` in the existing
 `feat/kubescape-agentless-hotspot` checkout. The operator requested continued
 execution; no branch/worktree, publication, external repository or admission
@@ -143,10 +147,11 @@ failure-path promotion is not established by the local capture-child tests alone
 
 ## Remaining acceptance boundary
 
-The [open drain/lifetime issue](../internals/backlog/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md)
-records this source fix and the remaining lifetime/qualification work. Before any
-admission request, complete actual JVM/full-readout exec qualification and revised
-native permission-control custody checks, preserving the intentional target-exit failure.
+The [drain/lifetime issue](../internals/backlog/resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md)
+records this source fix and the subsequent qualification. At this initial checkpoint,
+actual JVM/full-readout exec and revised native permission-control custody were
+still pending; the later coupled-exec record completes them without erasing the
+original rejected outcomes. Operator admission and publication remain separate.
 No admission source, SDK tag, provider handoff or Kubescape deployment is changed.
 The actual newly built canonical CLI still refuses a valid schema3 request before
 acquisition: exit2, empty stdout and the A-OBS/operator-review diagnostic

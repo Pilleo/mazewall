@@ -51,6 +51,7 @@ type Enricher struct {
 	sink           model.Sink
 	clock          BootClock
 	onFatal        context.CancelFunc
+	onError        func(error)
 	jobs           chan pendingEvent
 	wg             sync.WaitGroup
 	mu             sync.Mutex
@@ -61,13 +62,17 @@ type Enricher struct {
 }
 
 func NewEnricher(ctx context.Context, opts EnrichmentOptions, lookup StackLookup, sink model.Sink, clock BootClock, onFatal context.CancelFunc) (*Enricher, error) {
+	return newEnricher(ctx, opts, lookup, sink, clock, onFatal, nil)
+}
+
+func newEnricher(ctx context.Context, opts EnrichmentOptions, lookup StackLookup, sink model.Sink, clock BootClock, onFatal context.CancelFunc, onError func(error)) (*Enricher, error) {
 	if opts.Workers <= 0 || opts.MaxPending <= 0 || opts.MaxPendingBytes <= 0 || opts.Deadline <= 0 || opts.Deadline > time.Hour {
 		return nil, fmt.Errorf("invalid enrichment limits")
 	}
 	if lookup == nil || sink == nil || clock == nil {
 		return nil, fmt.Errorf("enrichment dependencies are required")
 	}
-	e := &Enricher{ctx: ctx, opts: opts, lookup: lookup, sink: sink, clock: clock, onFatal: onFatal, jobs: make(chan pendingEvent, opts.MaxPending)}
+	e := &Enricher{ctx: ctx, opts: opts, lookup: lookup, sink: sink, clock: clock, onFatal: onFatal, onError: onError, jobs: make(chan pendingEvent, opts.MaxPending)}
 	for i := 0; i < opts.Workers; i++ {
 		e.wg.Add(1)
 		go e.worker()
@@ -122,6 +127,9 @@ func (e *Enricher) write(record model.Record) error {
 	record.SchemaVersion = 1
 	// Capture cancellation must not erase terminal cancellation records.
 	if err := e.sink.Write(context.WithoutCancel(e.ctx), record); err != nil {
+		if e.onError != nil {
+			e.onError(err)
+		}
 		if e.err == nil {
 			e.err = err
 			if e.onFatal != nil {
@@ -188,6 +196,9 @@ func (e *Enricher) worker() {
 	defer e.wg.Done()
 	for job := range e.jobs {
 		evidence, err := e.resolve(job.event)
+		if fatalEnrichmentError(err) && e.onError != nil {
+			e.onError(err)
+		}
 		e.mu.Lock()
 		if evidence.Attribution == "event_correlated" {
 			e.stats.Resolved++
@@ -195,7 +206,7 @@ func (e *Enricher) worker() {
 			e.stats.Unavailable++
 		}
 		writeErr := e.write(model.Record{Kind: "enrichment", SessionID: job.event.SessionID, EventID: job.event.EventID, Evidence: &evidence})
-		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		if fatalEnrichmentError(err) {
 			if e.err == nil {
 				e.err = err
 				if e.onFatal != nil {
@@ -215,6 +226,10 @@ func (e *Enricher) worker() {
 	}
 }
 
+func fatalEnrichmentError(err error) bool {
+	return err != nil && (errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || (!errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)))
+}
+
 func (e *Enricher) recover(event model.Event) {
 	recovery, ok := e.lookup.(ReferenceRecovery)
 	if !ok || event.CorrelationID == 0 || e.ctx.Err() != nil {
@@ -231,6 +246,10 @@ func (e *Enricher) recover(event model.Event) {
 	if err != nil {
 		action.Error = err.Error()
 	}
+	fatal := clockErr != nil || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || (err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ebpf.ErrIterationAborted))
+	if fatal && e.onError != nil {
+		e.onError(err)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.stats.RecoveryAttempts++
@@ -243,7 +262,6 @@ func (e *Enricher) recover(event model.Event) {
 	_ = e.write(model.Record{Kind: "recovery", SessionID: event.SessionID, EventID: event.EventID, Recovery: &action})
 	// A concurrent LRU iteration abort or expiry is an explicit unsuccessful
 	// attempt. Native permission and unexpected recovery failures stay fatal.
-	fatal := clockErr != nil || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) || (err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, ebpf.ErrIterationAborted))
 	if fatal && e.err == nil {
 		e.err = err
 		if e.onFatal != nil {

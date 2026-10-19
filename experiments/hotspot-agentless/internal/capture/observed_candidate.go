@@ -23,6 +23,9 @@ func RunObservedCandidate(ctx context.Context, cfg Config, writer io.Writer, con
 	return runControlled(ctx, cfg, writer, control, runObservedCandidate)
 }
 
+// ObservedTargetExited preserves the private watcher cause across the qualification process boundary.
+func ObservedTargetExited(err error) bool { return errors.Is(err, errTargetExited) }
+
 func runObservedCandidate(ctx context.Context, cfg Config, writer io.Writer) error {
 	var random [16]byte
 	if _, err := rand.Read(random[:]); err != nil {

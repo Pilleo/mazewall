@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 16fab8e6f36f3f1fdb57964003affd30a420219c
-status: p0_approved_pending_governing_checkpoint_and_named_gates
+status: provider_candidate_qualified_pending_named_operator_and_cross_repository_gates
 ---
 
 # Kubescape Agentless HotSpot Forward Implementation Plan
@@ -22,6 +22,15 @@ reference. Task0 makes that authority durable before implementation. Native
 qualification/admission, SDK publication, writable storage provisioning, the dirty
 node-agent baseline and cluster operations retain their separate gates; no profile
 or A/B/C/D deliverable is qualified or completed by this checkpoint.
+
+**Current provider checkpoint (2026-10-19):** Shared SDK extraction/decoder and
+separate observed negotiation are implemented. The
+[actual six-case candidate gate](../../plans/2026-10-19-hotspot-coupled-exec-evidence.md)
+now qualifies the bounded observational corpus; source/native/strict regressions
+pass. This does not authorize observed admission, a new SDK release or the A5
+provider handoff. Writable storage provisioning, the node-agent prototype baseline
+and cluster access remain separately controlled. No B/C/D implementation or end-to-end
+Kubescape integration is claimed by the candidate result.
 
 ## Global Constraints
 

@@ -2,8 +2,9 @@
 
 Continuation: [2026-10-19 owned-drain repair](2026-10-19-hotspot-observed-drain-evidence.md)
 records new source and new native captures separately. The original report,
-artifact hashes and rejection below remain frozen; the overall A-OBS gate is still
-rejected, not silently upgraded by the three subsequently completed cases.
+artifact hashes and rejection below remain frozen. The later
+[coupled JVM exec qualification](2026-10-19-hotspot-coupled-exec-evidence.md) has its
+own actual qualified candidate report; admission and publication remain closed.
 
 ## Decision
 
@@ -131,7 +132,7 @@ Container retirement does **not** establish native collector retirement. On the
 pending-error path the harness releases its target after Run returns although
 native resources remain retained; this lifetime-coupling gap is part of the
 rejection, not successful finalization. It is tracked with the drain blocker in
-[issue-20261018-212457-115](../internals/backlog/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md).
+[issue-20261018-212457-115](../internals/backlog/resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md).
 
 The controller's writable owned-output bind also covered its candidate bundle
 subtree. Post-run complete-byte checks still match the pre-run manifest, and target

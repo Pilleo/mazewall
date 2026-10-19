@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -80,6 +81,36 @@ func TestObservedFixtureMountPoint(t *testing.T) {
 	info, err := os.Stat(filepath.Join(output, "fixture/gates"))
 	if err != nil || !info.IsDir() {
 		t.Fatalf("target's read-only fixture lacks nested gate mount point: %v", err)
+	}
+}
+
+func TestObservedFixtureCompilesMaintainedExecEntry(t *testing.T) {
+	root, err := observedRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := t.TempDir()
+	docker := &observedCompilerReceipt{}
+	if err := compileObserved(docker, root, output, "test-image"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(docker.created, "/fixture/ObservedExecWorkload.java") || !slices.Contains(docker.created, "/fixture/ObservedWorkload.java") {
+		t.Fatal("actual compiler command omits a maintained fixture source", docker.created)
+	}
+	if _, err := os.Stat(filepath.Join(output, "fixture/ObservedExecWorkload.java")); err != nil {
+		t.Fatal("exec source not staged in compiler mount", err)
+	}
+}
+
+func TestObservedExecUsesJVMWorkloadInsteadOfShellControl(t *testing.T) {
+	root, err := observedRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	docker := &observedCompilerReceipt{}
+	runObservedCase(context.Background(), docker, "target-exec", root, t.TempDir(), "", "", "", map[string]string{"jdk": "test-image"}, bundle.Verified{})
+	if !slices.Contains(docker.created, "ObservedExecWorkload") {
+		t.Fatal("exec control did not launch the actual JVM exec workload", docker.created)
 	}
 }
 

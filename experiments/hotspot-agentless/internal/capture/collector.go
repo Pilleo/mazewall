@@ -207,7 +207,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			for name, replacement := range sym.GetEbpfReplacements() {
 				gc.SetVar(name, replacement)
 			}
-			enrichment, err = NewEnricher(ownedCtx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks, strictEpoch: cfg.StrictEpoch, execBarrier: execBarrier}, sink, LinuxBootClock{}, cancelAll)
+			enrichment, err = newEnricher(ownedCtx, opts, gadgetLookup{symbolizer: sym, sessionID: sessionID, pid: uint32(cfg.PID), startTicks: ticks, strictEpoch: cfg.StrictEpoch, execBarrier: execBarrier}, sink, LinuxBootClock{}, cancelAll, fatal.Record)
 			if err != nil {
 				return err
 			}

@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 16fab8e6f36f3f1fdb57964003affd30a420219c
-status: p0_approved_pending_task0_review_and_native_capability_gate
+status: candidate_qualified_pending_operator_admission_and_sdk_release
 ---
 
 # Agentless HotSpot Provider and Go Bridge Implementation Plan
@@ -24,8 +24,10 @@ still require their separate named gates. No ordinary-JVM support is yet qualifi
 **Execution checkpoint (2026-10-19):** A1/A2/A3 and the initial rejected A4 corpus
 are committed; SDKv0.1.0 remains immutable. The subsequent
 [owned-drain repair](../../plans/2026-10-19-hotspot-observed-drain-evidence.md)
-completes three controlled native captures but leaves the overall A-OBS verdict
-rejected. A4 admission and A5 publication/handoff remain blocked. Do not redispatch
+and [coupled JVM exec qualification](../../plans/2026-10-19-hotspot-coupled-exec-evidence.md)
+complete the six-case controlled candidate gate. The original rejected matrices
+remain frozen; actual rebuilt helper strict acceptance executes8tests without
+skips/failures. A4 admission and A5 publication/handoff remain blocked. Do not redispatch
 the completed extraction/decoder/negotiation work or promote successful route
 prefixes to a lifetime proof.
 

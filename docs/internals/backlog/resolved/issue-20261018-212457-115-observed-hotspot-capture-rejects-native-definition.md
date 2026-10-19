@@ -1,7 +1,7 @@
 ---
 title: "Observed HotSpot capture rejects native definition drain at strict-only guard"
 severity: "HIGH"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "profiler"
@@ -54,7 +54,7 @@ lifetime coupling is also unqualified. A future fix must preserve the target
 until the actual collector owner is retired, not relabel container cleanup as
 native completion. No lifetime guard or admission table was changed here.
 
-See [the qualification evidence](../../plans/2026-10-18-hotspot-observed-profile-evidence.md).
+See [the qualification evidence](../../../plans/2026-10-18-hotspot-observed-profile-evidence.md).
 
 ## 2026-10-19 continuation
 
@@ -75,7 +75,26 @@ has a separate checked owner and three new RED/GREEN remote-absence/cause-retent
 regressions; its revised native qualification and coupled JVM exec proof remain
 pending. This issue stays open rather than
 calling the wider lifetime gate complete. See the
-[repair evidence](../../plans/2026-10-19-hotspot-observed-drain-evidence.md).
+[repair evidence](../../../plans/2026-10-19-hotspot-observed-drain-evidence.md).
+
+## Final qualification resolution
+
+The [coupled JVM exec continuation](../../../plans/2026-10-19-hotspot-coupled-exec-evidence.md)
+completes the remaining source/custody qualification. Actual ordinary/churn/unload
+captures return400pairs each with380/380/381useful exact application prefixes;
+all physical native event/definition/auxiliary joins and SDK Finish pass. Actual
+same-PID JVM exec, target exit and permission denial remain failed captures with
+their original typed causes and checked physical owners. Expected target137 is
+retained as an explicit negative-control result, not successful enrichment.
+
+The exact-path exec attempt exposed a distinct asynchronous cause-retention bug,
+fixed under [its own issue](issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md).
+Full native qualification is now `qualified` for the approved observational claim;
+the original rejected reports remain frozen. New complete bundles reproduce byte
+for byte, both Go/race owners pass, all8strict public-native tests execute without
+skips/failures, and the root quality build passes. This archives the drain/lifetime
+defect, not operator admission, SDK publication, global loss or metadata/code/mount
+lifetime proof. No admission table or public runtime support was expanded.
 
 ---
 <!-- id: issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition  file: issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md -->

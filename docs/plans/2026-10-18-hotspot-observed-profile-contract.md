@@ -119,8 +119,10 @@ candidate assets from its recorded graph and run the ordinary tiered/G1, code-ca
 churn, class unloading, exec/exit and permission cases with the required route
 denominators; then preserve the real qualified/rejected verdict. The initial Task4
 rejection and subsequent owned-drain repair have separate evidence: three repaired
-controlled cases now complete, but the full A-OBS verdict still rejects. Candidate
-bundle reproducibility is not SDK publication or runtime admission.
+controlled cases initially completed with a rejected full verdict. The later
+[coupled JVM exec qualification](2026-10-19-hotspot-coupled-exec-evidence.md) completes
+the controlled candidate gate, preserving all earlier rejected reports. Candidate
+qualification/bundle reproducibility is not SDK publication or runtime admission.
 The unchanged inherited USER_NOTIF ENOSYS socket/directory shutdown investigation
 remains open under issue20261003-131111-752.
 

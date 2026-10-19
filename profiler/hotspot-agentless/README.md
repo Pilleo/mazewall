@@ -60,7 +60,9 @@ The current accepted source overlay is
 The [owned-drain repair](../../docs/plans/2026-10-19-hotspot-observed-drain-evidence.md)
 wires actual auxiliary ownership for both HotSpot modes without fabricating an
 epoch lease. It preserves strict admission and native budgets; ordinary-JVM
-qualification remains rejected overall. The historical allocator/helper evidence
+candidate qualification is completed by the separate
+[coupled JVM exec evidence](../../docs/plans/2026-10-19-hotspot-coupled-exec-evidence.md),
+but production admission/publication stay closed. The historical allocator/helper evidence
 below is not a release/admission receipt for the new source graph. Existing asset
 bundles must be rebuilt and fully verified for the current fingerprint.
 
