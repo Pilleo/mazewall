@@ -58,6 +58,29 @@ func TestObservedMatrixNative(t *testing.T) {
 	}
 }
 
+func TestObservedPublicCLINative(t *testing.T) {
+	t.Setenv("MW_OBSERVED_PUBLIC_CLI", "true")
+	TestObservedMatrixNative(t)
+	output := os.Getenv("MW_OBSERVED_OUTPUT")
+	assets := os.Getenv("MW_HOTSPOT_ASSETS")
+	want, err := driver.HashFile(filepath.Join(assets, "mw-hotspot-collector"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"ordinary", "compiled-churn", "class-unload"} {
+		var input struct {
+			Argv []string `json:"argv"`
+			Hash string   `json:"binary_sha256"`
+		}
+		if err := driver.ReadJSON(filepath.Join(output, name, "collector-process-input.json"), &input); err != nil {
+			t.Fatal(err)
+		}
+		if input.Hash != want || len(input.Argv) < 2 || input.Argv[0] != filepath.Join(assets, "mw-hotspot-collector") || input.Argv[1] != "--capture" {
+			t.Fatal("public CLI acceptance executed a different binary or entry", name, input)
+		}
+	}
+}
+
 func TestObservedPermissionNative(t *testing.T) {
 	dir, assets := os.Getenv("MW_OBSERVED_DENIAL"), os.Getenv("MW_HOTSPOT_ASSETS")
 	if dir == "" || assets == "" {

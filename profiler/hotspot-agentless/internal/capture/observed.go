@@ -2,6 +2,7 @@ package capture
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
@@ -9,15 +10,56 @@ import (
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 	jsonoutput "io.mazewall/experiments/hotspot-agentless/internal/output"
 	"os"
+	"syscall"
 )
 
 const ObservationSchema = 3
 
-var errObservedUnadmitted = errors.New("observed profile requires A-OBS qualification and separate operator admission review")
+// RunObserved collects generation-checked observations, never policy evidence.
+func RunObserved(ctx context.Context, cfg Config, writer io.Writer) error {
+	cfg.profile = wire.Observed25
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return runObserved(ctx, cfg, writer)
+}
 
-func RunObserved(context.Context, Config, io.Writer) error { return errObservedUnadmitted }
-func RunObservedControlled(context.Context, Config, io.Writer, *os.File) error {
-	return errObservedUnadmitted
+func RunObservedControlled(ctx context.Context, cfg Config, writer io.Writer, control *os.File) error {
+	cfg.profile = wire.Observed25
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return runControlled(ctx, cfg, writer, control, runObserved)
+}
+
+func runObserved(ctx context.Context, cfg Config, writer io.Writer) error {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return err
+	}
+	cfg.sessionID = fmt.Sprintf("%x", random)
+	sink := newObservedSink(writer)
+	r, err := observedLifecycleRecord("session_started", cfg.sessionID, cfg.ExpectedTarget, "", "")
+	if err != nil {
+		return err
+	}
+	if err := sink.Write(ctx, r); err != nil {
+		return err
+	}
+	err = Run(ctx, cfg, writer)
+	if err == nil || errors.Is(err, errReadoutPending) {
+		return err
+	}
+	r, clockErr := observedLifecycleRecord("collector_error", cfg.sessionID, cfg.ExpectedTarget, "", "")
+	if clockErr != nil {
+		return errors.Join(err, clockErr)
+	}
+	r.Lifecycle.Message = err.Error()
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		r.Lifecycle.Errno = int(errno)
+	}
+	return errors.Join(err, sink.Write(context.Background(), r))
 }
 
 type observedSink struct{ model.Sink }

@@ -521,10 +521,19 @@ func runObservedCase(parent context.Context, docker candidateDocker, name, root,
 	}
 	logs = append(logs, collectorLog)
 	collector = exec.CommandContext(ctx, binary, "-test.run=^TestObservedCollectorProcess$", "-test.timeout=20s")
+	if os.Getenv("MW_OBSERVED_PUBLIC_CLI") == "true" && (name == "ordinary" || name == "compiled-churn" || name == "class-unload") {
+		path, err := verified.Collector()
+		if err != nil {
+			fail(err)
+			return
+		}
+		target := result.Target
+		collector = exec.CommandContext(ctx, path, "--capture", "--protocol-version=3", "--runtime-profile=otel_hotspot25_observed_v1", "--hotspot-identity=unknown", "--drain-full", "--control-stdin", "--duration=12s", "--pid="+strconv.FormatUint(uint64(target.PID), 10), "--expected-start-ticks="+strconv.FormatUint(target.StartTicks, 10), "--expected-cgroup-id="+strconv.FormatUint(target.CgroupID, 10), "--expected-mntns="+strconv.FormatUint(target.MountNS, 10), "--store="+store, "--image="+image)
+	}
 	collector.Env = append(os.Environ(), "MW_OBSERVED_CAPTURE_INPUT="+input)
 	collector.Stdin, collector.Stdout, collector.Stderr = control, io.MultiWriter(raw, write), collectorLog
 	collector.WaitDelay = time.Second
-	binaryHash, err := driver.HashFile(binary)
+	binaryHash, err := driver.HashFile(collector.Path)
 	if err != nil {
 		fail(err)
 		return

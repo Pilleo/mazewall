@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 16fab8e6f36f3f1fdb57964003affd30a420219c
-status: candidate_qualified_pending_operator_admission_and_sdk_release
+status: admitted_cli_qualified_pending_sdk_release
 ---
 
 # Agentless HotSpot Provider and Go Bridge Implementation Plan
@@ -30,6 +30,12 @@ remain frozen; actual rebuilt helper strict acceptance executes8tests without
 skips/failures. A4 admission and A5 publication/handoff remain blocked. Do not redispatch
 the completed extraction/decoder/negotiation work or promote successful route
 prefixes to a lifetime proof.
+
+**Admission continuation:** The operator's explicit "yes" approves the scoped
+observed-profile admission change. [New source and actual-CLI evidence](../../plans/2026-10-19-hotspot-observed-admission.md)
+record three completed CLI captures, preserved negative controls and two identical
+rebuilt bundles. Root and all eight strict native tests pass. SDK publication and A5
+handoff remain separately gated; this answer does not authorize them.
 
 ## Global Constraints
 

@@ -1,6 +1,6 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 139 | *Total Resolved Issues:* 712
+*Total Active Issues:* 139 | *Total Resolved Issues:* 713
 
 Active status detail: 138 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| Archived [issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a](resolved/issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a.md) | Scoped observed admission approved; actual CLI and strict regression gates pass | medium | profiler |
 | Archived [issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi](resolved/issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md) | Retain asynchronous enrichment causes before pending readout returns; native cause and strict regression gates pass | high | profiler |
 | Archived [issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition](resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md) | Observed native drain/custody repaired; controlled A-OBS qualified, operator admission remains closed | high | profiler |
 | [issue-20261018-172609-510-preserve-unknown-identity-hotspot-reporter-failure](issue-20261018-172609-510-preserve-unknown-identity-hotspot-reporter-failure.md) | Preserve unknown-identity HotSpot reporter failures through the fatal owner; Task3 source remedy awaits independent review | high | profiler |

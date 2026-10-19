@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -12,14 +11,22 @@ import (
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 )
 
-func TestObservedPublicEntrypointsNeverAcquireOrEmit(t *testing.T) {
+func TestObservedPublicEntrypointsValidateBeforeAcquireOrEmit(t *testing.T) {
 	for _, run := range []func() error{
 		func() error { return RunObserved(context.Background(), Config{}, nil) },
 		func() error { return RunObservedControlled(context.Background(), Config{}, nil, nil) },
 	} {
-		if err := run(); !errors.Is(err, errObservedUnadmitted) {
-			t.Fatal("admission bypass", err)
+		if err := run(); err == nil || !strings.Contains(err.Error(), "observed profile/expected target") {
+			t.Fatal("invalid observed scope did not reach validation", err)
 		}
+	}
+}
+
+func TestObservedPublicValidScopeRequiresParentControl(t *testing.T) {
+	cfg := Config{PID: 123, Image: "gadget@sha256:" + strings.Repeat("a", 64), Store: "unused", DrainFull: true, ExpectedTarget: wire.Target{PID: 123, StartTicks: 456, CgroupID: 789, MountNS: 42}}
+	var out bytes.Buffer
+	if err := RunObservedControlled(context.Background(), cfg, &out, nil); err == nil || !strings.Contains(err.Error(), "parent control pipe") || out.Len() != 0 {
+		t.Fatal("valid scope must reach control boundary before emission or native work", err, out.String())
 	}
 }
 

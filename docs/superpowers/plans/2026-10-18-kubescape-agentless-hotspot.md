@@ -1,7 +1,7 @@
 ---
 document_type: execution_plan
 base_revision: 16fab8e6f36f3f1fdb57964003affd30a420219c
-status: provider_candidate_qualified_pending_named_operator_and_cross_repository_gates
+status: provider_admitted_pending_sdk_release_and_cross_repository_gates
 ---
 
 # Kubescape Agentless HotSpot Forward Implementation Plan
@@ -39,6 +39,12 @@ aggregation and opt-in API gate preparation. Its own handoff explicitly has
 reprovision S or redispatch B1/B2. The node-agent prototype remains dirty and
 operator-owned. See the [specific remaining gates](../../plans/2026-10-19-hotspot-integration-gate-checkpoint.md)
 before selecting more work; this observation grants no external edit or cluster authority.
+
+**Later admission approval:** The operator explicitly approved the scoped A4
+observed-profile admission change. Its [actual-CLI continuation](../../plans/2026-10-19-hotspot-observed-admission.md)
+has new executable/manifest/native receipts, not relabeled candidate artifacts.
+SDK publication, B3 live API, C's dirty baseline and D's cluster gates remain
+separate. No external-repository edits or deployment follow implicitly.
 
 ## Global Constraints
 

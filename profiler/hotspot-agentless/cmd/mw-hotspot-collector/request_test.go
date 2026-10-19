@@ -45,11 +45,10 @@ func TestObservationNegotiationRefusesSpecificMismatch(t *testing.T) {
 	}
 }
 
-func TestObservedShippedDispatchRejectsBeforeAcquisition(t *testing.T) {
-	// A syntactically valid nonexistent PID with no assets must fail usage/admission,
-	// before preflight, signal/control owners, or any target/resource acquisition.
-	if code := run(observedArgs()); code != 2 {
-		t.Fatalf("unqualified observed dispatch: %d", code)
+func TestObservedShippedDispatchReportsInvalidCaptureConfiguration(t *testing.T) {
+	// Missing assets fail capture validation, not usage/admission.
+	if code := run(observedArgs()); code != 1 {
+		t.Fatalf("observed request did not reach capture validation: %d", code)
 	}
 }
 

@@ -25,10 +25,6 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	if r.Protocol == 3 {
-		fmt.Fprintln(os.Stderr, "observed profile requires A-OBS qualification and separate operator admission review")
-		return 2
-	}
 	if !r.preflight {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
@@ -41,6 +37,14 @@ func run(args []string) int {
 			if r.Control {
 				runCapture = func(ctx context.Context, cfg capture.Config, writer io.Writer) error {
 					return capture.RunProductionControlled(ctx, cfg, writer, os.Stdin)
+				}
+			}
+		}
+		if r.Protocol == capture.ObservationSchema {
+			runCapture = capture.RunObserved
+			if r.Control {
+				runCapture = func(ctx context.Context, cfg capture.Config, writer io.Writer) error {
+					return capture.RunObservedControlled(ctx, cfg, writer, os.Stdin)
 				}
 			}
 		}

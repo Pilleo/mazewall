@@ -5,6 +5,13 @@ receipt. It belongs to the existing
 [dependency/storage alignment issue](../internals/backlog/issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md).
 No external checkout, cluster, registry, SDK tag or runtime admission is changed.
 
+**Subsequent operator decision:** The operator explicitly approved only scoped
+observed-profile admission after this checkpoint. The
+[admission continuation](2026-10-19-hotspot-observed-admission.md) records the new
+source and actual rebuilt-CLI acceptance separately. The initial state and
+requested decisions below are retained as history; SDK publication, storage live
+API, node-agent baseline and cluster gates are not approved by that answer.
+
 ## Observed state on 2026-10-19
 
 |Area|Evidence now available|Still not established|

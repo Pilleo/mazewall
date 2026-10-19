@@ -62,15 +62,16 @@ wires actual auxiliary ownership for both HotSpot modes without fabricating an
 epoch lease. It preserves strict admission and native budgets; ordinary-JVM
 candidate qualification is completed by the separate
 [coupled JVM exec evidence](../../docs/plans/2026-10-19-hotspot-coupled-exec-evidence.md),
-but production admission/publication stay closed. The historical allocator/helper evidence
+followed by operator-approved [scoped admission](../../docs/plans/2026-10-19-hotspot-observed-admission.md).
+SDK publication remains closed. The historical allocator/helper evidence
 below is not a release/admission receipt for the new source graph. Existing asset
 bundles must be rebuilt and fully verified for the current fingerprint.
 
-Task3 adds a separately negotiated schema3 observation **candidate**, described in
+Task3 adds a separately negotiated schema3 observation profile, described in
 the [profile contract](../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
-The shipped CLI and `RunObserved*` admission remain closed pending A-OBS and
-separate operator review. `RunObservedCandidate` exists only in internal builds
-tagged `mw_hotspot_qualification`. Native modules pin actual SDKv0.1.0; its immutable
+The rebuilt CLI and `RunObserved*` now use the qualified owned implementation after
+explicit operator approval. Strict2 and false policy eligibility are unchanged.
+`RunObservedCandidate` is only a tagged compatibility alias. Native modules pin actual SDKv0.1.0; its immutable
 bundle verifier does not implement the local candidate's format3 behavior. Candidate
 packing/tests require the explicit per-owner Go workspace until a separately
 approved new SDK release exists. Strict2 and the Kotlin facade retain their scope.

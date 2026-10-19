@@ -2,13 +2,15 @@
 
 ## Admission and compatibility
 
-`otel_hotspot25_observed_v1` is a schema3 **request and qualification candidate**.
-The shipped CLI rejects it with exit2 before signal, control, target or producer
-acquisition. Both public internal-package entries `capture.RunObserved` and
-`RunObservedControlled` return the same unadmitted-profile error in every build.
-Only `mw_hotspot_qualification` compiles `capture.RunObservedCandidate`; it is an
-internal matrix entry, with no CLI bypass. A-OBS and separate operator review must
-precede admission, a rebuilt admitted helper and direct CLI acceptance.
+`otel_hotspot25_observed_v1` is a separately negotiated schema3 observational
+profile. After the six-case candidate gate, the operator explicitly approved
+[scoped admission](2026-10-19-hotspot-observed-admission.md). The rebuilt CLI and
+`capture.RunObserved`/`RunObservedControlled` now validate and run the same owned
+implementation that was qualified, rather than returning the former admission
+refusal. Invalid negotiation still exits2; failed capture configuration/runtime
+exits1. CLI schema3 requires parent control and the independently supplied target
+tuple. The tagged `RunObservedCandidate` is a compatibility alias, not a bypass.
+SDK publication and end-to-end Kubescape acceptance remain separate gates.
 
 Strict schema2 remains pinned Temurin25.0.4.1+1-LTS, `-Xint -XX:+UseSerialGC`,
 stable safepoint epoch and full owned drain. Its Kotlin API/ABI, absent schema3
