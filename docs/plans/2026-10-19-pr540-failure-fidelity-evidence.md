@@ -51,7 +51,7 @@ and native receipts do **not** qualify the changed helper. Strict Kotlin seriali
 path/assets did not change; no additional focused Kotlin check was needed beyond
 the full hook. No module/sum, native asset, JVM pin or release identity changed.
 
-Both fix issues remain open for control-plane handling (146active=145open+1deferred;
+At that historical checkpoint both fix issues remained open (146active=145open+1deferred;
 714resolved). ADK validation passes; the optional orchestrator schema validator's
 254proven baseline errors are not a new Task3 failure. Task3's original failed
 full hook is not waived by the focused pass or independent broad PASS/APPROVED
@@ -64,5 +64,11 @@ No publication, PR mutation, provisioning or Tasks4–6 implementation occurred.
 Both owned disposable VM/kind resources are RETIRED; no current Ready environment
 is claimed. Actual released SDK origin/sums, rebuilt bundles, native attach/real
 child Wait/retirement, provider handoffs and Kubernetes acceptance remain separate
-[release](2026-10-19-hotspot-bridge-release.md) and
-[follow-up plan](../superpowers/plans/2026-10-19-pr540-review-next-steps.md) gates.
+[release](2026-10-19-hotspot-bridge-release.md#ordered-gates) and
+[shared ownership](2026-10-18-hotspot-observed-profile-contract.md#shared-contract-and-ownership) gates.
+
+The [subsequent shared-review checkpoint](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
+records the new Go/Kotlin OCI repairs and provider guards, their actual host checks,
+six still-open issues and missing license approval. It does not reuse this older
+SDK inventory/full-hook receipt for the changed sources; the combined configured
+root/portal gate and released-graph/native qualification remain pending.

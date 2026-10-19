@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 146 | *Total Resolved Issues:* 714
+*Total Active Issues:* 152 | *Total Resolved Issues:* 714
 
-Active status detail: 145 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 151 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,12 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w](issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w.md) | Deliver late HotSpot watcher lifecycle events and real unregister | high | profiler |
+| [issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti](issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti.md) | Retain later original HotSpot admission errors in the active owner | high | profiler |
+| [issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi](issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi.md) | Reject unsaveable HotSpot stacks after a final profile save | high | profiler |
+| [issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d](issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d.md) | Reject OCI digest/media contradictions; shared SDK and Kotlin regression follow-up | high | profiler |
+| [issue-20261019-163139-601-reject-provider-key-aliases-that-override-canonica](issue-20261019-163139-601-reject-provider-key-aliases-that-override-canonica.md) | Reject provider aliases overriding canonical HotSpot pins | high | profiler |
+| [issue-20261019-163139-921-include-approved-bridge-license-material-in-select](issue-20261019-163139-921-include-approved-bridge-license-material-in-select.md) | Package actual selected SDK license material; owner confirmation pending | high | profiler |
 | [issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau](issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau.md) | Preserve compound HotSpot collector permission causes across schema3 wire; PR540 Task2 review pending | high | profiler |
 | [issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col](issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col.md) | Suppress failed owned HotSpot summaries before collector error publication; PR540 Task1 review pending | high | profiler |
 | [issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th](issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th.md) | Preserve HotSpot terminal status write failures through pending cleanup; verified in companion72034696, review pending | high | core |

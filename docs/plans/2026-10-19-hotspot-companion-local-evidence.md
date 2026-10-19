@@ -249,8 +249,9 @@ against storage46c8444a after the separately approved full Create-response chang
 with both formats and independently checked profile cleanup. Published storage
 identity, node-agent runtime wiring and final D acceptance remain incomplete.
 
-SDK review is [PR540](https://github.com/Pilleo/mazewall/pull/540), now ready for
-review. No review/check success, v0.2.0 tag, module checksum or ready provider
+SDK review moved from the historical [PR540](https://github.com/Pilleo/mazewall/pull/540)
+to the [split review stack](2026-10-19-hotspot-bridge-release.md#split-review-routing-2026-10-19).
+No exact-source release approval, v0.2.0 tag, module checksum or ready provider
 handoff is fabricated while that gate is outstanding.
 
 The owned kind node has a nested PID identity chain316557→1, recorded in
@@ -301,3 +302,30 @@ host configuration or bypassing any permission error. Images/evidence are retain
 No native capture acceptance occurred in the VM. After release handoffs exist,
 provisioning/revalidation must acquire new actual owner/node identities; retired
 Ready receipts are history, not a currently available acceptance environment.
+
+## Subsequent whole-feature review
+
+Read-only review of all45committed paths through node-agent
+`72034696017511e05f44d115e4081f39821cbd4d` reproduced three Important defects with
+actual failing host controls, not native acceptance:
+
+- [Watcher registration](../internals/backlog/issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w.md)
+  after startup misses add/remove events; unregister does not remove the frozen callback.
+- [Late admission failure](../internals/backlog/issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti.md)
+  can lose active main delivery of original EACCES after the real10s admission/2s
+  cleanup bounds, while a physical owner remains pending.
+- [Publication after final save](../internals/backlog/issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi.md)
+  can return success while the actual disk-queue/storage payload contains no stacks.
+
+All three remain open and **unfixed**; the development port requires corrections
+and production-boundary regressions, including real unregister/replay ordering,
+retained late-error ownership and final-save linearization. Existing disabled and
+normal save/queue controls pass, but do not disprove these reachable failures.
+The strict/observed guidance mismatch also needs correction without relaxing the
+production pin. A clean local merge simulation onto upstream main`02f0bf7b` is only
+port preparation, not current-main compatibility, release or native qualification.
+
+The [shared SDK/host contract](2026-10-18-hotspot-observed-profile-contract.md#shared-contract-and-ownership)
+and [current release limits](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
+retain independent host ownership, missing license/release approval and real pins.
+No ready C handoff, ordinary image, new environment or default-branch merge is claimed.

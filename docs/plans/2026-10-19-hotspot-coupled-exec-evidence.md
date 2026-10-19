@@ -10,7 +10,7 @@ produce a successful Capture or certify graceful native retirement on that failu
 
 This follows source/custody commit1728e661 under the
 [coupled exec contract](2026-10-19-hotspot-coupled-exec-contract.md) and the approved
-[A3 observational scope](../superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a3-native-qualification-exit).
+[A3 observational scope](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a3-native-qualification-exit).
 No operator admission decision, SDK release, storage/node-agent edit, cluster
 operation, dependency, native layout or source-overlay pin change is included.
 

@@ -12,6 +12,15 @@ source and actual rebuilt-CLI acceptance separately. The initial state and
 requested decisions below are retained as history; SDK publication, storage live
 API, node-agent baseline and cluster gates are not approved by that answer.
 
+**Subsequent shared-review state:** the
+[maintained contract](2026-10-18-hotspot-observed-profile-contract.md#shared-contract-and-ownership)
+now records reviewed Go/Kotlin OCI and shared provider-guard repairs. The
+[current release checkpoint](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
+keeps license approval, combined root/portal verification and actual release/native
+handoffs open. [Whole-node review](2026-10-19-hotspot-companion-local-evidence.md#subsequent-whole-feature-review)
+reproduced three still-unfixed integration defects; all six new issues remain open.
+The dated state and exact-source receipts below are history, not newer qualification.
+
 ## Observed state on 2026-10-19
 
 |Area|Evidence now available|Still not established|
