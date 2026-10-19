@@ -201,6 +201,21 @@ anything, and READY does not establish call admissibility or denial provenance.
 
 ## Verification and delivery
 
+For fast host-only adapter contracts:
+
+```bash
+./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true :integrations:koog:test
+```
+
+`ThreadToolAdapterTest` uses actual owned workers/domains and the upstream Koog
+registry, with native installation mocked through repository-only test fixtures.
+It covers validation placement, once-only dispatch, wrong/closed owners, nested
+dispatch rejection and cancellation that retains admission until physical cleanup.
+These host tests do **not** exercise kernel denials or replace static-analysis,
+published-consumer or native retirement gates.
+
+The complete adapter and published-consumer gates are separate:
+
 ```bash
 ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true :integrations:koog:build \
   --configuration-cache-problems=fail

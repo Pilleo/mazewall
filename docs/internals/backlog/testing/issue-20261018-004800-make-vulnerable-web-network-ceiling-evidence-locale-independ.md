@@ -8,7 +8,9 @@ component: "testing"
 target_modules:
   - ":demos:vulnerable-web-app"
 target_files:
-  - "demos/vulnerable-web-app/src/test/kotlin/demo/vulnapp/VulnerableWebAppFreshJvmTest.kt"
+   - "demos/vulnerable-web-app/src/test/kotlin/demo/vulnapp/VulnerableWebAppFreshJvmTest.kt"
+   - "demos/vulnerable-web-app/build.gradle.kts"
+   - "demos/vulnerable-web-app/README.md"
 verify_cheap:
   - "./gradlew :demos:vulnerable-web-app:test --tests demo.vulnapp.VulnerableWebAppFreshJvmTest"
 needs_kernel: true
@@ -35,6 +37,24 @@ The owning demo, enforcement modules and shared native harness are unchanged fro
 - Initial full build: `.superpowers/sdd/2026-10-18-sandbox-escape-bench/full-build-after-status.log:2613-2628`, exit 1; the owning task ran 57 tests with this sole failure.
 - Focused control: `LC_ALL=C ./gradlew :demos:vulnerable-web-app:test --tests '*VulnerableWebAppFreshJvmTest.learned network calls cannot relax the explicit service ceiling*' --console=plain --max-workers=1`, exit 0; retained in that workspace's `locale-control.log` and `.exit`.
 - The generic failure is not accepted as a security success in either run. The issue concerns the fixture's recognition boundary, not evidence that the syscall policy was bypassed.
+
+## 2026-10-19 local correction and verification
+
+The exact case failed again under ambient `be_BY.UTF-8@latin`, with a real
+Belarusian permission diagnostic. After that RED, the owning demo's existing
+Gradle `Test` configuration explicitly sets `LC_ALL=C`; fresh JVM children inherit
+it. README documents this supported test-launch locale, not multilingual
+recognition or a production locale change. No fixture assertion, policy, native
+limit, outside-worker positive control or zero-served-request check changed.
+
+The actual focused fresh-JVM case then passed from BOTH Belarusian and C ambient
+environments, followed by all57 demo tests and formatting. Independent review
+found no defects in the narrow configuration/docs change. Evidence is retained
+under `.superpowers/sdd/2026-10-19-web-fixture-locale/`. The analyzer failures seen
+at that checkpoint were resolved separately; the full optional build now exits0
+with healthy test aggregation. See
+`.superpowers/sdd/2026-10-19-strict-analyzer-repair/completion-receipt.json`.
+Keep open for scoped integration rather than bypassing the operator approval path.
 
 ---
 

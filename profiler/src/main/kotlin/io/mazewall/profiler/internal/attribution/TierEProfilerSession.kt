@@ -398,12 +398,12 @@ internal class TierEProfilerSession internal constructor(
         } else {
             source.attachUsdtMarker(targetPid, agentLibrary, usdtNote)
         }
-        if (recoveryScanner != null) {
+        recoveryScanner?.let { scanner ->
             check(retainedBudget.tryReserve(TierERetainedStateBudget.Category.RECOVERY_SCAN_BUFFERS, RECOVERY_QUEUE_BYTES)) {
                 "insufficient collector retention for bounded recovery scan queue"
             }
             recoveryQueueReserved = true
-            recoveryReader = TierERecoveryReader(requireNotNull(recoveryScanner)).also { it.start() }
+            recoveryReader = TierERecoveryReader(scanner).also { it.start() }
         }
         lifecycle = TierESessionLifecycleState.RUNNING
     }
@@ -1097,8 +1097,8 @@ internal class TierEProfilerSession internal constructor(
 
     private fun closeSource() {
         if (sourceClosed) return
-        if (recoveryReader != null) {
-            if (recoveryReader?.stopAndJoin() != true) recoveryScanError = true
+        recoveryReader?.let { reader ->
+            if (!reader.stopAndJoin()) recoveryScanError = true
             recoveryReader = null
             recoveryScanner = null
         }

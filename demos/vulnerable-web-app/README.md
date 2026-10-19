@@ -92,6 +92,10 @@ Those tests compare prepared service policy, real complete native publication an
 an explicitly interrupted-publication refusal, including a real denied upload
 through HTTP. The companion `VulnerableWebAppFreshJvmTest` suite also tests a
 genuinely fresh connection against the service ceiling.
+The demo's Gradle `Test` workers and their fresh JVM children explicitly use
+`LC_ALL=C`: these fixtures require an identifiable native permission diagnostic,
+not merely a generic fetch failure. This is a test-launch locale contract, not
+multilingual diagnostic support or a change to the running application's locale.
 The complete five-row profile→enforcement comparison is separately qualified by
 the installed-container workflow above; the JUnit tour alone is not that sweep.
 
