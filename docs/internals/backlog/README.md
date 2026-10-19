@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 152 | *Total Resolved Issues:* 714
+*Total Active Issues:* 153 | *Total Resolved Issues:* 714
 
-Active status detail: 151 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 152 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl](issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl.md) | Copy read-only released SDK source into writable staging; host RED/GREEN, distribution qualification remains open | high | profiler |
 | [issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w](issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w.md) | Deliver late HotSpot watcher lifecycle events and real unregister | high | profiler |
 | [issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti](issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti.md) | Retain later original HotSpot admission errors in the active owner | high | profiler |
 | [issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi](issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi.md) | Reject unsaveable HotSpot stacks after a final profile save | high | profiler |
