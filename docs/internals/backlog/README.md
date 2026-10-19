@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 156 | *Total Resolved Issues:* 699
+*Total Active Issues:* 155 | *Total Resolved Issues:* 699
 
-Active status detail: 155 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 154 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -59,7 +59,6 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261019-013721-472](issue-20261019-013721-472-restore-recursive-project-package-coverage-in-spot.md) | Restore recursive project-package coverage in SpotBugs gates | high | testing |
 | [issue-20261018-200356-681](issue-20261018-200356-681-await-first-execution-end-before-sequential-owned-.md) | Await first execution end before sequential owned scoping submissions | high | enforcer |
 | [issue-20261018-173748-642](issue-20261018-173748-642-prevent-cold-mmap-linkage-from-aborting-strict-pro.md) | Prevent cold mmap linkage from aborting strict protection tests | high | enforcer |
-| [issue-20261018-170634-091](issue-20261018-170634-091-preserve-codanna-discovery-and-single-launch-behav.md) | Preserve Codanna discovery and single-launch behavior in ADK hooks | medium | testing |
 | [issue-20261018-132635](testing/issue-20261018-132635-keep-ci-container-cache-restore-and-save-keys-stable-across.md) | Keep CI container cache restore and save keys stable across generated build files | medium | ci |
 | [issue-20261018-132632](code_health/issue-20261018-132632-qualify-spotbugs-analysis-of-generated-koog-coroutine-classe.md) | Qualify SpotBugs analysis of generated Koog coroutine classes | low | testing |
 | [issue-20261018-125543](code_health/issue-20261018-125543-distinguish-delta-filter-fragments-from-effective-unsafe-prc.md) | Distinguish delta filter fragments from effective unsafe prctl authority in diagnostics | low | enforcer |

@@ -18,162 +18,12 @@ if [ "$1" = "--doctor" ]; then
   exit 0
 fi
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
-  echo "adkw --doctor | --install-archive <local.tar> --sha256 <hex> [--replace] | --install-dev [--replace] | <adk-command>"
-  echo "Archive installation is offline and requires Python 3; only --install-dev builds."
+  echo "adkw --doctor | --install-dev [--replace] | <adk-command>"
   echo "Forwards to the installed ADK CLI. Java ${MIN_JAVA}+ required for commands."
   if [ -x "$DIST_BIN" ]; then exec "$DIST_BIN" --help; fi
   exit 0
 fi
-[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]] && [[ "$MIN_JAVA" =~ ^[0-9]+$ ]] || { echo "Wrapper metadata is incomplete or invalid." >&2; exit 5; }
-if [ "${1:-}" = "--install-archive" ]; then
-  shift
-  ARCHIVE="${1:-}"
-  [ "$#" -gt 0 ] && shift
-  SHA256=""
-  REPLACE=false
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --sha256)
-        [ "$#" -ge 2 ] && [ -z "$SHA256" ] || { echo "Specify one --sha256 <hex>." >&2; exit 2; }
-        SHA256="$2"; shift 2 ;;
-      --replace)
-        [ "$REPLACE" = false ] || { echo "Duplicate --replace." >&2; exit 2; }
-        REPLACE=true; shift ;;
-      *) echo "Unknown archive installation option: $1" >&2; exit 2 ;;
-    esac
-  done
-  [[ "$SHA256" =~ ^[[:xdigit:]]{64}$ ]] || { echo "A SHA-256 checksum of 64 hexadecimal characters is required." >&2; exit 2; }
-  [ -f "$ARCHIVE" ] || { echo "Local archive not found: $ARCHIVE" >&2; exit 2; }
-  command -v python3 >/dev/null || { echo "Python 3 is required for safe offline archive installation." >&2; exit 6; }
-  exec python3 - "$ARCHIVE" "$SHA256" "$DIST_DIR" "$VERSION" "$MIN_JAVA" "$REPLACE" <<'PY'
-import hashlib
-import os
-from pathlib import Path
-import shutil
-import sys
-import tarfile
-import tempfile
-
-archive, digest, destination, version, minimum, replace = sys.argv[1:]
-destination = Path(destination).absolute()
-stage = None
-backup = None
-lock = None
-
-def present(path):
-    return os.path.lexists(path)
-
-def fail(message, code=4):
-    print(message, file=sys.stderr)
-    raise SystemExit(code)
-
-try:
-    if present(destination) and replace != 'true':
-        fail('Distribution exists; refusing replacement. Use --replace.', 3)
-    with open(archive, 'rb') as source, tempfile.TemporaryFile() as snapshot:
-        checksum = hashlib.sha256()
-        while chunk := source.read(1024 * 1024):
-            checksum.update(chunk)
-            snapshot.write(chunk)
-        if checksum.hexdigest() != digest.lower():
-            fail('Archive SHA-256 checksum mismatch.')
-        snapshot.seek(0)
-        root = 'agent-devkit-' + version
-        with tarfile.open(fileobj=snapshot, mode='r:*') as tar:
-            members = tar.getmembers()
-            entries = {}
-            for member in members:
-                name = member.name.rstrip('/') if member.isdir() else member.name
-                parts = name.split('/')
-                if any(part in ('', '.', '..') for part in parts) or parts[0] != root or '\\' in name or any(ord(c) < 32 for c in name):
-                    fail('Unsafe archive path or unexpected distribution root: ' + member.name)
-                if not (member.isfile() or member.isdir()):
-                    fail('Archive links and special entries are not supported: ' + name)
-                if name in entries:
-                    fail('Duplicate archive entry: ' + name)
-                entries[name] = member
-            for name in entries:
-                parent = name.rpartition('/')[0]
-                while parent:
-                    if parent in entries and not entries[parent].isdir():
-                        fail('Archive parent is not a directory: ' + parent)
-                    parent = parent.rpartition('/')[0]
-            required = [
-                'bin/agent-devkit', 'lib/agent-devkit-' + version + '.jar',
-                'scripts/adkw', 'scripts/adk-wrapper.properties', 'scripts/adk-codanna-reindex', 'scripts/adk-run-captured',
-                'bundled/plugins/opencode/adk-compaction.js',
-                'bundled/agents/codex/adk-reviewer.toml', 'bundled/agents/codex/adk-evidence-collector.toml',
-                'bundled/agents/opencode/adk-reviewer.md', 'bundled/agents/opencode/adk-evidence-collector.md',
-            ] + ['bundled/skills/' + skill + '/SKILL.md' for skill in ('ast_grep', 'file_structure', 'create_backlog_issue', 'fix_backlog_item')]
-            for name in required:
-                member = entries.get(root + '/' + name)
-                if member is None or not member.isfile() or member.size == 0:
-                    fail('Missing distribution resource: ' + name)
-            if not entries[root + '/bin/agent-devkit'].mode & 0o111:
-                fail('Distribution launcher is not executable.')
-            metadata_entry = entries[root + '/scripts/adk-wrapper.properties']
-            if metadata_entry.size > 65536:
-                fail('Distribution metadata is too large.')
-            with tar.extractfile(metadata_entry) as metadata_file:
-                metadata = {}
-                for line in metadata_file.read().decode('utf-8').splitlines():
-                    key, separator, value = line.partition('=')
-                    if separator:
-                        if key in metadata:
-                            fail('Duplicate distribution metadata: ' + key)
-                        metadata[key] = value
-            if metadata.get('distributionVersion') != version or metadata.get('minimumJavaVersion') != minimum:
-                fail('Distribution version or Java compatibility metadata mismatch.')
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            lock = destination.with_name(destination.name + '.install-lock')
-            try:
-                lock.mkdir()
-            except FileExistsError:
-                lock = None
-                fail('Another installation is in progress; refusing replacement.', 3)
-            if present(destination) and replace != 'true':
-                fail('Distribution exists; refusing replacement. Use --replace.', 3)
-            stage = Path(tempfile.mkdtemp(prefix=destination.name + '.stage-', dir=destination.parent))
-            payload = stage / 'payload'
-            payload.mkdir()
-            for name, member in entries.items():
-                relative = name.split('/')[1:]
-                target = payload.joinpath(*relative)
-                if member.isdir():
-                    target.mkdir(parents=True, exist_ok=True)
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with tar.extractfile(member) as content, target.open('xb') as output:
-                        shutil.copyfileobj(content, output)
-                    target.chmod(0o755 if member.mode & 0o111 else 0o644)
-            if present(destination):
-                backup = stage / 'previous'
-                os.rename(destination, backup)
-            try:
-                os.rename(payload, destination)
-            except BaseException:
-                if backup is not None:
-                    os.rename(backup, destination)
-                    backup = None
-                raise
-except (OSError, tarfile.TarError, UnicodeError, ValueError) as error:
-    fail('Archive installation failed: ' + str(error))
-finally:
-    if stage is not None:
-        try:
-            if backup is not None and not present(destination):
-                print('Previous distribution retained at ' + str(backup), file=sys.stderr)
-            else:
-                shutil.rmtree(stage)
-        except BaseException as cleanup_error:
-            print('Cleanup incomplete: ' + str(cleanup_error) + '; staged data retained at ' + str(stage), file=sys.stderr)
-    if lock is not None:
-        try:
-            lock.rmdir()
-        except BaseException as lock_error:
-            print('Lock release failed: ' + str(lock_error), file=sys.stderr)
-PY
-fi
+[ -n "$VERSION" ] && [ -n "$MIN_JAVA" ] || { echo "Wrapper metadata is incomplete." >&2; exit 5; }
 java_major="$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -1)"
 [ -n "$java_major" ] || { echo "Java is not available." >&2; exit 6; }
 [ "$java_major" -ge "$MIN_JAVA" ] || { echo "Java $MIN_JAVA+ required (found $java_major)." >&2; exit 6; }
@@ -196,10 +46,4 @@ if [ "$1" = "--install-dev" ]; then
   mv "$TEMP_DIR" "$DIST_DIR"; exit 0
 fi
 [ -x "$DIST_BIN" ] || { echo "ADK is not installed. Use --install-dev." >&2; exit 2; }
-if [ -n "${ADK_DEV_SOURCE:-}" ] && [ -d "$ADK_DEV_SOURCE" ]; then
-  SRC_BIN="$ADK_DEV_SOURCE/build/install/agent-devkit/bin/agent-devkit"
-  if [ -x "$SRC_BIN" ] && [ "$SRC_BIN" -nt "$DIST_BIN" ]; then
-    echo "Warning: installed ADK distribution is older than the source build (ADK_DEV_SOURCE). Run \`adkw --install-dev --replace\` to refresh; continuing with the installed distribution." >&2
-  fi
-fi
 exec "$DIST_BIN" "$@"

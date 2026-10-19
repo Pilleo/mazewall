@@ -17,6 +17,7 @@ public final class VerificationActionsTest {
             writeSuccessMarker(successMarker);
             return;
         }
+        RootVerificationFunctionalTest.verifyEscapedClasspathLocation();
         PublicCompileClasspathFunctionalTest.verify(rootBuild.getParent());
         try {
             SpotBugsReportTest.main(new String[0]);

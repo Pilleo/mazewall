@@ -621,12 +621,42 @@ final class RootVerificationFunctionalTest {
         if (result.task(task) != null) throw new AssertionError("Fabricated source-module gate: " + task);
     }
 
-    private static BuildResult run(Path fixture, boolean fail, String... tasks) {
+    static void verifyEscapedClasspathLocation() {
+        try {
+            Path directory = Files.createTempDirectory("testkit-classpath-").resolve("classes with spaces #");
+            String resource = ClasspathLocationFixture.class.getName().replace('.', '/') + ".class";
+            Path bytecode = directory.resolve(resource);
+            Files.createDirectories(bytecode.getParent());
+            try (var input = ClasspathLocationFixture.class.getClassLoader().getResourceAsStream(resource)) {
+                if (input == null) throw new AssertionError("Missing classpath location fixture");
+                Files.copy(input, bytecode);
+            }
+            try (var loader = new java.net.URLClassLoader(new java.net.URL[] {directory.toUri().toURL()}, null)) {
+                Class<?> fixture = loader.loadClass(ClasspathLocationFixture.class.getName());
+                Path actual = classpathEntry(fixture).toPath();
+                if (!actual.equals(directory)) throw new AssertionError("TestKit classpath URL was not decoded: " + actual);
+            } finally {
+                try (var files = Files.walk(directory.getParent())) {
+                    for (Path file : files.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(file);
+                }
+            }
+        } catch (Exception failure) {
+            throw new AssertionError("Escaped TestKit classpath verification failed", failure);
+        }
+    }
+
+    private static final class ClasspathLocationFixture {}
+
+    private static java.io.File classpathEntry(Class<?> type) throws java.net.URISyntaxException {
+        return Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI()).toFile();
+    }
+
+    private static BuildResult run(Path fixture, boolean fail, String... tasks) throws java.net.URISyntaxException {
         var arguments = new java.util.ArrayList<>(List.of(tasks));
         arguments.addAll(List.of("--no-configuration-cache", "--max-workers=2", "--stacktrace"));
         var pluginClasspath = List.of(
-                Path.of(SpotBugsToolchainPlugin.class.getProtectionDomain().getCodeSource().getLocation().getPath()).toFile(),
-                Path.of(com.github.spotbugs.snom.SpotBugsTask.class.getProtectionDomain().getCodeSource().getLocation().getPath()).toFile(),
+                classpathEntry(SpotBugsToolchainPlugin.class),
+                classpathEntry(com.github.spotbugs.snom.SpotBugsTask.class),
                 new java.io.File("build/resources/main").getAbsoluteFile());
         GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withPluginClasspath(pluginClasspath).withArguments(arguments).forwardOutput();
         return fail ? runner.buildAndFail() : runner.build();

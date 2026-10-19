@@ -69,14 +69,6 @@ Evidence is retained under `.superpowers/sdd/2026-10-18-ci-cache-key-stability/`
 
 **Pending:** publish the approved separate PR, require remote CI, and compare actual logged restore/save primary keys for the same SHA in exercised save contexts. A skipped main-branch-only save is not observed equality. Local proof is not yet a remote cache-hit/transfer/size qualification. Keep this issue open for operator/control-plane acceptance; do not automatically merge or archive it.
 
-## Subsequent remote qualification
-
-PR [537](https://github.com/Pilleo/mazewall/pull/537) passed both required PR jobs and merged with operator approval as `6a966c7fd0f23b4d140adff986f76fe7424bb5b2`. The earlier pending-publication record above is historical.
-
-Default-branch run [39147119265](https://github.com/Pilleo/mazewall/actions/runs/39147119265) exercised **both** cache save contexts. Each actual requested restore primary exactly matched its actual saved primary, including digest `2f1f0f73ac7713ba5d956a5e663b0b4e8a1208d59d5aaad8708edf1f315574b6` and merge SHA `6a966c7fd0f23b4d140adff986f76fe7424bb5b2`. `master-cache-receipt.json` and the full job logs under the existing evidence workspace retain those comparisons. Both jobs initially restored older fallback archives; an exact primary hit or performance improvement is not established.
-
-The optional-integration and host-unit gates passed, but the **overall default-branch workflow failed** in `:enforcer:integrationTest`. Its fatal report identifies cold mmap method-handle linkage and executable CodeHeap growth denied with EPERM in an existing strict protection fixture. Publication was skipped. This independently tracked native-gate blocker is [issue-20261018-173748-642](../issue-20261018-173748-642-prevent-cold-mmap-linkage-from-aborting-strict-pro.md); no passing native result is inferred from a successful cache save. Cache-key binding is remotely verified, while full workflow acceptance remains red. No policy relaxation, cache deletion, automatic rerun or automatic backlog archival was performed.
-
 ---
 
 **Verification:** `./gradlew :tools:orchestrator:checkBacklog` plus the `verify_cheap` commands above (if any).
