@@ -20,12 +20,10 @@ func unmarshalExtended(data []byte, dst any, fields string) (extensions, error) 
 	if raw == nil {
 		return nil, fmt.Errorf("expected JSON object")
 	}
+	if err := checkCanonicalFields(raw, fields); err != nil {
+		return nil, err
+	}
 	for _, field := range strings.Split(fields, ",") {
-		for key := range raw {
-			if key != field && strings.EqualFold(key, field) {
-				return nil, fmt.Errorf("noncanonical field %q", key)
-			}
-		}
 		delete(raw, field)
 	}
 	if err := json.Unmarshal(data, dst); err != nil {
@@ -35,6 +33,17 @@ func unmarshalExtended(data []byte, dst any, fields string) (extensions, error) 
 		raw = nil
 	}
 	return raw, nil
+}
+
+func checkCanonicalFields(raw map[string]json.RawMessage, fields string) error {
+	for _, field := range strings.Split(fields, ",") {
+		for key := range raw {
+			if key != field && strings.EqualFold(key, field) {
+				return fmt.Errorf("noncanonical field %q", key)
+			}
+		}
+	}
+	return nil
 }
 
 func marshalExtended(value any, extra extensions) ([]byte, error) {
@@ -107,6 +116,18 @@ func requireFields(raw json.RawMessage, path, names string) (map[string]json.Raw
 	return object, nil
 }
 
+func requireProviderFields(raw json.RawMessage, path string) error {
+	const fields = "name,gadget_revision,profiler_revision,patch_sha256"
+	object, err := requireFields(raw, path, fields)
+	if err != nil {
+		return err
+	}
+	if err := checkCanonicalFields(object, fields); err != nil {
+		return fmt.Errorf("%w: %s: %v", ErrJSON, path, err)
+	}
+	return nil
+}
+
 func requiredRecordFields(line []byte) error {
 	row, err := requireFields(line, "", "schema_version,kind,session_id")
 	if err != nil {
@@ -153,7 +174,7 @@ func requiredRecordFields(line []byte) error {
 		if e != nil {
 			return e
 		}
-		if _, e = requireFields(l["provider"], "lifecycle.provider", "name,gadget_revision,profiler_revision,patch_sha256"); e != nil {
+		if e = requireProviderFields(l["provider"], "lifecycle.provider"); e != nil {
 			return e
 		}
 		if raw, present := l["errno_causes"]; present {
@@ -223,7 +244,7 @@ func requiredEvidenceFields(raw json.RawMessage) error {
 	if err != nil {
 		return err
 	}
-	if _, err := requireFields(e["provider"], "evidence.provider", "name,gadget_revision,profiler_revision,patch_sha256"); err != nil {
+	if err := requireProviderFields(e["provider"], "evidence.provider"); err != nil {
 		return err
 	}
 	if err := requiredIdentityFields(e["hotspot_identity"], "evidence.hotspot_identity"); err != nil {
