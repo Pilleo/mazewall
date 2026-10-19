@@ -177,6 +177,7 @@ private fun verifyOciGraph(
     require(index.manifests.any { it.digest == manifest.gadgetDigest }) { "Gadget digest absent from OCI index" }
     val pending = ArrayDeque(index.manifests)
     val visited = mutableSetOf<String>()
+    val mediaByDigest = mutableMapOf<String, String>()
     while (pending.isNotEmpty()) {
         require(pending.size + visited.size <= MAX_ASSET_FILES) { "OCI graph exceeds descriptor limit" }
         val descriptor = pending.removeFirst()
@@ -186,6 +187,8 @@ private fun verifyOciGraph(
         require(manifest.files[name] == hash) { "Unlisted required OCI blob: $name" }
         val path = ownedFile(root, name)
         require(descriptor.size >= 0 && Files.size(path) == descriptor.size) { "OCI descriptor size mismatch" }
+        val previous = mediaByDigest.putIfAbsent(hash, descriptor.mediaType)
+        require(previous == null || previous == descriptor.mediaType) { "Conflicting OCI media type: $hash" }
         if (visited.add(hash) && descriptor.mediaType in setOf("application/vnd.oci.image.index.v1+json", "application/vnd.oci.image.manifest.v1+json")) {
             val document = readOciDocument(path)
             pending.addAll(document.manifests)
