@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 155 | *Total Resolved Issues:* 699
+*Total Active Issues:* 156 | *Total Resolved Issues:* 699
 
-Active status detail: 154 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 155 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-182206-556](issue-20261019-182206-556-remove-serialized-ci-validation-delay-while-preser.md) | Remove serialized CI validation delay while preserving complete gates | high | ci |
 | [issue-20261019-094851-103](issue-20261019-094851-103-compare-spring-implementation-origins-without-url-.md) | Compare Spring implementation origins without URL-handler or DNS effects | high | spring |
 | [issue-20261019-093313-349](issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md) | Recognize boxed Boolean is-accessors in Portal POJO boundaries | high | codegen |
 | [issue-20261019-075429-286](issue-20261019-075429-286-qualify-portable-fresh-cache-native-boundary-check.md) | Qualify portable fresh-cache native boundary checking with explicit artifact custody | low | benchmarks |

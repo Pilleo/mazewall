@@ -6,6 +6,11 @@ on:
     pull_request:
         branches: [main, master]
 
+# Replace obsolete PR work, without grouping/cancelling separate default-branch pushes.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
     optional-integrations:
         name: Koog and Spring Integration Acceptance
@@ -100,19 +105,17 @@ jobs:
                       build/test-results/optionalIntegrationCheck/*.xml
                   if-no-files-found: ignore
     build-test-publish:
+        # Keep the required check name stable; publication joins both jobs below.
         name: Build, Test, Security Scan & Publish
-        needs: [optional-integrations]
-        if: always()
         # Dedicated-process worker correctness requires Landlock TSYNC (ABI 8+).
         runs-on: ubuntu-26.04
         timeout-minutes: 90
         permissions:
             contents: read
-            packages: write
             pull-requests: write
+        outputs:
+            container_cache_hash: ${{ steps.container_cache_key.outputs.hash }}
         steps:
-            - name: Require Optional Integration Acceptance
-              run: test "${{ needs.optional-integrations.result }}" = success
             - name: Checkout Code
               uses: actions/checkout@v6
             - name: Compute Container Gradle Cache Key
@@ -151,6 +154,8 @@ jobs:
                   key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
                   restore-keys: |
                       container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+                      optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+                      optional-container-gradle-${{ runner.os }}-
                       container-gradle-${{ runner.os }}-
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
@@ -271,11 +276,59 @@ jobs:
                   path: |
                       ~/.cache/mazewall/container-gradle
                   key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+    publish:
+        name: Publish Verified Packages
+        needs: [optional-integrations, build-test-publish]
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        runs-on: ubuntu-26.04
+        timeout-minutes: 30
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Restore Container Gradle Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ~/.cache/mazewall/container-gradle
+                  key: container-gradle-${{ runner.os }}-${{ needs.build-test-publish.outputs.container_cache_hash }}-${{ github.sha }}
+                  restore-keys: |
+                      container-gradle-${{ runner.os }}-${{ needs.build-test-publish.outputs.container_cache_hash }}-
+                      container-gradle-${{ runner.os }}-
+            - name: Setup Podman Socket
+              run: |
+                  mkdir -p ~/.config/containers
+                  echo -e '[engine]\nruntime = "runc"' > ~/.config/containers/containers.conf
+                  systemctl --user enable --now podman.socket
+                  echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
+                  echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
+            - name: Restore Existing Test Runner Image
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ github.workspace }}/.cache/podman-image
+                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+            - name: Load Existing Test Runner Image
+              run: |
+                  if [ -f .cache/podman-image/mazewall-test-runner.tar ]; then
+                      podman load -i .cache/podman-image/mazewall-test-runner.tar
+                  fi
             - name: Publish to GitHub Packages
-              if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: >-
                   ./scripts/run_containerized_tests.sh -PincludeSpringIntegration=true
                   -PincludeKoogIntegration=true -PkoogBootstrap=true publishAllPublicationsToGitHubPackagesRepository
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GITHUB_ACTOR: ${{ github.actor }}
+            - name: Verify Workspace and Cache Ownership
+              if: always()
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "$HOME/.cache/mazewall"; do
+                      if [ -d "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned publication output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done

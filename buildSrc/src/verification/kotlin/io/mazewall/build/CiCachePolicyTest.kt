@@ -8,8 +8,12 @@ object CiCachePolicyTest {
             cache-read-only: false
             dependency-check-data
             run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon
+            concurrency:
+                group: ${'$'}{{ github.workflow }}-${'$'}{{ github.event_name }}-${'$'}{{ github.event.pull_request.number || github.run_id }}
+                cancel-in-progress: ${'$'}{{ github.event_name == 'pull_request' }}
             jobs:
                 optional-integrations:
+                    name: Koog and Spring Integration Acceptance
                     steps:
                         - name: Checkout Code
                           uses: actions/checkout@v6
@@ -32,6 +36,9 @@ object CiCachePolicyTest {
                           with:
                               key: optional-container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
                 build-test-publish:
+                    name: Build, Test, Security Scan & Publish
+                    outputs:
+                        container_cache_hash: ${'$'}{{ steps.container_cache_key.outputs.hash }}
                     steps:
                         - name: Checkout Code
                           uses: actions/checkout@v6
@@ -46,12 +53,24 @@ object CiCachePolicyTest {
                               key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
                               restore-keys: |
                                   container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-
+                                  optional-container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-
+                                  optional-container-gradle-${'$'}{{ runner.os }}-
                                   container-gradle-${'$'}{{ runner.os }}-
                         - name: Save Container Gradle Cache (Master Only)
                           uses: actions/cache/save@v4
                           if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && steps.container_cache_key.outcome == 'success'
                           with:
                               key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
+                publish:
+                    needs: [optional-integrations, build-test-publish]
+                    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+                    steps:
+                        - name: Restore Container Gradle Cache
+                          uses: actions/cache/restore@v4
+                          with:
+                              key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ needs.build-test-publish.outputs.container_cache_hash }}-${'$'}{{ github.sha }}
+                        - name: Publish to GitHub Packages
+                          run: ./scripts/run_containerized_tests.sh publishAllPublicationsToGitHubPackagesRepository
         """.trimIndent()
         check(ciCachePolicyViolations(valid).isEmpty())
         check(ciCachePolicyViolations(valid.replace("cache-read-only: false", "cache-read-only: true")) == listOf(CiCacheViolation.PR_CACHE_WRITES))
@@ -78,6 +97,30 @@ object CiCachePolicyTest {
         mutations.forEachIndexed { index, mutation ->
             check(ciCachePolicyViolations(mutation).isNotEmpty()) { "Mutable/missing container cache identity mutation $index must fail" }
         }
-        println("CI cache policy: five existing checks and shared-output/producer/save-guard mutations passed.")
+        val graphMutations = listOf(
+            valid.replace("    build-test-publish:\n", "    build-test-publish:\n        needs: [optional-integrations]\n"),
+            valid.replace("    optional-integrations:\n", "    optional-integrations:\n        needs: [build-test-publish]\n"),
+            valid.replace("    optional-integrations:\n", "    optional-integrations:\n        if: false\n"),
+            valid.replace("name: Koog and Spring Integration Acceptance", "name: Renamed required check"),
+            valid.replace("needs: [optional-integrations, build-test-publish]", "needs: [build-test-publish]"),
+            valid.replace("needs: [optional-integrations, build-test-publish]", "needs: [optional-integrations]"),
+            valid.replace("if: github.event_name == 'push'", "if: always() && github.event_name == 'push'"),
+            valid.replace("if: github.event_name == 'push'", "if: github.event_name == 'pull_request'"),
+            valid.replace("container_cache_hash: ${'$'}{{ steps.container_cache_key.outputs.hash }}", "container_cache_hash: missing"),
+            valid.replace("needs.build-test-publish.outputs.container_cache_hash", "needs.build-test-publish.outputs.wrong"),
+            valid.replace("github.event.pull_request.number || github.run_id", "github.sha"),
+            valid.replace("cancel-in-progress: ${'$'}{{ github.event_name == 'pull_request' }}", "cancel-in-progress: true"),
+            valid + "\nrun: ./gradlew publishAllPublicationsToGitHubPackagesRepository\n",
+        )
+        graphMutations.forEachIndexed { index, mutation ->
+            check(ciCachePolicyViolations(mutation).isNotEmpty()) { "Unsafe/serialized CI graph mutation $index must fail" }
+        }
+        val mainStart = valid.indexOf("    build-test-publish:\n")
+        val mainWithoutOptionalCache = valid.substring(0, mainStart) +
+            valid.substring(mainStart).replace("optional-container-gradle-", "unused-container-gradle-")
+        check(ciCachePolicyViolations(mainWithoutOptionalCache) == listOf(CiCacheViolation.CONTAINER_CACHE_REUSE)) {
+            "Main container verification must reuse compatible optional PR caches before older main fallback"
+        }
+        println("CI policy: cache invariants, parallel validation, gated publication and PR-only cancellation mutations passed.")
     }
 }
