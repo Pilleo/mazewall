@@ -49,7 +49,7 @@ capture error contained only cancellation and pending readout. An asynchronous
 enrichment worker held its original exec cause until Finish, which that unsafe
 pending-owner return must not call or block on.
 
-The [registered cause-retention issue](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/internals/backlog/resolved/issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md)
+The [registered cause-retention issue](../internals/backlog/resolved/issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md)
 adds a private constructor/error callback into the existing bounded fatal owner.
 The public internal-package NewEnricher signature and its original one-shot cancel
 contract stay intact. Lookup/recovery causes are reported before the shared

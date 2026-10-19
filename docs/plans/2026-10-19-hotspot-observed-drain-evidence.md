@@ -147,7 +147,7 @@ failure-path promotion is not established by the local capture-child tests alone
 
 ## Remaining acceptance boundary
 
-The [drain/lifetime issue](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/internals/backlog/resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md)
+The [drain/lifetime issue](../internals/backlog/resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md)
 records this source fix and the subsequent qualification. At this initial checkpoint,
 actual JVM/full-readout exec and revised native permission-control custody were
 still pending; the later coupled-exec record completes them without erasing the

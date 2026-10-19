@@ -155,7 +155,26 @@ authorized complete unchanged checkpoint is pending at authoring, with its actua
 outcome recorded locally. Neither that diagnostic nor a later passing checkpoint
 would repair the root cause, prove retirement or qualify changed Go helper bytes.
 
-Governing [spec A1/A2](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a1-profiles-and-wire-versions)
-and [execution plan](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-18-hotspot-observed-provider.md#task-3-add-the-separately-negotiated-observation-profile)
-retain all later gates. Local detailed Task3 evidence lives in the owning SDD
+The [release gates](2026-10-19-hotspot-bridge-release.md#ordered-gates) retain the
+separate source-review, publication and native acceptance requirements.
+Local detailed Task3 evidence lives in the owning SDD
 `task-3-report.md` and `build/kubescape-dev/task-3/`.
+
+## Shared contract and ownership
+
+MazeWall collector tooling and node-agent share hotspot-bridge bundle verification,
+bounded wire validation, typed content IDs and error vocabulary. Kotlin retains
+its strict admission/session implementation and the same regression expectations.
+The SDK does not prove pipe EOF, child Wait, process retirement or metadata lifetime;
+those remain owned by each host. Node-agent additionally owns container discovery,
+storage projection and enforcement exclusion. The two Gadget dependency graphs
+remain independent. Schema3 observations stay policy-ineligible and globally
+incomplete; no host may silently upgrade them into schema2 or lifetime proof.
+
+Both Go and Kotlin OCI walkers reject contradictory effective media for one digest
+before deduplication, while permitting same-media sharing and retaining full-byte,
+reachable-child and inventory checks. The shared wire boundary rejects case-folded
+aliases of the four canonical provider keys before typed decoding; genuine unknown
+extensions retain their raw bytes. Kotlin keeps exact-key access and schema2-only
+admission. Schema2 still omits schema3-only fields. These locally reviewed repairs
+do not qualify native assets or publish an SDK; see the [current release status](2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint).

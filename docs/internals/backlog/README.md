@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 138 | *Total Resolved Issues:* 710
+*Total Active Issues:* 153 | *Total Resolved Issues:* 714
 
-Active status detail: 137 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 152 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,25 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl](issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl.md) | Copy read-only released SDK source into writable staging; host RED/GREEN, distribution qualification remains open | high | profiler |
+| [issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w](issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w.md) | Deliver late HotSpot watcher lifecycle events and real unregister | high | profiler |
+| [issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti](issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti.md) | Retain later original HotSpot admission errors in the active owner | high | profiler |
+| [issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi](issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi.md) | Reject unsaveable HotSpot stacks after a final profile save | high | profiler |
+| [issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d](issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d.md) | Reject OCI digest/media contradictions; shared SDK and Kotlin regression follow-up | high | profiler |
+| [issue-20261019-163139-601-reject-provider-key-aliases-that-override-canonica](issue-20261019-163139-601-reject-provider-key-aliases-that-override-canonica.md) | Reject provider aliases overriding canonical HotSpot pins | high | profiler |
+| [issue-20261019-163139-921-include-approved-bridge-license-material-in-select](issue-20261019-163139-921-include-approved-bridge-license-material-in-select.md) | Package actual selected SDK license material; delegated existing-Apache check recorded, release approval pending | high | profiler |
+| [issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau](issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau.md) | Preserve compound HotSpot collector permission causes across schema3 wire; PR540 Task2 review pending | high | profiler |
+| [issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col](issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col.md) | Suppress failed owned HotSpot summaries before collector error publication; PR540 Task1 review pending | high | profiler |
+| [issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th](issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th.md) | Preserve HotSpot terminal status write failures through pending cleanup; verified in companion72034696, review pending | high | core |
+| [issue-20261019-113411-720-repair-node-agent-legacy-package-guard-target-afte](issue-20261019-113411-720-repair-node-agent-legacy-package-guard-target-afte.md) | Repair node-agent legacy guard target; independent guards/binary pass in72034696, review pending | high | core |
+| [issue-20261019-084828-251-investigate-tier-e-delayed-artifact-coverage-dropp](issue-20261019-084828-251-investigate-tier-e-delayed-artifact-coverage-dropp.md) | Investigate retained Tier E delayed-artifact71/72 coverage failure | medium | profiler |
+| Archived [issue-20261019-082935-929-return-persisted-containerprofile-payload-from-cre](resolved/issue-20261019-082935-929-return-persisted-containerprofile-payload-from-cre.md) | Full ContainerProfile Create payload and checked live JSON/protobuf gate | medium | profiler |
+| [issue-20261019-083248-888-fix-pre-existing-storage-watcher-identity-test-dat](issue-20261019-083248-888-fix-pre-existing-storage-watcher-identity-test-dat.md) | Fix baseline storage watcher-test deep-reflection race | medium | profiler |
+| [issue-20261019-071745-155-release-hotspot-bridge-v0-2-0-and-pin-actual-provi](issue-20261019-071745-155-release-hotspot-bridge-v0-2-0-and-pin-actual-provi.md) | Release bridge v0.2.0 through review and pin actual provider handoff | medium | profiler |
+| Archived [issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a](resolved/issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a.md) | Scoped observed admission approved; actual CLI and strict regression gates pass | medium | profiler |
+| Archived [issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi](resolved/issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md) | Retain asynchronous enrichment causes before pending readout returns; native cause and strict regression gates pass | high | profiler |
+| Archived [issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition](resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md) | Observed native drain/custody repaired; controlled A-OBS qualified, operator admission remains closed | high | profiler |
+| [issue-20261018-172609-510-preserve-unknown-identity-hotspot-reporter-failure](issue-20261018-172609-510-preserve-unknown-identity-hotspot-reporter-failure.md) | Preserve unknown-identity HotSpot reporter failures through the fatal owner; Task3 source remedy awaits independent review | high | profiler |
 | Archived [issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio](resolved/issue-20261018-035018-153-replace-clock-only-native-correlation-id-allocatio.md) | Replace clock-only native correlation ID allocation with reviewed uniqueness contract | medium | profiler |
 | [issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo](issue-20261017-173125-908-record-qualification-source-receipts-and-linked-wo.md) | Record qualification source receipts and linked-worktree Go VCS limitations | high | profiler |
 | Archived [issue-20261017-120338-807-match-exact-java-owners-in-benchmark-readiness-and](resolved/issue-20261017-120338-807-match-exact-java-owners-in-benchmark-readiness-and.md) | Match exact Java owners in benchmark readiness and reporting | high | profiler |
