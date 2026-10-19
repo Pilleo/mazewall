@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 149 | *Total Resolved Issues:* 698
+*Total Active Issues:* 156 | *Total Resolved Issues:* 699
 
-Active status detail: 148 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 155 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,8 +50,16 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-094851-103](issue-20261019-094851-103-compare-spring-implementation-origins-without-url-.md) | Compare Spring implementation origins without URL-handler or DNS effects | high | spring |
+| [issue-20261019-093313-349](issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md) | Recognize boxed Boolean is-accessors in Portal POJO boundaries | high | codegen |
+| [issue-20261019-075429-286](issue-20261019-075429-286-qualify-portable-fresh-cache-native-boundary-check.md) | Qualify portable fresh-cache native boundary checking with explicit artifact custody | low | benchmarks |
+| [issue-20261019-073259-804](issue-20261019-073259-804-run-integration-boundary-host-controls-from-the-st.md) | Run integration-boundary host controls from the standard check task | low | benchmarks |
+| [issue-20261019-070717-313](issue-20261019-070717-313-verify-spring-thread-dispatch-with-real-owned-runt.md) | Verify Spring thread dispatch with real owned-runtime host contracts | low | testing |
+| [issue-20261019-064750-154](issue-20261019-064750-154-add-host-contract-coverage-for-koog-thread-backed-.md) | Add host contract coverage for Koog thread-backed tools | low | testing |
+| [issue-20261019-013721-472](issue-20261019-013721-472-restore-recursive-project-package-coverage-in-spot.md) | Restore recursive project-package coverage in SpotBugs gates | high | testing |
 | [issue-20261018-200356-681](issue-20261018-200356-681-await-first-execution-end-before-sequential-owned-.md) | Await first execution end before sequential owned scoping submissions | high | enforcer |
 | [issue-20261018-173748-642](issue-20261018-173748-642-prevent-cold-mmap-linkage-from-aborting-strict-pro.md) | Prevent cold mmap linkage from aborting strict protection tests | high | enforcer |
+| [issue-20261018-170634-091](issue-20261018-170634-091-preserve-codanna-discovery-and-single-launch-behav.md) | Preserve Codanna discovery and single-launch behavior in ADK hooks | medium | testing |
 | [issue-20261018-132635](testing/issue-20261018-132635-keep-ci-container-cache-restore-and-save-keys-stable-across.md) | Keep CI container cache restore and save keys stable across generated build files | medium | ci |
 | [issue-20261018-132632](code_health/issue-20261018-132632-qualify-spotbugs-analysis-of-generated-koog-coroutine-classe.md) | Qualify SpotBugs analysis of generated Koog coroutine classes | low | testing |
 | [issue-20261018-125543](code_health/issue-20261018-125543-distinguish-delta-filter-fragments-from-effective-unsafe-prc.md) | Distinguish delta filter fragments from effective unsafe prctl authority in diagnostics | low | enforcer |
@@ -87,7 +95,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-](issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-.md) | Keep executable buildSrc TestKit storage checkout-owned | high | testing |
 | [issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing](issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md) | Investigate Dependency-Check NVD record processing failure | high | ci |
 | [issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe](issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe.md) | Preserve canonical backlog totals and active membership after evidence closure | medium | core |
-| [issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt](issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt.md) | Add negative controls for benchmark prepared health guards | low | benchmarks |
+| Archived [issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt](resolved/issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt.md) | Add negative controls for benchmark prepared health guards | low | benchmarks |
 | [issue-20261013-005316-083-record-independent-production-operation-and-launch](issue-20261013-005316-083-record-independent-production-operation-and-launch.md) | Record independent production operation and launch authority | medium | integrations |
 | [issue-20261013-005316-364-verify-candidate617-through-authorized-remote-arti](issue-20261013-005316-364-verify-candidate617-through-authorized-remote-arti.md) | Verify candidate617 through authorized remote artifact retrieval | medium | integrations |
 | [issue-20261013-005316-772-provide-a-prepared-offline-presentation-demo-launc](issue-20261013-005316-772-provide-a-prepared-offline-presentation-demo-launc.md) | Provide a readable JUnit feature showcase for presentation | high | demos |

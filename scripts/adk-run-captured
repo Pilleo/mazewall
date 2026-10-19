@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""Capture a finite, non-interactive command; emit at most 8 KiB of JSON.
+
+Usage: run-captured [--limit BYTES] [--timeout SECONDS] -- COMMAND [ARG ...]
+Only Python's standard library is required. Original logs are never shortened.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+
+class Interrupted(Exception):
+    def __init__(self, signum: int):
+        self.signum = signum
+
+
+def encode(value: dict) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, separators=(',', ':')) + '\n').encode('utf-8')
+
+
+def private_file(path: Path):
+    # Do not change the process umask: the child must inherit the original one.
+    return os.fdopen(os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'wb')
+
+
+def save_status(directory: Path, value: dict) -> None:
+    temporary = directory / '.status.tmp'
+    with private_file(temporary) as stream:
+        stream.write(encode(value))
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, directory / 'status.json')
+
+
+def preview(path: Path, size: int, allowance: int) -> dict:
+    truncated = size > allowance
+    with path.open('rb') as stream:
+        if not truncated:
+            text = stream.read(size).decode('utf-8', errors='replace')
+        elif allowance:
+            head = stream.read(allowance // 2)
+            stream.seek(max(0, size - (allowance - len(head))))
+            tail = stream.read(allowance - len(head))
+            text = (head.decode('utf-8', errors='replace') + '\n[... omitted ...]\n' +
+                    tail.decode('utf-8', errors='replace'))
+        else:
+            text = ''
+    return {'file': str(path), 'bytes': size, 'truncated': truncated, 'preview': text}
+
+
+def make_report(directory: Path, status: dict, limit: int) -> bytes:
+    sizes = [(directory / name).stat().st_size for name in ('stdout.log', 'stderr.log')]
+    allowance = limit
+    while True:
+        shares = [min(n, allowance // 2) for n in sizes]
+        # Give unused space to the stream that still needs it.
+        for i in (1, 0):
+            shares[i] += min(sizes[i] - shares[i], allowance - sum(shares))
+        report = {key: status[key] for key in ('status', 'exit_code', 'elapsed_s')}
+        if status.get('error'):
+            report['error'] = status['error'][:200]
+        for i, name in enumerate(('stdout', 'stderr')):
+            report[name] = preview(directory / (name + '.log'), sizes[i], shares[i])
+        payload = encode(report)
+        if len(payload) <= limit:
+            return payload
+        if allowance == 0:
+            raise OSError('Report paths exceed --limit; use a shorter --log-dir or a higher limit')
+        allowance //= 2  # Account for JSON escaping and UTF-8, not line counts.
+
+
+def stop(proc: subprocess.Popen) -> None:
+    """Best-effort cleanup of the owned process group, not escaped daemons."""
+    try:
+        if os.name == 'posix':
+            os.killpg(proc.pid, signal.SIGTERM)
+        elif proc.poll() is None:
+            proc.terminate()
+        proc.wait(timeout=1)
+    except (ProcessLookupError, subprocess.TimeoutExpired):
+        pass
+    finally:
+        try:
+            if os.name == 'posix':
+                os.killpg(proc.pid, signal.SIGKILL)
+            elif proc.poll() is None:
+                proc.kill()
+        except ProcessLookupError:
+            pass
+        proc.wait()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('--limit', type=int, default=8192, help='maximum total JSON response bytes (default: 8192)')
+    parser.add_argument('--timeout', type=float, help='optional command deadline in seconds')
+    parser.add_argument('--log-dir', type=Path, help='parent directory for retained logs')
+    parser.add_argument('command', nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    command = args.command[1:] if args.command[:1] == ['--'] else args.command
+    if not command:
+        parser.error('missing command; use -- COMMAND [ARG ...]')
+    if args.limit < 1024:
+        parser.error('--limit must be at least 1024 bytes')
+    if args.timeout is not None and (not math.isfinite(args.timeout) or args.timeout <= 0):
+        parser.error('--timeout must be a finite positive number')
+
+    state_home = Path(os.environ.get('XDG_STATE_HOME') or Path.home() / '.local/state')
+    root = (args.log_dir or state_home / 'agent-output').expanduser().resolve()
+    directory = None
+    proc = None
+    began = time.monotonic()
+    status = {'status': 'running', 'exit_code': None, 'command': command, 'cwd': os.getcwd()}
+    previous_handlers = {}
+
+    def interrupt(signum, _frame):
+        raise Interrupted(signum)
+
+    try:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        directory = Path(tempfile.mkdtemp(prefix='run-', dir=str(root)))
+        with private_file(directory / 'stdout.log') as out, private_file(directory / 'stderr.log') as err:
+            save_status(directory, status)
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                previous_handlers[sig] = signal.signal(sig, interrupt)
+            try:
+                # No implicit shell, cwd/env changes, tee, buffering of logs in RAM, or retry.
+                proc = subprocess.Popen(command, stdout=out, stderr=err, start_new_session=(os.name == 'posix'))
+                status['pid'] = proc.pid
+                save_status(directory, status)
+                rc = proc.wait(timeout=args.timeout)
+                status.update(status=('ok' if rc == 0 else 'signalled' if rc < 0 else 'failed'),
+                              exit_code=(128 - rc if rc < 0 else rc), child_returncode=rc)
+            except (subprocess.TimeoutExpired, Interrupted) as exc:
+                for sig in previous_handlers:
+                    signal.signal(sig, signal.SIG_IGN)
+                if proc is not None:
+                    stop(proc)
+                status.update(status='timeout' if isinstance(exc, subprocess.TimeoutExpired) else 'interrupted',
+                              exit_code=124 if isinstance(exc, subprocess.TimeoutExpired) else 128 + exc.signum)
+            except (FileNotFoundError, PermissionError) as exc:
+                if proc is not None:
+                    raise  # A storage failure after launch is not a launch error.
+                status.update(status='launch_error', exit_code=127 if isinstance(exc, FileNotFoundError) else 126,
+                              error=str(exc))
+            out.flush()
+            err.flush()
+            os.fsync(out.fileno())
+            os.fsync(err.fileno())
+        status['elapsed_s'] = round(time.monotonic() - began, 3)
+        save_status(directory, status)
+        payload = make_report(directory, status, args.limit)
+    except (OSError, ValueError) as exc:
+        if proc is not None and proc.poll() is None:
+            stop(proc)
+        status.update(status='capture_error', exit_code=125, error=str(exc),
+                      elapsed_s=round(time.monotonic() - began, 3))
+        if directory is not None:
+            try:
+                save_status(directory, status)
+            except OSError:
+                pass
+        payload = encode({'status': 'capture_error', 'exit_code': 125,
+                          'error': str(exc)[:200], 'logs': str(directory) if directory else None})
+        if len(payload) > args.limit:
+            payload = encode({'status': 'capture_error', 'exit_code': 125,
+                              'error': 'Capture/report failure. Use a shorter --log-dir or higher --limit.'})
+    finally:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
+    sys.stdout.buffer.write(payload)
+    sys.stdout.buffer.flush()
+    return status['exit_code']
+
+
+if __name__ == '__main__':
+    sys.exit(main())
