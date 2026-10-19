@@ -1,0 +1,20 @@
+def pitestThreads = providers.gradleProperty('mazewall.pitest.threads')
+    .orElse(providers.systemProperty('pitest.threads'))
+    .orElse('2')
+    .map { value ->
+        int count = value.isInteger() ? value.toInteger() : 0
+        if (count < 1) {
+            throw new GradleException("PIT threads must be a positive integer: '$value'")
+        }
+        count
+    }
+
+pitest {
+    threads.set(pitestThreads)
+    mainProcessJvmArgs.set([
+        '-Xms128m', '-Xmx512m', '-XX:MaxMetaspaceSize=256m', '--enable-native-access=ALL-UNNAMED'
+    ])
+    jvmArgs.set([
+        '-Xms128m', '-Xmx256m', '-XX:MaxMetaspaceSize=256m', '--enable-native-access=ALL-UNNAMED'
+    ])
+}

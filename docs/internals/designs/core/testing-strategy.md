@@ -136,10 +136,33 @@ and daemon-reactor specifications raised the observed host-unit platform report
 to about 69% without adding synthetic tests. The host floor is 65%, retaining
 more than four percentage points of change tolerance below that result.
 
-`./gradlew :enforcer:pitest :platform:pitest :profiler:pitest` adds an
-assertion-quality gate for the deterministic policy, protocol, and profiling
-slices. It runs only named host unit tests and enforces line reach, mutation
-score, and test strength independently. The current floors are:
+The host-only mutation gate adds an assertion-quality check for the deterministic
+policy, protocol, and profiling slices. Run the three modules serially, with two
+PIT workers and one ordinary test fork:
+
+```bash
+./gradlew :enforcer:pitest :platform:pitest :profiler:pitest \
+  --max-workers=1 --no-parallel \
+  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+```
+
+`gradle/pitest-limits.gradle` supplies the shared default of two PIT workers.
+`-Pmazewall.pitest.threads` takes precedence over compatible `-Dpitest.threads`;
+selected values must be positive integers. Each PIT parent uses
+`-Xms128m -Xmx512m -XX:MaxMetaspaceSize=256m`, and each minion uses
+`-Xms128m -Xmx256m -XX:MaxMetaspaceSize=256m`. Both retain
+`--enable-native-access=ALL-UNNAMED`. These limits do not change Gradle's JVM
+budget or the native suites' fresh-process requirements.
+
+`./gradlew -p buildSrc pitestLimitsTest --console=plain --max-workers=1` resolves
+the actual shared script, root properties, and PIT plugin in an independent
+three-project fixture. It checks precedence, invalid values, JVM budgets,
+unrelated extension settings, and changed properties with configuration-cache
+reuse. The regression also runs in mandatory `verificationActionsTest`; both
+tasks declare the shared script and root properties as inputs.
+
+PIT runs only named host unit tests and enforces line reach, mutation score, and
+test strength independently. The current floors are:
 
 | Module | Line reach | Mutation score | Test strength |
 | --- | ---: | ---: | ---: |

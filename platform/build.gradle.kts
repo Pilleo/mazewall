@@ -134,16 +134,16 @@ pitest {
             "io.mazewall.platform.lifecycle.NetworkSyscallMapperTest",
         ),
     )
-    jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
-    threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
 
     // Host-unit floor for pure ABI values and protocol state machines.
     coverageThreshold.set(97)
     mutationThreshold.set(61)
     testStrengthThreshold.set(98)
 }
+
+apply(from = rootProject.file("gradle/pitest-limits.gradle"))
 
 classDiagrams {
     plantumlServer = null
