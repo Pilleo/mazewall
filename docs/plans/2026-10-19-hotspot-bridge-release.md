@@ -9,6 +9,15 @@ an existing immutable tag. No default-branch push or broad orchestrator dispatch
 [Owning issue](../internals/backlog/issue-20261019-071745-155-release-hotspot-bridge-v0-2-0-and-pin-actual-provi.md).
 [Admitted CLI evidence](2026-10-19-hotspot-observed-admission.md).
 
+## Split review routing (2026-10-19)
+
+The cumulative PR540 review is superseded by the stacked
+[SDK PR542](https://github.com/Pilleo/mazewall/pull/542),
+[collector/qualification PR543](https://github.com/Pilleo/mazewall/pull/543), and
+[integration-records PR544](https://github.com/Pilleo/mazewall/pull/544).
+Required exact-SDK release review now belongs to PR542; splitting the reviews
+does not grant approval, publish a tag, change source bytes or waive any gate below.
+
 ## Exact release scope
 
 - Module `github.com/Pilleo/mazewall/hotspot-bridge`, Go1.26, no external dependency.
