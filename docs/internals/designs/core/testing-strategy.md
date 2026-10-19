@@ -166,6 +166,11 @@ dedicated container homes remain separate. Its location under `caches` lets the
 existing Gradle cache archives retain nested-build dependencies, compiled scripts
 and compilation outputs across disposable producer checkouts. It does not reuse
 old native acceptance outcomes or remove the mandatory build-tool regression suite.
+The JVM argument provider declares the relative cache layout as input and the
+absolute Gradle home as internal transport. This prevents host/container cache-home
+switches from invalidating the same verification task and rerunning its suite
+inside the demo's bounded startup. Verification sources and classpaths remain
+declared inputs; only cache-location plumbing is excluded.
 The real two-checkout TestKit regression asserts the configured nested home and
 requires the second independent Java compilation to be `FROM-CACHE` with a real
 class output. Run it directly with `./gradlew -p buildSrc testKitCacheTest`.

@@ -48,5 +48,20 @@ checkout-local `-g` compatibility concern was corrected. Backlog validation and
 whitespace checks pass. Committed native acceptance and hosted timing remain
 pending; this checkpoint makes no end-to-end speedup claim.
 
+### Hosted boundary regression and correction
+
+First hosted optional acceptance passed, but the main demo failed with exit124.
+The absolute TestKit-home system properties were task inputs, so switching from
+host to container and back reran the entire mandatory verification suite during
+the demo's existing60-second packaging bound. Do not increase that bound or skip
+verification to conceal this regression.
+
+A JVM argument provider now models the relative cache layout as input and marks
+the absolute Gradle home as internal cache transport. The actual task-input
+regression failed against the raw system properties, then passed with the provider.
+A two-invocation task probe executes verification first and is `UP-TO-DATE` when
+only the configured transport home switches. Sources/classpaths remain inputs.
+Final full-build and hosted requalification are required after this correction.
+
 ---
 <!-- id: issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab  file: issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab.md -->
