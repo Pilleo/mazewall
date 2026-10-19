@@ -73,6 +73,11 @@ configurations.named(verification.runtimeOnlyConfigurationName) {
 }
 
 val verificationActionsMarker = layout.buildDirectory.file("verification/verification-actions.success")
+tasks.register<JavaExec>("testKitCacheTest") {
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    mainClass.set("io.mazewall.build.TestKitCacheFunctionalTest")
+}
 tasks.register<JavaExec>("spotbugsReportTest") {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
@@ -108,10 +113,11 @@ tasks.register<JavaExec>("failureTriageTest") {
     doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
-    systemProperty("org.gradle.testkit.dir", layout.buildDirectory.dir("test-kit").get().asFile.absolutePath)
+    systemProperty("org.gradle.testkit.dir", gradle.gradleUserHomeDir.resolve("caches/mazewall-test-kit").absolutePath)
+    systemProperty("mazewall.test.gradleUserHome", gradle.gradleUserHomeDir.absolutePath)
     inputs.files(sourceSets.main.get().allSource, sourceSets.test.get().allSource, verification.allSource)
         .withPropertyName("verificationSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -141,7 +147,7 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
 tasks.test {
     useJUnitPlatform()
     dependsOn(verificationActionsTest)
-    systemProperty("org.gradle.testkit.dir", layout.buildDirectory.dir("test-kit").get().asFile.absolutePath)
+    systemProperty("org.gradle.testkit.dir", gradle.gradleUserHomeDir.resolve("caches/mazewall-test-kit").absolutePath)
 }
 
 tasks.named("check") { dependsOn(verificationActionsTest) }
