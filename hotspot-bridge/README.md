@@ -2,9 +2,9 @@
 
 Module `github.com/Pilleo/mazewall/hotspot-bridge` uses Go 1.26 and only the
 standard library. It supplies bundle verification, plain wire DTOs, bounded
-schema2/3 consumption and canonical observed-stack content IDs. Published v0.1.0
-is immutable at `1a6d58d2c73f5b089588add7364bf8d7913c5604`. This checkout adds
-**local candidate** format3 bundle negotiation; it is not the published v0.1.0.
+schema2/3 consumption and canonical observed-stack content IDs. The **v0.2.0 source**
+adds format3 bundle negotiation. Published v0.1.0 stays immutable at
+`1a6d58d2c73f5b089588add7364bf8d7913c5604`; its verifier does not gain this behavior.
 Neither DTO/decoder nor bundle support admits a native runtime profile.
 
 `bundle.Verify(root, expectedManifestSHA, wire.Strict25)` checks the actual
@@ -98,10 +98,11 @@ It groups provider observations, not universal class-loader/method identities.
 
 The v0.1.0 module Sum is `h1:tWCzIDVBquWo6tWwuqIT5oKlfRPP+XMshdJ8B7hFcIs=`;
 GoModSum is `h1:FEiVroH+pQOmKfe6YXTFkvkpAF3z799E4hFDPza6e/s=`.
-The candidate requires a separately approved new release (proposed v0.2.0) before
-hermetic consumers can use its format3 bundle behavior. No new tag/publication is
-authorized by Task3. Local workspace checks supply neither a released candidate
-dependency nor native qualification.
+Hermetic consumers require the actual `hotspot-bridge/v0.2.0` release and its
+remotely resolved origin/checksums before selecting format3 behavior. Release
+preparation is not proof that this tag is already published: require a release
+receipt with the actual remote tag, commit and checksums. Local workspace checks
+supply neither a published dependency nor native runtime qualification.
 
 Standalone checks: `GOWORK=off go test -race ./... -count=1`.
 Native checks: with the selected explicit `GOWORK`, run

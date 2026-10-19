@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 139 | *Total Resolved Issues:* 713
+*Total Active Issues:* 140 | *Total Resolved Issues:* 713
 
-Active status detail: 138 open, 1 deferred. Archived rows below preserve historical
+Active status detail: 139 open, 1 deferred. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261019-071745-155-release-hotspot-bridge-v0-2-0-and-pin-actual-provi](issue-20261019-071745-155-release-hotspot-bridge-v0-2-0-and-pin-actual-provi.md) | Release bridge v0.2.0 through review and pin actual provider handoff | medium | profiler |
 | Archived [issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a](resolved/issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a.md) | Scoped observed admission approved; actual CLI and strict regression gates pass | medium | profiler |
 | Archived [issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi](resolved/issue-20261019-023327-138-retain-asynchronous-enrichment-causes-before-pendi.md) | Retain asynchronous enrichment causes before pending readout returns; native cause and strict regression gates pass | high | profiler |
 | Archived [issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition](resolved/issue-20261018-212457-115-observed-hotspot-capture-rejects-native-definition.md) | Observed native drain/custody repaired; controlled A-OBS qualified, operator admission remains closed | high | profiler |
