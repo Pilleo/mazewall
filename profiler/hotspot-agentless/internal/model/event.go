@@ -1,31 +1,13 @@
 package model
 
-import "go.opentelemetry.io/ebpf-profiler/libpf"
+import (
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
 
 // Event is an occurrence at the selected handler entry, not an open result.
-type Event struct {
-	HotSpotIdentity   *HotSpotIdentity `json:"hotspot_identity,omitempty"`
-	SessionID         string           `json:"session_id"`
-	EventID           string           `json:"event_id"`
-	CPU               uint32           `json:"cpu"`
-	Sequence          uint64           `json:"sequence"`
-	PID               uint32           `json:"host_pid"`
-	TID               uint32           `json:"host_tid"`
-	ProcessStartTicks uint64           `json:"process_start_ticks"`
-	CgroupID          uint64           `json:"cgroup_id"`
-	CaptureBootNS     uint64           `json:"capture_boot_ns"`
-	ClockDomain       string           `json:"clock_domain"`
-	Kind              string           `json:"event_kind"`
-	CorrelationID     uint64           `json:"correlation_id"`
-	DirFD             int32            `json:"dirfd"`
-	Flags             uint64           `json:"flags"`
-	Mode              uint64           `json:"mode"`
-	Filename          string           `json:"filename"`
-	FilenameBytes     []byte           `json:"filename_bytes"`
-	RegisterRead      int32            `json:"register_read"`
-	ArgumentRead      int32            `json:"argument_read"`
-	PathTruncated     bool             `json:"path_truncated"`
-}
+// A defined runtime type keeps StackRef here; external aliases cannot own methods.
+type Event wire.Event
 
 type StackRef struct {
 	HotSpotIdentity   libpf.HotSpotIdentity
@@ -37,5 +19,5 @@ type StackRef struct {
 }
 
 func (e Event) StackRef() StackRef {
-	return StackRef{HotSpotIdentity: e.HotSpotIdentity.capture(), SessionID: e.SessionID, PID: e.PID, TID: e.TID, ProcessStartTicks: e.ProcessStartTicks, CorrelationID: e.CorrelationID, CaptureBootNS: e.CaptureBootNS}
+	return StackRef{HotSpotIdentity: captureHotSpotIdentity(e.HotSpotIdentity), SessionID: e.SessionID, PID: e.PID, TID: e.TID, ProcessStartTicks: e.ProcessStartTicks, CorrelationID: e.CorrelationID, CaptureBootNS: e.CaptureBootNS}
 }

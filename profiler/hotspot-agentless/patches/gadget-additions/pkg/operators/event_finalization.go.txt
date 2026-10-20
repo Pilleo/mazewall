@@ -13,19 +13,40 @@ const EventFinalizationOptionsKey = "mw.event-finalization-options"
 type EventFinalizationOptions struct {
 	HardDeadline time.Time
 	StrictFull   bool
+	ObservedFull bool
 	AfterReadout func(context.Context) error
+	Accounting   *SelectedAccountingTarget
+}
+
+type SelectedAccountingTarget struct {
+	Session string
+	PID     uint32
+	Birth   uint64
+}
+
+type SelectedCPUCounts struct {
+	Attempted, Submitted, ReserveFailed, Overflow uint64
+}
+
+type SelectedAccountingObservation struct {
+	Target           SelectedAccountingTarget
+	MapID            uint32
+	PossibleCPUs     int
+	Rows             []SelectedCPUCounts
+	Quiesced, Joined bool
 }
 
 type EventFinalizationObservation struct {
-	Scope                        string  `json:"scope"`
-	Phase                        string  `json:"phase"`
-	ProducersQuiesced            bool    `json:"producers_quiesced"`
-	BufferDrained                bool    `json:"buffer_drained"`
-	ReceiverJoined               bool    `json:"receiver_joined"`
-	FinalCounterRead             bool    `json:"final_counter_read"`
-	NativeReserveFailures        *uint64 `json:"native_reserve_failures,omitempty"`
-	BackgroundLossSamplerStarted bool    `json:"background_loss_sampler_started"`
-	ResourcesRetired             bool    `json:"resources_retired"`
-	LossComplete                 bool    `json:"loss_complete"`
-	Error                        string  `json:"error,omitempty"`
+	SelectedAccounting           *SelectedAccountingObservation `json:"selected_event_accounting,omitempty"`
+	Scope                        string                         `json:"scope"`
+	Phase                        string                         `json:"phase"`
+	ProducersQuiesced            bool                           `json:"producers_quiesced"`
+	BufferDrained                bool                           `json:"buffer_drained"`
+	ReceiverJoined               bool                           `json:"receiver_joined"`
+	FinalCounterRead             bool                           `json:"final_counter_read"`
+	NativeReserveFailures        *uint64                        `json:"native_reserve_failures,omitempty"`
+	BackgroundLossSamplerStarted bool                           `json:"background_loss_sampler_started"`
+	ResourcesRetired             bool                           `json:"resources_retired"`
+	LossComplete                 bool                           `json:"loss_complete"`
+	Error                        string                         `json:"error,omitempty"`
 }

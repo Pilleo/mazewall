@@ -111,6 +111,76 @@ qualification tools, not broader production admission. See the
 [readout evidence](../docs/plans/2026-10-05-hotspot-dense-readout-evidence.md) and
 [workstream design](../docs/plans/2026-10-05-hotspot-performance-capability-design.md).
 
+The pinned upstream already captures `nmethod._compile_id` and checks it during
+JIT cache lookup/symbolization. The shared candidate audit reports those reviewed
+source checks; it does not prove loaded-object identity or native code/metadata
+validity through decode or exclude concurrent reclamation. Compiled/concurrent-GC
+production qualification remains false, with the interpreted/Serial profile above
+unchanged. The actual diagnostic retained a four-carrier identity refusal; a later
+fully receipted six-case run passing the experimental validators does not erase
+that failure or qualify runtime lifetime. See the
+[generation evidence](../docs/plans/2026-10-17-hotspot-upstream-generation-evidence.md)
+and [native mechanism decision](../docs/plans/2026-10-17-hotspot-jitgc-native-mechanism-decision.md).
+
+Known limit: the retained failure has a nine-event/two-TID correlation alias;
+unchanged actual C also fails distinct-key uniqueness under equal clocks. The
+historical trigger remains unproved. The approved bounded shared allocator is
+implemented with actual-C and isolated multi-CPU kernel checks. The corrected
+`8212ee25…` graph now has two byte-identical locked helper/full-OCI builds and eight
+actually executed public-native cases (zero skips). The paced case accepts;
+both dense600 diagnostics still reject with retained partial evidence. Exact task
+binding, selected accounting/drain, zero-retention conservation and non-time
+rendered/pdata compatibility pass within the existing profile. An experimental
+four-carrier control observes no cross-task reference alias, without qualifying
+logical ancestry, JIT/GC/Loom lifetime, active perf/NMI or all publication/eviction
+interleavings. Task3's complete-production-path native kprobe fixture closes the
+finite supported-context cache/definition/eviction/drain gate:376calls,366exact
+definitions,0reported loss, actual eviction/republish and checked all-owner retirement.
+Synthetic entry seeds complement the existing real JVM captures; the allocator
+issue is resolved within that scope. Its raw positive
+reference is not Kubescape's frame-content CallID; the existing Tier E importer
+does not consume this agentless schema-2 stream. See
+[allocator evidence](../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md)
+and the preserved [identity evidence](../docs/plans/2026-10-18-hotspot-correlation-identity-evidence.md).
+
+Fresh2026-10-17public acceptance still rejects dense600/1ms:
+275received/265paired/10pending,225/600marked tokens in paired public evidence,
+with no pending physical owner and checked helper/client absence. Passing the7-test
+matrix, including its dense success-or-rejection diagnostic, does not promote
+that workload. A separate retained
+original native stream contains all600marked tokens and final retirement
+observations, yet its public consumer also times out; native completion and
+complete public readout are separate requirements. No new reader/buffer change
+was justified by actual JFR, so that work is deferred. Fresh same-code alternating
+replay timings show no optimization gain; they include canonical render/hash and
+measurement-field construction, excluding process startup and outer report
+serialization/file I/O. See the
+[fresh matched evidence and decision](../docs/plans/2026-10-17-hotspot-dense-next-evidence.md).
+
+The2026-10-17 alternating public consumer diagnostics (recovered2026-10-18)
+retain6 actual rejected collections:411/230/548/311/232/273 paired marked tokens
+of600, despite green success-or-rejection tests and checked resource retirement.
+All six partial summaries still lack complete physical drain/terminal accounting.
+Actual pinned client JFR identifies JSON parsing and eager public diagnostic/report
+serialization cost; the decision is `consumer_cost_identified_requires_followup`.
+It does not establish a sole deadline cause, optimization gain or600 acceptance.
+Whole-client stack categories overlap, scalar fixture durations cannot locate a
+post-stop interval, and JFR itself adds work/openat events. The proposed follow-up
+was deferred public rawJson materialization with unchanged validation/ABI/ownership
+regressions. See
+[actual consumer evidence](../docs/plans/2026-10-17-hotspot-consumer-readout-evidence.md).
+
+The2026-10-18follow-up now delegates public stack/frame `rawJson` getters to their
+existing immutable owners. Typed construction avoids unused frame/stack rendering;
+`toJson()` still renders aggregate diagnostics but does not force individual frame
+strings. Event argument parsing stays eager; requested raw getters preserve exact
+canonical bytes and all public descriptors. Full-public replay (including output
+I/O) retains identical bytes/counts, but timing variation and deferred render cost
+do not establish a general end-to-end gain. The fresh dense600/1ms collection still
+**rejects**278received/277paired/1pending,237/600marked pairs, with checked resource
+retirement. All current bounds and admission profiles remain unchanged. See
+[public raw diagnostic evidence](../docs/plans/2026-10-18-hotspot-public-raw-json-evidence.md).
+
 The uncalled kernel-SHA256 qualification prototype is retained only for historical
 replay at `96789e51`; it was never a production hash provider. Recover its exact
 `profiler/hotspot-agentless/scripts/kernel-digest.py` and paired self-test with
@@ -177,6 +247,19 @@ Snapshots are immutable and partial; pending pairs and retention loss are distin
 Native physical drain, parent resource completion and whole-session collection
 completeness are separate facts. Diagnostics are retained separately from JSONL,
 with explicit discarded byte counts.
+
+Full owned captures may include `selected_event_accounting` in
+`evidence.summary.rawJson`. Its `complete=true` proves scoped selected openat
+conservation using the acquired session/PID/birth/map/CPU binding and final native
+owner; it does not mean zero loss or complete collection. The optional
+`unproven_collection_sources` array currently contains exactly `definitions`,
+`enrichment`, `wire`, `retention` when selected proof succeeds. Missing or invalid
+selected proof also leaves `selected_events` unproven. Definition/auxiliary reader
+joins, zero loss metrics and terminal counts cannot prove those independent source
+denominators. Early partial snapshots may omit the diagnostic; omission is not
+completeness. Even retaining zero client records can preserve selected accounting
+while `retention` remains unproven. See the
+[production inventory evidence](../docs/plans/2026-10-17-hotspot-production-loss-evidence.md).
 
 `HotSpotProfilingException` retains its original cause, optional partial result,
 native errno observations, diagnostics and pending cleanup ownership. Explicit

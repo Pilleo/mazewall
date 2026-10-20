@@ -1,0 +1,154 @@
+//go:build mw_kernel
+
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-service/api"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/spf13/viper"
+)
+
+func TestKernelSelectedAccountingKeepsAcquiredMapOwner(t *testing.T) {
+	spec := &ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 32, MaxEntries: 1}
+	makeMap := func(spec *ebpf.MapSpec) *ebpf.Map {
+		value, err := ebpf.NewMap(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := value.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		return value
+	}
+	original, replacement := makeMap(spec), makeMap(spec)
+	i := eventFinalizationScopeFixture()
+	i.collectionSpec.Maps["selected_counts"] = spec
+	i.collection = &ebpf.Collection{Maps: map[string]*ebpf.Map{"selected_counts": original}}
+	binding, err := bindSelectedAccounting(i, &operators.SelectedAccountingTarget{Session: "s", PID: 123, Birth: 456})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i.selectedAccounting = binding
+	i.eventFinalizer = newEventStopOwner(nativeEventStopBackend{instance: i})
+	if _, err := (nativeEventStopBackend{instance: i}).Sample(); err == nil {
+		t.Fatal("sample accepted before actual owner joins")
+	}
+	snapshot, _ := i.EventFinalization()
+	if snapshot.SelectedAccounting != nil {
+		t.Fatal("pre-join diagnostic published")
+	}
+	value, err := binding.sampleAfterJoin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.MapID != binding.preparedMapID || len(value.Rows) != binding.preparedPossibleCPUs {
+		t.Fatal("acquired receipt changed", value)
+	}
+	i.collection.Maps["selected_counts"] = replacement
+	if _, err := binding.sampleAfterJoin(); err == nil {
+		t.Fatal("collection map substitution accepted")
+	}
+	i.collection.Maps["selected_counts"] = makeMap(&ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 8, MaxEntries: 1})
+	if _, err := bindSelectedAccounting(i, &operators.SelectedAccountingTarget{Session: "s", PID: 123, Birth: 456}); err == nil {
+		t.Fatal("actual wrong-layout map accepted against correct spec")
+	}
+	t.Logf("acquired_map=%d possible_cpus=%d prejoin/substitution/actual-wrong-layout refused", binding.preparedMapID, binding.preparedPossibleCPUs)
+}
+
+type selectedPublicationContext struct {
+	operators.GadgetContext
+	t            *testing.T
+	i            *ebpfInstance
+	publications int
+}
+
+func (c *selectedPublicationContext) SetVar(key string, value any) {
+	if strings.HasPrefix(key, operators.MapPrefix) {
+		binding, ok := c.i.SelectedAccountingBinding()
+		if !ok || binding.MapID == 0 || binding.PossibleCPUs <= 0 {
+			c.t.Fatal("map published before actual accounting binding")
+		}
+		if len(c.i.links) != 0 || c.i.tracers["openat"].ringbufReader != nil {
+			c.t.Fatal("reader/link started before first map publication")
+		}
+		c.publications++
+	}
+	c.GadgetContext.SetVar(key, value)
+}
+
+func TestKernelSelectedAccountingBindsDuringActualStartBeforePublication(t *testing.T) {
+	for _, supported := range []bool{false, true} {
+		t.Run(map[bool]string{false: "rejected_layout", true: "acquired"}[supported], func(t *testing.T) {
+			gc := gadgetcontext.New(context.Background(), "selected-start-control")
+			defer gc.Cancel()
+			i := eventFinalizationScopeFixture()
+			i.logger, i.gadgetCtx, i.bpfOperator = gc.Logger(), gc, &ebpfOperator{}
+			i.config = viper.New()
+			i.params = map[string]*param{}
+			i.paramValues = map[string]string{}
+			for key, value := range map[string]string{"collect_ustack": "false", "collect_otel_stack": "false", ParamTraceKernel: "false", "target_pid": "123", "target_start_ticks": "456"} {
+				i.params[key] = &param{Param: &api.Param{Key: key, DefaultValue: value, TypeHint: "string"}}
+			}
+			i.collectionSpec.Programs["capture_openat"].License = "GPL"
+			i.collectionSpec.Programs["capture_openat"].AttachTo = "__x64_sys_openat"
+			i.collectionSpec.Programs["capture_openat"].Instructions = asm.Instructions{asm.Mov.Imm(asm.R0, 0), asm.Return()}
+			i.collectionSpec.Maps["events"].MaxEntries = 4096
+			selectedSpec := &ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 32, MaxEntries: 1}
+			if !supported {
+				selectedSpec.ValueSize = 8
+			}
+			i.collectionSpec.Maps["selected_counts"] = selectedSpec
+			ds, err := datasource.New(datasource.TypeSingle, "openat")
+			if err != nil {
+				t.Fatal(err)
+			}
+			accessor, err := ds.AddField("wire", api.Kind_Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			i.tracers["openat"].ds, i.tracers["openat"].accessor, i.tracers["openat"].eventSize = ds, accessor, 4
+			gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute), Accounting: &operators.SelectedAccountingTarget{Session: "s", PID: 123, Birth: 456}})
+			publication := &selectedPublicationContext{GadgetContext: gc, t: t, i: i}
+			err = i.Start(publication)
+			if !supported {
+				if err == nil || !strings.Contains(err.Error(), "selected counter layout unsupported") {
+					t.Fatal("wrong acquired-layout refusal", err)
+				}
+				if i.collection != nil || publication.publications != 0 || len(i.links) != 0 || i.tracers["openat"].ringbufReader != nil {
+					t.Fatal("failed bind leaked/published acquired collection")
+				}
+				if _, ok := i.SelectedAccountingBinding(); ok {
+					t.Fatal("failed Start published a binding")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if publication.publications == 0 || len(i.links) != 1 || i.tracers["openat"].ringbufReader == nil {
+				t.Fatal("actual Start did not publish/read/attach")
+			}
+			if err := i.Stop(publication); err != nil {
+				t.Fatal(err)
+			}
+			observation, _ := i.EventFinalization()
+			if !observation.ResourcesRetired || observation.SelectedAccounting == nil {
+				t.Fatal("actual Start owner not sampled/retired", observation)
+			}
+			t.Logf("actual Start publications=%d selected=%+v", publication.publications, observation.SelectedAccounting)
+		})
+	}
+}

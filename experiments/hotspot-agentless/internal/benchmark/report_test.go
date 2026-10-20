@@ -3,6 +3,7 @@ package benchmark
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 	"strings"
 	"testing"
@@ -22,7 +23,7 @@ func benchmarkPackets(t *testing.T, m RunManifest, missing bool) *bytes.Buffer {
 		if i == 1 {
 			filename = "/fixture/mw-bench-0123456789abcdef-000001-r0"
 		}
-		v := model.Event{EventID: id, SessionID: "s", PID: 123, TID: 456, Sequence: uint64(i + 1), Filename: filename}
+		v := wire.Event{EventID: id, SessionID: "s", PID: 123, TID: 456, Sequence: uint64(i + 1), Filename: filename}
 		e.Encode(model.Record{Kind: "event", EventID: id, Event: &v})
 		e.Encode(model.Record{Kind: "enrichment", EventID: id, Evidence: &model.StackEvidence{Attribution: "skipped", Reason: "unwind_disabled"}})
 		received++

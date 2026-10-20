@@ -4,7 +4,11 @@ package tracer
 
 import (
 	"context"
+	"errors"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
 	"testing"
+	"time"
 )
 
 func TestDefinitionAuxiliaryStopRequiresOwnedInitializedScope(t *testing.T) {
@@ -14,5 +18,57 @@ func TestDefinitionAuxiliaryStopRequiresOwnedInitializedScope(t *testing.T) {
 	}
 	if err := stopper.StopAuxiliary(context.Background()); err == nil {
 		t.Fatal("unowned auxiliary scope certified as stopped")
+	}
+}
+
+func TestHotSpotProfilesOwnAuxiliaryCallbacks(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		config Config
+	}{
+		{"strict", Config{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 123}}},
+		{"observed", Config{HotSpotObservedPID: 123}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			parent := context.Background()
+			ctx, scope := newAuxiliaryContext(parent, &test.config)
+			if scope == nil || periodiccaller.OwnedScopeFrom(ctx) != scope {
+				t.Fatal("HotSpot callbacks have no owned auxiliary scope")
+			}
+			started, release := make(chan struct{}), make(chan struct{})
+			defer func() {
+				close(release)
+				stop, cancel := context.WithTimeout(parent, time.Second)
+				defer cancel()
+				if err := scope.Stop(stop); err != nil {
+					t.Error("auxiliary cleanup failed", err)
+				}
+			}()
+			if !periodiccaller.GoOwned(ctx, func() { close(started); <-release }) {
+				t.Fatal("owned callback enrollment rejected")
+			}
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("owned callback did not start")
+			}
+			stop, cancel := context.WithCancel(parent)
+			cancel()
+			tracer := &Tracer{auxiliaryScope: scope}
+			if err := tracer.StopAuxiliary(stop); !errors.Is(err, context.Canceled) || scope.Joined() {
+				t.Fatal("held auxiliary callback was certified retired", err)
+			}
+			if ctx.Err() == nil || parent.Err() != nil {
+				t.Fatal("auxiliary stop must cancel only its owned context")
+			}
+		})
+	}
+}
+
+func TestLegacyProfilerDoesNotAcquireHotSpotAuxiliaryScope(t *testing.T) {
+	parent := context.Background()
+	ctx, scope := newAuxiliaryContext(parent, &Config{})
+	if ctx != parent || scope != nil {
+		t.Fatal("legacy profiler acquired a HotSpot-only auxiliary scope")
 	}
 }

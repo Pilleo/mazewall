@@ -21,7 +21,7 @@ func (t *Tracer) StopAuxiliary(ctx context.Context) error {
 	return t.auxiliaryScope.Stop(ctx)
 }
 func newAuxiliaryContext(ctx context.Context, cfg *Config) (context.Context, *periodiccaller.OwnedScope) {
-	if cfg.HotSpotEpochTarget.PID == 0 {
+	if cfg.HotSpotEpochTarget.PID == 0 && cfg.HotSpotObservedPID == 0 {
 		return ctx, nil
 	}
 	s := periodiccaller.NewOwnedScope(ctx, cfg.OnHotSpotFatal)

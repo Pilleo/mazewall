@@ -53,3 +53,17 @@ func TestCommandStdoutRemainsSeparateFromDiagnostics(t *testing.T) {
 		t.Fatal("native command failure swallowed")
 	}
 }
+
+func TestRemovalSuccessCannotReplaceCheckedRemoteAbsence(t *testing.T) {
+	id := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	for _, script := range []string{
+		`case "$1" in ps) printf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n';; rm) exit 0;; esac`,
+		`case "$1" in ps) printf denied >&2; exit 13;; rm) exit 0;; esac`,
+	} {
+		// Only the external Docker transport is replaced; exercise real retirement.
+		docker := Docker{Root: t.TempDir(), Prefix: []string{"sh", "-c", script, "docker"}}
+		if err := RemoveOwned(docker, id); err == nil {
+			t.Error("unchecked remote ownership reported retired")
+		}
+	}
+}

@@ -1,42 +1,95 @@
 package candidate
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"unicode/utf8"
 )
 
 type Frame struct {
 	FunctionName string `json:"function_name"`
 }
+
+func (f *Frame) UnmarshalJSON(data []byte) error {
+	var value struct {
+		FunctionName *string `json:"function_name"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	if value.FunctionName == nil {
+		return fmt.Errorf("missing frame name")
+	}
+	// Empty names are valid unresolved native frames, never application matches.
+	f.FunctionName = *value.FunctionName
+	return nil
+}
+
 type Evidence struct {
 	Attribution string  `json:"attribution"`
 	Frames      []Frame `json:"frames"`
 }
 type ThreadIdentity struct {
 	Scope, Source   string
-	LogicalID       uint64 `json:"logical_id"`
-	ObjectLease     bool   `json:"object_lease"`
-	MountCapture    uint64 `json:"mount_capture"`
-	MountDecode     uint64 `json:"mount_decode"`
-	ParentAvailable bool   `json:"parent_available"`
+	LogicalID       *uint64 `json:"logical_id"`
+	ObjectLease     *bool   `json:"object_lease"`
+	MountCapture    *uint64 `json:"mount_capture"`
+	MountDecode     *uint64 `json:"mount_decode"`
+	ParentAvailable *bool   `json:"parent_available"`
 }
 type Event struct {
-	Filename   string
-	PID        uint32          `json:"host_pid"`
-	StartTicks uint64          `json:"process_start_ticks"`
-	TID        uint32          `json:"host_tid"`
-	Identity   *ThreadIdentity `json:"thread_identity"`
+	Filename      string          `json:"filename"`
+	SessionID     string          `json:"session_id"`
+	EventID       string          `json:"event_id"`
+	ClockDomain   string          `json:"clock_domain"`
+	EventKind     string          `json:"event_kind"`
+	CaptureBootNS *uint64         `json:"capture_boot_ns"`
+	PID           uint32          `json:"host_pid"`
+	StartTicks    uint64          `json:"process_start_ticks"`
+	TID           uint32          `json:"host_tid"`
+	Identity      *ThreadIdentity `json:"thread_identity"`
 }
+
+func (e *Event) UnmarshalJSON(data []byte) error {
+	type payload Event
+	value := struct {
+		*payload
+		Filename *string `json:"filename"`
+	}{payload: (*payload)(e)}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	if value.Filename == nil {
+		return fmt.Errorf("missing event path")
+	}
+	e.Filename = *value.Filename
+	return nil
+}
+
 type Record struct {
-	Kind      string
-	SessionID *string `json:"session_id"`
-	EventID   string  `json:"event_id"`
-	Event     *Event
-	Evidence  *Evidence
+	SchemaVersion int `json:"schema_version"`
+	Kind          string
+	SessionID     *string `json:"session_id"`
+	EventID       string  `json:"event_id"`
+	Event         *Event
+	Evidence      *Evidence
+	Summary       *captureSummary
+	Recovery      json.RawMessage
+}
+type captureSummary struct {
+	Enrichment                 *terminalCounters
+	TerminalAccountingComplete *bool `json:"terminal_accounting_complete"`
+}
+type terminalCounters struct{ Received, Resolved, Unavailable, Skipped *uint64 }
+type targetIdentity struct {
+	PID         uint32 `json:"pid"`
+	StartTicks  uint64 `json:"start_ticks"`
+	FixtureRoot string `json:"fixture_root"`
 }
 type RuntimeManifest struct {
 	PID        uint32
@@ -62,20 +115,36 @@ type VirtualVerdict struct {
 	ProductionQualified bool `json:"production_qualified"`
 }
 
+var methodDisplay = regexp.MustCompile(`^(?:[^\s]+\s+)?([A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)\.([A-Za-z_$][A-Za-z0-9_$]*|<init>|<clinit>)\([^)]*\)$`)
+
+// ParseJavaMethod extracts exact owner/method names in the qualification renderer's naming domain.
+func ParseJavaMethod(display string) (owner, method string, ok bool) {
+	parsed := methodDisplay.FindStringSubmatch(display)
+	if parsed == nil {
+		return "", "", false
+	}
+	return parsed[1], parsed[2], true
+}
+
 func routeMatches(frames []Frame, expected []string) (bool, error) {
 	if len(expected) == 0 {
 		return false, fmt.Errorf("missing expected application route")
 	}
-	first := expected[0]
-	owner := first
-	if index := strings.LastIndex(first, "."); index >= 0 {
-		owner = first[:index]
+	owner, _, ok := ParseJavaMethod(expected[0] + "()")
+	if !ok {
+		return false, fmt.Errorf("invalid expected method")
 	}
-	owner += "."
+	for _, name := range expected {
+		parsedOwner, method, ok := ParseJavaMethod(name + "()")
+		if !ok || parsedOwner != owner || parsedOwner+"."+method != name {
+			return false, fmt.Errorf("invalid or mixed expected owners")
+		}
+	}
 	var application []string
 	for _, frame := range frames {
-		if strings.Contains(frame.FunctionName, owner) {
-			application = append(application, frame.FunctionName)
+		parsedOwner, method, ok := ParseJavaMethod(frame.FunctionName)
+		if ok && parsedOwner == owner {
+			application = append(application, parsedOwner+"."+method)
 		}
 	}
 	if len(application) == 0 {
@@ -85,7 +154,7 @@ func routeMatches(frames []Frame, expected []string) (bool, error) {
 		return false, fmt.Errorf("wrong or reordered application route")
 	}
 	for index, name := range expected {
-		if !strings.Contains(application[index], name) {
+		if application[index] != name {
 			return false, fmt.Errorf("wrong or reordered application route")
 		}
 	}
@@ -94,47 +163,28 @@ func routeMatches(frames []Frame, expected []string) (bool, error) {
 
 func VerifyRuntime(manifest RuntimeManifest, rows []Record) (RuntimeVerdict, error) {
 	result := RuntimeVerdict{Scope: "application_route_prefix"}
-	events := map[string]Event{}
-	terminals := map[string]Evidence{}
-	sessions := map[string]bool{}
-	for _, row := range rows {
-		if row.SessionID != nil {
-			sessions[*row.SessionID] = true
-		}
-		if row.Kind == "event" {
-			if row.Event == nil {
-				return result, fmt.Errorf("missing event")
-			}
-			if _, marked := manifest.Tokens[row.Event.Filename]; !marked {
-				continue
-			}
-			if _, duplicate := events[row.EventID]; duplicate {
-				return result, fmt.Errorf("duplicate event")
-			}
-			if row.Event.PID != manifest.PID || row.Event.StartTicks != manifest.StartTicks {
-				return result, fmt.Errorf("process generation mismatch")
-			}
-			events[row.EventID] = *row.Event
-		} else if row.Kind == "enrichment" {
-			if _, duplicate := terminals[row.EventID]; duplicate {
-				return result, fmt.Errorf("duplicate terminal")
-			}
-			if row.Evidence == nil {
-				return result, fmt.Errorf("missing terminal evidence")
-			}
-			terminals[row.EventID] = *row.Evidence
-		}
+	index, err := validateCapture(rows, targetIdentity{PID: manifest.PID, StartTicks: manifest.StartTicks})
+	if err != nil {
+		return result, err
 	}
-	if len(sessions) > 1 {
-		return result, fmt.Errorf("mixed collector sessions")
+	if len(manifest.Tokens) == 0 {
+		return result, fmt.Errorf("empty token manifest")
+	}
+	for path := range manifest.Tokens {
+		if !filepath.IsAbs(path) {
+			return result, fmt.Errorf("expected token path must be absolute")
+		}
 	}
 	seen := map[string]bool{}
-	for key, event := range events {
+	for key, event := range index.events {
+		if _, marked := manifest.Tokens[event.Filename]; !marked {
+			continue
+		}
 		if seen[event.Filename] {
 			return result, fmt.Errorf("duplicate token")
 		}
 		seen[event.Filename] = true
-		evidence, ok := terminals[key]
+		evidence, ok := index.terminals[key]
 		if !ok {
 			return result, fmt.Errorf("missing terminal")
 		}
@@ -162,34 +212,30 @@ func VerifyRuntime(manifest RuntimeManifest, rows []Record) (RuntimeVerdict, err
 	return result, nil
 }
 
-func VerifyVirtual(oracle map[string]VirtualOracle, rows []Record) (VirtualVerdict, error) {
+func VerifyVirtual(oracle map[string]VirtualOracle, rows []Record, target targetIdentity) (VirtualVerdict, error) {
 	var result VirtualVerdict
-	terminals := map[string]Evidence{}
-	for _, row := range rows {
-		if row.Kind == "enrichment" {
-			if _, duplicate := terminals[row.EventID]; duplicate {
-				return result, fmt.Errorf("duplicate terminal")
-			}
-			if row.Evidence == nil {
-				return result, fmt.Errorf("missing terminal evidence")
-			}
-			terminals[row.EventID] = *row.Evidence
+	index, err := validateCapture(rows, target)
+	if err != nil {
+		return result, err
+	}
+	if !filepath.IsAbs(target.FixtureRoot) || len(oracle) == 0 {
+		return result, fmt.Errorf("missing independent virtual fixture context")
+	}
+	for token, value := range oracle {
+		if token == "" || token == "." || token == ".." || filepath.Base(token) != token || value.LogicalID == 0 {
+			return result, fmt.Errorf("invalid virtual oracle token/identity")
 		}
 	}
 	seen := map[string]bool{}
 	carriers := map[uint32]bool{}
-	for _, row := range rows {
-		if row.Kind != "event" {
-			continue
-		}
-		if row.Event == nil {
-			return result, fmt.Errorf("missing event")
-		}
-		event := row.Event
+	for id, event := range index.events {
 		token := filepath.Base(event.Filename)
 		expected, marked := oracle[token]
 		if !marked {
 			continue
+		}
+		if event.Filename != filepath.Join(target.FixtureRoot, token) {
+			return result, fmt.Errorf("virtual token full-path mismatch")
 		}
 		if seen[token] {
 			return result, fmt.Errorf("duplicate logical operation")
@@ -200,19 +246,29 @@ func VerifyVirtual(oracle map[string]VirtualOracle, rows []Record) (VirtualVerdi
 		if identity != nil && identity.Source == "oracle" {
 			return result, fmt.Errorf("oracle substituted for capture")
 		}
-		if identity == nil || identity.Scope != "mounted_virtual" {
+		if identity == nil {
 			continue
 		}
-		if identity.LogicalID != expected.LogicalID {
+		switch identity.Scope {
+		case "carrier_only", "logical_unavailable":
+			continue
+		case "mounted_virtual":
+		default:
+			return result, fmt.Errorf("unsupported logical scope")
+		}
+		if identity.Source != "candidate_native" {
+			return result, fmt.Errorf("unqualified identity source")
+		}
+		if identity.LogicalID == nil || *identity.LogicalID != expected.LogicalID {
 			return result, fmt.Errorf("wrong logical thread")
 		}
-		if !identity.ObjectLease || identity.MountCapture == 0 || identity.MountCapture != identity.MountDecode {
+		if identity.ObjectLease == nil || !*identity.ObjectLease || identity.MountCapture == nil || identity.MountDecode == nil || *identity.MountCapture == 0 || *identity.MountCapture != *identity.MountDecode {
 			return result, fmt.Errorf("unproved mount/object identity")
 		}
-		if identity.ParentAvailable {
+		if identity.ParentAvailable == nil || *identity.ParentAvailable {
 			return result, fmt.Errorf("parent source unqualified")
 		}
-		evidence, ok := terminals[row.EventID]
+		evidence, ok := index.terminals[id]
 		if !ok {
 			return result, fmt.Errorf("missing identity terminal")
 		}
@@ -237,28 +293,39 @@ func VerifyVirtual(oracle map[string]VirtualOracle, rows []Record) (VirtualVerdi
 }
 
 func Attached(path string) (bool, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if !utf8.Valid(data) {
-		return false, fmt.Errorf("invalid capture UTF8")
-	}
-	end := strings.LastIndexByte(string(data), '\n')
-	if end < 0 {
-		return false, nil
-	}
-	for _, line := range strings.Split(string(data[:end]), "\n") {
-		var row struct{ Kind string }
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 4096), maxCaptureLine+2)
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		// The native writer may still be producing the final row.
+		if atEOF && len(data) <= maxCaptureLine && bytes.IndexByte(data, '\n') < 0 {
+			return 0, nil, nil
+		}
+		return captureLine(data, atEOF)
+	})
+	count := 0
+	for scanner.Scan() {
+		count++
+		if count > maxCaptureRows || !utf8.Valid(scanner.Bytes()) {
+			return false, fmt.Errorf("invalid readiness capture")
+		}
+		var row Record
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
 			return false, err
+		}
+		if row.SchemaVersion != 1 || row.SessionID == nil || len(*row.SessionID) == 0 || len(*row.SessionID) > 128 {
+			return false, fmt.Errorf("unsupported readiness schema/session")
 		}
 		if row.Kind == "collector_attached" {
 			return true, nil
 		}
 	}
-	return false, nil
+	return false, scanner.Err()
 }

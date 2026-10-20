@@ -140,6 +140,14 @@ func TestKernelEventFinalizationDetachesDrainsAndSamplesWithoutLaterEvent(t *tes
 			i := eventFinalizationScopeFixture()
 			i.tracers = map[string]*Tracer{"openat": tr}
 			i.collection = &ebpf.Collection{Maps: map[string]*ebpf.Map{"events": events, "events_lost_samples": lost, "sequences": counter}}
+			selectedSpec := &ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 32, MaxEntries: 1}
+			i.collectionSpec.Maps["selected_counts"] = selectedSpec
+			i.collection.Maps["selected_counts"] = newFinalizationTestMap(t, selectedSpec)
+			binding, bindErr := bindSelectedAccounting(i, &operators.SelectedAccountingTarget{Session: "held-callback-control", PID: uint32(os.Getpid()), Birth: 456})
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
+			i.selectedAccounting = binding
 			i.eventStopOptions = &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute)}
 			if control.deadline {
 				i.eventStopOptions.HardDeadline = time.Now().Add(500 * time.Millisecond)
@@ -198,7 +206,7 @@ func TestKernelEventFinalizationDetachesDrainsAndSamplesWithoutLaterEvent(t *tes
 					t.Fatal("callback deadline lost", err)
 				}
 				r, _ := i.EventFinalization()
-				if r.BufferDrained || r.ResourcesRetired || r.NativeReserveFailures != nil {
+				if r.BufferDrained || r.ResourcesRetired || r.NativeReserveFailures != nil || r.SelectedAccounting != nil {
 					t.Fatal("held callback certified finalized", r)
 				}
 				if err := i.closeOwnedEvents(); !errors.Is(err, context.DeadlineExceeded) {

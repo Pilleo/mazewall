@@ -178,6 +178,11 @@ func (o *eventStopOwner) copySnapshot() operators.EventFinalizationObservation {
 		v := *s.NativeReserveFailures
 		s.NativeReserveFailures = &v
 	}
+	if s.SelectedAccounting != nil {
+		value := *s.SelectedAccounting
+		value.Rows = append([]operators.SelectedCPUCounts(nil), value.Rows...)
+		s.SelectedAccounting = &value
+	}
 	return s
 }
 func (o *eventStopOwner) snapshot() operators.EventFinalizationObservation {

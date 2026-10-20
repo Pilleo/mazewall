@@ -17,11 +17,47 @@ The experiment bundle contains several independent review families:
 | Definition/event drain | `profiler-definition-drain.patch`, `gadget-definition-drain.patch`, `gadget-finalization.patch`, additions | Native queued tails8/5000, ordered callback completion and deadline retention |
 | Checked metadata retirement | `profiler-metadata-retirement.patch`, processmanager additions | Native cause/failed-owner retention and checked reader-join regressions |
 | Auxiliary/prune worker ownership | `profiler-auxiliary-ownership.patch`, `gadget-auxiliary-ownership.patch`, additions | Scoped cancellation/join/finalizers, native perf/netlink controls and fresh strict reports |
+| Observed-reader/callback support (Task3 candidate only) | HotSpot/processmanager observed additions, existing epoch/structured patches | Actual reader and reporter-cause host/race controls; no ordinary-JVM qualification or CLI admission |
 
 These units are local overlays, not standalone upstream PRs yet. Epoch and
 lifecycle units depend on selected profiler/bridge boundaries and require separate
 review; review-unit separation is not a claim that every patch applies in isolation.
 Fault/diagnostic additions remain test-only with separate manifests.
+
+## Bounded native correlation allocator (2026-10-18, scoped native qualification)
+
+`profiler-epoch-capture.patch` includes the shared production `correlation_ids.h`:
+one ARRAY/u32/u64/1, at most 32 CAS attempts, positive IDs through INT64_MAX.
+The actual miss path returns zero without cache/definition publication on bounded
+allocation failure; hits, full keys, trace ABI, deadlines and membership pruning
+remain intact. The existing loader acquires the allocator with the LRU and rewrites
+both unwinder variants to that same map; no new public accessor/reset is added.
+
+`tests/correlation/dispatcher.c` includes the entire prepared dispatcher and real
+layouts. `tests/correlation/allocator.bpf.c` compiles the same production header
+into a test-only runnable BPF wrapper. See
+[allocator evidence](../../../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md)
+for RED/GREEN/mutants, actual multi-CPU execution, loader ownership, source controls
+and retained failures. These isolated checks do not prove HotSpot transport or
+active perf/NMI safety. Task2 separately produced two byte-identical locked helpers
+and complete local OCI bundles, independently verified every asset/descriptor, and
+executed all eight public-native cases with real current assets. Observed IDs1–9
+in completed public fixture captures bind to exact tasks; zero stays unavailable.
+Rendered and serialized pdata compatibility pass at1,2^53+1,INT64_MAX. The one
+experimental six-case control includes four carrier TIDs without observed reference
+aliasing, not JIT/GC/Loom lifetime proof. Both dense600 diagnostics still reject.
+Task3 adds an optional real kprobe wrapper around the complete production cache/
+send path:376calls/366exact definitions/0reported loss, two equal-key miss IDs,
+membership-proven LRU eviction/republish, native saturation and ordered nine-packet
+drain/all-owner retirement. This closes finite supported-context acceptance and
+archives the scoped allocator issue. Synthetic frame/task entry seeds complement
+Task2's JVM coupling; exhaustive schedules and active perf/NMI remain unqualified.
+No runtime source changed in Task2/3; original failure/historical linkage stays unproved.
+The R1 review correction uses distinct task/frame/epoch fixtures and exact binding
+assertions, including preservation after rejected redelivery. A definition-swap
+negative fails that oracle. Its new hashed graph preserves all native bytes and
+reuses the original isolated native receipts; current all-fourteen advancement
+chronology is recorded separately from the older incomplete chronology evidence.
 
 ## Current strict full and retirement patches
 
@@ -227,6 +263,13 @@ Retained partial frames carry actual diagnostics; failures before emitting a
 frame still have only the existing log/placeholder evidence. Interpreted method
 lookup ignores the captured check argument; its identity gap is separately
 tracked, while existing compiled-ID checking remains intact.
+
+Those are historical pre-identity/observation limitations. The identity patch below
+retains the interpreted pointer guards. Task3's separately selected observed reader
+routes original native read causes to the fatal owner before formatting can erase
+them; logical missing metadata becomes unavailable, and unknown-definition reporter
+conflicts also reach the actual consumer's fatal route. This source support remains
+unadmitted; see the [observed contract](../../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
 
 ## Interpreted identity patch (local, not submitted upstream)
 

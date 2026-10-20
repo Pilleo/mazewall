@@ -46,6 +46,20 @@ struct {
 	__type(value, __u64);
 } sequences SEC(".maps");
 
+struct selected_cpu_counts { __u64 attempted, submitted, reserve_failed, overflow; };
+struct {
+	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct selected_cpu_counts);
+} selected_counts SEC(".maps");
+
+static __always_inline void selected_inc(struct selected_cpu_counts *counts, __u64 *field)
+{
+	if (__sync_fetch_and_add(field, 1) == ~0ULL)
+		__sync_fetch_and_or(&counts->overflow, 1);
+}
+
 GADGET_TRACER_MAP(events, 1024 * 256);
 GADGET_TRACER(openat, events, event);
 
@@ -63,13 +77,19 @@ int capture_openat(struct pt_regs *ctx)
 	if (target_start_ticks && process_start_ticks != target_start_ticks)
 		return 0;
 	__u32 zero = 0;
+	struct selected_cpu_counts *counts = bpf_map_lookup_elem(&selected_counts, &zero);
+	if (!counts)
+		return 0;
+	selected_inc(counts, &counts->attempted);
 	__u64 *seq = bpf_map_lookup_elem(&sequences, &zero);
 	if (!seq)
 		return 0;
 	__u64 occurrence = __sync_fetch_and_add(seq, 1) + 1;
 	struct event *event = gadget_reserve_buf(&events, sizeof(*event));
-	if (!event)
+	if (!event) {
+		selected_inc(counts, &counts->reserve_failed);
 		return 0;
+	}
 	__builtin_memset(event, 0, sizeof(*event));
 	event->sequence = occurrence;
 	event->process_start_ticks = process_start_ticks;
@@ -130,6 +150,7 @@ int capture_openat(struct pt_regs *ctx)
 			event->hotspot_epoch_state = 1; // stable (including zero)
 	}
 	gadget_submit_buf(ctx, &events, event, sizeof(*event));
+	selected_inc(counts, &counts->submitted);
 	return 0;
 }
 

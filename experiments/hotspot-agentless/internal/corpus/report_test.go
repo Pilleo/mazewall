@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 	"strings"
@@ -19,7 +20,7 @@ func corpusRecords(t *testing.T) []model.Record {
 	rows = append(rows, model.Record{SchemaVersion: 1, Kind: "collector_attached", SessionID: "s"})
 	for i, branch := range []string{"A", "B"} {
 		id := fmt.Sprint(i)
-		e := &model.Event{EventID: id, SessionID: "s", PID: 123, TID: 123, ProcessStartTicks: 7, CorrelationID: uint64(i + 1), ClockDomain: "CLOCK_BOOTTIME", Filename: fmt.Sprintf("/fixture/mw-inline-corpus-r-w0-s0-%s", branch), DirFD: -100, ArgumentRead: 50}
+		e := &wire.Event{EventID: id, SessionID: "s", PID: 123, TID: 123, ProcessStartTicks: 7, CorrelationID: uint64(i + 1), ClockDomain: "CLOCK_BOOTTIME", Filename: fmt.Sprintf("/fixture/mw-inline-corpus-r-w0-s0-%s", branch), DirFD: -100, ArgumentRead: 50}
 		e.FilenameBytes = []byte(e.Filename)
 		rows = append(rows, model.Record{SchemaVersion: 1, Kind: "event", SessionID: "s", EventID: id, Event: e}, model.Record{SchemaVersion: 1, Kind: "enrichment", SessionID: "s", EventID: id, Evidence: &model.StackEvidence{Attribution: "event_correlated", Walk: "returned", Frames: []model.Frame{{ProviderType: uint8(libpf.HotSpotFrame), FunctionName: "InlineCorpusFixture.sharedLeaf(java.lang.String)", ScopeLookup: "exact_pc"}, {ProviderType: uint8(libpf.HotSpotFrame), FunctionName: "InlineCorpusFixture.path" + branch + "(java.lang.String)", ScopeLookup: "exact_pc"}}, Provider: model.Provider{PatchSHA256: "patch"}}})
 	}

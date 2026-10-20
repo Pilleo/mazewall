@@ -1,9 +1,11 @@
 # Pinned JIT and GC candidate qualification
 
 Review update: the recorded corpus counts are historical diagnostic observations,
-not promotion-grade validation. Identity/pairing and substring-name verifier defects
+not promotion-grade validation. Original identity/pairing and substring-name verifier defects
 are reproduced in the [implementation review](2026-10-05-hotspot-implementation-review.md).
-Revalidate retained packets with hardened validators before relying on useful counts.
+The [remediation](2026-10-05-hotspot-review-remediation-evidence.md) now revalidates
+the retained counts and records fresh40token C1/C2/G1 cases at29/30/31useful prefixes.
+These remain diagnostic prefixes without compiled/reclamation lifetime proof.
 
 Implemented offline proof gate, exact-token JVM fixture/verifier and explicit
 experimental schema1 harness. Production ValidateProfile/Discover remain unchanged;

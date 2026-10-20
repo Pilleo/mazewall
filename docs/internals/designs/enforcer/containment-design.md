@@ -211,6 +211,10 @@ HotSpot when installed only on a worker. Late JNI native-nmethod generation can
 occur synchronously on that contained thread and require executable CodeHeap
 growth. The retained relative-file read failure involved a late `size0` JNI
 wrapper and a 64 KiB non-profiled executable heap expansion denied with `EPERM`.
+The unsupervised installer returns no supervisor lease instead of constructing a
+dummy callback after the irreversible boundary; cold lambda linkage can itself
+require such executable CodeHeap growth. The [scoped correction](../../../plans/2026-10-17-containment-post-install-bootstrap-evidence.md)
+removes that unnecessary bootstrap without permitting executable mappings.
 Class loading or one successful warm read does not prove that all late native
 nmethods are ready. Select the runtime profile explicitly for the substrate:
 strict profiles remain fail-closed, without automatic detection or fallback.
@@ -936,7 +940,7 @@ semantics. The helper returns typed
 the limitation and denies with EPERM before accepting or importing a socket.
 Address-less accept is supported. No numeric-PID write or forced-write fallback
 is performed. Restoring this route requires a separately verified memory-write
-capability ([backlog](../../backlog/issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md)).
+capability ([backlog](../../backlog/resolved/issue-20260910-171157-430-restore-accept-peer-address-writes-through-identit.md)).
 
 The notification deadline no longer waits for these tracee filesystem/memory
 operations on the reactor. As with any JVM service, scheduling and native-kernel
@@ -1022,7 +1026,7 @@ Reply interpretation and its post-reply cleanup are also terminal failure bounda
 
 The process boundary is also the authorization boundary: `SupervisorInstaller`'s JVM validation listener registers and consumes its session's spawn authorization. The sidecar routes carry the resulting JVM decision alongside their request context; neither argument preparation nor a route executor mirrors, consumes again, or independently grants that authority. Duplicating the store across processes would risk replay or incorrectly deny a legitimately consumed authorization.
 
-The native `O_PATH` flag is verified against the host C headers as `0x00200000`; secure-exec, Landlock and profiler classification share this platform value ([resolved issue](../../backlog/resolved/issue-20260909-074606-812-correct-o-path-native-flag-value-against-linux-hea.md)). One secure-exec limitation remains explicitly tracked: `pidfd_getfd` plus local close does not remove an injected descriptor from the tracee's FD table ([backlog](../../backlog/issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md)). Failed rewrite remains denied, but the injected remote descriptor can remain until tracee teardown. No remote-close protocol is introduced.
+The native `O_PATH` flag is verified against the host C headers as `0x00200000`; secure-exec, Landlock and profiler classification share this platform value ([resolved issue](../../backlog/resolved/issue-20260909-074606-812-correct-o-path-native-flag-value-against-linux-hea.md)). One secure-exec limitation remains explicitly tracked: `pidfd_getfd` plus local close does not remove an injected descriptor from the tracee's FD table ([backlog](../../backlog/resolved/issue-20260909-074418-909-correct-secure-exec-cleanup-of-injected-tracee-des.md)). Failed rewrite remains denied, but the injected remote descriptor can remain until tracee teardown. No remote-close protocol is introduced.
 
 ---
 

@@ -28,7 +28,7 @@ identity/pairing even though their outputs cannot yet activate production suppor
 
 Reproduced: runtime useful1 for schema99/foreign ID; Loom marked1 for wrong PID/
 birth with no terminal, and logical_observed1 for float ID/wrong process.
-[Issue](../internals/backlog/issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-.md).
+[Issue](../internals/backlog/resolved/issue-20261005-212825-219-validate-complete-candidate-evidence-identity-and-.md).
 
 ### R2 — P2: substring names count wrong routes as useful
 
@@ -38,7 +38,7 @@ Owner and expected method are substring matches. `WrongFixture.leafCorrupt()` an
 yielding useful/logical counts for different classes and methods. The current
 native-only/unavailable distinction must remain, but useful application methods
 need exact owner/name extraction and ordered comparison.
-[Issue](../internals/backlog/issue-20261005-212825-569-match-exact-candidate-application-methods-instead-.md).
+[Issue](../internals/backlog/resolved/issue-20261005-212825-569-match-exact-candidate-application-methods-instead-.md).
 
 ### R3 — P2: cleanup loses remote failure/ownership evidence
 
@@ -49,7 +49,7 @@ timeout also raises before wrapper joins and can replace the original failure.
 Killing a Docker client does not establish container retirement. Fault injection
 of the existing finally block confirmed returncode1 is ignored. No actual privileged
 container was leaked by this review; the defect is the unhandled failure path.
-[Issue](../internals/backlog/issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi.md).
+[Issue](../internals/backlog/resolved/issue-20261005-212825-858-retain-remote-candidate-cleanup-failures-and-pendi.md).
 
 ### R4 — P2: per-CPU contradictions disappear in aggregate totals
 
@@ -60,7 +60,7 @@ submitted/reserve equation. CPU A(1attempt,2submitted,0reserve) and CPU B(1attem
 Evaluate returns complete/lost0. The first CPU is impossible and the second's drop
 is unexplained. Validate each tuple before summing; do not rely on totals to expose
 contradictory final snapshots.
-[Issue](../internals/backlog/issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot.md).
+[Issue](../internals/backlog/resolved/issue-20261005-212826-184-reject-contradictory-per-cpu-conservation-snapshot.md).
 
 ## Reproduction evidence
 
@@ -95,3 +95,12 @@ virtual corpus with independent expected birth identity. Only after these gates
 design production digest opt-in or default loss-owner binding. Compiled/virtual
 promotion remains blocked on actual event-time lifetime mechanisms, not faster
 qualification tools. See [remediation plan](../superpowers/plans/2026-10-05-hotspot-review-remediation.md).
+
+## Remediation checkpoint (2026-10-17)
+
+All four findings are resolved in the migrated Go tools. Negative controls, retained
+and fresh independent-identity captures, actual remote cleanup and kernel accounting
+checks plus the complete build/native public/ABI gates pass. See
+[remediation evidence](2026-10-05-hotspot-review-remediation-evidence.md).
+The reproductions above describe the historical reviewed revision; wider runtime,
+digest-provider and all-source-loss promotion boundaries remain unchanged.

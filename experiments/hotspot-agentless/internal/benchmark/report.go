@@ -114,7 +114,7 @@ func Analyze(m RunManifest, target, records io.Reader) (RunReport, error) {
 			if _, ok := events[row.EventID]; ok {
 				return r, fmt.Errorf("duplicate event")
 			}
-			events[row.EventID] = *row.Event
+			events[row.EventID] = model.Event(*row.Event)
 			perCPU[row.Event.CPU] = append(perCPU[row.Event.CPU], row.Event.Sequence)
 		case "enrichment":
 			if row.Evidence == nil {

@@ -60,7 +60,9 @@ internal object HotSpotPerformanceMain {
     }
 
     private fun replay(input: Path): JsonObject {
-        val measured = Files.newInputStream(input).use { measureReplay(it, HotSpotReplayLimits()) }
+        val rendered = Files.newInputStream(input).use { measureReplayAndRender(it, HotSpotReplayLimits()) }
+        val measured = rendered.replay
+        val renderedBytes = rendered.canonicalJson.toByteArray(Charsets.UTF_8)
         return buildJsonObject {
             put("input_bytes", Files.size(input))
             put("projection_schema", 1)
@@ -69,6 +71,9 @@ internal object HotSpotPerformanceMain {
             put("mapping_nanos", measured.mappingNanos)
             put("reader_decode_io_nanos", measured.pipelineNanos - measured.mappingNanos)
             put("finish_nanos", measured.finishNanos)
+            put("render_nanos", rendered.renderNanos)
+            put("rendered_bytes", renderedBytes.size)
+            put("rendered_sha256", hash(renderedBytes))
             put(
                 "received",
                 measured.evidence.summary.received

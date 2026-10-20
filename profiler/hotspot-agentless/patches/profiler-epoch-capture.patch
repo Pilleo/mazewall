@@ -64,8 +64,9 @@
    for (int i = 0; i < HOTSPOT_FRAMES_PER_PROGRAM; i++) {
 --- a/support/ebpf/interpreter_dispatcher.ebpf.c
 +++ b/support/ebpf/interpreter_dispatcher.ebpf.c
-@@ -9,2 +9,3 @@
+@@ -9,2 +9,4 @@
  #include "types.h"
++#include "correlation_ids.h"
 +extern struct hotspot_procs_t hotspot_procs;
  
 @@ -337,1 +337,24 @@
@@ -93,8 +94,47 @@
 +
 +
    // Build traceCache
-@@ -355,3 +378,4 @@
+@@ -355,3 +379,4 @@
    traceCache->tid = trace->tid;
 +  traceCache->hotspot_identity = trace->hotspot_identity;
  
    u16 len = trace->frame_data_len;
+@@ -375,1 +400,5 @@
+-  u64 correlation_id = bpf_ktime_get_ns();
++  u64 correlation_id = next_correlation_id();
++  if (!correlation_id) {
++    bpf_map_update_elem(&generic_params, &key0, &correlation_id, BPF_ANY);
++    return 0;
++  }
+--- /dev/null
++++ b/support/ebpf/correlation_ids.h
+@@ -0,0 +1,29 @@
++// Copyright The OpenTelemetry Authors
++// SPDX-License-Identifier: Apache-2.0
++#ifndef MW_CORRELATION_IDS_H
++#define MW_CORRELATION_IDS_H
++
++// Owned with the producer LRU; never reset while its namespace is alive.
++struct correlation_ids_t {
++  __uint(type, BPF_MAP_TYPE_ARRAY);
++  __type(key, u32);
++  __type(value, u64);
++  __uint(max_entries, 1);
++} correlation_ids SEC(".maps");
++
++static EBPF_INLINE u64 next_correlation_id(void)
++{
++  u32 zero = 0;
++  u64 *last = bpf_map_lookup_elem(&correlation_ids, &zero);
++  if (!last) return 0;
++  u64 current = *(volatile u64 *)last;
++  for (int attempt = 0; attempt < 32; attempt++) {
++    if (current >= 0x7fffffffffffffffULL) return 0;
++    u64 previous = __sync_val_compare_and_swap(last, current, current + 1);
++    if (previous == current) return current + 1;
++    current = previous;
++  }
++  return 0;
++}
++
++#endif

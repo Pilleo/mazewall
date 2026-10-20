@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 	"strings"
@@ -21,7 +22,7 @@ func TestUnloadingReportDistinguishesUnavailableFromWrongGeneration(t *testing.T
 			if g == 1 && !wrong {
 				name = "UnloadG00001"
 			}
-			event := model.Event{PID: 123, TID: 124, EventID: id, CorrelationID: 7, Filename: strings.Split(strings.TrimSpace(strings.Split(manifest, "\n")[g+1]), ",")[3]}
+			event := wire.Event{PID: 123, TID: 124, EventID: id, CorrelationID: 7, Filename: strings.Split(strings.TrimSpace(strings.Split(manifest, "\n")[g+1]), ",")[3]}
 			_ = e.Encode(model.Record{Kind: "event", EventID: id, Event: &event})
 			_ = e.Encode(model.Record{Kind: "enrichment", EventID: id, Evidence: &model.StackEvidence{Attribution: "event_correlated", Frames: []model.Frame{{FunctionName: name + ".sharedLeaf(java.lang.String)"}, {FunctionName: name + ".pathA(java.lang.String)"}}}})
 		}
@@ -60,7 +61,7 @@ func TestEpochGateRejectsUnavailableMissingBranchAndReferenceMixing(t *testing.T
 					if mode == "mixed_reference" {
 						ref = 10
 					}
-					e := model.Event{PID: 123, TID: 456, EventID: id, Filename: filename, CorrelationID: ref, HotSpotIdentity: model.CapturedHotSpotIdentity(libpf.HotSpotIdentity{Epoch: epoch, State: libpf.HotSpotEpochStable})}
+					e := wire.Event{PID: 123, TID: 456, EventID: id, Filename: filename, CorrelationID: ref, HotSpotIdentity: model.CapturedHotSpotIdentity(libpf.HotSpotIdentity{Epoch: epoch, State: libpf.HotSpotEpochStable})}
 					v := model.StackEvidence{Attribution: "event_correlated", HotSpotIdentity: model.CheckedHotSpotIdentity(libpf.HotSpotIdentity{Epoch: epoch, State: libpf.HotSpotEpochStable}), Frames: []model.Frame{{FunctionName: fmt.Sprintf("UnloadG%05d.sharedLeaf(java.lang.String)", g)}, {FunctionName: fmt.Sprintf("UnloadG%05d.path%s(java.lang.String)", g, branch)}}}
 					if mode == "all_unavailable" || mode == "missing_B" && g == 1 && branch == "B" {
 						v.Attribution = "unavailable"
