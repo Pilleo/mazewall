@@ -107,5 +107,33 @@ The relevant next context, if separately authorized, is the original hosted/
 container final-normal-close barrier with actual iteration/predicate records,
 not another identical local pass. PR548 remains frozen pending that evidence.
 
+## Hosted diagnostic contexts
+
+Diagnostic-only draftPR549 was kept separate from default/feature branches.
+The reviewed buffered instrumentation was not merged. Hosted class probe
+[39412166077](https://github.com/Pilleo/mazewall/actions/runs/39412166077) passes
+eight tests (zero failures/errors, one existing prerequisite skip); selected
+method executes2.924s. It yields no failing-owner trace or causal fix.
+
+An aggregate probe without original host-test preparation stopped in an unrelated
+profiler unit test before Portal ran; that result supplies no target evidence.
+The probe was corrected to the actual candidate0e275fdd base, ordinary host test/
+consumerHarnessTest preparation followed by the original container kernel
+aggregate, with unchanged runtime/diagnostic source hashes and limits. No profiler
+test/assertion was changed or skipped to address that setup mismatch.
+
+[Corrected context39417323041](https://github.com/Pilleo/mazewall/actions/runs/39417323041)
+passes host preparation and kernel aggregate. All seven Portal integration suites
+pass (42 tests, one prerequisite skip); selected method executes2.63s, no skip/
+failure. These diagnostic-source runs still cannot identify the original owner,
+prove zero observer effect or establish a production fix. CI source/context and
+artifacts are retained in the investigation workspace and public diagnostic branch.
+
+PR549 is closed WITHOUT MERGE; sources/branches/evidence remain recoverable. No
+corrective runtime change is justified yet. The bounded next action is one real
+revalidation of unchanged, uninstrumented PR548 under its original required
+checks—not retry-until-green or a claim this issue is fixed. A failed revalidation
+remains blocking. This issue stays open even if the independent feature qualifies.
+
 ---
 <!-- id: issue-20261020-094438-599-identify-incomplete-selected-launch-retirement-aft  file: issue-20261020-094438-599-identify-incomplete-selected-launch-retirement-aft.md -->
