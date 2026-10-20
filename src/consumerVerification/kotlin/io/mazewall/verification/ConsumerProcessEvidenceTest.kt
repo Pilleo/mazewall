@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -12,11 +13,54 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 class ConsumerProcessEvidenceTest {
     @TempDir
     private lateinit var root: Path
+
+    @Test
+    fun `fast successful exit drains delayed actual readers before stream cleanup`() = assertDelayedReaders(0)
+
+    @Test
+    fun `fast nonzero exit drains delayed actual readers before stream cleanup`() = assertDelayedReaders(37)
+
+    private fun assertDelayedReaders(exitCode: Int) {
+        val args = listOf("sh", "-c", "printf 'out\\000é\\n'; printf 'err\\000λ\\n' >&2; exit $exitCode")
+        val outcome = runCatching {
+            ConsumerProcessEvidence.run(args, root, "delayed", startPump = { reader ->
+                // Execute the actual reader only at its join, after the real child's exit.
+                object : CompletableFuture<Void>() {
+                    override fun get(timeout: Long, unit: TimeUnit): Void? {
+                        if (!isDone) {
+                            val receipt = Json.parseToJsonElement(Files.readString(root.resolve("delayed.command.json"))).jsonObject
+                            val pid = receipt.getValue("pid").jsonPrimitive.content.toLong()
+                            assertTrue(ProcessHandle.of(pid).map { !it.isAlive }.orElse(true), "Reader ran before actual child exit")
+                            val read = runCatching { reader.run() }
+                            read.fold({ complete(null) }, { completeExceptionally(it) })
+                        }
+                        return super.get(timeout, unit)
+                    }
+                }
+            })
+        }
+        assertTrue(outcome.isSuccess, "Normal exit must drain before stream cleanup: ${outcome.exceptionOrNull()}")
+        val result = outcome.getOrThrow()
+        assertEquals(exitCode, result.exitCode)
+        assertEquals("out\u0000é\n", result.stdout)
+        assertEquals("err\u0000λ\n", result.stderr)
+        assertArrayEquals("out\u0000é\n".toByteArray(), Files.readAllBytes(root.resolve("delayed.stdout.log")))
+        assertArrayEquals("err\u0000λ\n".toByteArray(), Files.readAllBytes(root.resolve("delayed.stderr.log")))
+        assertArrayEquals("out\u0000é\nerr\u0000λ\n".toByteArray(), Files.readAllBytes(root.resolve("delayed.log")))
+        val receipt = Json.parseToJsonElement(Files.readString(root.resolve("delayed.command.json"))).jsonObject
+        assertEquals(args, receipt.getValue("argv").jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(root.toString(), receipt.getValue("cwd").jsonPrimitive.content)
+        assertEquals(exitCode.toString(), receipt.getValue("exitCode").jsonPrimitive.content)
+        assertEquals("false", receipt.getValue("timedOut").jsonPrimitive.content)
+        assertEquals("true", receipt.getValue("reaped").jsonPrimitive.content)
+        assertEquals(false, ProcessHandle.of(receipt.getValue("pid").jsonPrimitive.content.toLong()).map { it.isAlive }.orElse(false))
+    }
 
     @Test
     fun `actual nonzero child retains full separate streams and command identity`() {
