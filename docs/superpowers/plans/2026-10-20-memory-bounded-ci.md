@@ -147,6 +147,14 @@ review and hosted cold/warm final-code memory qualification remain pending. The
 earlier all-module memory witness predates final parser/cancellation fixes and is
 not represented as a current-head hosted run. See the scoped backlog evidence.
 
+Final local checkpoint: whole-branch findings are addressed by `392ad367` and the
+operator-authorized retirement-sampling fix `e159fca8`; final scoped re-review is
+spec PASS/quality APPROVE. The corrected full optional build passes271 tasks in
+4m33s with configuration-cache reuse; all41 Python tests and strict YAML/link,
+backlog and whitespace checks pass. The earlier checkpoint above is historical.
+Draft stacked PR/hosted cold-warm qualification remain next; PR545 is not merged
+implicitly, and no final-code hosted load or CI speed claim is made.
+
 - [x] Spec coverage: memory limits/evidence, compatibility, cache boundaries, failure graph and rollout are assigned to Tasks1-3.
 - [x] Step/type scan: file names, CLI, output wire values, PIT settings and cache-output forwarding agree with the spec.
 - [x] Review focus: each of the five conditions above has an owning test/acceptance step.

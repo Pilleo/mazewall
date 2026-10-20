@@ -80,5 +80,27 @@ zero OOM-kill increase. Heap limits are proposed caps, not an unmeasured guarant
   pending. PR545 is still the unmerged prerequisite; no implicit merge or
   branch-protection change is authorized.
 
+## Reviewed local completion checkpoint
+
+Whole-branch review found detached Gradle daemon/workers outside launcher-group
+cleanup and malformed YAML indentation. `392ad367` fixes both with invocation-owned
+Linux subreaper/pidfd retirement; the real independent Gradle cancellation fixture
+proves launcher/daemon/worker exit while unrelated work survives. Strict YAML parses.
+
+Scoped re-review identified a new sampling gap during retirement. The operator
+authorized the additional focused correction; `e159fca8` observes primary completion,
+continues one-second sampling through the same bounded cleanup, and retains the
+post-retirement sample. Two false-pass scenarios were observed RED then GREEN.
+Re-review marks all findings addressed, spec PASS and quality APPROVE.
+
+Final local optional build on `e159fca8` passes in4m33s (271tasks,31 executed,
+240 up-to-date; configuration cache reused). All41 Python tests pass, as do
+backlog, strict YAML/link and whitespace checks. These are local, not CI timings.
+Historical mutation evidence above is not relabelled as final-code load evidence.
+
+Hosted cold/warm final-code memory/load qualification remains outstanding. Keep
+this issue open and the follow-up draft while PR545 remains the unmerged base.
+No merge, publication, CI speed claim or memory-exhaustion guarantee is implied.
+
 ---
 <!-- id: issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m  file: issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m.md -->
