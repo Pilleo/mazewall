@@ -106,6 +106,14 @@ public class ProcessBroker internal constructor(
     private val socketAcceptance = SocketAcceptance()
     private val generationCaptures = PortalGenerationCaptures()
 
+    // Temporary investigation records; fixed capacity, no rendering in lifecycle paths.
+    internal val diagnosticCloses = Array(3) { BrokerCloseDiagnostic() }
+    internal val diagnosticStartupAttempts = Array(4) { BrokerAttemptDiagnostic() }
+    internal var diagnosticCloseCount = 0
+        private set
+    internal var diagnosticStartupAttemptCount = 0
+        private set
+
     @Volatile private var mostRecentInvocation: PortalInvocationTiming? = null
 
     @Volatile private var mostRecentWorkerLifecycle: PortalWorkerLifecycle = PortalWorkerLifecycle.notStarted()
@@ -377,8 +385,12 @@ public class ProcessBroker internal constructor(
         val cleanup = CleanupCollector()
         var allRetired = false
         var failure: Throwable? = null
+        val diagnostic = operation.diagnostic
+        diagnostic?.startedNs = System.nanoTime()
+        diagnostic?.threadId = Thread.currentThread().threadId()
+        diagnostic?.interruptedBefore = Thread.currentThread().isInterrupted
         try {
-            allRetired = retireOwnedResources(cleanup, startupToJoin, operation.deadline)
+            allRetired = retireOwnedResources(cleanup, startupToJoin, operation.deadline, diagnostic)
             val outcome = cleanup.outcome()
             failure = outcome.failureOrNull()
             if (failure == null && !allRetired) {
@@ -403,6 +415,12 @@ public class ProcessBroker internal constructor(
                 operation.result.complete(failure?.let(BrokerCloseResult::Failed) ?: BrokerCloseResult.Succeeded)
             }
         }
+        diagnostic?.allRetired = allRetired
+        diagnostic?.failure = failure
+        diagnostic?.lifecycleAfter = lifecycle
+        diagnostic?.interruptedAfter = Thread.currentThread().isInterrupted
+        diagnostic?.remainingAfterMs = operation.deadline.remainingMillis()
+        diagnostic?.finishedNs = System.nanoTime()
         failure?.let(::raiseBrokerFailure)
     }
 
@@ -411,26 +429,37 @@ public class ProcessBroker internal constructor(
         cleanup: CleanupCollector,
         startupToJoin: CountDownLatch?,
         deadline: Deadline,
+        diagnostic: BrokerCloseDiagnostic?,
     ): Boolean {
         cleanup.attempt("operation dispatch shutdown") { operations.stop() }
         cleanup.attempt("maintenance shutdown") { maintenance.shutdownNow() }
         generationCaptures.cancel()
-        val maintenanceStopped = awaitMaintenance(deadline)
+        val maintenanceStopped = awaitMaintenance(deadline).also { diagnostic?.maintenanceStopped = if (it) 1 else 0 }
         retireRetainedCapabilities(cleanup)
         closeRetirement.retireHandoffs(cleanup)
         provisionalSlots.toList().forEach { slot ->
             cleanup.attempt("provisional worker") { destroySlot(slot) }
         }
-        val startupStopped = awaitBrokerStartup(startupToJoin, deadline)
+        val startupStopped = awaitBrokerStartup(startupToJoin, deadline).also { diagnostic?.startupStopped = if (it) 1 else 0 }
         closeRetirement.retireAllSlots(cleanup)
         provisionalAttempts.toList().forEach { attempt ->
-            cleanup.attempt("startup acquisition") { retireStartupAttempt(attempt) }
+            cleanup.attempt("startup acquisition") {
+                retireStartupAttempt(attempt, diagnostic?.let { it.attempts.getOrNull(it.attemptCount++) })
+            }
         }
         closeRetirement.retireHandoffs(cleanup)
-        val operationsStopped = operations.await(deadline)
+        val operationsStopped = operations.await(deadline).also { diagnostic?.operationsStopped = if (it) 1 else 0 }
         var capturesStopped = false
-        cleanup.attempt("generation capture ownership") { capturesStopped = generationCaptures.retire(deadline) }
-        return capturesStopped && operationsStopped && maintenanceStopped && startupStopped && closeRetirement.allOwnedResourcesRetired(cleanup)
+        cleanup.attempt("generation capture ownership") { capturesStopped = generationCaptures.retire(deadline, diagnostic) }
+        diagnostic?.capturesStopped = if (capturesStopped) 1 else 0
+        val retired = capturesStopped && operationsStopped && maintenanceStopped && startupStopped &&
+            closeRetirement.allOwnedResourcesRetired(cleanup, diagnostic).also { diagnostic?.ownedResources = if (it) 1 else 0 }
+        diagnostic?.conjunctionResult = if (retired) 1 else 0
+        diagnostic?.conjunctionNs = System.nanoTime()
+        diagnostic?.remainingAtConjunctionMs = deadline.remainingMillis()
+        diagnostic?.interruptedAtConjunction = Thread.currentThread().isInterrupted
+        diagnostic?.startupLatch = startupToJoin?.count ?: -1
+        return retired
     }
 
     /** Keeps close-only ownership retirement separate from public broker operations. */
@@ -460,14 +489,14 @@ public class ProcessBroker internal constructor(
             leftover.distinct().forEach { slot -> cleanup.attempt("worker") { destroySlot(slot) } }
         }
 
-        fun allOwnedResourcesRetired(cleanup: CleanupCollector): Boolean =
-            trackedSlots.isEmpty() &&
-                idle.isEmpty() &&
-                provisionalSlots.isEmpty() &&
-                provisionalAttempts.isEmpty() &&
-                acceptedHandoffs.isEmpty() &&
-                retainedCapabilities.isEmpty() &&
-                cleanup.outcome().complete
+        fun allOwnedResourcesRetired(cleanup: CleanupCollector, diagnostic: BrokerCloseDiagnostic?): Boolean =
+            trackedSlots.isEmpty().also { diagnostic?.registry?.set(0, if (it) 1 else 0) } &&
+                idle.isEmpty().also { diagnostic?.registry?.set(1, if (it) 1 else 0) } &&
+                provisionalSlots.isEmpty().also { diagnostic?.registry?.set(2, if (it) 1 else 0) } &&
+                provisionalAttempts.isEmpty().also { diagnostic?.registry?.set(3, if (it) 1 else 0) } &&
+                acceptedHandoffs.isEmpty().also { diagnostic?.registry?.set(4, if (it) 1 else 0) } &&
+                retainedCapabilities.isEmpty().also { diagnostic?.registry?.set(5, if (it) 1 else 0) } &&
+                cleanup.outcome().complete.also { diagnostic?.registry?.set(6, if (it) 1 else 0) }
     }
 
     private fun prepareClose(): ClosePreparation =
@@ -478,7 +507,7 @@ public class ProcessBroker internal constructor(
             check(transition is ProcessBrokerLifecycleTransition.Advanced) { (transition as ProcessBrokerLifecycleTransition.ProtocolViolation).reason }
             lifecycle = transition.state
             startupCancelled = true
-            val operation = CloseOperation(Deadline.afterMillis(limits.closeTimeoutMs), CompletableFuture())
+            val operation = CloseOperation(Deadline.afterMillis(limits.closeTimeoutMs), CompletableFuture(), diagnosticCloses.getOrNull(diagnosticCloseCount++))
             closeOperation = operation
             ClosePreparation.execute(startupCompletion, operation)
         }
@@ -609,7 +638,7 @@ public class ProcessBroker internal constructor(
         } catch (failure: Throwable) {
             mostRecentWorkerLifecycle = PortalWorkerLifecycle(PortalWorkerLifecycleState.STARTUP_FAILED, detail = failure.message?.take(1024))
             synchronized(attempt) { attempt.acquisitionFinished = true }
-            val cleanupFailure = runCatching { retireStartupAttempt(attempt) }.exceptionOrNull()
+            val cleanupFailure = runCatching { retireStartupAttempt(attempt, diagnosticStartupAttempts.getOrNull(diagnosticStartupAttemptCount++)) }.exceptionOrNull()
             attempt.pump?.snapshot()?.let { diagnostics ->
                 failure.addSuppressed(IllegalStateException("portal worker startup diagnostics: $diagnostics"))
             }
@@ -617,7 +646,7 @@ public class ProcessBroker internal constructor(
         }
     }
 
-    private fun retireStartupAttempt(attempt: StartupAttempt): Boolean {
+    private fun retireStartupAttempt(attempt: StartupAttempt, diagnostic: BrokerAttemptDiagnostic?): Boolean {
         synchronized(attempt) {
             if (attempt.transferred) return true
             attempt.retirementRequested = true
@@ -630,7 +659,26 @@ public class ProcessBroker internal constructor(
             startupRetirement.retireEndpoint(attempt, cleanup)
             val outcome = cleanup.outcome()
             outcome.failures.forEach { logger.log(Level.WARNING, "failed to release ${it.resource}", it.cause) }
-            if (attempt.fullyRetired) provisionalAttempts.remove(attempt)
+            if (attempt.fullyRetired.also { retired ->
+                    diagnostic?.retired = if (retired) 1 else 0
+                    diagnostic?.attemptIdentity = System.identityHashCode(attempt)
+                    diagnostic?.threadId = Thread.currentThread().threadId()
+                    diagnostic?.interrupted = Thread.currentThread().isInterrupted
+                    diagnostic?.acquisitionFinished = attempt.acquisitionFinished
+                    diagnostic?.retirementRequested = attempt.retirementRequested
+                    diagnostic?.transferred = attempt.transferred
+                    diagnostic?.channelRetired = attempt.channelRetired
+                    diagnostic?.serverRetired = attempt.serverRetired
+                    diagnostic?.processDestroyed = attempt.processDestroyed
+                    diagnostic?.processReaped = attempt.processReaped
+                    diagnostic?.cgroupRetired = attempt.cgroupRetired
+                    diagnostic?.pumpRetired = attempt.pumpRetired
+                    diagnostic?.endpointRetired = attempt.endpointRetired
+                    diagnostic?.processIdentity = System.identityHashCode(attempt.process)
+                    diagnostic?.pumpIdentity = System.identityHashCode(attempt.pump)
+                    diagnostic?.cleanupComplete = outcome.complete
+                    diagnostic?.observedNs = System.nanoTime()
+                }) provisionalAttempts.remove(attempt)
             outcome.failureOrNull()?.let { throw it }
             return attempt.fullyRetired
         }
@@ -1047,7 +1095,70 @@ private fun raiseBrokerFailure(failure: Throwable): Nothing = throw failure
 private data class CloseOperation(
     val deadline: Deadline,
     val result: CompletableFuture<BrokerCloseResult>,
+    val diagnostic: BrokerCloseDiagnostic?,
 )
+
+/** Temporary fixed-capacity records. -1 means not evaluated/reached; excess counts mean overflow. */
+internal class BrokerCloseDiagnostic {
+    var startedNs = 0L
+    var conjunctionNs = 0L
+    var finishedNs = 0L
+    var threadId = 0L
+    var interruptedBefore = false
+    var interruptedAtConjunction = false
+    var interruptedAfter = false
+    var remainingAtConjunctionMs = -1
+    var remainingAfterMs = -1
+    var startupLatch = -1L
+    var maintenanceStopped = -1
+    var startupStopped = -1
+    var operationsStopped = -1
+    var capturesStopped = -1
+    var ownedResources = -1
+    var conjunctionResult = -1
+    val registry = IntArray(7) { -1 }
+    var allRetired = false
+    var lifecycleAfter: ProcessBrokerLifecycle? = null
+    var failure: Throwable? = null
+    val attempts = Array(4) { BrokerAttemptDiagnostic() }
+    var attemptCount = 0
+    val captures = Array(4) { BrokerCaptureDiagnostic() }
+    var captureCount = 0
+}
+
+internal class BrokerAttemptDiagnostic {
+    var observedNs = 0L
+    var threadId = 0L
+    var interrupted = false
+    var attemptIdentity = 0
+    var retired = -1
+    var acquisitionFinished = false
+    var retirementRequested = false
+    var transferred = false
+    var channelRetired = false
+    var serverRetired = false
+    var processDestroyed = false
+    var processReaped = false
+    var cgroupRetired = false
+    var pumpRetired = false
+    var endpointRetired = false
+    var processIdentity = 0
+    var pumpIdentity = 0
+    var cleanupComplete = false
+}
+
+internal class BrokerCaptureDiagnostic {
+    var observedNs = 0L
+    var identity = 0
+    var captureThreadId = 0L
+    var cancelThreadId = 0L
+    var ended = -1L
+    var cancellationEnded = -1L
+    var resultObserved = false
+    var physicalEnd = -1
+    var interrupted = false
+    var cancelFailure: Throwable? = null
+}
 
 private sealed interface BrokerCloseResult {
     data object Succeeded : BrokerCloseResult

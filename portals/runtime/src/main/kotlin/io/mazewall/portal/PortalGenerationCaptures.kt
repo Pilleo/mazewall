@@ -40,11 +40,16 @@ internal class PortalGenerationCaptures {
 
     fun cancel() = owners.forEach(Capture<*>::cancel)
 
-    fun retire(deadline: Deadline): Boolean {
+    fun retire(deadline: Deadline, diagnostic: BrokerCloseDiagnostic? = null): Boolean {
         cancel()
         var fatal: Throwable? = null
         owners.toList().forEach { capture ->
-            if (capture.awaitPhysicalEnd(deadline)) {
+            if (capture.awaitPhysicalEnd(deadline).also { physicallyEnded ->
+                    val record = diagnostic?.let { it.captures.getOrNull(it.captureCount++) }
+                    record?.identity = System.identityHashCode(capture)
+                    record?.physicalEnd = if (physicallyEnded) 1 else 0
+                    capture.copyDiagnostic(record)
+                }) {
                 owners.remove(capture)
                 val outcome = capture.result.join().exceptionOrNull()
                 if (outcome is Error && !capture.resultObserved) {
@@ -97,6 +102,17 @@ internal class PortalGenerationCaptures {
         val mayForget: Boolean get() = physicallyEnded &&
             cancelFailure.get() == null &&
             (resultObserved || result.getNow(null)?.exceptionOrNull() !is Error)
+
+        fun copyDiagnostic(record: BrokerCaptureDiagnostic?) {
+            record?.captureThreadId = thread.threadId()
+            record?.cancelThreadId = cancellation.threadId()
+            record?.ended = ended.count
+            record?.cancellationEnded = cancellationEnded.count
+            record?.resultObserved = resultObserved
+            record?.cancelFailure = cancelFailure.get()
+            record?.interrupted = Thread.currentThread().isInterrupted
+            record?.observedNs = System.nanoTime()
+        }
 
         fun awaitPhysicalEnd(deadline: Deadline): Boolean {
             if (physicallyEnded) return true

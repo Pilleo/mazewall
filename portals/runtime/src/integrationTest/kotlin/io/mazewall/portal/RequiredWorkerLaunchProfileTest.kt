@@ -219,70 +219,175 @@ class RequiredWorkerLaunchProfileTest {
 
     @Test
     fun `selected launch cancellation and expiry retain actual child until physical retirement`() {
-        val fixture = fixture()
-        for (cancel in listOf(true, false)) {
-            val entered = CountDownLatch(1)
-            val release = CountDownLatch(1)
-            val receipts = Receipts()
-            receipts.beforeReturn = { child ->
-                assertEquals("MAZEWALL_PORTAL_PARENT_AUTH_PENDING", CompletableFuture.supplyAsync { child.inputStream.bufferedReader().readLine() }.get(5, TimeUnit.SECONDS))
-                entered.countDown()
-                if (cancel) assertTrue(release.await(10, TimeUnit.SECONDS)) else assertFalse(release.await(2100, TimeUnit.MILLISECONDS))
-            }
-            val broker =
-                ProcessBroker(
-                    launcher = receipts,
-                    sockets = receipts.sockets,
-                    workerClasspath = fixture,
-                    launchProfile = selectedProfile(),
-                    limits = PortalRuntimeLimits(startupTimeoutMs = if (cancel) 10_000 else 2000, closeTimeoutMs = 5_000),
-                )
-            val startup = CompletableFuture.supplyAsync { runCatching { broker.start() }.exceptionOrNull() }
-            var primary: Throwable? = null
-            try {
-                assertTrue(entered.await(5, TimeUnit.SECONDS))
-                assertTrue(receipts.child!!.isAlive)
-                if (cancel) {
-                    val closeReturned = CompletableFuture<Throwable?>()
-                    val closeInterrupted = AtomicBoolean()
-                    val closer = Thread.ofPlatform().unstarted {
-                        val failure = runCatching { broker.close() }.exceptionOrNull()
-                        closeInterrupted.set(Thread.currentThread().isInterrupted)
-                        closeReturned.complete(failure)
-                    }
-                    try {
-                        closer.start()
-                        io.mazewall.testing.awaitCondition(java.time.Duration.ofSeconds(5), "selected launch entered close") {
-                            broker.lifecycleState() == ProcessBrokerLifecycle.Closing
-                        }
-                        closer.interrupt()
-                        val failure = closeReturned.get(5, TimeUnit.SECONDS)
-                        assertTrue(failure is IncompleteBrokerCleanupException, failure?.stackTraceToString().orEmpty())
-                        assertTrue(closeInterrupted.get(), "incomplete close must preserve its caller interruption")
-                        assertEquals(1, broker.provisionalWorkers(), "held launch still physically owns actual child")
-                        assertTrue(receipts.child!!.isAlive)
-                    } finally {
-                        release.countDown()
-                        closer.join(5_000)
-                        assertFalse(closer.isAlive, "the actual close caller must physically end")
+        val diagnostics = Array(2) { SelectedLaunchDiagnostic() }
+        var diagnosticIteration = 0
+        try {
+            val fixture = fixture()
+            for (cancel in listOf(true, false)) {
+                val diagnostic = diagnostics[diagnosticIteration++]
+                diagnostic.visited = true
+                diagnostic.cancel = cancel
+                val entered = CountDownLatch(1)
+                val release = CountDownLatch(1)
+                val receipts = Receipts()
+                receipts.beforeReturn = { child ->
+                    assertEquals("MAZEWALL_PORTAL_PARENT_AUTH_PENDING", CompletableFuture.supplyAsync { child.inputStream.bufferedReader().readLine() }.get(5, TimeUnit.SECONDS))
+                    entered.countDown()
+                    if (cancel) assertTrue(release.await(10, TimeUnit.SECONDS)) else assertFalse(release.await(2100, TimeUnit.MILLISECONDS))
+                }
+                val broker =
+                    ProcessBroker(
+                        launcher = receipts,
+                        sockets = receipts.sockets,
+                        workerClasspath = fixture,
+                        launchProfile = selectedProfile(),
+                        limits = PortalRuntimeLimits(startupTimeoutMs = if (cancel) 10_000 else 2000, closeTimeoutMs = 5_000),
+                    )
+                diagnostic.broker = broker
+                val startup = CompletableFuture.supplyAsync {
+                    runCatching { broker.start() }.exceptionOrNull().also {
+                        diagnostic.startupFailure = it
+                        diagnostic.startupThreadId = Thread.currentThread().threadId()
+                        diagnostic.startupInterrupted = Thread.currentThread().isInterrupted
+                        diagnostic.startupReturnedNs = System.nanoTime()
                     }
                 }
-                val failure = requireNotNull(startup.get(8, TimeUnit.SECONDS))
-                assertFalse("GUEST_ENTERED" in failure.suppressed.joinToString { it.message.orEmpty() })
-                broker.close()
-                assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
-                receipts.assertRetired()
-            } catch (failure: Throwable) {
-                primary = failure
-                throw failure
-            } finally {
-                release.countDown()
-                val cleanup = CleanupCollector()
-                cleanup.attempt("selected launch completion") { startup.handle { _, _ -> Unit }.get(8, TimeUnit.SECONDS) }
-                cleanup.attempt("selected launch broker retirement") { broker.close() }
-                cleanup.outcome().failureOrNull()?.let { throw CleanupFailures.merge(primary, it) }
+                var primary: Throwable? = null
+                try {
+                    diagnostic.phase = SelectedLaunchPhase.HANDSHAKE
+                    assertTrue(entered.await(5, TimeUnit.SECONDS))
+                    assertTrue(receipts.child!!.isAlive)
+                    if (cancel) {
+                        val closeReturned = CompletableFuture<Throwable?>()
+                        val closeInterrupted = AtomicBoolean()
+                        val closer = Thread.ofPlatform().unstarted {
+                            diagnostic.closerThreadId = Thread.currentThread().threadId()
+                            diagnostic.interruptedCloseStartedNs = System.nanoTime()
+                            val failure = runCatching { broker.close() }.exceptionOrNull()
+                            closeInterrupted.set(Thread.currentThread().isInterrupted)
+                            diagnostic.interruptedCloseReturnedNs = System.nanoTime()
+                            closeReturned.complete(failure)
+                        }
+                        try {
+                            diagnostic.phase = SelectedLaunchPhase.EXPECTED_INTERRUPTED_CLOSE
+                            closer.start()
+                            io.mazewall.testing.awaitCondition(java.time.Duration.ofSeconds(5), "selected launch entered close") {
+                                broker.lifecycleState() == ProcessBrokerLifecycle.Closing
+                            }
+                            closer.interrupt()
+                            val failure = closeReturned.get(5, TimeUnit.SECONDS)
+                            assertTrue(failure is IncompleteBrokerCleanupException, failure?.stackTraceToString().orEmpty())
+                            assertTrue(closeInterrupted.get(), "incomplete close must preserve its caller interruption")
+                            assertEquals(1, broker.provisionalWorkers(), "held launch still physically owns actual child")
+                            assertTrue(receipts.child!!.isAlive)
+                            diagnostic.heldChildAliveAssertionPassed = true
+                        } finally {
+                            release.countDown()
+                            closer.join(5_000)
+                            assertFalse(closer.isAlive, "the actual close caller must physically end")
+                        }
+                    }
+                    diagnostic.phase = SelectedLaunchPhase.STARTUP_RESULT
+                    val failure = requireNotNull(startup.get(8, TimeUnit.SECONDS))
+                    assertFalse("GUEST_ENTERED" in failure.suppressed.joinToString { it.message.orEmpty() })
+                    diagnostic.phase = SelectedLaunchPhase.FINAL_NORMAL_CLOSE_272
+                    diagnostic.normalCloseStartedNs = System.nanoTime()
+                    broker.close()
+                    diagnostic.normalCloseReturnedNs = System.nanoTime()
+                    diagnostic.phase = SelectedLaunchPhase.PHYSICAL_ASSERTIONS
+                    assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+                    receipts.assertRetired()
+                    diagnostic.physicalAssertionsPassed = true
+                } catch (failure: Throwable) {
+                    diagnostic.bodyFailurePhase = diagnostic.phase
+                    primary = failure
+                    throw failure
+                } finally {
+                    release.countDown()
+                    val cleanup = CleanupCollector()
+                    diagnostic.phase = SelectedLaunchPhase.FINALLY_COMPLETION
+                    cleanup.attempt("selected launch completion") { startup.handle { _, _ -> Unit }.get(8, TimeUnit.SECONDS) }
+                    cleanup.attempt("selected launch broker retirement") {
+                        diagnostic.phase = SelectedLaunchPhase.FINALLY_RETRY_282
+                        diagnostic.retryStartedNs = System.nanoTime()
+                        broker.close()
+                        diagnostic.retryReturnedNs = System.nanoTime()
+                    }
+                    val outcome = cleanup.outcome()
+                    diagnostic.finallyActionsFinished = true
+                    diagnostic.finallyCleanupComplete = outcome.complete
+                    outcome.failureOrNull()?.let { throw CleanupFailures.merge(primary, it) }
+                    diagnostic.phase = SelectedLaunchPhase.FINISHED
+                }
             }
+        } catch (failure: Throwable) {
+            try {
+                renderSelectedLaunchDiagnostics(diagnostics)
+            } catch (diagnosticFailure: Throwable) {
+                runCatching { System.err.println("BUFFERED-DIAG diagnostic-render-error (original failure preserved): ${diagnosticFailure.stackTraceToString()}") }
+            }
+            throw failure
         }
+    }
+
+    private enum class SelectedLaunchPhase {
+        NOT_REACHED, HANDSHAKE, EXPECTED_INTERRUPTED_CLOSE, STARTUP_RESULT, FINAL_NORMAL_CLOSE_272,
+        PHYSICAL_ASSERTIONS, FINALLY_COMPLETION, FINALLY_RETRY_282, FINISHED,
+    }
+
+    private class SelectedLaunchDiagnostic {
+        var visited = false
+        var cancel = false
+        var broker: ProcessBroker? = null
+        var phase = SelectedLaunchPhase.NOT_REACHED
+        var bodyFailurePhase = SelectedLaunchPhase.NOT_REACHED
+        var startupFailure: Throwable? = null
+        var startupThreadId = 0L
+        var startupInterrupted = false
+        var startupReturnedNs = 0L
+        var closerThreadId = 0L
+        var interruptedCloseStartedNs = 0L
+        var interruptedCloseReturnedNs = 0L
+        var heldChildAliveAssertionPassed = false
+        var normalCloseStartedNs = 0L
+        var normalCloseReturnedNs = 0L
+        var physicalAssertionsPassed = false
+        var retryStartedNs = 0L
+        var retryReturnedNs = 0L
+        var finallyActionsFinished = false
+        var finallyCleanupComplete = false
+    }
+
+    private fun renderSelectedLaunchDiagnostics(diagnostics: Array<SelectedLaunchDiagnostic>) {
+        System.err.println("BUFFERED-DIAG after-original-body-and-finally; 0 timestamp=not reached; predicate -1=not evaluated/reached, 0=false, 1=true; identity 0=null; no physical re-probes")
+        for (record in diagnostics) {
+            System.err.println("BUFFERED-DIAG iteration visited=${record.visited} cancel=${record.cancel} phase=${record.phase} bodyFailurePhase=${record.bodyFailurePhase} heldChildAliveAssertionPassed=${record.heldChildAliveAssertionPassed} physicalAssertionsPassed=${record.physicalAssertionsPassed} finallyActionsFinished=${record.finallyActionsFinished} finallyCleanupComplete=${record.finallyCleanupComplete}")
+            if (!record.visited) continue
+            System.err.println("BUFFERED-DIAG test expectedInterrupted(thread=${record.closerThreadId},startNs=${record.interruptedCloseStartedNs},returnedNs=${record.interruptedCloseReturnedNs}) normal272(startNs=${record.normalCloseStartedNs},returnedNs=${record.normalCloseReturnedNs}) retry282(startNs=${record.retryStartedNs},returnedNs=${record.retryReturnedNs})")
+            System.err.println("BUFFERED-DIAG startup thread=${record.startupThreadId} interrupted=${record.startupInterrupted} returnedNs=${record.startupReturnedNs} failure=${record.startupFailure?.stackTraceToString()}")
+            val broker = record.broker ?: continue
+            System.err.println("BUFFERED-DIAG closeCount=${broker.diagnosticCloseCount} capacity=${broker.diagnosticCloses.size} overflow=${broker.diagnosticCloseCount > broker.diagnosticCloses.size} startupAttemptCount=${broker.diagnosticStartupAttemptCount} capacity=${broker.diagnosticStartupAttempts.size} overflow=${broker.diagnosticStartupAttemptCount > broker.diagnosticStartupAttempts.size}")
+            for ((index, close) in broker.diagnosticCloses.withIndex()) {
+                if (close.startedNs == 0L) {
+                    System.err.println("BUFFERED-DIAG close[$index] skipped=no-start-record")
+                    continue
+                }
+                System.err.println("BUFFERED-DIAG close[$index] startNs=${close.startedNs} conjunctionNs=${close.conjunctionNs} finishedNs=${close.finishedNs} thread=${close.threadId} interrupted(before,conjunction,after)=${close.interruptedBefore},${close.interruptedAtConjunction},${close.interruptedAfter} remainingMs(conjunction,after)=${close.remainingAtConjunctionMs},${close.remainingAfterMs} startupLatch=${close.startupLatch}")
+                System.err.println("BUFFERED-DIAG close[$index] captures=${close.capturesStopped} operations=${close.operationsStopped} maintenance=${close.maintenanceStopped} startup=${close.startupStopped} ownedResources=${close.ownedResources} conjunctionResult=${close.conjunctionResult} registry(tracked,idle,provisionalSlots,attempts,handoffs,capabilities,cleanup)=${close.registry.toList()} allRetired=${close.allRetired} lifecycleAfter=${close.lifecycleAfter} failure=${close.failure?.stackTraceToString()}")
+                System.err.println("BUFFERED-DIAG close[$index] attemptCount=${close.attemptCount} capacity=${close.attempts.size} overflow=${close.attemptCount > close.attempts.size} captureCount=${close.captureCount} capacity=${close.captures.size} overflow=${close.captureCount > close.captures.size}")
+                for (attempt in close.attempts) renderAttemptDiagnostic(attempt)
+                for (capture in close.captures) {
+                    if (capture.observedNs == 0L) continue
+                    System.err.println("BUFFERED-DIAG capture identity=${capture.identity} observedNs=${capture.observedNs} physicalEnd=${capture.physicalEnd} thread=${capture.captureThreadId} cancelThread=${capture.cancelThreadId} ended=${capture.ended} cancellationEnded=${capture.cancellationEnded} resultObserved=${capture.resultObserved} closerInterrupted=${capture.interrupted} cancelFailure=${capture.cancelFailure?.stackTraceToString()}")
+                }
+            }
+            for (attempt in broker.diagnosticStartupAttempts) renderAttemptDiagnostic(attempt)
+        }
+    }
+
+    private fun renderAttemptDiagnostic(attempt: BrokerAttemptDiagnostic) {
+        if (attempt.observedNs == 0L) return
+        System.err.println("BUFFERED-DIAG attempt identity=${attempt.attemptIdentity} observedNs=${attempt.observedNs} thread=${attempt.threadId} interrupted=${attempt.interrupted} retired=${attempt.retired} acquisitionFinished=${attempt.acquisitionFinished} retirementRequested=${attempt.retirementRequested} transferred=${attempt.transferred} flags(channel,server,destroyed,reaped,cgroup,pump,endpoint)=${attempt.channelRetired},${attempt.serverRetired},${attempt.processDestroyed},${attempt.processReaped},${attempt.cgroupRetired},${attempt.pumpRetired},${attempt.endpointRetired} processIdentity=${attempt.processIdentity} pumpIdentity=${attempt.pumpIdentity} cleanupComplete=${attempt.cleanupComplete}")
     }
 
     @Test
