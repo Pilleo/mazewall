@@ -51,6 +51,20 @@ Verify checkout/actual Gradle home/data ownership again; no repair. Explicitly
 save restore's new primary key immediately after successful update+ownership.
 No always-save or partial-update acceptance.
 
+`actions/cache/save@v4` can warn and exit successfully after upload failure; its
+step outcome alone is not persistence evidence. Immediately follow save with
+`actions/cache/restore@v4` using the identical data path/new primary key,
+`lookup-only: true`, `fail-on-cache-miss: true` and NO restore-keys. Then assert its
+`cache-hit` output is exactly `true` in an explicit shell step: unavailable cache
+features can return without failing even with fail-on-cache-miss. Both verification
+steps use the same explicit non-cancelled successful-update/ownership eligibility
+as save, independent of prior success()/save outcome. No second DB download,
+custom cache API/client, warning-log parsing, credential handling or retries.
+An unavailable/missing/nonexact lookup fails closed, including transient visibility
+or immediate eviction; retain that cache-availability risk rather than assuming
+the save warning was harmless. Exact membership is not an archive-integrity or
+future-retention guarantee; warm restoration remains a separate real proof.
+
 Then run unchanged `dependencyCheckAnalyze --info --no-configuration-cache
 --no-daemon` with the existing binding. Explicit non-cancellation/prerequisite
 condition allows analysis after upload failure, without masking the failed upload

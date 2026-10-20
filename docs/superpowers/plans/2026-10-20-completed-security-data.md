@@ -49,13 +49,23 @@ GRADLE_USER_HOME; restore/save only that path. Stable existing join needs exactl
 `[core-quality, mutation-tests, security-check]` and all three literal successes.
 Publisher optional/join dependency and container hash forwarding unchanged.
 
+Supported-action ruling: cache/save v4 warns on upload errors. After save, use
+cache/restore v4 lookup-only:true/fail-on-cache-miss:true for identical path/new
+primary key, no restore-keys; explicitly assert cache-hit exactly true afterward.
+Use the same explicit non-cancelled eligible-update/ownership prerequisites on
+lookup and assertion, independent of save/lookup success() so false/unset output
+cannot silently pass. Analysis remains independent of save/lookup/assertion results.
+No retry/custom API/log-warning parser or second archive download. Missing/unavailable
+or nonexact lookup keeps job red; eventual visibility/eviction can cause a fail-closed
+availability failure. This is membership proof, not archive integrity/retention.
+
 ### Task 1: Required completed-data security lifecycle
 
 - [ ] Read investigation report/provenance and existing workflow/policy/test extraction helpers. Trace every old security/filter/cache/join caller; write tests before production changes, keeping every old fixture/assertion.
 - [ ] Add failing valid-lifecycle fixture and exact negative mutations for absent/serialized/skipped/allowed-failure security, overlapping data cache, unsafe prefix/version/key, cache-hit bypass, no updater/analysis/ownership or unsafe-save/implicit-success conditions. Actual extracted metadata/eligibility shell tests cover absent/empty/ASCII+Unicode blank and normal keys, version bump/unsafe version, unique same-run attempts, no emitted key values. Actual join shell tests125 tuples, only all-success passes. Condition/control tests cover update failure, foreign ownership, cancellation, upload failure with both analysis outcomes, missing key and docs-only behavior without a network scanner.
 - [ ] RED: `./gradlew -p buildSrc ciCachePolicyTest --console=plain --max-workers=1` must fail for missing production lifecycle/policy, not dependency/toolchain failure. Capture exact source/command/exit.
 - [ ] Implement only the three files: independent lane/filters/explicit cache ownership, updater/save/analysis sequencing and failure semantics, exact literal-success join. Use supported cache actions/public setup-gradle inputs, current bindings, one cache owner and no new helper framework. Keep core's demo filter, native/ownership/container outputs, all other job maps and publisher behavior unchanged except removing core security/data include.
-- [ ] GREEN: focused command plus root `checkCiCachePolicy` and installed duplicate-rejecting actual YAML/shell checks. Compare all baseline job maps and root scanner config; exercise actual conditions/shell, not only mutation strings. No real NVD call, huge suite, dependency update or source outside scope.
+- [ ] Add persistence-proof RED controls before resuming GREEN: reject missing/wrong-path/wrong-key/fallback/nonlookup lookup, missing fail-on-miss or exact-hit assertion, skipped proof via save/lookup outcome or implicit success(), and analysis conditioned on persistence success. Run the actual extracted assertion with true/false/unset/nonexact values: only literaltrue passes. Mocked action outcomes are condition inputs, not proof of real upload. Analysis eligibility must survive save warning/lookup failure/assertion failure. Then GREEN: focused command plus root `checkCiCachePolicy` and installed duplicate-rejecting actual YAML/shell checks. Compare all baseline job maps and root scanner config; exercise actual conditions/shell, not only mutation strings. No real NVD call, huge suite, dependency update or source outside scope.
 - [ ] Self-review and commit only three files: `git commit -m "Persist completed security data in an independent required lane"`; report exact RED/GREEN/argv/YAML/failurecontrols/limits and no real scan claim.
 
 ## Completion and hosted qualification
