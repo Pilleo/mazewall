@@ -383,7 +383,8 @@ object CiCachePolicyTest {
             "timeout-minutes: 150" to "timeout-minutes: 90",
             "gradle-home-cache-excludes: dependency-check-data" to "gradle-home-cache-includes: dependency-check-data",
             "dc-data-v1-" to "dc-data-v0-",
-            "{version}-" to "unversioned-",
+            "{version}_" to "unversioned-",
+            "{version}_" to "{version}-",
             "{os.environ['RUNNER_ARCH']}" to "any-arch",
             "{os.environ['GITHUB_RUN_ATTEMPT']}" to "1",
             "tomllib.load(catalog)" to "{}",
@@ -418,7 +419,7 @@ object CiCachePolicyTest {
             val catalog = scratch.resolve("gradle/libs.versions.toml")
             catalog.parentFile.mkdirs()
             val output = scratch.resolve("outputs")
-            fun metadataResult(key: String?, version: String = "10.0.4", attempt: String = "1"): Pair<Int, Map<String, String>> {
+            fun metadataResult(key: String?, version: String = "10.0.4", attempt: String = "1", os: String = "Linux", arch: String = "X64"): Pair<Int, Map<String, String>> {
                 catalog.writeText("[versions]\ndependencyCheck = \"$version\"\n")
                 output.writeText("")
                 val builder = ProcessBuilder("bash", "-e", "-o", "pipefail", "-c", metadataShell).directory(scratch)
@@ -427,8 +428,8 @@ object CiCachePolicyTest {
                     if (key != null) put("NVD_API_KEY", key)
                     put("GRADLE_USER_HOME", scratch.resolve("actual-gradle-home").path)
                     put("GITHUB_OUTPUT", output.path)
-                    put("RUNNER_OS", "Linux")
-                    put("RUNNER_ARCH", "X64")
+                    put("RUNNER_OS", os)
+                    put("RUNNER_ARCH", arch)
                     put("GITHUB_RUN_ID", "123")
                     put("GITHUB_RUN_ATTEMPT", attempt)
                 }
@@ -438,16 +439,36 @@ object CiCachePolicyTest {
                 check(key.isNullOrEmpty() || key !in log + output.readText()) { "Metadata exposed key material" }
                 return process.exitValue() to output.readLines().filter(String::isNotEmpty).associate { it.substringBefore('=') to it.substringAfter('=') }
             }
+            val isolatedSnapshots = listOf(
+                metadataResult("normal", "10.0.4"),
+                metadataResult("normal", "10.0.4-rc1"),
+                metadataResult("normal", os = "Windows"),
+                metadataResult("normal", arch = "ARM64"),
+            ).map { (exit, outputs) ->
+                check(exit == 0) { "Accepted version/platform metadata must succeed" }
+                outputs
+            }
+            check(isolatedSnapshots[1]["prefix"] == "dc-data-v1-Linux-X64-dc10.0.4-rc1_")
+            check(isolatedSnapshots[1]["key"] == "dc-data-v1-Linux-X64-dc10.0.4-rc1_123-1")
+            for ((index, snapshot) in isolatedSnapshots.withIndex()) {
+                val prefix = snapshot.getValue("prefix")
+                check(snapshot.getValue("key").startsWith(prefix))
+                for ((otherIndex, other) in isolatedSnapshots.withIndex()) {
+                    if (index != otherIndex) check(!other.getValue("key").startsWith(prefix)) {
+                        "Cross-version/platform cache collision: prefix=$prefix key=${other.getValue("key")}"
+                    }
+                }
+            }
             for (key in listOf(null, "", " \t\r\n", "\u00a0\u2007\u202f", "\u001c\u001f\u2028\u2029", "key-without-logging", "\u0085")) {
                 val (exit, outputs) = metadataResult(key)
                 check(exit == 0 && outputs["eligible"] == (!key.isNullOrBlank()).toString()) { "Kotlin blank eligibility mismatch" }
                 check(outputs["data_dir"] == scratch.resolve("actual-gradle-home/dependency-check-data").path)
-                check(outputs["prefix"] == "dc-data-v1-Linux-X64-dc10.0.4-")
-                check(outputs["key"] == "dc-data-v1-Linux-X64-dc10.0.4-123-1")
+                check(outputs["prefix"] == "dc-data-v1-Linux-X64-dc10.0.4_")
+                check(outputs["key"] == "dc-data-v1-Linux-X64-dc10.0.4_123-1")
             }
-            check(metadataResult("normal", "11.0.0").second["prefix"] == "dc-data-v1-Linux-X64-dc11.0.0-")
-            check(metadataResult("normal", attempt = "2").second["key"] == "dc-data-v1-Linux-X64-dc10.0.4-123-2")
-            for (version in listOf("../10.0.4", "10.0.4 unsafe", "10.0.4/other", "")) check(metadataResult("normal", version).first != 0)
+            check(metadataResult("normal", "11.0.0").second["prefix"] == "dc-data-v1-Linux-X64-dc11.0.0_")
+            check(metadataResult("normal", attempt = "2").second["key"] == "dc-data-v1-Linux-X64-dc10.0.4_123-2")
+            for (version in listOf("../10.0.4", "10.0.4 unsafe", "10.0.4/other", "10.0.4_rc1", "")) check(metadataResult("normal", version).first != 0)
             val home = scratch.resolve("owned-home").apply { mkdirs() }
             home.resolve("dependency-check-data").mkdirs()
             fun executeControl(command: String, workspace: String = scratch.path): Int {

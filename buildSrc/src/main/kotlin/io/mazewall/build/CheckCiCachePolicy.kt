@@ -241,7 +241,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
             home = os.environ['GRADLE_USER_HOME']
             if not Path(home).is_absolute() or any(char in home for char in '\r\n'):
                 raise SystemExit('Expected absolute GRADLE_USER_HOME')
-            prefix = f"dc-data-v1-{os.environ['RUNNER_OS']}-{os.environ['RUNNER_ARCH']}-dc{version}-"
+            prefix = f"dc-data-v1-{os.environ['RUNNER_OS']}-{os.environ['RUNNER_ARCH']}-dc{version}_"
             key = f"{prefix}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
             value = os.environ.get('NVD_API_KEY', '')
             blank = all(unicodedata.category(char) in ('Zs', 'Zl', 'Zp') or char in '\t\n\v\f\r\x1c\x1d\x1e\x1f' for char in value)
