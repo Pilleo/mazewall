@@ -103,10 +103,13 @@ internal object ConsumerProcessEvidence {
                         } catch (caught: Throwable) {
                             failure = caught
                         } finally {
+                            var interrupted = Thread.interrupted()
+
                             fun attempt(action: () -> Unit) {
                                 try {
                                     action()
                                 } catch (cleanup: Throwable) {
+                                    if (cleanup is InterruptedException) interrupted = true
                                     if (failure == null) {
                                         failure = cleanup
                                     } else if (failure !== cleanup) {
@@ -114,10 +117,14 @@ internal object ConsumerProcessEvidence {
                                     }
                                 }
                             }
-                            pumps.forEach { pump -> attempt { pump.get(5, TimeUnit.SECONDS) } }
-                            reaped = child?.let { !it.isAlive } == true
-                            attempt { combined.replace(stdout.bytes() + stderr.bytes()) }
-                            attempt { persist(if (reaped) Phase.REAPED else Phase.LAUNCH_FAILED) }
+                            try {
+                                pumps.forEach { pump -> attempt { pump.get(5, TimeUnit.SECONDS) } }
+                                reaped = child?.let { !it.isAlive } == true
+                                attempt { combined.replace(stdout.bytes() + stderr.bytes()) }
+                                attempt { persist(if (reaped) Phase.REAPED else Phase.LAUNCH_FAILED) }
+                            } finally {
+                                if (interrupted) Thread.currentThread().interrupt()
+                            }
                         }
                         failure?.let { throw it }
                         return ConsumerCommandResult(child!!.exitValue(), String(stdout.bytes(), Charsets.UTF_8), String(stderr.bytes(), Charsets.UTF_8))
@@ -156,18 +163,20 @@ internal object ConsumerProcessEvidence {
             input: InputStream,
             startPump: (Runnable) -> CompletableFuture<Void>,
         ): CompletableFuture<Void> =
-            startPump(Runnable {
-            input.use {
-                val bytes = ByteArray(65536)
-                while (true) {
-                    val count = it.read(bytes)
-                    if (count < 0) break
-                    validate()
-                    val buffer = ByteBuffer.wrap(bytes, 0, count)
-                    while (buffer.hasRemaining()) channel.write(buffer)
-                }
-            }
-        })
+            startPump(
+                Runnable {
+                    input.use {
+                        val bytes = ByteArray(65536)
+                        while (true) {
+                            val count = it.read(bytes)
+                            if (count < 0) break
+                            validate()
+                            val buffer = ByteBuffer.wrap(bytes, 0, count)
+                            while (buffer.hasRemaining()) channel.write(buffer)
+                        }
+                    }
+                },
+            )
 
         fun replace(bytes: ByteArray) {
             validate()

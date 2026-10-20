@@ -14,7 +14,9 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class ConsumerProcessEvidenceTest {
     @TempDir
@@ -26,16 +28,103 @@ class ConsumerProcessEvidenceTest {
     @Test
     fun `fast nonzero exit drains delayed actual readers before stream cleanup`() = assertDelayedReaders(37)
 
+    @Test
+    fun `interrupted normal drain restores waiter interrupt after pending real pump cleanup`() {
+        val normalDrain = CountDownLatch(1)
+        val finalDrain = CountDownLatch(1)
+        val releaseReaders = CountDownLatch(1)
+        val readers = mutableListOf<Thread>()
+        var failure: Throwable? = null
+        var restoredInterrupt = false
+        val waiter = Thread {
+            try {
+                ConsumerProcessEvidence.run(listOf("sh", "-c", "printf out; printf err >&2"), root, "interrupted", startPump = { reader ->
+                    val pump = object : CompletableFuture<Void>() {
+                        private var joins = 0
+
+                        override fun get(
+                            timeout: Long,
+                            unit: TimeUnit,
+                        ): Void? {
+                            if (joins++ == 0) {
+                                normalDrain.countDown()
+                            } else {
+                                // Probe the still-pending future before releasing readers: restored interrupts cannot race completion.
+                                try {
+                                    try {
+                                        super.get(0, TimeUnit.NANOSECONDS)
+                                    } catch (_: TimeoutException) {
+                                        // A non-interrupted pending join proceeds to its original bounded wait.
+                                    }
+                                } finally {
+                                    finalDrain.countDown()
+                                }
+                            }
+                            return super.get(timeout, unit)
+                        }
+                    }
+                    readers += Thread {
+                        val read = runCatching {
+                            check(releaseReaders.await(10, TimeUnit.SECONDS)) { "Reader barrier was not released" }
+                            reader.run()
+                        }
+                        read.fold({ pump.complete(null) }, { pump.completeExceptionally(it) })
+                    }.also { it.start() }
+                    pump
+                })
+            } catch (caught: Throwable) {
+                failure = caught
+            } finally {
+                restoredInterrupt = Thread.currentThread().isInterrupted
+            }
+        }
+        waiter.start()
+        try {
+            assertTrue(normalDrain.await(5, TimeUnit.SECONDS), "Waiter did not enter normal drain")
+            val running = Json.parseToJsonElement(Files.readString(root.resolve("interrupted.command.json"))).jsonObject
+            val pid = running
+                .getValue("pid")
+                .jsonPrimitive.content
+                .toLong()
+            assertTrue(ProcessHandle.of(pid).map { !it.isAlive }.orElse(true), "Normal drain preceded actual child exit")
+            waiter.interrupt()
+            assertTrue(finalDrain.await(5, TimeUnit.SECONDS), "Pending pump did not reach final cleanup")
+            releaseReaders.countDown()
+            waiter.join(5000)
+            assertTrue(!waiter.isAlive, "Interrupted waiter did not finish bounded cleanup")
+            assertTrue(failure is IllegalStateException, "Original lifecycle interruption was replaced: $failure")
+            assertTrue(failure?.cause is InterruptedException, "Original interruption cause was lost: $failure")
+            assertTrue(failure!!.suppressed.any { it is java.util.concurrent.ExecutionException && it.cause is java.io.IOException }, "Later real pump failure was not suppressed")
+            val receipt = Json.parseToJsonElement(Files.readString(root.resolve("interrupted.command.json"))).jsonObject
+            assertEquals("true", receipt.getValue("reaped").jsonPrimitive.content)
+            assertEquals("false", receipt.getValue("timedOut").jsonPrimitive.content)
+            assertTrue(ProcessHandle.of(pid).map { !it.isAlive }.orElse(true), "Owned child was not retired")
+            assertTrue(restoredInterrupt, "Outer pump cleanup consumed the waiter's interrupt")
+        } finally {
+            releaseReaders.countDown()
+            waiter.interrupt()
+            waiter.join(5000)
+            readers.forEach { it.join(5000) }
+            assertTrue(!waiter.isAlive && readers.none { it.isAlive }, "Fixture threads did not retire")
+        }
+    }
+
     private fun assertDelayedReaders(exitCode: Int) {
         val args = listOf("sh", "-c", "printf 'out\\000é\\n'; printf 'err\\000λ\\n' >&2; exit $exitCode")
         val outcome = runCatching {
             ConsumerProcessEvidence.run(args, root, "delayed", startPump = { reader ->
                 // Execute the actual reader only at its join, after the real child's exit.
                 object : CompletableFuture<Void>() {
-                    override fun get(timeout: Long, unit: TimeUnit): Void? {
+                    override fun get(
+                        timeout: Long,
+                        unit: TimeUnit,
+                    ): Void? {
                         if (!isDone) {
                             val receipt = Json.parseToJsonElement(Files.readString(root.resolve("delayed.command.json"))).jsonObject
-                            val pid = receipt.getValue("pid").jsonPrimitive.content.toLong()
+                            val pid = receipt
+                                .getValue("pid")
+                                .jsonPrimitive.content
+                                .toLong()
                             assertTrue(ProcessHandle.of(pid).map { !it.isAlive }.orElse(true), "Reader ran before actual child exit")
                             val read = runCatching { reader.run() }
                             read.fold({ complete(null) }, { completeExceptionally(it) })
@@ -59,7 +148,11 @@ class ConsumerProcessEvidenceTest {
         assertEquals(exitCode.toString(), receipt.getValue("exitCode").jsonPrimitive.content)
         assertEquals("false", receipt.getValue("timedOut").jsonPrimitive.content)
         assertEquals("true", receipt.getValue("reaped").jsonPrimitive.content)
-        assertEquals(false, ProcessHandle.of(receipt.getValue("pid").jsonPrimitive.content.toLong()).map { it.isAlive }.orElse(false))
+        val pid = receipt
+            .getValue("pid")
+            .jsonPrimitive.content
+            .toLong()
+        assertEquals(false, ProcessHandle.of(pid).map { it.isAlive }.orElse(false))
     }
 
     @Test
