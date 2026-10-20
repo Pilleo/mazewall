@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 import argparse
+import ctypes
 from dataclasses import dataclass, field
 from enum import Enum
 import errno
@@ -257,27 +258,89 @@ def _receipt(command, exit_code, elapsed, samples, verdict, reason):
     }
 
 
-def _retire(child: subprocess.Popen, signum: int) -> str | None:
+def _subreaper(value: int | None = None) -> int:
+    prctl = ctypes.CDLL(None, use_errno=True).prctl
+    prctl.argtypes = [ctypes.c_int, *([ctypes.c_ulong] * 4)]
+    prctl.restype = ctypes.c_int
+    previous = ctypes.c_int()
+    # Linux PR_GET_CHILD_SUBREAPER / PR_SET_CHILD_SUBREAPER, confined to this CLI.
+    result = prctl(37 if value is None else 36, ctypes.addressof(previous) if value is None else value, 0, 0, 0)
+    if result == -1:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
+    return previous.value if value is None else value
+
+
+def _acquire_ownership() -> int:
+    # A fresh, single-threaded CLI has no other descendants to adopt or reap.
+    if len(list(Path("/proc/self/task").iterdir())) != 1 or signal.getsignal(signal.SIGCHLD) != signal.SIG_DFL:
+        raise OSError("owned lifetime requires a single thread and default SIGCHLD")
+    Path("/proc/thread-self/children").read_text(encoding="ascii")
     try:
-        os.killpg(child.pid, signum)
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline:
-            try:
-                os.killpg(child.pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            os.killpg(child.pid, signal.SIGKILL)
-    except ProcessLookupError:
+        os.waitid(os.P_ALL, 0, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
         pass
-    except OSError as error:
-        return f"owned group cleanup failed: {error}"
+    else:
+        raise OSError("owned lifetime refuses pre-existing children")
+    # Probe every required kernel primitive before allowing any command to launch.
+    descriptor = os.pidfd_open(os.getpid())
     try:
-        child.wait(timeout=1)
-    except subprocess.TimeoutExpired:
-        return "owned child did not retire within cleanup bound"
-    return None
+        signal.pidfd_send_signal(descriptor, 0)
+        try:
+            os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG)
+        except ChildProcessError:
+            pass
+    finally:
+        os.close(descriptor)
+    previous = _subreaper()
+    _subreaper(1)
+    return previous
+
+
+def _retire(child: subprocess.Popen, signum: int) -> str | None:
+    descriptors = {}
+    killed = set()
+    deadline = time.monotonic() + 3
+    try:
+        while True:
+            # Drain direct roots and newly adopted orphans, not racy ancestry
+            # snapshots; setsid/double-forks from any JVM thread remain owned.
+            for text in Path("/proc/thread-self/children").read_text(encoding="ascii").split():
+                pid = int(text)
+                if pid not in descriptors:
+                    # No other thread or SIGCHLD handler can reap/reuse this PID.
+                    descriptors[pid] = os.pidfd_open(pid)
+                    try:
+                        signal.pidfd_send_signal(descriptors[pid], signum)
+                    except ProcessLookupError:
+                        pass
+            for pid, descriptor in list(descriptors.items()):
+                if time.monotonic() >= deadline and pid not in killed:
+                    try:
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    killed.add(pid)
+                if child.returncode is None and pid == child.pid:
+                    exited = child.poll() is not None
+                else:
+                    exited = os.waitid(os.P_PIDFD, descriptor, os.WEXITED | os.WNOHANG) is not None
+                if exited:
+                    os.close(descriptor)
+                    del descriptors[pid]
+                    killed.discard(pid)
+            try:
+                os.waitid(os.P_ALL, 0, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            except ChildProcessError:
+                return None
+            if time.monotonic() >= deadline + 1:
+                return "owned descendants did not retire within cleanup bound"
+            time.sleep(0.02)
+    except (OSError, ValueError) as error:
+        return f"owned descendant cleanup failed: {error}"
+    finally:
+        for descriptor in descriptors.values():
+            os.close(descriptor)
 
 
 def main(argv: Sequence[str]) -> int:
@@ -293,7 +356,7 @@ def main(argv: Sequence[str]) -> int:
     samples = []
     interrupted = 0
     child = None
-    retirement_attempted = False
+    ownership = None
     exit_code = None
     result = 1
 
@@ -330,25 +393,26 @@ def main(argv: Sequence[str]) -> int:
             return 1
         elif not interrupted:
             try:
-                child = subprocess.Popen(command, start_new_session=True)
-            except OSError as error:
-                result = 127 if error.errno == errno.ENOENT else 126
+                ownership = _acquire_ownership()
+                if not interrupted:
+                    child = subprocess.Popen(command, start_new_session=True)
+            except (OSError, AttributeError) as error:
+                result = 127 if ownership is not None and getattr(error, "errno", None) == errno.ENOENT else 126
                 verdict = MemoryVerdict.UNKNOWN
-                reason = f"command could not launch: {error}"
+                reason = f"command could not launch with owned lifetime: {error}"
             else:
                 cleanup_error = None
                 try:
-                    while not interrupted and child.poll() is None:
+                    while child is not None and not interrupted and child.poll() is None:
                         try:
                             child.wait(timeout=1)
                         except subprocess.TimeoutExpired:
                             if not interrupted:
                                 sample()
                 finally:
-                    if interrupted or child.returncode is None:
-                        retirement_attempted = True
+                    if child is not None:
                         cleanup_error = _retire(child, interrupted or signal.SIGTERM)
-                code = child.returncode
+                code = child.returncode if child is not None else None
                 exit_code = None if code is None else (128 - code if code < 0 else code)
                 sample()
                 verdict = evaluate_samples(samples)
@@ -359,21 +423,23 @@ def main(argv: Sequence[str]) -> int:
                     result = result or 1
                 if exit_code:
                     reason = f"command exited {exit_code}; " + reason
+            finally:
+                if ownership is not None:
+                    try:
+                        _subreaper(ownership)
+                    except OSError as error:
+                        reason += f"; cannot restore child subreaper: {error}"
+                        result = result or 1
         while True:
             handled_signal = interrupted
             if handled_signal:
-                if child is not None and not retirement_attempted:
-                    retirement_attempted = True
-                    cleanup_error = _retire(child, handled_signal)
-                    if cleanup_error:
-                        reason += "; " + cleanup_error
                 result = 128 + handled_signal
                 if exit_code is None:
                     verdict = MemoryVerdict.UNKNOWN
                 reason = f"interrupted by {signal.Signals(handled_signal).name}; " + reason
             if not save(verdict, reason):
                 result = result or 1
-            # A signal during publication still needs group retirement and a cancellation receipt.
+            # A signal during publication still needs a cancellation receipt.
             if interrupted == handled_signal:
                 return result
     finally:

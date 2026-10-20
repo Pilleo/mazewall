@@ -1,10 +1,12 @@
 import json
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -331,9 +333,11 @@ class OwnedCommandTest(LinuxFixtureTest):
     def test_collection_exception_cannot_replace_exit_42(self):
         receipt = self.root / "receipt.json"
         initial = self.collect()
+        subreaper = probe._subreaper()
         with patch.object(probe, "collect_sample", side_effect=[initial, OSError("collection failed")]):
             status = probe.main(["--output", str(receipt), "--", sys.executable, "-c", "raise SystemExit(42)"])
         self.assertEqual(status, 42)
+        self.assertEqual(probe._subreaper(), subreaper)
         data = json.loads(receipt.read_text())
         self.assertEqual(data["command_exit_code"], 42)
         self.assertEqual(data["qualification"], "unknown")
@@ -513,6 +517,201 @@ class OwnedCommandTest(LinuxFixtureTest):
             if process.poll() is None:
                 process.kill()
             process.communicate(timeout=3)
+
+    def test_sigterm_retires_detached_descendant_not_unrelated_process(self):
+        ready = self.root / "detached.json"
+        detached = (
+            "import os, signal, time; from pathlib import Path; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            f"p = Path({str(ready) + '.pending'!r}); p.write_text(str(os.getpid())); "
+            f"p.replace({str(ready)!r}); time.sleep(60)"
+        )
+        child = (
+            "import subprocess, sys, time; "
+            f"subprocess.Popen([sys.executable, '-c', {detached!r}], "
+            "start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
+            "time.sleep(60)"
+        )
+        unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        process, receipt, _ = self.launch(child)
+        detached_fd = None
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(ready.exists(), "detached descendant did not become ready")
+            detached_fd = os.pidfd_open(int(ready.read_text()))
+            process.send_signal(signal.SIGTERM)
+            process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 143)
+            self.assertEqual(json.loads(receipt.read_text())["command_exit_code"], 143)
+            self.assertIsNone(unrelated.poll(), "cleanup killed pre-existing unrelated work")
+            self.assertTrue(select.select([detached_fd], [], [], 0)[0], "detached descendant is live")
+        finally:
+            if detached_fd is not None:
+                try:
+                    signal.pidfd_send_signal(detached_fd, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                os.close(detached_fd)
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=3)
+            unrelated.kill()
+            unrelated.wait(timeout=3)
+
+    def test_double_fork_from_non_main_thread_retires_on_success_and_failure(self):
+        ready = self.root / "daemon-pid"
+        release = self.root / "release"
+        daemonize = (
+            "import os, signal, time; from pathlib import Path\n"
+            "if os.fork(): os._exit(0)\n"
+            "os.setsid()\n"
+            "if os.fork(): os._exit(0)\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"p = Path({str(ready) + '.pending'!r}); p.write_text(str(os.getpid())); p.replace({str(ready)!r})\n"
+            "time.sleep(60)\n"
+        )
+        for code in (0, 42):
+            with self.subTest(primary_status=code):
+                ready.unlink(missing_ok=True)
+                release.unlink(missing_ok=True)
+                child = (
+                    "import subprocess, sys, threading, time; from pathlib import Path; "
+                    f"t = threading.Thread(target=lambda: subprocess.run([sys.executable, '-c', {daemonize!r}], "
+                    "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)); t.start(); t.join(); "
+                    f"ready = Path({str(ready)!r})\n"
+                    "while not ready.exists(): time.sleep(0.01)\n"
+                    f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n"
+                    f"raise SystemExit({code})\n"
+                )
+                process, receipt, _ = self.launch(child)
+                descriptor = None
+                try:
+                    deadline = time.monotonic() + 5
+                    while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(ready.exists())
+                    descriptor = os.pidfd_open(int(ready.read_text()))
+                    release.touch()
+                    process.communicate(timeout=8)
+                    self.assertEqual(process.returncode, code)
+                    self.assertEqual(json.loads(receipt.read_text())["command_exit_code"], code)
+                    self.assertTrue(select.select([descriptor], [], [], 0)[0], "double-fork daemon is live")
+                finally:
+                    release.touch()
+                    if descriptor is not None:
+                        try:
+                            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        os.close(descriptor)
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate(timeout=3)
+
+    def test_cancellation_retires_detached_worker_born_during_cleanup(self):
+        daemon_ready = self.root / "daemon-pid"
+        worker_ready = self.root / "worker-pid"
+        worker = (
+            "import os, signal, time; from pathlib import Path; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            f"p = Path({str(worker_ready) + '.pending'!r}); p.write_text(str(os.getpid())); "
+            f"p.replace({str(worker_ready)!r}); time.sleep(60)"
+        )
+        daemon = (
+            "import os, signal, subprocess, sys, time; from pathlib import Path\n"
+            "def on_term(*_):\n"
+            "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            f"    subprocess.Popen([sys.executable, '-c', {worker!r}], start_new_session=True)\n"
+            "signal.signal(signal.SIGTERM, on_term)\n"
+            f"p = Path({str(daemon_ready) + '.pending'!r}); p.write_text(str(os.getpid())); p.replace({str(daemon_ready)!r})\n"
+            "time.sleep(60)\n"
+        )
+        child = (
+            "import subprocess, sys, time; "
+            f"subprocess.Popen([sys.executable, '-c', {daemon!r}], start_new_session=True, "
+            "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); time.sleep(60)"
+        )
+        process, receipt, _ = self.launch(child)
+        descriptors = []
+        try:
+            for marker in (daemon_ready, worker_ready):
+                deadline = time.monotonic() + 5
+                while not marker.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(marker.exists())
+                descriptors.append(os.pidfd_open(int(marker.read_text())))
+                if marker == daemon_ready:
+                    process.send_signal(signal.SIGTERM)
+            process.communicate(timeout=8)
+            self.assertEqual(process.returncode, 143)
+            self.assertEqual(json.loads(receipt.read_text())["command_exit_code"], 143)
+            for descriptor in descriptors:
+                self.assertTrue(select.select([descriptor], [], [], 0)[0], "late descendant is live")
+        finally:
+            for descriptor in descriptors:
+                try:
+                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                os.close(descriptor)
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=3)
+
+    def test_missing_ownership_primitives_fail_before_launch(self):
+        receipt = self.root / "receipt.json"
+        marker = self.root / "launched"
+        command = [sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"]
+        for target, name in ((probe, "_subreaper"), (os, "pidfd_open"), (signal, "pidfd_send_signal")):
+            with self.subTest(primitive=name), patch.object(probe, "_PROC", self.proc):
+                with patch.object(target, name, side_effect=OSError("ownership unavailable")):
+                    status = probe.main(["--output", str(receipt), "--", *command])
+                self.assertEqual(status, 126)
+                self.assertFalse(marker.exists())
+                data = json.loads(receipt.read_text())
+                self.assertIsNone(data["command_exit_code"])
+                self.assertEqual(data["qualification"], "unknown")
+
+    def test_pre_existing_child_is_not_acquired_or_killed(self):
+        receipt = self.root / "receipt.json"
+        marker = self.root / "launched"
+        unrelated = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        before = probe._subreaper()
+        try:
+            with patch.object(probe, "_PROC", self.proc):
+                status = probe.main(["--output", str(receipt), "--", sys.executable, "-c",
+                                     f"from pathlib import Path; Path({str(marker)!r}).touch()"])
+            self.assertEqual(status, 126)
+            self.assertFalse(marker.exists())
+            self.assertIsNone(unrelated.poll())
+            self.assertEqual(probe._subreaper(), before)
+            self.assertIsNone(json.loads(receipt.read_text())["command_exit_code"])
+        finally:
+            unrelated.kill()
+            unrelated.wait(timeout=3)
+
+    def test_threaded_host_or_custom_sigchld_cannot_launch(self):
+        receipt = self.root / "receipt.json"
+        marker = self.root / "launched"
+        command = [sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"]
+        done = threading.Event()
+        thread = threading.Thread(target=done.wait)
+        thread.start()
+        try:
+            with patch.object(probe, "_PROC", self.proc):
+                status = probe.main(["--output", str(receipt), "--", *command])
+            self.assertEqual(status, 126)
+            self.assertFalse(marker.exists())
+        finally:
+            done.set()
+            thread.join(timeout=3)
+        with patch.object(probe, "_PROC", self.proc), patch.object(signal, "getsignal", return_value=signal.SIG_IGN):
+            status = probe.main(["--output", str(receipt), "--", *command])
+        self.assertEqual(status, 126)
+        self.assertFalse(marker.exists())
+        self.assertIsNone(json.loads(receipt.read_text())["command_exit_code"])
 
 
 if __name__ == "__main__":

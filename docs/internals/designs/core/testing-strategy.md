@@ -170,6 +170,15 @@ additional OOM kills; unknown evidence is not a pass. The wrapper preserves a
 failing command's exit status and rejects unsafe or unknown memory evidence even
 when PIT succeeds. CI always uploads the receipt and all three PIT report paths,
 including after failure or cancellation when artifact upload can still execute.
+On Linux, the wrapper acquires a child-subreaper lifetime before launch and uses
+pidfds to retire its descendants, including detached single-use Gradle daemons
+and workers. Retirement also drains descendants after a normal launcher exit,
+before final observations/publication; cancellation preserves the actual launcher
+status separately from the wrapper's signal status. Cleanup allows three seconds
+before SIGKILL and one further second to reap; a cleanup failure is not success.
+Unavailable ownership primitives prevent launch. This is a single-threaded CLI,
+not a general-purpose in-process supervisor: it refuses pre-existing children or
+custom SIGCHLD handling and restores the prior subreaper setting afterward.
 Run the wrapper regression separately with
 `python3 -m unittest discover -s scripts/tests -p 'test_ci_resource_probe.py' -v`.
 
