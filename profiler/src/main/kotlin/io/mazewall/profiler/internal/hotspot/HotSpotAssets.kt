@@ -6,7 +6,6 @@ import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
-import java.security.MessageDigest
 import java.util.HexFormat
 
 private const val MAX_MANIFEST_BYTES = 65536
@@ -21,7 +20,7 @@ private const val MAX_MANIFEST_JSON_DEPTH = 2
 private const val OCI_SCHEMA = 2
 private const val GADGET_REVISION = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 private const val PROFILER_REVISION = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
-private const val PATCH_SHA256 = "618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c"
+private const val PATCH_SHA256 = "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"
 private val SHA256_PATTERN = Regex("[a-f0-9]{64}")
 
 /** Local integrity/version admission. The operator supplies a trusted manifest and owns installation. */
@@ -36,6 +35,12 @@ internal data class HotSpotAssets private constructor(
         fun load(
             directory: Path,
             timings: HotSpotAssetTimings?,
+        ): HotSpotAssets = load(directory, timings, JavaHotSpotAssetDigest)
+
+        fun load(
+            directory: Path,
+            timings: HotSpotAssetTimings?,
+            digest: HotSpotAssetDigest,
         ): HotSpotAssets {
             val root = directory.toAbsolutePath().normalize()
             val manifest = measuredAssetPhase(timings, "manifest") {
@@ -53,9 +58,12 @@ internal data class HotSpotAssets private constructor(
             for ((name, expected) in manifest.files) {
                 require(SHA256_PATTERN.matches(expected)) { "Invalid asset checksum: $name" }
                 val path = ownedFile(root, name)
-                totalBytes += Files.size(path)
-                require(totalBytes <= MAX_ASSET_BYTES) { "HotSpot asset size limit exceeded" }
-                require(sha256(path) == expected) { "HotSpot asset checksum mismatch: $name" }
+                val remaining = MAX_ASSET_BYTES - totalBytes
+                require(Files.size(path) <= remaining) { "HotSpot asset size limit exceeded" }
+                val actual = digest.digest(path, remaining)
+                require(actual.bytesHashed <= remaining) { "HotSpot asset hash byte budget exceeded" }
+                totalBytes += actual.bytesHashed
+                require(HexFormat.of().formatHex(actual.bytes()) == expected) { "HotSpot asset checksum mismatch: $name" }
                 if (name.startsWith("oci/blobs/sha256/")) {
                     require(name.removePrefix("oci/blobs/sha256/") == expected) { "OCI blob digest mismatch: $name" }
                 }
@@ -113,19 +121,6 @@ private fun ownedFile(
     return path
 }
 
-private fun sha256(path: Path): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    Files.newInputStream(path).use { input ->
-        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-        var count = input.read(buffer)
-        while (count != -1) {
-            digest.update(buffer, 0, count)
-            count = input.read(buffer)
-        }
-    }
-    return HexFormat.of().formatHex(digest.digest())
-}
-
 private fun checkAssetJsonDepth(
     text: String,
     maximum: Int,
@@ -180,8 +175,14 @@ private fun verifyOciGraph(
 ) {
     val index = readOciDocument(ownedFile(root, "oci/index.json"))
     require(index.manifests.any { it.digest == manifest.gadgetDigest }) { "Gadget digest absent from OCI index" }
+    require(
+        index.manifests.filter { it.digest == manifest.gadgetDigest }.all {
+            it.mediaType in setOf("application/vnd.oci.image.index.v1+json", "application/vnd.oci.image.manifest.v1+json")
+        },
+    ) { "Unsupported selected OCI root media type" }
     val pending = ArrayDeque(index.manifests)
     val visited = mutableSetOf<String>()
+    val mediaByDigest = mutableMapOf<String, String>()
     while (pending.isNotEmpty()) {
         require(pending.size + visited.size <= MAX_ASSET_FILES) { "OCI graph exceeds descriptor limit" }
         val descriptor = pending.removeFirst()
@@ -191,6 +192,8 @@ private fun verifyOciGraph(
         require(manifest.files[name] == hash) { "Unlisted required OCI blob: $name" }
         val path = ownedFile(root, name)
         require(descriptor.size >= 0 && Files.size(path) == descriptor.size) { "OCI descriptor size mismatch" }
+        val previous = mediaByDigest.putIfAbsent(hash, descriptor.mediaType)
+        require(previous == null || previous == descriptor.mediaType) { "Conflicting OCI media type: $hash" }
         if (visited.add(hash) && descriptor.mediaType in setOf("application/vnd.oci.image.index.v1+json", "application/vnd.oci.image.manifest.v1+json")) {
             val document = readOciDocument(path)
             pending.addAll(document.manifests)

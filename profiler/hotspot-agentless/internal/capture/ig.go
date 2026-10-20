@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"io"
 	"strconv"
 	"strings"
@@ -28,21 +29,35 @@ import (
 )
 
 type Config struct {
-	AbortContext context.Context
-	production   bool
-	sessionID    string
-	DrainFull    bool
-	DrainEvents  bool
-	EventsOnly   bool
-	StrictEpoch  bool
-	PID          int
-	Image        string
-	Store        string
-	Enrichment   EnrichmentOptions
+	profile        wire.Profile
+	ExpectedTarget wire.Target
+	AbortContext   context.Context
+	production     bool
+	sessionID      string
+	DrainFull      bool
+	DrainEvents    bool
+	EventsOnly     bool
+	StrictEpoch    bool
+	PID            int
+	Image          string
+	Store          string
+	Enrichment     EnrichmentOptions
 }
 
 func (c Config) Validate() error {
-	if c.DrainFull && (!c.StrictEpoch || c.EventsOnly || c.DrainEvents) {
+	if c.profile != "" && c.profile != wire.Strict25 && c.profile != wire.Observed25 {
+		return fmt.Errorf("invalid internal capture profile")
+	}
+	if c.profile == wire.Observed25 {
+		t := c.ExpectedTarget
+		if c.PID <= 0 || c.PID > 1<<31-1 || c.StrictEpoch || !c.DrainFull || c.EventsOnly || c.DrainEvents || t.PID != uint32(c.PID) || t.StartTicks == 0 || t.CgroupID == 0 || t.MountNS == 0 {
+			return fmt.Errorf("invalid observed profile/expected target")
+		}
+		if c.Enrichment != (EnrichmentOptions{}) && c.Enrichment != DefaultEnrichmentOptions() {
+			return fmt.Errorf("observed capture requires verified native enrichment bounds")
+		}
+	}
+	if c.DrainFull && ((!c.StrictEpoch && c.profile != wire.Observed25) || c.EventsOnly || c.DrainEvents) {
 		return fmt.Errorf("full drain requires strict structured full capture and one owner")
 	}
 	if c.DrainEvents && !c.EventsOnly {

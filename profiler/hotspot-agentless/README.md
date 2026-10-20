@@ -54,13 +54,56 @@ This verifies the actual prepared-source identity and generated native hashes,
 stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
-The current verified overlay identity is
-`618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c`.
-Moving the rebuild driver's pinned-image lookup from Python to Go changes its
-hashed source bytes. Older `e908…` bundles and recorded lifecycle projections keep
-their historical identity; current asset/protocol admission requires the rebuilt
-bundle. The generated native layouts and both architecture BPF objects remain
-byte-identical across this tooling-only transition.
+The current accepted source overlay is
+`89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50`.
+
+The [owned-drain repair](../../docs/plans/2026-10-19-hotspot-observed-drain-evidence.md)
+wires actual auxiliary ownership for both HotSpot modes without fabricating an
+epoch lease. It preserves strict admission and native budgets; ordinary-JVM
+candidate qualification is completed by the separate
+[coupled JVM exec evidence](../../docs/plans/2026-10-19-hotspot-coupled-exec-evidence.md),
+followed by operator-approved [scoped admission](../../docs/plans/2026-10-19-hotspot-observed-admission.md).
+SDKv0.2.0 is published; host distribution qualification remains open. The historical allocator/helper evidence
+below is not a release/admission receipt for the new source graph. Existing asset
+bundles must be rebuilt and fully verified for the current fingerprint.
+
+Task3 adds a separately negotiated schema3 observation profile, described in
+the [profile contract](../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
+The rebuilt CLI and `RunObserved*` now use the qualified owned implementation after
+explicit operator approval. Strict2 and false policy eligibility are unchanged.
+`RunObservedCandidate` is only a tagged compatibility alias. Native modules pin released SDKv0.2.0.
+Use `GOWORK=off` with the owner's prepared `build/experiment.go.mod`; the SDK must
+resolve to that released module, not a local workspace replacement. Existing helper
+bundles do not qualify the new graph; rebuild and verify their embedded module
+provenance before distribution. Strict2 and the Kotlin facade retain their scope.
+It adds the bounded shared native correlation allocator. Both architecture BPF
+objects and layouts are generated; actual-C and isolated kernel checks pass.
+Task2 built two byte-identical locked Go1.26.0 helpers/full local OCI bundles and
+executed all eight public-native cases without skips. The qualified helper is
+`d0cc2a1ddf91fecef49d80a5bb3fded0d416a7002664fbfcef6bf4c1d9f3f93c`;
+the unchanged gadget is `sha256:5c5791bb47beba9568d98216abf7af4a03abe9093d1d024d511a26e645e051e9`.
+Actual non-time task binding, selected accounting/drain and legacy rendered/pdata
+checks passed. Both dense600 diagnostics still rejected; experimental carrier
+controls do not qualify lifetime or active perf/NMI contexts. Task3's optional
+complete-path native kprobe fixture closes finite cache publication/eviction/drain
+acceptance:376calls/366exact packets/0reported loss, native LRU republish and checked
+all-owner retirement. The scoped allocator issue is resolved; synthetic entry
+seeds do not replace JVM metadata proof or exhaust possible schedules.
+The R1 review correction makes reordered-definition regression fixtures distinct;
+its hashed test input changes the graph from `962b…` without changing native source,
+generated layouts or either embedded architecture. Fresh all-fourteen pin-ordering
+receipts accompany the correction; older chronology limits remain documented.
+Preserved `270a…`, `618c…` and earlier bundles retain their historical evidence;
+current admission requires the new source identity and refuses those old pins.
+See [allocator evidence](../../docs/plans/2026-10-18-hotspot-correlation-allocator-evidence.md).
+
+For an explicitly offline rebuild with already acquired pinned images, invoke the
+existing `mw-gadget-build` command with `--builder-image-pull never` and the locked
+builder digest, and Docker with `--pull=never`. Set both `DOCKER_HOST` and
+`MAZEWALL_DOCKER_HOST` to the authorized rootful endpoint. The normal Make gadget
+target retains its explicit `always` pull policy; there is no network fallback in
+asset admission or capture. Preserve old `build/assets` before installing the new
+verified bundle. Task2's receipts retain exact offline commands and destinations.
 
 `manifest.json` locks collector version 2, production wire schema 2, capture ABI 2, Linux-amd64,
 upstream revisions and the verified overlay fingerprint. Every listed file has a

@@ -10,7 +10,9 @@ import io.mazewall.profiler.api.ProfileStrategy
 import io.mazewall.profiler.api.StructuredProfileEvidence
 import io.mazewall.profiler.testing.tierE.EnabledIfTierERootfulAvailable
 import io.mazewall.testing.containers.ContainerEndpoint
+import jdk.jfr.consumer.RecordingFile
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Test
@@ -48,6 +50,7 @@ class HotSpotPublicIntegrationTest {
                     val evidence = requireNotNull(final.structuredEvidence)
                     report(fixture, "public", evidence)
                     verifyCorpus(evidence, fixture.run, pid)
+                    verifySelectedAccounting(evidence, pid)
                     assertFalse(final.coverage.complete || session.pendingOwnership)
                     assertFailsWith<IncompleteProfileException> { final.toDedicatedWorkerPolicies() }
                 }
@@ -64,16 +67,19 @@ class HotSpotPublicIntegrationTest {
         HotSpotAcceptanceHarness(endpoint, directory).use { fixture ->
             fixture.start(100)
             profiler().use { profiler ->
-                profiler.attach(Pid(fixture.pid), fixture.options(retained = 1)).use { session ->
+                profiler.attach(Pid(fixture.pid), fixture.options(retained = 0)).use { session ->
                     fixture.prepare()
                     fixture.measure()
                     val final = session.finish()
                     val evidence = requireNotNull(final.structuredEvidence)
-                    assertEquals(1, evidence.records.size)
-                    assertTrue(evidence.discardedOccurrences >= 99uL)
+                    assertEquals(0, evidence.records.size)
+                    assertTrue(evidence.discardedOccurrences >= 100uL)
+                    assertEquals(evidence.summary.received, evidence.discardedOccurrences)
+                    assertEquals(0uL, evidence.pendingOccurrences)
                     assertTrue(evidence.terminalAccountingComplete)
                     assertFalse(evidence.retentionComplete || final.coverage.complete || session.pendingOwnership)
                     report(fixture, "retention", evidence)
+                    verifyUnprovenSources(evidence)
                 }
             }
             fixture.assertCollectorsGone()
@@ -135,10 +141,17 @@ class HotSpotPublicIntegrationTest {
         @TempDir directory: Path,
     ) = currentJvmMeasurement(endpoint, directory, dense = true)
 
+    @Test
+    fun `profiled dense interpreter diagnostic retains JFR and checked retirement`(
+        endpoint: ContainerEndpoint,
+        @TempDir directory: Path,
+    ) = currentJvmMeasurement(endpoint, directory, dense = true, readoutJfr = true)
+
     private fun currentJvmMeasurement(
         endpoint: ContainerEndpoint,
         directory: Path,
         dense: Boolean,
+        readoutJfr: Boolean = false,
     ) {
         val assets = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))
         val root = Path.of(".").toAbsolutePath().normalize()
@@ -152,6 +165,17 @@ class HotSpotPublicIntegrationTest {
         val collector = "hs-current-${java.util.UUID.randomUUID()}"
         val client = "$collector-client"
         val docker = Path.of("/usr/bin/docker")
+        val readoutRecording = directory.resolve("readout.jfr")
+        val recordingArguments = if (readoutJfr) {
+            listOf(
+                "-XX:FlightRecorderOptions=stackdepth=128",
+                "-XX:StartFlightRecording=filename=$readoutRecording,settings=profile," +
+                    "dumponexit=true,maxsize=16m,jdk.ExecutionSample#period=1ms," +
+                    "jdk.ObjectAllocationSample#throttle=1000/s,jdk.JavaMonitorEnter#threshold=1ms",
+            )
+        } else {
+            emptyList()
+        }
         try {
             val commandResult = HotSpotAcceptanceHarness.runCommand(
                 endpoint.command(
@@ -181,6 +205,7 @@ class HotSpotPublicIntegrationTest {
                     "java",
                     "-Xint",
                     "-XX:+UseSerialGC",
+                    *recordingArguments.toTypedArray(),
                     "-cp",
                     "$dist/*:$classes",
                 "io.mazewall.profiler.hotspot.HotSpotSupportedWorkloadMain",
@@ -219,6 +244,21 @@ class HotSpotPublicIntegrationTest {
             Files.writeString(destination.resolve("client-output.txt"), commandResult.second)
             Files.copy(directory.resolve(if (accepted) "current-result.txt" else "current-failure.txt"), destination.resolve("result.txt"))
             Files.copy(assets.resolve("manifest.json"), destination.resolve("assets-manifest.json"))
+            if (readoutJfr) {
+                assertTrue(Files.size(readoutRecording) > 0L, "Client JVM produced no JFR recording")
+                var vmInformationSeen = false
+                var executionSampleSeen = false
+                RecordingFile(readoutRecording).use { recording ->
+                    while (recording.hasMoreEvents()) {
+                        val eventName = recording.readEvent().eventType.name
+                        if (eventName == "jdk.JVMInformation") vmInformationSeen = true
+                        if (eventName == "jdk.ExecutionSample") executionSampleSeen = true
+                    }
+                }
+                assertTrue(vmInformationSeen, "No actual JVM identity event in recording")
+                assertTrue(executionSampleSeen, "No CPU samples; recording cannot diagnose readout")
+                Files.copy(readoutRecording, destination.resolve("readout.jfr"))
+            }
         } finally {
             val progress = directory.resolve("current-progress.txt")
             if (Files.exists(progress)) println("Current-JVM progress: ${Files.readString(progress)}")
@@ -230,6 +270,66 @@ class HotSpotPublicIntegrationTest {
             HotSpotAcceptanceHarness.runCommand(endpoint.command("rm", "-f", collector))
             HotSpotAcceptanceHarness.runCommand(endpoint.command("rm", "-f", client))
         }
+    }
+
+    private fun verifySelectedAccounting(
+        evidence: StructuredProfileEvidence,
+        pid: Int,
+    ) {
+        val selected = Json
+            .parseToJsonElement(evidence.summary.rawJson)
+            .jsonObject
+            .getValue("selected_event_accounting")
+            .jsonObject
+
+        fun number(key: String): ULong {
+            val value = selected.getValue(key).jsonPrimitive
+            assertFalse(value.isString)
+            return value.content.toULong()
+        }
+        assertEquals(1uL, number("schema_version"))
+        assertEquals("owned_openat_handler_entry", selected.getValue("scope").jsonPrimitive.content)
+        assertEquals(evidence.sessionId, selected.getValue("session_id").jsonPrimitive.content)
+        assertEquals(pid.toULong(), number("host_pid"))
+        assertEquals(
+            evidence.records
+                .first()
+                .event.processStartTicks,
+            number("process_start_ticks"),
+        )
+        assertTrue(number("map_id") > 0uL && number("possible_cpus") > 0uL)
+        val attempted = number("attempted")
+        val submitted = number("submitted")
+        assertTrue(submitted <= attempted)
+        assertEquals(attempted - submitted, number("reserve_failed"))
+        assertTrue(number("received") <= submitted)
+        assertEquals(evidence.summary.received, number("received"))
+        assertEquals(evidence.summary.received, number("terminals"))
+        assertEquals("true", selected.getValue("complete").jsonPrimitive.content)
+        assertFalse(evidence.collectionLossComplete)
+        verifyUnprovenSources(evidence)
+    }
+
+    private fun verifyUnprovenSources(evidence: StructuredProfileEvidence) {
+        val summary = Json.parseToJsonElement(evidence.summary.rawJson).jsonObject
+        assertEquals(
+            listOf("definitions", "enrichment", "wire", "retention"),
+            summary
+                .getValue("unproven_collection_sources")
+                .jsonArray
+                .map { it.jsonPrimitive.content },
+        )
+        assertEquals(
+            "true",
+            summary
+                .getValue("selected_event_accounting")
+                .jsonObject
+                .getValue("complete")
+                .jsonPrimitive
+                .content,
+        )
+        assertTrue(evidence.summary.physicalDrainComplete)
+        assertFalse(evidence.collectionLossComplete)
     }
 
     private fun verifyCorpus(

@@ -4,6 +4,7 @@ package support
 
 import (
 	"fmt"
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/btf"
 	"unsafe"
 )
@@ -17,6 +18,10 @@ func CheckHotSpotEpochABI() error {
 	m := s.Maps["stack_cache2correlation_id"]
 	if m == nil || m.KeySize != 24+3072*8 || m.ValueSize != 8 || m.MaxEntries != 256 {
 		return fmt.Errorf("unsupported epoch producer cache ABI")
+	}
+	a := s.Maps["correlation_ids"]
+	if a == nil || a.Type != ebpf.Array || a.KeySize != 4 || a.ValueSize != 8 || a.MaxEntries != 1 {
+		return fmt.Errorf("unsupported correlation allocator ABI")
 	}
 	p := s.Maps["hotspot_procs"]
 	if p == nil || p.ValueSize != uint32(unsafe.Sizeof(HotspotProcInfo{})) {

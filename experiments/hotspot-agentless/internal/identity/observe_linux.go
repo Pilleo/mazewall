@@ -18,6 +18,10 @@ import (
 
 // Discover is read-only. The caller must own an exec barrier before calling it.
 func Discover(pid int, ticks uint64) (Target, error) {
+	return discoverProfile(pid, ticks, false)
+}
+
+func discoverProfile(pid int, ticks uint64, observed bool) (Target, error) {
 	var target Target
 	statTicks := func() (uint64, error) {
 		b, e := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
@@ -151,12 +155,15 @@ func Discover(pid int, ticks uint64) (Target, error) {
 		}
 		return addr, nil
 	}
-	counter, err := address("_ZN20SafepointSynchronize18_safepoint_counterE", 8)
-	if err != nil {
-		return target, err
-	}
-	if counter&7 != 0 {
-		return target, fmt.Errorf("unaligned JVM epoch")
+	var counter uint64
+	if !observed {
+		counter, err = address("_ZN20SafepointSynchronize18_safepoint_counterE", 8)
+		if err != nil {
+			return target, err
+		}
+		if counter&7 != 0 {
+			return target, fmt.Errorf("unaligned JVM epoch")
+		}
 	}
 	serial, err := address("UseSerialGC", 1)
 	if err != nil {
@@ -192,8 +199,35 @@ func Discover(pid int, ticks uint64) (Target, error) {
 	if sb[0] > 1 || cb[0] > 1 {
 		return target, fmt.Errorf("invalid JVM bool storage")
 	}
-	if err = ValidateProfile(Profile{BuildID: buildID, SHA256: digest, UseSerialGC: sb[0] == 1, UseCompiler: cb[0] == 1}); err != nil {
+	profile := Profile{BuildID: buildID, SHA256: digest, UseSerialGC: sb[0] == 1, UseCompiler: cb[0] == 1}
+	if observed {
+		for name, out := range map[string]*bool{"UseG1GC": &profile.useG1GC, "TieredCompilation": &profile.tieredCompilation} {
+			a, e := address(name, 1)
+			if e != nil {
+				return target, e
+			}
+			var b [1]byte
+			if err := read(a, b[:]); err != nil {
+				return target, err
+			}
+			if b[0] > 1 {
+				return target, fmt.Errorf("invalid JVM bool storage")
+			}
+			*out = b[0] == 1
+		}
+		err = validateObservedProfile(profile)
+	} else {
+		err = ValidateProfile(profile)
+	}
+	if err != nil {
 		return target, err
+	}
+	if observed {
+		after, err := statTicks()
+		if err != nil || after != before {
+			return target, fmt.Errorf("target changed during observed profile discovery: %w", err)
+		}
+		return Target{PID: uint32(pid), ProcessStartTicks: ticks, JVMBuildID: buildID, JVMSHA256: digest}, nil
 	}
 	if err = read(counter, epoch[:]); err != nil {
 		return target, err

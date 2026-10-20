@@ -563,7 +563,7 @@ public object ContainedExecutors {
         newDefaultAction: SeccompAction,
         scopingPolicy: StacktraceScopingPolicy,
         attempt: InstallationAttempt,
-    ): AutoCloseable {
+    ): AutoCloseable? {
         val arch = io.mazewall.platform.syscall.Arch
             .current()
         if (toInstall.hasSupervisedSyscalls) {
@@ -621,7 +621,8 @@ public object ContainedExecutors {
                 attempt.native,
                 attempt.selfVerificationEnabled,
             )
-            return AutoCloseable {}
+            // No supervisor lease: linking a no-op callback here can require executable memory after installation.
+            return null
         }
     }
 }

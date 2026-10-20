@@ -5,6 +5,7 @@ package ebpfoperator
 import (
 	"context"
 	"errors"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"golang.org/x/sys/unix"
 	"sync"
 	"testing"
@@ -189,5 +190,19 @@ func TestEventFinalizationTransitionsRejectSkippedPhases(t *testing.T) {
 	}
 	if _, err := advanceEventStop(eventResourcesRetired, eventResourcesRetired); err == nil {
 		t.Fatal("retirement repeated")
+	}
+}
+
+func TestEventFinalizationSelectedRowsAreSnapshotOwned(t *testing.T) {
+	owner := newEventStopOwner(nil)
+	owner.mu.Lock()
+	owner.observation.SelectedAccounting = &operators.SelectedAccountingObservation{Rows: []operators.SelectedCPUCounts{{Attempted: 1, Submitted: 1}}}
+	owner.mu.Unlock()
+	first := owner.snapshot()
+	first.SelectedAccounting.Rows[0].Attempted = 99
+	first.SelectedAccounting.MapID = 99
+	second := owner.snapshot()
+	if second.SelectedAccounting.Rows[0].Attempted != 1 || second.SelectedAccounting.MapID != 0 {
+		t.Fatal("caller mutated owned observation")
 	}
 }

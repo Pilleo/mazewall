@@ -2,6 +2,7 @@ package capture
 
 import (
 	"context"
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 )
 
@@ -11,7 +12,7 @@ type eventsOnlyState struct {
 }
 
 func (s *eventsOnlyState) Submit(ctx context.Context, e model.Event) error {
-	if err := s.sink.Write(ctx, model.Record{SchemaVersion: 1, Kind: "event", SessionID: e.SessionID, EventID: e.EventID, Event: &e}); err != nil {
+	if err := s.sink.Write(ctx, model.Record{SchemaVersion: 1, Kind: "event", SessionID: e.SessionID, EventID: e.EventID, Event: (*wire.Event)(&e)}); err != nil {
 		return err
 	}
 	s.stats.Received++

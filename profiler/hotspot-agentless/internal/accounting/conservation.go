@@ -38,6 +38,9 @@ func Aggregate(rows []CPUCounts, possibleCPUs int, generationMatched bool) (Coun
 		if row.Overflow != 0 {
 			return Counts{}, fmt.Errorf("native counter overflow")
 		}
+		if row.Submitted > row.Attempted || row.ReserveFailed != row.Attempted-row.Submitted {
+			return Counts{}, fmt.Errorf("per-CPU counter conservation mismatch")
+		}
 		for _, pair := range []struct {
 			target *uint64
 			value  uint64

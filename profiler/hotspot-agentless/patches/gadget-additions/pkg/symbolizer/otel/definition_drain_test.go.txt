@@ -5,7 +5,11 @@ package otel
 import (
 	"context"
 	"errors"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 	"golang.org/x/sys/unix"
+	"strings"
 	"testing"
 	"time"
 )
@@ -13,6 +17,51 @@ import (
 type definitionDrainFixture struct {
 	readerDone, release chan struct{}
 	failure             error
+}
+
+func TestHotSpotDefinitionDrainDispatchesOnlyInitializedOwnedProfiles(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		options symbolizer.SymbolizerOptions
+	}{
+		{"strict", symbolizer.SymbolizerOptions{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 123}}},
+		{"observed", symbolizer.SymbolizerOptions{HotSpotObservedPID: 123}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			done := make(chan struct{})
+			close(done)
+			backend := &definitionDrainFixture{readerDone: make(chan struct{}), release: done}
+			o := &otelResolverInstance{options: test.options, trc: &tracer.Tracer{}, consumerDone: done, definitionDrain: newDefinitionDrainOwner(backend)}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			observation, err := o.DrainDefinitions(ctx)
+			if err != nil || !observation.BuffersDrained || !observation.ReaderStopped || !observation.ConsumerStopped {
+				t.Fatal("initialized owned profile did not dispatch its existing drain owner", observation, err)
+			}
+			// Dispatch is not initialization: the real tracer must still refuse an unstarted reader.
+			o.definitionDrain = nil
+			observation, err = o.DrainDefinitions(ctx)
+			if err == nil || !strings.Contains(err.Error(), "owned definition reader not started") || observation.BuffersDrained {
+				t.Fatal("unstarted real definition reader was not checked", observation, err)
+			}
+			if err := o.StopAuxiliary(ctx); err == nil || !strings.Contains(err.Error(), "owned auxiliary scope not initialized") {
+				t.Fatal("real auxiliary scope was not checked", err)
+			}
+		})
+	}
+}
+
+func TestObservedDefinitionDrainRefusesMissingNativeOwners(t *testing.T) {
+	for _, o := range []*otelResolverInstance{
+		{options: symbolizer.SymbolizerOptions{HotSpotObservedPID: 123}},
+		{options: symbolizer.SymbolizerOptions{HotSpotObservedPID: 123}, trc: &tracer.Tracer{}},
+		{trc: &tracer.Tracer{}, consumerDone: make(chan struct{})},
+	} {
+		observation, err := o.DrainDefinitions(context.Background())
+		if err == nil || observation.BuffersDrained || o.ownedDefinitionDrain() != nil {
+			t.Fatal("missing or unowned native definition state acquired a drain owner", observation, err)
+		}
+	}
 }
 
 func (b *definitionDrainFixture) Quiesce(context.Context) error     { return b.failure }

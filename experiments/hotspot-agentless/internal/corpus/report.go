@@ -164,7 +164,7 @@ func AnalyzeRuntime(manifest, records, compiler io.Reader, pid uint32, perBranch
 			if e.ProcessStartTicks != generation {
 				return r, fmt.Errorf("mixed process incarnations")
 			}
-			events[row.EventID] = e
+			events[row.EventID] = model.Event(e)
 		case "enrichment":
 			if row.Evidence == nil {
 				return r, fmt.Errorf("missing terminal")

@@ -1,16 +1,12 @@
 package model
 
 import (
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"io.mazewall/experiments/hotspot-agentless/internal/identity"
 )
 
-type HotSpotIdentity struct {
-	State     string  `json:"state"`
-	Epoch     *uint64 `json:"epoch,omitempty"`
-	Profile   string  `json:"profile,omitempty"`
-	ReadError *int32  `json:"read_error,omitempty"`
-}
+type HotSpotIdentity = wire.HotSpotIdentity
 
 func CapturedHotSpotIdentity(c libpf.HotSpotIdentity) *HotSpotIdentity {
 	if c.State == libpf.HotSpotEpochUnknown {
@@ -39,7 +35,7 @@ func CheckedHotSpotIdentity(c libpf.HotSpotIdentity) *HotSpotIdentity {
 	}
 	return i
 }
-func (i *HotSpotIdentity) capture() libpf.HotSpotIdentity {
+func captureHotSpotIdentity(i *HotSpotIdentity) libpf.HotSpotIdentity {
 	if i == nil {
 		return libpf.HotSpotIdentity{}
 	}

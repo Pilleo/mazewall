@@ -1,0 +1,136 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/cilium/ebpf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+)
+
+type selectedAccountingBinding struct {
+	owner                *ebpfInstance
+	target               operators.SelectedAccountingTarget
+	selectedMap          *ebpf.Map
+	preparedMapID        uint32
+	preparedPossibleCPUs int
+}
+
+func validateSelectedAccountingTarget(target *operators.SelectedAccountingTarget, pidText, birthText string) error {
+	if target == nil || target.Session == "" || len(target.Session) > 128 || target.PID == 0 || target.Birth == 0 {
+		return fmt.Errorf("invalid selected accounting target")
+	}
+	pid, err := strconv.ParseUint(pidText, 10, 32)
+	if err != nil {
+		return fmt.Errorf("parse selected target PID: %w", err)
+	}
+	birth, err := strconv.ParseUint(birthText, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse selected target birth: %w", err)
+	}
+	if pid != uint64(target.PID) || birth != target.Birth {
+		return fmt.Errorf("selected target differs from producer parameters")
+	}
+	return nil
+}
+
+func validSelectedCounterInfo(info *ebpf.MapInfo) bool {
+	return info != nil && info.Type == ebpf.PerCPUArray && info.KeySize == 4 && info.ValueSize == 32 && info.MaxEntries == 1
+}
+
+func bindSelectedAccounting(i *ebpfInstance, target *operators.SelectedAccountingTarget) (*selectedAccountingBinding, error) {
+	if target == nil {
+		return nil, nil
+	}
+	if target.Session == "" || len(target.Session) > 128 || target.PID == 0 || target.Birth == 0 || i.collectionSpec == nil || i.collection == nil {
+		return nil, fmt.Errorf("invalid selected accounting target/owner")
+	}
+	spec := i.collectionSpec.Maps["selected_counts"]
+	if spec == nil || spec.Type != ebpf.PerCPUArray || spec.KeySize != 4 || spec.ValueSize != 32 || spec.MaxEntries != 1 {
+		return nil, fmt.Errorf("selected counter layout unsupported")
+	}
+	m := i.collection.Maps["selected_counts"]
+	if m == nil {
+		return nil, fmt.Errorf("selected map not acquired")
+	}
+	info, err := m.Info()
+	if err != nil {
+		return nil, fmt.Errorf("inspect acquired selected map: %w", err)
+	}
+	if !validSelectedCounterInfo(info) {
+		return nil, fmt.Errorf("actual selected map layout unsupported")
+	}
+	id, ok := info.ID()
+	if !ok || id == 0 {
+		return nil, fmt.Errorf("selected kernel map ID unavailable")
+	}
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		return nil, err
+	}
+	if cpus <= 0 {
+		return nil, fmt.Errorf("possible CPU count unavailable")
+	}
+	return &selectedAccountingBinding{owner: i, target: *target, selectedMap: m, preparedMapID: uint32(id), preparedPossibleCPUs: cpus}, nil
+}
+
+func (b *selectedAccountingBinding) identity() operators.SelectedAccountingObservation {
+	return operators.SelectedAccountingObservation{Target: b.target, MapID: b.preparedMapID, PossibleCPUs: b.preparedPossibleCPUs}
+}
+
+func (b *selectedAccountingBinding) sampleAfterJoin() (*operators.SelectedAccountingObservation, error) {
+	if b.owner.collection == nil || b.owner.collection.Maps["selected_counts"] != b.selectedMap {
+		return nil, fmt.Errorf("selected collection map ownership changed")
+	}
+	info, err := b.selectedMap.Info()
+	if err != nil {
+		return nil, fmt.Errorf("inspect final selected map: %w", err)
+	}
+	if !validSelectedCounterInfo(info) {
+		return nil, fmt.Errorf("actual selected map layout changed")
+	}
+	id, ok := info.ID()
+	if !ok || uint32(id) != b.preparedMapID {
+		return nil, fmt.Errorf("selected map changed")
+	}
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil {
+		return nil, err
+	}
+	if cpus != b.preparedPossibleCPUs {
+		return nil, fmt.Errorf("possible CPU cardinality changed")
+	}
+	rows := make([]operators.SelectedCPUCounts, cpus)
+	zero := uint32(0)
+	if err := b.selectedMap.Lookup(&zero, &rows); err != nil {
+		return nil, fmt.Errorf("sample joined selected counters: %w", err)
+	}
+	value := b.identity()
+	value.Rows, value.Quiesced, value.Joined = rows, true, true
+	return &value, nil
+}
+
+func (i *ebpfInstance) SelectedAccountingBinding() (operators.SelectedAccountingObservation, bool) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.selectedAccounting == nil {
+		return operators.SelectedAccountingObservation{}, false
+	}
+	return i.selectedAccounting.identity(), true
+}
+
+func (i *ebpfInstance) bindPreparedSelectedAccounting() error {
+	if i.eventStopOptions == nil || i.eventStopOptions.Accounting == nil {
+		return nil
+	}
+	binding, err := bindSelectedAccounting(i, i.eventStopOptions.Accounting)
+	if err != nil {
+		return err
+	}
+	i.mu.Lock()
+	i.selectedAccounting = binding
+	i.mu.Unlock()
+	return nil
+}

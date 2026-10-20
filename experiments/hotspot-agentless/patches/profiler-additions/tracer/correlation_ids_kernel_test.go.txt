@@ -1,0 +1,71 @@
+//go:build mw_kernel
+
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"testing"
+
+	"github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/support"
+)
+
+func TestKernelCorrelationAllocatorLoaderOwnership(t *testing.T) {
+	coll, err := support.LoadCollectionSpec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocator := coll.Maps["correlation_ids"]
+	if allocator == nil || allocator.Type != ebpf.Array || allocator.KeySize != 4 || allocator.ValueSize != 8 || allocator.MaxEntries != 1 {
+		t.Fatal("allocator ABI", allocator)
+	}
+	// Exercise the real acquisition/rewrite boundary without allocating unrelated
+	// process metadata maps or attaching a profiler to the host.
+	owned := map[string]*ebpf.Map{}
+	subset := &ebpf.CollectionSpec{Maps: map[string]*ebpf.MapSpec{
+		"correlation_ids": allocator, "stack_cache2correlation_id": coll.Maps["stack_cache2correlation_id"],
+	}}
+	defer func() {
+		for name, m := range owned {
+			if err := m.Close(); err != nil {
+				t.Errorf("retire %s: %v", name, err)
+			}
+		}
+	}()
+	if err := loadAllMaps(subset, &Config{}, owned); err != nil {
+		t.Fatal(err)
+	}
+	if err := rewriteMaps(coll, owned); err != nil {
+		t.Fatal(err)
+	}
+	info, err := owned["correlation_ids"].Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, ok := info.ID()
+	if !ok || info.Type != ebpf.Array || info.KeySize != 4 || info.ValueSize != 8 || info.MaxEntries != 1 {
+		t.Fatal("acquired allocator identity/layout", info)
+	}
+	for _, name := range []string{"perf_unwind_stop", "kprobe_unwind_stop"} {
+		program := coll.Programs[name]
+		if program == nil {
+			t.Fatal("missing variant", name)
+		}
+		for _, symbol := range []string{"correlation_ids", "stack_cache2correlation_id"} {
+			found := false
+			for _, ins := range program.Instructions {
+				if ins.Map() == owned[symbol] {
+					found = true
+				}
+				if ins.Reference() == symbol {
+					t.Fatal("unbound symbolic map", name, symbol)
+				}
+			}
+			if !found || coll.Maps[symbol] != nil {
+				t.Fatal("unrewritten map", name, symbol)
+			}
+		}
+	}
+	t.Logf("allocator map_id=%d ARRAY key=4 value=8 entries=1; both actual unwinder specs share acquired allocator/LRU; no attachment", id)
+}

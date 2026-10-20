@@ -193,7 +193,12 @@ type graphModule struct {
 }
 
 func moduleGraph(root string) (map[string]graphModule, error) {
-	child := exec.Command("go", "list", "-modfile", "build/experiment.go.mod", "-m", "-json", "all")
+	args := []string{"list", "-buildvcs=false"}
+	if work := os.Getenv("GOWORK"); work == "" || work == "off" {
+		args = append(args, "-modfile", "build/experiment.go.mod")
+	}
+	args = append(args, "-m", "-json", "all")
+	child := exec.Command("go", args...)
 	child.Dir = root
 	child.Stderr = os.Stderr
 	data, err := child.Output()
@@ -214,6 +219,17 @@ func moduleGraph(root string) (map[string]graphModule, error) {
 		modules[module.Path] = module
 	}
 	return modules, nil
+}
+
+func bridgeSource(graph map[string]graphModule) (string, error) {
+	module, ok := graph["github.com/Pilleo/mazewall/hotspot-bridge"]
+	if module.Replace != nil {
+		module = *module.Replace
+	}
+	if !ok || module.Dir == "" {
+		return "", fmt.Errorf("missing actual hotspot-bridge source")
+	}
+	return module.Dir, nil
 }
 
 func verifiedPreparationIdentity(root string) (string, error) {
@@ -275,7 +291,8 @@ func copySourceTree(source, destination string, excludeGenerated bool) error {
 			return err
 		}
 		if entry.IsDir() {
-			return os.Mkdir(target, info.Mode().Perm())
+			// Staging directories need owner access for copying and cleanup; file modes stay verbatim.
+			return os.Mkdir(target, info.Mode().Perm()|0700)
 		}
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported source member: %s", path)
@@ -285,6 +302,38 @@ func copySourceTree(source, destination string, excludeGenerated bool) error {
 		}
 		return os.Chmod(target, info.Mode().Perm())
 	})
+}
+
+func selectedModuleLicenses(modulePath, directory string) ([]string, error) {
+	var names []string
+	err := filepath.WalkDir(directory, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := strings.ToLower(entry.Name())
+		for _, prefix := range []string{"license", "copying", "notice", "copyright"} {
+			if strings.HasPrefix(name, prefix) {
+				relative, err := filepath.Rel(directory, path)
+				if err != nil {
+					return err
+				}
+				names = append(names, filepath.ToSlash(relative))
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return nil, fmt.Errorf("missing selected-module license: %s", modulePath)
+	}
+	return names, nil
 }
 
 func releaseDistribution(engine, bundle, output, libraryVersion string) (failure error) {
@@ -352,33 +401,9 @@ func releaseDistribution(engine, bundle, output, libraryVersion string) (failure
 		if replacement.Dir == "" {
 			return fmt.Errorf("missing selected module source: %s", module.Path)
 		}
-		var names []string
-		err := filepath.WalkDir(replacement.Dir, func(path string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			name := strings.ToLower(entry.Name())
-			for _, prefix := range []string{"license", "copying", "notice", "copyright"} {
-				if strings.HasPrefix(name, prefix) {
-					relative, err := filepath.Rel(replacement.Dir, path)
-					if err != nil {
-						return err
-					}
-					names = append(names, filepath.ToSlash(relative))
-					break
-				}
-			}
-			return nil
-		})
+		names, err := selectedModuleLicenses(module.Path, replacement.Dir)
 		if err != nil {
 			return err
-		}
-		sort.Strings(names)
-		if len(names) == 0 {
-			return fmt.Errorf("missing selected-module license: %s", module.Path)
 		}
 		for _, name := range names {
 			destination := filepath.Join(root, "licenses", module.Path, filepath.FromSlash(name))
@@ -431,6 +456,10 @@ func releaseDistribution(engine, bundle, output, libraryVersion string) (failure
 	if !ok || profilerModule.Replace == nil {
 		return fmt.Errorf("missing actual patched profiler source")
 	}
+	bridge, err := bridgeSource(graph)
+	if err != nil {
+		return err
+	}
 	if err := os.Mkdir(filepath.Join(root, "licenses/mazewall"), 0755); err != nil {
 		return err
 	}
@@ -444,7 +473,7 @@ func releaseDistribution(engine, bundle, output, libraryVersion string) (failure
 	for _, copy := range []struct {
 		from, to  string
 		generated bool
-	}{{engine, "mazewall-hotspot", true}, {gadget, "inspektor-gadget", false}, {profilerModule.Replace.Dir, "opentelemetry-ebpf-profiler", false}} {
+	}{{engine, "mazewall-hotspot", true}, {bridge, "hotspot-bridge", true}, {gadget, "inspektor-gadget", false}, {profilerModule.Replace.Dir, "opentelemetry-ebpf-profiler", false}} {
 		if err := copySourceTree(copy.from, filepath.Join(sourceRoot, copy.to), copy.generated); err != nil {
 			return err
 		}
