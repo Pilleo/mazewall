@@ -471,7 +471,8 @@ object CiCachePolicyTest {
             for (version in listOf("../10.0.4", "10.0.4 unsafe", "10.0.4/other", "10.0.4_rc1", "")) check(metadataResult("normal", version).first != 0)
             val home = scratch.resolve("owned-home").apply { mkdirs() }
             home.resolve("dependency-check-data").mkdirs()
-            fun executeControl(command: String, workspace: String = scratch.path): Int {
+            val ownedWorkspace = scratch.resolve("owned-workspace").apply { mkdirs() }
+            fun executeControl(command: String, workspace: String = ownedWorkspace.path): Int {
                 val process = ProcessBuilder("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", command)
                     .directory(scratch).redirectErrorStream(true).apply {
                         environment()["GITHUB_WORKSPACE"] = workspace
@@ -481,10 +482,27 @@ object CiCachePolicyTest {
                 check(process.waitFor(5, TimeUnit.SECONDS)) { "Actual control shell timed out: $log" }
                 return process.exitValue()
             }
+            val callerOwned = scratch.resolve("caller-owned").apply { writeText("owned fixture\n") }
+            val callerUid = Files.getAttribute(callerOwned.toPath(), "unix:uid") as Int
+            val rejectsCallerOwned = runCatching { foreignOwnershipFixture(callerUid, listOf(callerOwned)) }.isFailure
+            val rootOwned = listOf(File("/etc/hostname"), File("/etc/passwd")).firstOrNull {
+                it.canRead() && Files.getAttribute(it.toPath(), "unix:uid") == 0
+            } ?: error("No readable UID 0 fixture for the modeled ownership-selection control")
+            val rootAlternative = if (callerUid == 0) scratch.resolve("foreign-owned").apply {
+                writeText("temporary foreign ownership\n")
+                Files.setAttribute(toPath(), "unix:uid", 1)
+            } else callerOwned
+            val rejectsRootOwned = foreignOwnershipFixture(0, listOf(rootOwned, rootAlternative)) == rootAlternative
+            check(rejectsCallerOwned && rejectsRootOwned) {
+                "Foreign fixture selection: reject caller-owned=$rejectsCallerOwned; UID 0 rejects root-owned=$rejectsRootOwned"
+            }
+            val foreign = foreignOwnershipFixture(callerUid, listOf(callerOwned, rootAlternative, rootOwned))
+            check(Files.getAttribute(foreign.toPath(), "unix:uid") != callerUid)
             for (name in listOf("Verify Restored Security Ownership", "Verify Updated Security Ownership", "Verify Final Security Ownership")) {
                 check(executeControl(shell(step(security, name))) == 0) { "Caller-owned paths must pass $name" }
-                check(executeControl(shell(step(security, name)), "/etc/hostname") != 0) { "Foreign-owned paths must fail $name" }
+                check(executeControl(shell(step(security, name)), foreign.path) != 0) { "Foreign-owned paths must fail $name" }
             }
+            println("Actual ownership shell passed positive/negative controls for UID $callerUid; UID 0 fixture selection checked separately.")
             val gradlew = scratch.resolve("gradlew")
             for (exit in listOf(0, 7)) {
                 gradlew.writeText("#!/bin/sh\nprintf '%s\\n' \"\$*\" > actual-argv\nexit $exit\n")
@@ -569,6 +587,10 @@ object CiCachePolicyTest {
         }
         println("Actual snapshot assertion accepts only literal true; absent/wrong/skipped persistence proof rejected (no real cache calls).")
     }
+
+    private fun foreignOwnershipFixture(callerUid: Int, candidates: List<File>): File =
+        candidates.firstOrNull { it.isFile && it.canRead() && Files.getAttribute(it.toPath(), "unix:uid") != callerUid }
+            ?: error("No readable foreign-owned fixture for UID $callerUid; ownership controls cannot run in this namespace")
 
     private fun job(workflow: String, name: String): String =
         Regex("(?ms)^    $name:\\n.*?(?=^    [a-zA-Z0-9_-]+:|\\z)").find(workflow)?.value.orEmpty()

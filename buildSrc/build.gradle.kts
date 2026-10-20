@@ -116,6 +116,9 @@ val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest"
     inputs.file(layout.projectDirectory.file("../scripts/ci_cache_key.sh"))
         .withPropertyName("containerCacheKeyHelper")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(layout.projectDirectory.file("../.github/workflows/ci.yml"))
+        .withPropertyName("ciCachePolicyWorkflow")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file(verificationActionsMarker)
     args(verificationActionsMarker.get().asFile.absolutePath)
     doFirst { verificationActionsMarker.get().asFile.delete() }
