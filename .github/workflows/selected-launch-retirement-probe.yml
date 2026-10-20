@@ -2,7 +2,7 @@ name: Selected Launch Retirement Probe
 
 on:
     pull_request:
-        branches: [triage/selected-launch-retirement]
+        branches: [probe-base/selected-launch-retirement]
 
 jobs:
     kernel-context:
@@ -26,6 +26,19 @@ jobs:
                       portals/runtime/src/main/kotlin/io/mazewall/portal/PortalGenerationCaptures.kt \
                       portals/runtime/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt
                   uname -sr
+            - name: Set up JDK 25 for Host Unit Preparation
+              uses: actions/setup-java@v5
+              with:
+                  java-version: "25"
+                  distribution: "temurin"
+            - name: Restore Host Gradle Cache
+              uses: gradle/actions/setup-gradle@v6
+              with:
+                  cache-read-only: true
+            - name: Prepare Original Host Unit Test Outputs
+              run: |
+                  set -o pipefail
+                  ./gradlew test consumerHarnessTest --no-daemon --console=plain 2>&1 | tee selected-launch-host-unit.log
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -77,6 +90,8 @@ jobs:
                   name: selected-launch-retirement-${{ github.run_attempt }}
                   path: |
                       selected-launch-probe.log
+                      selected-launch-host-unit.log
+                      profiler/build/test-results/test/*.xml
                       portals/runtime/build/test-results/integrationTest/*.xml
                       portals/runtime/build/reports/tests/integrationTest/
                       build/reports/test-health/fragments/
