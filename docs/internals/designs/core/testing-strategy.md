@@ -210,6 +210,25 @@ distinct exhaustion result; do not add a test-only production bypass.
 
 ## Fast iteration and cache reuse
 
+Root `buildLogicCheck` is the explicit complete build-tool regression gate. It uses
+public GradleBuild APIs, a distinct nested build name `build-logic-verification`,
+the existing buildSrc `verificationActionsTest`, one nested worker and no project
+parallelism. Root `check` requires it, preserving existing root build/mergeCheck
+coverage; buildSrc's own test/check dependencies also remain mandatory. The bridge
+has no outer cached-success output or skip predicate: actual nested inputs and
+marker invalidation remain authoritative.
+
+JAR bootstrap/help/compile/assemble do not implicitly select the verifier, though
+ordinary buildSrc compilation can still run. Lazy direct `mustRunAfter` edges put
+other root/child tasks after the gate only when it is selected, without adding it
+to fast paths. Applied-production DSL/block fixtures check bootstrap isolation,
+mandatory failures, strict cache reuse, input changes and stale-marker removal.
+Actual root/child-heavy/same-name ordering edges are inspected and unsafe mutations
+rejected; a one-worker execution under parallel-enabled configuration is not a
+concurrent-overlap stress test. Newly read buildSrc settings are named relative-path
+inputs, alongside the retained actual workflow and existing source/configuration
+inputs; independent input fixtures stage those real files, not exemptions.
+
 Build-tool regression fixtures use `$GRADLE_USER_HOME/caches/mazewall-test-kit`
 as their TestKit home rather than `buildSrc/build/test-kit`. The current Gradle
 User Home owns this path, including explicit `-g` overrides; the existing host and
@@ -253,8 +272,9 @@ owned-Git fixtures and workflow-policy mutations. These checks also run in manda
 retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. They execute the extracted join shell command for
-all 125 triples of success/failure/cancelled/skipped/null prerequisite results; only
-three successes pass. Actual security metadata/eligibility/ownership/task shells,
+all 625 quadruples of success/failure/cancelled/skipped/null prerequisite results; only
+four successes pass. The existing security125/legacy25 projections fix the extra
+results explicitly to success. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
 calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
@@ -266,7 +286,8 @@ a workflow-only edit reruns executable policy checks and an invalid edit removes
 the old success marker. Ownership fixtures verify a different numeric UID rather
 than assuming a system file is foreign; production ownership checks are unchanged.
 
-The `optional-integrations`, `core-quality`, `mutation-tests` and `security-check` jobs run
+The `optional-integrations`, `core-quality`, `mutation-tests`, `security-check` and
+`build-logic-validation` jobs run
 independently on separate `ubuntu-26.04` runners with JDK 25; heavy commands are
 never backgrounded together in one checkout. Core retains host quality,
 kernel/fresh-JVM and exploitation gates; independent security retains the real
@@ -274,6 +295,23 @@ vulnerability scan. Mutation uses host Gradle without Podman
 or another container-cache archive. Core, mutation and security independently filter code
 changes, including `.github/workflows/ci.yml`. A docs-only mutation step may skip
 while its job succeeds; the required join is never job-level skipped.
+
+Build-logic validation is an independent unconditional Ubuntu26.04/JDK25 lane,
+with the existing setup-gradle policy, no extra heap/worker/fork allowance and
+always-uploaded diagnostics. It runs:
+
+```bash
+python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- \
+  ./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail \
+  --no-daemon --max-workers=1 --no-parallel
+```
+
+The actual executed-suite receipt must qualify with known >=2147483648-byte
+headroom and zero additional OOM kills. Unknown evidence is not a pass. An unchanged
+UP-TO-DATE/cached nested verifier can demonstrate reuse but is not full-workload
+memory evidence. Other CI lanes compile build logic as needed without implicitly
+repeating its complete regression suite. Intentional bounded fixture builds can
+reuse verifier task names; global task-name counts are not duplicate-suite proof.
 
 Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
 container's separate data mount. Its explicit data-only cache is the sole owner;
@@ -308,8 +346,9 @@ Always-scheduled ownership and diagnostics retain update/analysis logs and repor
 
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests, security-check]` and `if: always()`;
-its shell requires all three results to equal `success`. Failure, cancellation, skipping or a
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation]`
+and `if: always()`; its shell requires all four results to equal `success`.
+Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
 

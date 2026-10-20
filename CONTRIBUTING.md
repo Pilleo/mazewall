@@ -48,6 +48,9 @@ You need a **Linux host or container with kernel ≥ 6.2** for integration tests
 # Focused iteration: host-safe unit tests and unit-only coverage
 ./gradlew unitCheck
 
+# Focused complete build-tool regressions with strict configuration-cache checks
+./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail --max-workers=1
+
 # Focused kernel iteration on a suitable host
 ./gradlew kernelCheck
 
@@ -59,6 +62,14 @@ You need a **Linux host or container with kernel ≥ 6.2** for integration tests
 ```
 
 The full build already selects kernel and fresh-JVM suites for included modules; equivalent iteration commands need not be repeated after that gate. For orchestrator work, use `./gradlew build -PincludeOrchestrator=true`. Documentation-only changes use reference/link checks, `git diff --check`, and backlog validation.
+
+Complete root `check`, `mergeCheck` and `build` also require `buildLogicCheck`
+before other selected project work. BuildSrc compilation still occurs as needed,
+but its JAR bootstrap, `help`, compilation and `assemble` no longer implicitly run
+the regression suite. BuildSrc's own `test`/`check` retain it. Focused/module checks
+are not substitutes for the complete root gate. CI runs the same suite in an
+independent required, memory-qualified lane; security remains a separate required
+prerequisite. Run the full gate before local publication.
 
 ### Commit verification
 

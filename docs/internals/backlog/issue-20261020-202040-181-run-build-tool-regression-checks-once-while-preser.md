@@ -53,5 +53,36 @@ restore deleted folders, overwrite workflow-input/foreign-owner fixes, or remove
 security from the new four-result join. Do not auto-archive the security repair,
 Portal investigation or this work package on a green but incomplete observation.
 
+## Local implementation and qualification
+
+Task3 `ad8addf1` selectively ports the public local bridge and applied DSL/block
+fixtures, retaining actual workflow/settings inputs and current ownership fixes.
+Focused RED/GREEN, strict-cache input failure/stale-marker checks, real direct
+root/heavy/same-name ordering edges and unsafe-anchor negative controls passed.
+Actual help/assemble graphs remain fast; complete check/build graphs select the
+gate first after ordinary buildSrc compilation. Task review passed scoped source.
+
+Task4 `3571f7a5` adds only the required lane and four-result policy/join changes.
+Actual625 shell tuples accept only all-success; legacy projections and current
+security/persistence/eligibility controls remain. Actual YAML/33-shell and baseline
+job-map checks pass: security and publisher blocks are byte-identical. Task review
+passed with no findings; normal commits were used for this task.
+
+The real strict-cache nested suite executed locally in259.34s and qualified with
+11,688,038,400bytes minimum headroom/0 additional OOM kills. An unchanged repeat
+reused strict configuration cache and left the nested verifier UP-TO-DATE in14.78s;
+that repeat is not a second executed-workload memory witness. Focused ktlint passed.
+The complete local build with Koog/bootstrap/Spring included passed in19m13s,
+282 tasks (188 executed,4 cached,90 up-to-date). No project heap/worker increase,
+cache exemption, missing test or input was used to obtain those outcomes.
+
+Task3 used a superfluous per-command hook override; no installed hook was present
+(hooksPath unset, only samples), no hook success is claimed, and the required real
+completion build subsequently passed. Do not repeat the override or rewrite history.
+
+Matched warm host measurements, whole-branch review and hosted first/warm new-gate
+qualification remain pending. Default warm/due security, baseline non-PIT memory,
+full scan scope and registry-byte identity remain separate open holds.
+
 ---
 <!-- id: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser  file: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md -->

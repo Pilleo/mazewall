@@ -42,7 +42,7 @@ snapshot taken immediately before and after that gate was byte-for-byte equal.
 The task-graph contract is also enforced by the BuildSrc TestKit suite and
 `scripts/check_gradle_lifecycle.sh`.
 
-## OWASP Dependency-Check cache
+## Historical OWASP Dependency-Check cache observation
 
 Pull-request run `34255417287`, attempt 1 (`ae809e89`), performed the expected
 cold refresh: `dependencyCheckAnalyze` downloaded all 387,494 NVD records in
@@ -54,3 +54,29 @@ MB entry, including `dependency-check-data`; `dependencyCheckAnalyze` completed
 in 16s (17:31:07–17:31:23 UTC) without logging a complete NVD-record download.
 The vulnerability analysis and CVSS gate both remained active, and the rerun
 completed successfully.
+
+## Current security rollout and explicit-gate comparison
+
+The older setup-gradle data-cache mechanism above is historical. Current security
+has its own completed-data-only cache with exact membership verification before
+analysis; see [testing strategy](../designs/core/testing-strategy.md). A saved data
+snapshot is not a security scan or publication pass.
+
+[Default run39483882935](https://github.com/Pilleo/mazewall/actions/runs/39483882935)
+at512565a7 completed in38m49s with93.72 summed runner-minutes. Actual cold scanner
+update took20m29s, security21m09s, core21m31s, optional acceptance28m31s, mutation
+12m17s and publication10m12s. This is a cold-data operational baseline, not a
+controlled warm comparison or guarantee for another hosted runner.
+
+The selectively recovered explicit build-logic gate needs new real-suite memory,
+local warm help/unitCheck and hosted first/warm observations before a numerical
+benefit is claimed. Match scanner due/cold state and cache warmth; compare wall,
+queue/setup/execute time and total runner minutes. Cached PIT/verifier paths are
+not executed-workload memory witnesses; fresh native results remain required.
+Warm unitCheck's existing10% regression guard applies to matched local observations,
+not a49-minute cold download versus a fresh-cache scan or old subsecond measurements.
+
+[Rollout evidence](../evidence/2026-10-20-ci-rollout.md) records bounds and open
+warm/due, scan-coverage, rootful, non-PIT memory and registry-identity gaps. No
+default benchmark rerun may implicitly republish SNAPSHOT packages without the
+normal release approval.

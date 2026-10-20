@@ -66,3 +66,23 @@ at lines4288–4415. This accounting correction does not change the raw run outc
 - The explicit build-logic optimization is not part of this baseline. Local
   development may proceed after evidence review; its rollout needs its own actual
   suite/memory/native/review/CI evidence and must retain every security gate.
+
+## Candidate local build-logic evidence — not hosted rollout
+
+Source tasks `ad8addf1` and `3571f7a5` passed scoped review and focused regressions,
+including direct ordering edges/negative controls, current workflow-input failure
+and all625 four-result join tuples. Baseline job-map checks retain the security and
+publisher blocks unchanged. Neither deleted folder was recreated.
+
+The actual resource-wrapped strict-cache gate executed its complete nested suite
+in259.34s, receipt `pass`, minimum observed local headroom11,688,038,400bytes and
+additional OOM kills0. The unchanged14.78s repeat reused strict configuration cache
+and left the nested verifier UP-TO-DATE: reuse evidence, not a second full workload.
+Raw receipts/logs are external `real-gate-first.{json,log}` and
+`real-gate-reuse.{json,log}` under `/tmp/opencode/ci-rollout-20261020/`.
+
+Focused script ktlint passed. Complete local build including Koog bootstrap and
+Spring passed19m13s,282 tasks (188 executed/4 cached/90 up-to-date). These observations
+qualify the actual candidate local workload only; they do not fill missing baseline
+lane memory, actual root execution, all-dependency coverage or hosted cache/native/
+publication evidence. No numerical optimization benefit is claimed yet.
