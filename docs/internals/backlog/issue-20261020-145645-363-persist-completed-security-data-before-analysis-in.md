@@ -64,5 +64,17 @@ Task review passed spec and quality with no findings. Whole-branch review and re
 trusted cold/warm/update-due persistence and analysis remain pending. Exact cache
 membership is not archive integrity/retention, nor a security/publication pass.
 
+Whole-branch review found one Important version-prefix collision: a stable version
+could restore a prerelease snapshot. Commit `a709eca6` terminates the version with
+`_`, excluded by the accepted version grammar. Actual metadata-shell RED reproduced
+the collision; GREEN proves mutual stable/prerelease nonmatch and OS/architecture
+isolation, retaining unsafe-version/attempt/matched-key-save controls. Scoped
+re-review marks the finding addressed with no new Critical/Important breakage.
+
+The corrected complete local build passed in16m36s,245 tasks (180 executed,
+7 cached,58 up-to-date). Hosted required checks and actual trusted-default
+cold/warm/update-due persistence/analysis/publication remain outstanding. Neither
+local fake-task controls nor exact lookup membership alone close this issue.
+
 ---
 <!-- id: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in  file: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in.md -->
