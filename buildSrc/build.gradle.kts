@@ -85,6 +85,13 @@ configurations.named(verification.runtimeOnlyConfigurationName) {
 }
 
 val verificationActionsMarker = layout.buildDirectory.file("verification/verification-actions.success")
+tasks.register<JavaExec>("buildLogicGateTest") {
+    mainClass.set("io.mazewall.build.BuildLogicGateFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+    inputs.file(layout.projectDirectory.file("settings.gradle.kts"))
+        .withPropertyName("verificationSettings")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
 tasks.register<JavaExec>("testKitCacheTest") {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
@@ -112,16 +119,20 @@ tasks.register<JavaExec>("pitestLimitsTest") {
 }
 
 val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest") {
+    val successMarker = verificationActionsMarker
     mainClass.set("io.mazewall.build.VerificationActionsTest")
+    inputs.file(layout.projectDirectory.file("settings.gradle.kts"))
+        .withPropertyName("verificationSettings")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(layout.projectDirectory.file("../scripts/ci_cache_key.sh"))
         .withPropertyName("containerCacheKeyHelper")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(layout.projectDirectory.file("../.github/workflows/ci.yml"))
         .withPropertyName("ciCachePolicyWorkflow")
         .withPathSensitivity(PathSensitivity.RELATIVE)
-    outputs.file(verificationActionsMarker)
-    args(verificationActionsMarker.get().asFile.absolutePath)
-    doFirst { verificationActionsMarker.get().asFile.delete() }
+    outputs.file(successMarker)
+    args(successMarker.get().asFile.absolutePath)
+    doFirst { successMarker.get().asFile.delete() }
 }
 
 tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "pitestLimitsTest") }.configureEach {
@@ -141,7 +152,7 @@ tasks.register<JavaExec>("failureTriageTest") {
     doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "pitestLimitsTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
     // Cache transport is not verification input: host/container homes intentionally differ.
@@ -188,4 +199,3 @@ tasks.test {
 }
 
 tasks.named("check") { dependsOn(verificationActionsTest) }
-tasks.named("jar") { dependsOn(verificationActionsTest) }

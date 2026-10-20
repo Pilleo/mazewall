@@ -24,6 +24,7 @@ public final class VerificationActionsTest {
         }
         RootVerificationFunctionalTest.verifyEscapedClasspathLocation();
         PublicCompileClasspathFunctionalTest.verify(rootBuild.getParent());
+        BuildLogicGateFunctionalTest.verify(rootBuild.getParent());
         try {
             SpotBugsReportTest.main(new String[0]);
             SpotBugsSourcePatchTest.main(new String[0]);

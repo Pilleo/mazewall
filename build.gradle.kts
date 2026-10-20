@@ -834,6 +834,28 @@ tasks.register("kernelCheck") {
     )
 }
 
+// BEGIN explicit build-logic gate
+val buildLogicCheck =
+    tasks.register<GradleBuild>("buildLogicCheck") {
+        group = "verification"
+        description = "Runs the complete build-logic verification suite."
+        setDir(layout.projectDirectory.dir("buildSrc").asFile)
+        setBuildName("build-logic-verification")
+        setTasks(listOf("verificationActionsTest"))
+        startParameter.maxWorkerCount = 1
+        startParameter.isParallelProjectExecutionEnabled = false
+    }
+tasks.named("check") { dependsOn(buildLogicCheck) }
+// Ordering does not select the gate on help, compilation or assemble paths.
+allprojects {
+    tasks.configureEach {
+        if (path != ":buildLogicCheck") {
+            mustRunAfter(":buildLogicCheck")
+        }
+    }
+}
+// END explicit build-logic gate
+
 tasks.register("mergeCheck") {
     group = "verification"
     description = "Runs the complete host and privileged-kernel merge gate."
