@@ -25,7 +25,9 @@ public final class VerificationWorkflowInputFunctionalTest {
                 Files.isDirectory(Path.of("/tmp/opencode")) ? Path.of("/tmp/opencode") : Path.of(System.getProperty("java.io.tmpdir")),
                 "verification-workflow-input-");
             Path project = Files.createDirectory(fixture.resolve("buildSrc"));
-            Files.writeString(project.resolve("settings.gradle.kts"), "rootProject.name = \"workflow-input-fixture\"\n");
+            Files.copy(repository.resolve("buildSrc/settings.gradle.kts"), project.resolve("settings.gradle.kts"));
+            Files.createDirectories(fixture.resolve("gradle"));
+            Files.copy(repository.resolve("gradle/libs.versions.toml"), fixture.resolve("gradle/libs.versions.toml"));
             String production = Files.readString(repository.resolve("buildSrc/build.gradle.kts"));
             int start = production.indexOf("val verificationActionsTest = tasks.register<JavaExec>");
             int end = production.indexOf("\ntasks.withType<JavaExec>()", start);

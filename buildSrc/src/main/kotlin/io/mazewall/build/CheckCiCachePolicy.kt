@@ -24,7 +24,8 @@ internal enum class CiCacheViolation(val explanation: String) {
     CODE_CHANGE_FILTER("Core and mutation need unconditional PR-readable code filters including the CI workflow"),
     MUTATION_EXECUTION("Run all three PIT tasks once, serially through the host resource probe with bounded workers and forks"),
     MUTATION_DIAGNOSTICS("Always upload the mutation resource receipt and all three PIT reports"),
-    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation and security success"),
+    BUILD_LOGIC_VALIDATION("Independent read-only build logic must run with strict configuration cache, bounded resources and always-uploaded diagnostics"),
+    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security and build-logic success"),
     PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
@@ -77,6 +78,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
                 workflowStep(security, "Check file changes").trim() != workflowStep(containerJobs[1], "Check file changes").trim()
             CiCacheViolation.MUTATION_EXECUTION -> !hasBoundedMutation(workflow, mutation)
             CiCacheViolation.MUTATION_DIAGNOSTICS -> !hasMutationDiagnostics(mutation)
+            CiCacheViolation.BUILD_LOGIC_VALIDATION -> !hasBuildLogicValidation(workflow)
             CiCacheViolation.REQUIRED_CHECK_JOIN -> !hasRequiredCheckJoin(join)
             CiCacheViolation.PUBLISH_GRAPH -> !hasGatedPublication(workflow, containerJobs[1], join)
             CiCacheViolation.PACKAGE_WRITE_SCOPE -> {
@@ -155,14 +157,57 @@ private fun hasMutationDiagnostics(mutation: String): Boolean {
     return workflowStep(mutation, "Upload Mutation Diagnostics").trimIndent().trim() == upload
 }
 
+private fun hasBuildLogicValidation(workflow: String): Boolean {
+    val expected = """
+        build-logic-validation:
+            name: Build Logic Validation
+            runs-on: ubuntu-26.04
+            timeout-minutes: 90
+            permissions:
+                contents: read
+            steps:
+                - name: Checkout Code
+                  uses: actions/checkout@v6
+                - name: Set up JDK 25
+                  uses: actions/setup-java@v5
+                  with:
+                      java-version: "25"
+                      distribution: "temurin"
+                - name: Setup Gradle
+                  uses: gradle/actions/setup-gradle@v6
+                  with:
+                      cache-encryption-key: ${'$'}{{ secrets.GRADLE_ENCRYPTION_KEY }}
+                      cache-read-only: false
+                - name: Run Build Logic Verification
+                  run: |
+                      set -o pipefail
+                      mkdir -p build/reports/ci-resources
+                      python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+                - name: Upload Build Logic Diagnostics
+                  if: always()
+                  uses: actions/upload-artifact@v4
+                  with:
+                      name: build-logic-diagnostics
+                      path: |
+                          build/reports/ci-resources/build-logic.json
+                          build/reports/ci-resources/build-logic.log
+                          build/reports/problems/
+                          buildSrc/build/reports/
+                          buildSrc/build/test-results/
+                          buildSrc/build/verification/
+                      if-no-files-found: ignore
+    """.trimIndent()
+    return workflowJobBlock(workflow, "build-logic-validation").trimEnd().trimIndent() == expected
+}
+
 private fun hasRequiredCheckJoin(join: String): Boolean {
     val headers = workflowHeaders(join)
     val step = """
         - name: Require Core and Mutation Success
-          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success
+          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success
     """.trimIndent()
     return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
-        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check]") &&
+        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation]") &&
         headers.filter { it.startsWith("if:") } == listOf("if: always()") &&
         headers.none { it.startsWith("continue-on-error:") } && join.substringAfter("        steps:\n", "").trim() == step
 }

@@ -9,6 +9,7 @@ object CiCachePolicyTest {
     @JvmStatic
     fun run() {
         verifyCompletedSecurityLifecycle()
+        verifyBuildLogicLane()
         val valid = """
             cache-read-only: false
             dependency-check-data
@@ -171,11 +172,12 @@ object CiCachePolicyTest {
         """.trimIndent().let { legacy ->
             val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
             val actualSecurity = job(repository.resolve(".github/workflows/ci.yml").readText(), "security-check")
+            val actualBuildLogic = job(repository.resolve(".github/workflows/ci.yml").readText(), "build-logic-validation")
             val fixtureFilter = step(job(legacy, "core-quality"), "Check file changes").trimEnd()
             val securityFixture = actualSecurity.replace(step(actualSecurity, "Check file changes").trimEnd(), fixtureFilter)
-            legacy.replace("    optional-integrations:\n", securityFixture.trimEnd() + "\n    optional-integrations:\n")
-                .replace("needs: [core-quality, mutation-tests]", "needs: [core-quality, mutation-tests, security-check]")
-                .replace("test \"\${{ needs.mutation-tests.result }}\" = success", "test \"\${{ needs.mutation-tests.result }}\" = success && test \"\${{ needs.security-check.result }}\" = success")
+            legacy.replace("    optional-integrations:\n", securityFixture.trimEnd() + "\n" + actualBuildLogic.trimEnd() + "\n    optional-integrations:\n")
+                .replace("needs: [core-quality, mutation-tests]", "needs: [core-quality, mutation-tests, security-check, build-logic-validation]")
+                .replace("test \"\${{ needs.mutation-tests.result }}\" = success", "test \"\${{ needs.mutation-tests.result }}\" = success && test \"\${{ needs.security-check.result }}\" = success && test \"\${{ needs.build-logic-validation.result }}\" = success")
         }
         val failures = mutableListOf<String>()
         fun expectViolations(label: String, workflow: String, vararg expected: String) {
@@ -183,7 +185,7 @@ object CiCachePolicyTest {
             if (actual != expected.toList()) failures += "$label: expected ${expected.toList()}, got $actual"
         }
         expectViolations("independent bounded graph", valid)
-        expectViolations("PR cache writes", valid.replace("cache-read-only: false", "cache-read-only: true"), "PR_CACHE_WRITES")
+        expectViolations("PR cache writes", valid.replace("cache-read-only: false", "cache-read-only: true"), "PR_CACHE_WRITES", "BUILD_LOGIC_VALIDATION")
         expectViolations("Dependency-Check data", valid.replace("dependency-check-data", "caches"), "DEPENDENCY_CHECK_DATA", "SECURITY_LIFECYCLE")
         expectViolations("host Dependency-Check", valid.replace("--no-configuration-cache", "--configuration-cache"), "SECURITY_LIFECYCLE", "HOST_DEPENDENCY_CHECK")
         expectViolations("container Dependency-Check", valid + "\nrun: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze", "CONTAINER_DEPENDENCY_CHECK")
@@ -256,7 +258,7 @@ object CiCachePolicyTest {
             expectViolations("$lane PR cache writes", readOnlyCache, "PR_CACHE_WRITES")
         }
         for (bound in listOf("--max-workers=1", "--no-parallel", "-Pmazewall.pitest.threads=2", "-Pmazewall.test.maxParallelForks=1")) {
-            expectViolations("missing $bound", valid.replace(bound, ""), "MUTATION_EXECUTION")
+            expectViolations("missing $bound", valid.replace(mutationJob, mutationJob.replace(bound, "")), "MUTATION_EXECUTION")
         }
         val executionMutations = listOf(
             mutationJob.replace("./gradlew :enforcer:pitest", "./scripts/run_containerized_tests.sh :enforcer:pitest"),
@@ -309,7 +311,7 @@ object CiCachePolicyTest {
         val joinJob = valid.substring(joinStart, valid.indexOf("    publish:\n"))
         for ((from, to) in listOf(
             "name: Build, Test, Security Scan & Publish" to "name: Renamed required check",
-            "needs: [core-quality, mutation-tests, security-check]" to "needs: [core-quality]",
+            "needs: [core-quality, mutation-tests, security-check, build-logic-validation]" to "needs: [core-quality]",
             "if: always()" to "if: success()",
             "if: always()" to "if: always() && !cancelled()",
             "&& test" to "|| test",
@@ -337,6 +339,8 @@ object CiCachePolicyTest {
                 val command = joinCommand.replace("${'$'}{{ needs.core-quality.result }}", core.orEmpty())
                     .replace("${'$'}{{ needs.mutation-tests.result }}", mutation.orEmpty())
                     .replace("${'$'}{{ needs.security-check.result }}", "success")
+                    .replace("${'$'}{{ needs.build-logic-validation.result }}", "success")
+                check("\${{" !in command) { "Unresolved legacy join expression" }
                 check(shellSucceeds(command) == (core == "success" && mutation == "success")) {
                     "Actual required-check shell join must fail closed for core=$core mutation=$mutation"
                 }
@@ -353,7 +357,79 @@ object CiCachePolicyTest {
             }
         }
         check(failures.isEmpty()) { failures.joinToString("\n") }
-        println("CI policy: legacy cache/graph regressions, independent security lifecycle, 125 actual join triples, default-push publication and PR-only cancellation passed.")
+        println("CI policy: legacy cache/graph regressions, independent security/build-logic lanes, 625 actual join tuples, default-push publication and PR-only cancellation passed.")
+    }
+
+    private fun verifyBuildLogicLane() {
+        val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
+        val workflow = repository.resolve(".github/workflows/ci.yml").readText()
+        val lane = job(workflow, "build-logic-validation")
+        check(lane.isNotEmpty()) { "Missing independent build-logic-validation lane" }
+        check(ciCachePolicyViolations(workflow).isEmpty()) { "Actual workflow must satisfy build-logic policy" }
+        val mutations = listOf(
+            lane to "",
+            "    build-logic-validation:\n" to "    build-logic-validation:\n        needs: [core-quality]\n",
+            "    build-logic-validation:\n" to "    build-logic-validation:\n        if: false\n",
+            "    build-logic-validation:\n" to "    build-logic-validation:\n        continue-on-error: true\n",
+            "name: Build Logic Validation" to "name: Unrequired Build Logic",
+            "ubuntu-26.04" to "ubuntu-24.04",
+            "timeout-minutes: 90" to "timeout-minutes: 180",
+            "contents: read" to "contents: write",
+            "java-version: \"25\"" to "java-version: \"22\"",
+            "cache-read-only: false" to "cache-read-only: true",
+            "gradle/actions/setup-gradle@v6" to "gradle/actions/setup-gradle@v5",
+            "set -o pipefail" to "set +o pipefail",
+            "python3 scripts/ci_resource_probe.py" to "python3 scripts/other.py",
+            "--output build/reports/ci-resources/build-logic.json" to "--output other.json",
+            "buildLogicCheck" to "check",
+            "--configuration-cache " to "",
+            "--configuration-cache-problems=fail" to "--configuration-cache-problems=warn",
+            "--no-daemon" to "",
+            "--max-workers=1" to "--max-workers=2",
+            "--no-parallel" to "--parallel",
+            "- name: Run Build Logic Verification" to "- name: Run Build Logic Verification\n              if: false",
+            "- name: Run Build Logic Verification" to "- name: Run Build Logic Verification\n              continue-on-error: true",
+            "2>&1 | tee" to "|| true 2>&1 | tee",
+            "if: always()" to "if: success()",
+            "build/reports/ci-resources/build-logic.log\n" to "",
+            "build/reports/ci-resources/build-logic.json\n" to "",
+            "buildSrc/build/reports/" to "",
+            "buildSrc/build/test-results/" to "",
+            "buildSrc/build/verification/" to "",
+        )
+        for ((from, to) in mutations) {
+            check(from in lane && from != to) { "Ineffective build-logic mutation: $from" }
+            check(ciCachePolicyViolations(workflow.replace(lane, lane.replace(from, to))).isNotEmpty()) {
+                "Unsafe build-logic lane accepted: $from"
+            }
+        }
+        val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
+        val results = listOf("success", "failure", "cancelled", "skipped", "")
+        var checked = 0
+        for (core in results) for (mutation in results) for (security in results) for (buildLogic in results) {
+            val command = join.replace("\${{ needs.core-quality.result }}", core)
+                .replace("\${{ needs.mutation-tests.result }}", mutation)
+                .replace("\${{ needs.security-check.result }}", security)
+                .replace("\${{ needs.build-logic-validation.result }}", buildLogic)
+            check("\${{" !in command) { "Unresolved four-way join expression" }
+            check(shellSucceeds(command) == (core == "success" && mutation == "success" && security == "success" && buildLogic == "success")) {
+                "Actual 625-way join failed: $core/$mutation/$security/$buildLogic"
+            }
+            checked++
+        }
+        check(checked == 625)
+        val prerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation")
+        for (prerequisite in prerequisites) {
+            val removedNeed = workflow.replace(
+                "needs: [core-quality, mutation-tests, security-check, build-logic-validation]",
+                "needs: [${prerequisites.filter { it != prerequisite }.joinToString(", ")}]",
+            )
+            check(removedNeed != workflow && ciCachePolicyViolations(removedNeed).isNotEmpty()) { "Missing join prerequisite accepted: $prerequisite" }
+            val removedResult = workflow.replace(" && test \"\${{ needs.$prerequisite.result }}\" = success", "")
+                .replace("test \"\${{ needs.$prerequisite.result }}\" = success && ", "")
+            check(removedResult != workflow && ciCachePolicyViolations(removedResult).isNotEmpty()) { "Missing literal success accepted: $prerequisite" }
+        }
+        println("Actual four-result join: all 625 tuples checked, only all literal success passes; unsafe build-logic lanes rejected.")
     }
 
     private fun shellSucceeds(command: String, environment: Map<String, String> = emptyMap()): Boolean {
@@ -520,6 +596,8 @@ object CiCachePolicyTest {
         for (core in results) for (mutation in results) for (securityResult in results) {
             val command = join.replace("\${{ needs.core-quality.result }}", core)
                 .replace("\${{ needs.mutation-tests.result }}", mutation).replace("\${{ needs.security-check.result }}", securityResult)
+                .replace("\${{ needs.build-logic-validation.result }}", "success")
+            check("\${{" !in command) { "Unresolved security join expression" }
             check(shellSucceeds(command) == (core == "success" && mutation == "success" && securityResult == "success")) {
                 "Actual 125-way join failed: $core/$mutation/$securityResult"
             }
