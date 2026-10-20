@@ -1,0 +1,76 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
+	"golang.org/x/sys/unix"
+)
+
+func TestObservedFullPrepareSeparatesUnknownEpochFromStrictDrain(t *testing.T) {
+	for _, kind := range []string{"observed", "strict", "mixed", "observed-counter", "no-hook", "no-accounting", "wrong-birth"} {
+		t.Run(kind, func(t *testing.T) {
+			i := eventFinalizationScopeFixture()
+			gc := gadgetcontext.New(context.Background(), "observed-prepare")
+			defer gc.Cancel()
+			opts := &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(59 * time.Second), ObservedFull: true, AfterReadout: func(context.Context) error { return nil }, Accounting: &operators.SelectedAccountingTarget{Session: "s", PID: 123, Birth: 456}}
+			counter := "0"
+			switch kind {
+			case "strict":
+				opts.StrictFull = true
+				opts.ObservedFull = false
+				counter = "4096"
+			case "mixed":
+				opts.StrictFull = true
+			case "observed-counter":
+				counter = "4096"
+			case "no-hook":
+				opts.AfterReadout = nil
+			case "no-accounting":
+				opts.Accounting = nil
+			case "wrong-birth":
+				opts.Accounting.Birth++
+			}
+			gc.SetVar(operators.EventFinalizationOptionsKey, opts)
+			parameters := map[string]*params.Param{}
+			for key, value := range map[string]string{"collect_ustack": "true", "collect_otel_stack": "true", ParamTraceKernel: "false", "target_safepoint_counter": counter, "target_pid": "123", "target_start_ticks": "456"} {
+				parameters[key] = (&params.ParamDesc{Key: key, DefaultValue: value}).ToParam()
+			}
+			err := i.prepareEventFinalization(gc, parameters)
+			if kind == "observed" || kind == "strict" {
+				if err != nil || i.eventFinalizer == nil {
+					t.Fatal("valid owned profile", kind, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("invalid owned profile", kind)
+			}
+			if kind != "wrong-birth" && !strings.Contains(err.Error(), "full drain") {
+				t.Fatal("wrong negotiation error", err)
+			}
+			if i.eventFinalizer != nil {
+				t.Fatal("owner acquired before valid negotiation")
+			}
+		})
+	}
+}
+
+func TestObservedFullActualJoinInvokesDefinitionHandoffAndPreservesCause(t *testing.T) {
+	r := newEventDrainReader()
+	close(r.done)
+	called := false
+	i := &ebpfInstance{tracers: map[string]*Tracer{"openat": {eventDrain: r}}, eventStopOptions: &operators.EventFinalizationOptions{ObservedFull: true, AfterReadout: func(context.Context) error { called = true; return unix.EACCES }}}
+	err := (nativeEventStopBackend{instance: i}).Join(context.Background())
+	if !called || !errors.Is(err, unix.EACCES) {
+		t.Fatal("observed drain skipped handoff/native cause", called, err)
+	}
+}

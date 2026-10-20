@@ -29,7 +29,7 @@ func TestReleaseFootprintChecksRealELFAndLinkedProvenance(t *testing.T) {
 		}
 		child := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-ldflags", flags, "-o", output, "./cmd/mw-hotspot-collector")
 		child.Dir = root
-		child.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
+		child.Env = append(os.Environ(), "GOWORK=off", "CGO_ENABLED=0", "GOOS=linux", "GOARCH=amd64")
 		if data, err := child.CombinedOutput(); err != nil {
 			t.Fatalf("real Go ELF build: %v\n%s", err, data)
 		}

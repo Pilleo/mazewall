@@ -21,7 +21,7 @@
 +++ b/pkg/symbolizer/otel/otel.go
 @@ -212,1 +212,7 @@
 -	if o.trc != nil {
-+	if o.options.HotSpotEpochTarget.PID != 0 {
++	if o.options.HotSpotEpochTarget.PID != 0 || o.options.HotSpotObservedPID != 0 {
 +		if err:=o.StopAuxiliary(ctx);err!=nil {
 +			if o.options.OnHotSpotFatal!=nil{o.options.OnHotSpotFatal(err)}
 +			return

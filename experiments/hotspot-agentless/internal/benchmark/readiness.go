@@ -8,8 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 
+	"io.mazewall/experiments/hotspot-agentless/internal/candidate"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 )
 
@@ -39,7 +39,7 @@ func ObserveReadiness(m RunManifest, records io.Reader) (ReadinessObservation, e
 			if _, found := events[row.EventID]; found {
 				return ReadinessObservation{}, fmt.Errorf("duplicate readiness event")
 			}
-			events[row.EventID] = *row.Event
+			events[row.EventID] = model.Event(*row.Event)
 		case "enrichment":
 			if row.Evidence == nil {
 				return ReadinessObservation{}, fmt.Errorf("missing readiness evidence")
@@ -108,14 +108,18 @@ func applicationSegment(v model.StackEvidence, route int) (correct, wrong bool) 
 	}
 	leaf, root := -1, -1
 	for j, f := range v.Frames {
-		if strings.Contains(f.FunctionName, "BenchmarkFixture.leaf(") {
+		owner, method, ok := candidate.ParseJavaMethod(f.FunctionName)
+		if !ok || owner != "BenchmarkFixture" {
+			continue
+		}
+		if method == "leaf" {
 			leaf = j
 		}
-		if strings.Contains(f.FunctionName, fmt.Sprintf("BenchmarkFixture.route%d(", route)) {
+		if method == fmt.Sprintf("route%d", route) {
 			root = j
 		}
 		for other := 0; other < 8; other++ {
-			if other != route && strings.Contains(f.FunctionName, fmt.Sprintf("BenchmarkFixture.route%d(", other)) {
+			if other != route && method == fmt.Sprintf("route%d", other) {
 				wrong = true
 			}
 		}

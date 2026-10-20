@@ -9,9 +9,11 @@ import (
 )
 
 const runtimeManifestJSON = `{"pid":123,"start_ticks":456,"tokens":{"/fixture/A":["Fixture.leaf","Fixture.routeA"]}}`
-const runtimeRowsJSON = `[{"schema_version":1,"session_id":"s","kind":"event","event_id":"s:0:1","event":{"filename":"/fixture/A","host_pid":123,"process_start_ticks":456}},{"schema_version":1,"session_id":"s","kind":"enrichment","event_id":"s:0:1","evidence":{"attribution":"event_correlated","frames":[{"function_name":"Fixture.leaf"},{"function_name":"Fixture.routeA"}]}}]`
+const runtimeRowsJSON = completeRowsJSON
 const virtualOracleJSON = `{"vt-7-3-A":{"logical_id":7,"route":["Fixture.leaf","Fixture.routeA"]}}`
-const virtualRowsJSON = `[{"kind":"event","event_id":"s:0:1","event":{"filename":"/fixture/vt-7-3-A","host_tid":42,"thread_identity":{"scope":"mounted_virtual","logical_id":7,"object_lease":true,"mount_capture":1,"mount_decode":1,"parent_available":false}}},{"kind":"enrichment","event_id":"s:0:1","evidence":{"attribution":"event_correlated","frames":[{"function_name":"Fixture.leaf"},{"function_name":"Fixture.routeA"}]}}]`
+
+var virtualRowsJSON = strings.Replace(runtimeRowsJSON, `"filename":"/fixture/A"`, `"filename":"/fixture/vt-7-3-A","thread_identity":{"scope":"mounted_virtual","source":"candidate_native","logical_id":7,"object_lease":true,"mount_capture":1,"mount_decode":1,"parent_available":false}`, 1)
+var virtualTarget = targetIdentity{PID: 123, StartTicks: 456, FixtureRoot: "/fixture"}
 
 func decode[T any](t *testing.T, value string) T {
 	t.Helper()
@@ -32,7 +34,12 @@ func TestRuntimeCandidatePreservesUsefulUnavailableAndNativeOnlyOutcomes(t *test
 	for _, attribution := range []string{"unavailable", "event_correlated"} {
 		rows = decode[[]Record](t, runtimeRowsJSON)
 		rows[1].Evidence.Attribution = attribution
-		rows[1].Evidence.Frames = nil
+		rows[1].Evidence.Frames = []Frame{}
+		if attribution == "unavailable" {
+			zero, one := uint64(0), uint64(1)
+			rows[3].Summary.Enrichment.Resolved = &zero
+			rows[3].Summary.Enrichment.Unavailable = &one
+		}
 		if attribution == "event_correlated" {
 			rows[1].Evidence.Frames = []Frame{{FunctionName: "libc.openat"}}
 		}
@@ -61,23 +68,23 @@ func TestRuntimeCandidateRejectsWrongRouteGenerationDuplicatesAndMissing(t *test
 func TestVirtualCandidateRequiresCapturedLeaseAndMountIdentity(t *testing.T) {
 	oracle := decode[map[string]VirtualOracle](t, virtualOracleJSON)
 	rows := decode[[]Record](t, virtualRowsJSON)
-	result, err := VerifyVirtual(oracle, rows)
+	result, err := VerifyVirtual(oracle, rows, virtualTarget)
 	if err != nil || result.LogicalObserved != 1 || result.ProductionQualified || result.ParentAvailable {
 		t.Fatalf("valid bounded virtual route: %+v %v", result, err)
 	}
 	rows[0].Event.Identity = nil
-	result, err = VerifyVirtual(oracle, rows)
+	result, err = VerifyVirtual(oracle, rows, virtualTarget)
 	if err != nil || result.LogicalObserved != 0 {
 		t.Fatalf("carrier-only outcome: %+v %v", result, err)
 	}
-	for _, change := range [][2]string{{`"logical_id":7`, `"logical_id":8`}, {`"mount_decode":1`, `"mount_decode":2`}, {`"mount_capture":1`, `"mount_capture":0`}, {`"object_lease":true`, `"object_lease":false`}, {`"scope":"mounted_virtual"`, `"scope":"mounted_virtual","source":"oracle"`}, {`"parent_available":false`, `"parent_available":true`}, {"Fixture.routeA", "Fixture.routeB"}} {
-		if _, err := VerifyVirtual(oracle, decode[[]Record](t, strings.Replace(virtualRowsJSON, change[0], change[1], 1))); err == nil {
+	for _, change := range [][2]string{{`"logical_id":7`, `"logical_id":8`}, {`"mount_decode":1`, `"mount_decode":2`}, {`"mount_capture":1`, `"mount_capture":0`}, {`"object_lease":true`, `"object_lease":false`}, {`"source":"candidate_native"`, `"source":"oracle"`}, {`"parent_available":false`, `"parent_available":true`}, {"Fixture.routeA", "Fixture.routeB"}} {
+		if _, err := VerifyVirtual(oracle, decode[[]Record](t, strings.Replace(virtualRowsJSON, change[0], change[1], 1)), virtualTarget); err == nil {
 			t.Fatalf("virtual corruption admitted: %v", change)
 		}
 	}
 	rows = decode[[]Record](t, virtualRowsJSON)
 	for _, variant := range [][]Record{rows[:1], append(rows, rows...), nil} {
-		if _, err := VerifyVirtual(oracle, variant); err == nil {
+		if _, err := VerifyVirtual(oracle, variant, virtualTarget); err == nil {
 			t.Fatal("missing/duplicate virtual evidence admitted")
 		}
 	}
@@ -88,7 +95,7 @@ func TestAttachmentReadinessRequiresCompleteActualRecord(t *testing.T) {
 	for _, test := range []struct {
 		input string
 		ready bool
-	}{{`{"kind":"collector_attached"}`, false}, {"{\"kind\":\"event\"}\n", false}, {"{\"kind\":\"collector_attached\"}\n", true}} {
+	}{{`{"schema_version":1,"session_id":"s","kind":"collector_attached"}`, false}, {"{\"schema_version\":1,\"session_id\":\"s\",\"kind\":\"event\"}\n", false}, {"{\"schema_version\":1,\"session_id\":\"s\",\"kind\":\"collector_attached\"}\n", true}} {
 		if err := os.WriteFile(path, []byte(test.input), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -108,6 +115,9 @@ func TestOfflineCandidateFilesPreserveApplicationPrefixAndRejectDuplicateOracle(
 		t.Fatal(err)
 	}
 	rows := decode[[]Record](t, virtualRowsJSON)
+	if err := os.WriteFile(filepath.Join(root, "identity.json"), []byte(`{"pid":123,"start_ticks":456,"fixture_root":"/fixture"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 	rows[1].Evidence.Frames = append([]Frame{{FunctionName: "libc.openat"}}, rows[1].Evidence.Frames...)
 	var data strings.Builder
 	for _, row := range rows {

@@ -43,7 +43,7 @@ public class StructuredProfileOccurrence internal constructor(
 }
 
 public class StructuredProfileStackEvidence internal constructor(
-    value: HotSpotStackEvidence,
+    private val value: HotSpotStackEvidence,
 ) {
     public val attribution: String = value.attribution
     public val walk: String = value.walk
@@ -52,7 +52,7 @@ public class StructuredProfileStackEvidence internal constructor(
     public val provider: StructuredProfileProvider? = value.provider?.let(::StructuredProfileProvider)
     public val frames: List<StructuredProfileFrame> = java.util.List.copyOf(value.frames.map(::StructuredProfileFrame))
     public val rawErrors: List<String> = value.rawErrors
-    public val rawJson: String = value.rawJson
+    public val rawJson: String get() = value.rawJson
 }
 
 public class StructuredProfileProvider internal constructor(
@@ -66,7 +66,7 @@ public class StructuredProfileProvider internal constructor(
 
 /** Leaf/root order, unsigned provider positions and optional source/BCI domains are preserved verbatim. */
 public class StructuredProfileFrame internal constructor(
-    value: HotSpotFrame,
+    private val value: HotSpotFrame,
 ) {
     public val providerType: UInt = value.providerType
     public val frameType: String = value.frameType
@@ -85,7 +85,7 @@ public class StructuredProfileFrame internal constructor(
     public val scopeWalk: String? = value.scopeWalk
     public val bciState: String? = value.bciState
     public val qualityDiagnostic: String? = value.qualityDiagnostic
-    public val rawJson: String = value.rawJson
+    public val rawJson: String get() = value.rawJson
 }
 
 public class StructuredProfileSummary internal constructor(

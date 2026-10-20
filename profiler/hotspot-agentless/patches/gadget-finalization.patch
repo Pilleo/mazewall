@@ -1,12 +1,13 @@
 --- a/pkg/operators/ebpf/ebpf.go
 +++ b/pkg/operators/ebpf/ebpf.go
-@@ -169,8 +169,10 @@
+@@ -169,8 +169,11 @@
  	return newInstance, nil
  }
  
  type ebpfInstance struct {
 +	eventFinalizer *eventStopOwner
 +	eventStopOptions *operators.EventFinalizationOptions
++	selectedAccounting *selectedAccountingBinding
  	mu          sync.Mutex
  	bpfOperator *ebpfOperator
  
@@ -89,7 +90,13 @@
  	if paramMap[ParamTraceKernel].AsBool() {
  		err := i.tracePipe(gadgetCtx)
  		if err != nil {
-@@ -1073,6 +1077,7 @@
+@@ -895 +899,4 @@
+-	i.collection = collection
++	i.collection = collection
++	if err := i.bindPreparedSelectedAccounting(); err != nil {
++		return errors.Join(err, closeEventCollection(i))
++	}
+@@ -1073,6 +1080,7 @@
  }
  
  func (i *ebpfInstance) Stop(gadgetCtx operators.GadgetContext) error {

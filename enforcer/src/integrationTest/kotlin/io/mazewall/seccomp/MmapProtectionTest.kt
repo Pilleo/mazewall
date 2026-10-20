@@ -52,18 +52,8 @@ class MmapProtectionTest : BaseIntegrationTest() {
     companion object {
         init {
             val linker = Linker.nativeLinker()
-            val mmap = linker.downcallHandle(
-                linker.defaultLookup().find("mmap").get(),
-                FunctionDescriptor.of(
-                    ValueLayout.ADDRESS,
-                    ValueLayout.ADDRESS,
-                    ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_LONG,
-                ),
-            )
+            // Resolve the production mmap adapter, not just an unused raw handle, before PROT_EXEC is denied.
+            withOwnedMapping(anonymousMapping(3)) { }
             val mprotect = linker.downcallHandle(
                 linker.defaultLookup().find("mprotect").get(),
                 FunctionDescriptor.of(

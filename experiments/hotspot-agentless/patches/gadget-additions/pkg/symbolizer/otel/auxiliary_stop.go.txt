@@ -8,8 +8,8 @@ import (
 )
 
 func (o *otelResolverInstance) StopAuxiliary(ctx context.Context) error {
-	if o.trc == nil || o.options.HotSpotEpochTarget.PID == 0 {
-		return fmt.Errorf("strict auxiliary owner unavailable")
+	if o.trc == nil || (o.options.HotSpotEpochTarget.PID == 0 && o.options.HotSpotObservedPID == 0) {
+		return fmt.Errorf("owned HotSpot auxiliary owner unavailable")
 	}
 	if err := o.trc.StopAuxiliary(ctx); err != nil {
 		return err

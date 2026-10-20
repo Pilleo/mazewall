@@ -1,0 +1,94 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package otel
+
+import (
+	"context"
+	"errors"
+	"slices"
+	"testing"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func TestNonTimeCorrelationReorderedDefinitionsAndGuards(t *testing.T) {
+	o := fixtureResolver()
+	checked := libpf.HotSpotValidation{State: libpf.HotSpotValidationChecked}
+	var otherFrames libpf.Frames
+	otherFrames.Append(&libpf.Frame{Type: libpf.NativeFrame, FunctionName: libpf.Intern("otherNativeLeaf"), AddressOrLineno: 8192})
+	otherFrames.Append(&libpf.Frame{Type: libpf.HotSpotFrame, FunctionName: libpf.Intern("pathB"), AddressOrLineno: 23, SourceLine: 58})
+	fixtures := []struct {
+		id     uint64
+		tid    uint32
+		epoch  uint64
+		frames libpf.Frames
+	}{
+		{1, 456, 2, fixtureFrames()},
+		{1<<53 + 1, 456, 2, otherFrames},
+		{0x7ffffffffffffffe, 457, 2, fixtureFrames()},
+		{0x7fffffffffffffff, 456, 4, fixtureFrames()},
+	}
+	taskFor := func(index int) symbolizer.Task {
+		row := fixtures[index]
+		task := epochTask(row.id, row.epoch)
+		task.PidNumbers[0].Pid = row.tid
+		return task
+	}
+	assertDefinition := func(index int) {
+		t.Helper()
+		row := fixtures[index]
+		want := symbolizer.StructuredStack{PID: 123, TID: row.tid, Frames: row.frames,
+			HotSpotIdentity: libpf.HotSpotIdentity{Epoch: row.epoch, State: libpf.HotSpotEpochStable}, HotSpotValidation: checked}
+		result, err := o.ResolveStructured(context.Background(), taskFor(index))
+		if err != nil || result.PID != want.PID || result.TID != want.TID || result.HotSpotIdentity != want.HotSpotIdentity || result.HotSpotValidation != want.HotSpotValidation || !slices.Equal(result.Frames, want.Frames) {
+			t.Fatalf("exact reference binding id=%d: got=%+v err=%v want=%+v", row.id, result, err, want)
+		}
+	}
+	active := make(map[uint64]bool)
+	for _, index := range []int{3, 1, 2, 0} {
+		row := fixtures[index]
+		if err := o.storeEpochTrace(row.id, row.frames, 123, row.tid, taskFor(index).HotSpotIdentity, checked); err != nil {
+			t.Fatal(err)
+		}
+		active[row.id] = true
+	}
+	for _, index := range []int{0, 2, 3, 1} {
+		row := fixtures[index]
+		task := taskFor(index)
+		assertDefinition(index)
+		for _, mutate := range []func(*symbolizer.Task){
+			func(task *symbolizer.Task) { task.Tgid++ },
+			func(task *symbolizer.Task) { task.PidNumbers[0].Pid++ },
+			func(task *symbolizer.Task) { task.HotSpotIdentity.Epoch += 2 },
+		} {
+			wrong := taskFor(index)
+			mutate(&wrong)
+			if _, err := o.ResolveStructured(context.Background(), wrong); !errors.Is(err, symbolizer.ErrStackIdentityMismatch) {
+				t.Fatal("wrong task/epoch accepted", row.id, err)
+			}
+			if err := o.storeEpochTrace(row.id, row.frames, wrong.Tgid, wrong.PidNumbers[0].Pid, wrong.HotSpotIdentity, checked); !errors.Is(err, symbolizer.ErrStackIdentityMismatch) {
+				t.Fatal("conflicting task/epoch redelivery accepted", row.id, err)
+			}
+			assertDefinition(index)
+		}
+		frames := slices.Clone(row.frames)
+		frames[0] = frames[1]
+		if err := o.storeEpochTrace(row.id, frames, 123, row.tid, task.HotSpotIdentity, checked); !errors.Is(err, symbolizer.ErrStackIdentityMismatch) {
+			t.Fatal("conflicting frames accepted", row.id, err)
+		}
+		assertDefinition(index)
+	}
+	o.pruneCorrelationMap(active)
+	o.pruneCorrelationMap(map[uint64]bool{})
+	if len(o.correlationMap) != len(fixtures) {
+		t.Fatal("ID magnitude treated as age")
+	}
+	o.pruneCorrelationMap(map[uint64]bool{})
+	if len(o.correlationMap) != 0 {
+		t.Fatal("two absent cycles not pruned")
+	}
+	if _, err := o.ResolveStructured(context.Background(), epochTask(0, 2)); !errors.Is(err, symbolizer.ErrStackUnavailable) {
+		t.Fatal("zero did not remain unavailable", err)
+	}
+}

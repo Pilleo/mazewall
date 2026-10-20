@@ -1,9 +1,11 @@
 # Selected-event conservation qualification and all-source inventory
 
 Review update: isolated native observations remain diagnostic; aggregate validation
-can mask contradictory CPU tuples. See the reproduced
-[review finding](2026-10-05-hotspot-implementation-review.md). Fix per-CPU validation
-before binding the evaluator to production final counters.
+previously masked contradictory CPU tuples. See the reproduced
+[review finding](2026-10-05-hotspot-implementation-review.md). The
+[remediation](2026-10-05-hotspot-review-remediation-evidence.md) rejects each invalid
+CPU tuple before summation and repeats the actual512open pressure/overflow proof.
+Production final-counter binding and all-source proof remain separate work.
 
 Implemented overflow-safe pure conservation/aggregation and all-source inventory.
 Unknown counters, unquiesced/unjoined source, CPU cardinality mismatch, generation

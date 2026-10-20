@@ -1,7 +1,10 @@
 package io.mazewall.profiler.hotspot
 
+import io.mazewall.profiler.internal.hotspot.HotSpotAssetDigest
 import io.mazewall.profiler.internal.hotspot.HotSpotAssetTimings
 import io.mazewall.profiler.internal.hotspot.HotSpotAssets
+import io.mazewall.profiler.internal.hotspot.HotSpotFileDigest
+import io.mazewall.profiler.internal.hotspot.JavaHotSpotAssetDigest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 import org.junit.jupiter.api.io.TempDir
@@ -16,6 +19,55 @@ import kotlin.test.assertTrue
 class HotSpotAssetsTest {
     @TempDir
     lateinit var directory: Path
+
+    @Test
+    fun `every admission rehashes bytes and preserves the original provider failure`() {
+        fixture()
+        var calls = 0
+        val hasher = HotSpotAssetDigest { path, budget ->
+            calls++
+            JavaHotSpotAssetDigest.digest(path, budget)
+        }
+        HotSpotAssets.load(directory, null, hasher)
+        val once = calls
+        HotSpotAssets.load(directory, null, hasher)
+        assertTrue(once >= 4)
+        assertEquals(once * 2, calls)
+        val denied = java.nio.file.AccessDeniedException(directory.toString())
+        val observed = assertFailsWith<java.nio.file.AccessDeniedException> {
+            HotSpotAssets.load(directory, null, HotSpotAssetDigest { _, _ -> throw denied })
+        }
+        kotlin.test.assertSame(denied, observed)
+    }
+
+    @Test
+    fun `streamed digest refuses bytes beyond its actual budget`() {
+        val path = Files.write(directory.resolve("bytes"), byteArrayOf(1, 2, 3))
+        assertFailsWith<IllegalArgumentException> { JavaHotSpotAssetDigest.digest(path, 2) }
+        val result = JavaHotSpotAssetDigest.digest(path, 3)
+        assertEquals(32, result.bytes().size)
+        assertEquals(3L, result.bytesHashed)
+    }
+
+    @Test
+    fun `aggregate allowance consumes streamed counts and rejects provider overflow`() {
+        fixture()
+        var calls = 0
+        val hasher = HotSpotAssetDigest { path, budget ->
+            calls++
+            val actual = JavaHotSpotAssetDigest.digest(path, budget)
+            if (calls == 1) {
+                assertEquals(536_870_912L, budget)
+                HotSpotFileDigest(budget - 1000, actual.bytes())
+            } else {
+                assertEquals(1000L, budget)
+                HotSpotFileDigest(budget + 1, actual.bytes())
+            }
+        }
+        val failure = assertFailsWith<IllegalArgumentException> { HotSpotAssets.load(directory, null, hasher) }
+        assertEquals("HotSpot asset hash byte budget exceeded", failure.message)
+        assertEquals(2, calls)
+    }
 
     @Test
     fun `measured admission preserves the resolved asset contract`() {
@@ -125,6 +177,84 @@ class HotSpotAssetsTest {
     }
 
     @Test
+    fun `conflicting media types cannot suppress required graph expansion`() {
+        for (opaqueFirst in listOf(false, true)) {
+            fixture()
+            val opaque = rootDescriptor.replace(
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.gadget.config.v1+json",
+            )
+            val descriptors = if (opaqueFirst) "$opaque,$rootDescriptor" else "$rootDescriptor,$opaque"
+            val index = directory.resolve("oci/index.json")
+            val old = Files.readString(index)
+            val updated = """{"schemaVersion":2,"manifests":[$descriptors]}"""
+            Files.writeString(index, updated)
+            val manifest = directory.resolve("manifest.json")
+            Files.writeString(
+                manifest,
+                Files.readString(manifest).replace(
+                    "\"oci/index.json\":\"${hash(old)}\"",
+                    "\"oci/index.json\":\"${hash(updated)}\"",
+                ),
+            )
+            assertFailsWith<IllegalArgumentException>("opaqueFirst=$opaqueFirst") { HotSpotAssets.load(directory) }
+        }
+    }
+
+    @Test
+    fun `same media shared OCI document remains admissible`() {
+        fixture()
+        val index = directory.resolve("oci/index.json")
+        val old = Files.readString(index)
+        val updated = """{"schemaVersion":2,"manifests":[$rootDescriptor,$rootDescriptor]}"""
+        Files.writeString(index, updated)
+        val manifest = directory.resolve("manifest.json")
+        Files.writeString(
+            manifest,
+            Files.readString(manifest).replace(
+                "\"oci/index.json\":\"${hash(old)}\"",
+                "\"oci/index.json\":\"${hash(updated)}\"",
+            ),
+        )
+        HotSpotAssets.load(directory)
+    }
+
+    @Test
+    fun `selected root refuses opaque media and incorrect size`() {
+        for (descriptor in listOf(
+            rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.gadget.config.v1+json"),
+            rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.gadget.ebpf.program.v1+binary"),
+            rootDescriptor.replace("\"size\":${blob.length}", "\"size\":1"),
+        )) {
+            fixture()
+            replaceRootDescriptors(descriptor)
+            assertFailsWith<IllegalArgumentException>(descriptor) { HotSpotAssets.load(directory) }
+        }
+    }
+
+    @Test
+    fun `selected root accepts OCI index media`() {
+        fixture()
+        replaceRootDescriptors(rootDescriptor.replace("application/vnd.oci.image.manifest.v1+json", "application/vnd.oci.image.index.v1+json"))
+        HotSpotAssets.load(directory)
+    }
+
+    private fun replaceRootDescriptors(descriptors: String) {
+        val index = directory.resolve("oci/index.json")
+        val old = Files.readString(index)
+        val updated = """{"schemaVersion":2,"manifests":[$descriptors]}"""
+        Files.writeString(index, updated)
+        val manifest = directory.resolve("manifest.json")
+        Files.writeString(
+            manifest,
+            Files.readString(manifest).replace(
+                "\"oci/index.json\":\"${hash(old)}\"",
+                "\"oci/index.json\":\"${hash(updated)}\"",
+            ),
+        )
+    }
+
+    @Test
     @EnabledIfEnvironmentVariable(named = "MW_HOTSPOT_ASSET_TEST_DIR", matches = ".+")
     fun `installed native bundle passes Kotlin admission`() {
         val installed = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))
@@ -156,7 +286,7 @@ class HotSpotAssetsTest {
             {"schema_version":1,"collector_version":"2","capture_abi":2,"wire_schema":2,
              "platform":"linux-amd64","gadget_revision":"7097db144ccd8dab15373f27ec98d2c3d22e4588",
              "profiler_revision":"ef6cf29492c8a980f889052903fa2dd0c0765cc0",
-             "patch_sha256":"618c3d67d71e86dfb0befb13f73498402af6110f1f2fceb3784c53785b0da00c",
+             "patch_sha256":"89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50",
              "gadget_digest":"sha256:$blobHash","files":{$files}}
         """.trimIndent(),
         )

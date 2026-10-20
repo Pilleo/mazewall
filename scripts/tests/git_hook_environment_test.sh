@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run under the fleet verification.lock when used in a shared verification fleet.
-# Removing the hook's Gradle isolation must make this real-Git regression fail.
+# Removing the full build gate or Gradle isolation must fail this real-Git regression.
 # Clearing Git-local context before audits must fail the alternate-index case.
 set -euo pipefail
 
@@ -112,7 +112,7 @@ git -C "$FOREIGN_REPO" -c core.hooksPath=/dev/null commit -q -m foreign-operatio
 git -C "$FOREIGN_REPO" update-ref refs/fixture/foreign HEAD
 git -C "$FOREIGN_REPO" config --local core.bare true
 printf 'foreign operations completed\n' > "$CASE_DIR/foreign-done"
-if (( GRADLE_STATUS != 0 )); then echo 'fixture FAILED requested Gradle failure'; fi
+if (( GRADLE_STATUS != 0 )); then echo 'fixture verification FAILED requested Gradle failure'; fi
 exit "$GRADLE_STATUS"
 GRADLE
   chmod +x "$case_dir/worktree/gradlew"
@@ -180,13 +180,13 @@ GRADLE
   [[ $(git --git-dir="$case_dir/foreign/.git" rev-parse refs/fixture/foreign) == "$(git --git-dir="$case_dir/foreign/.git" rev-parse HEAD)" ]] || fail 'foreign ref missing'
   [[ $(git --git-dir="$case_dir/foreign/.git" config --local user.name) == 'Foreign Fixture' ]] || fail 'foreign identity not updated'
   [[ $(git --git-dir="$case_dir/foreign/.git" config --local core.bare) == true ]] || fail 'foreign config not updated'
-  printf 'test\n' > "$case_dir/expected-args"
+  printf 'build\n' > "$case_dir/expected-args"
   if [[ $portal == included ]]; then
     printf ':portals:runtime:integrationTest\n:portals:runtime:test\n' >> "$case_dir/expected-args"
   else
     grep -q 'GATE DEGRADED' "$case_dir/hook.log" || fail 'excluded portal gate was silent'
   fi
-  printf '%s\n' -x check --no-configuration-cache --no-parallel >> "$case_dir/expected-args"
+  printf '%s\n' --no-configuration-cache --no-parallel >> "$case_dir/expected-args"
   diff -u "$case_dir/expected-args" "$case_dir/gradle-args" || fail 'gate argument selection changed'
   if (( gradle_status == 0 )); then
     [[ $status == 0 && $(cat "$case_dir/hook-status") == 0 ]] || fail 'successful gate aborted commit'
@@ -194,14 +194,14 @@ GRADLE
     [[ $(git -C "$case_dir/worktree" status --porcelain) == '' ]] || fail 'original commit index not clean'
   else
     [[ $status == 1 && $(cat "$case_dir/hook-status") == 1 ]] || fail 'Gradle failure did not abort commit with existing hook status 1'
-    grep -q 'ERROR: Host unit tests failed. Commit aborted.' "$case_dir/hook.log" || fail 'Gradle failure diagnostic missing'
+    grep -q 'ERROR: Full Gradle build failed. Commit aborted.' "$case_dir/hook.log" || fail 'Gradle verification failure diagnostic missing'
     [[ $(git -C "$case_dir/worktree" rev-parse HEAD) == "$(cat "$case_dir/original-head")" ]] || fail 'failed gate advanced original HEAD'
   fi
   echo "PASS: $label — real worktree exports isolated; foreign Git only; gate arguments/status preserved"
 }
 
 run_case portal-success included 0 allow
-run_case portal-failure included 23 allow
+run_case build-verification-failure included 23 allow
 run_case excluded-portal excluded 0 allow
 run_case staged-audit included 0 reject
 run_case alternate-index-audit included 0 alternate-reject

@@ -58,14 +58,8 @@ type correlationWaiter struct {
 	refs int
 }
 
-func (o *otelResolverInstance) storeTrace(id uint64, frames libpf.Frames, pid, tid uint32) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.correlationMap[id] = correlatedFrames{frames: slices.Clone(frames), pid: pid, tid: tid}
-	if waiter, ok := o.waiters[id]; ok {
-		close(waiter.ch)
-		delete(o.waiters, id)
-	}
+func (o *otelResolverInstance) storeTrace(id uint64, frames libpf.Frames, pid, tid uint32) error {
+	return o.storeEpochTrace(id, frames, pid, tid, libpf.HotSpotIdentity{}, libpf.HotSpotValidation{})
 }
 
 func (o *otelResolverInstance) ResolveStructured(ctx context.Context, task symbolizer.Task) (symbolizer.StructuredStack, error) {
@@ -83,6 +77,9 @@ func (o *otelResolverInstance) ResolveStructured(ctx context.Context, task symbo
 		return symbolizer.StructuredStack{}, symbolizer.ErrStackIdentityMismatch
 	}
 	result := symbolizer.StructuredStack{Frames: slices.Clone(trace.frames), PID: trace.pid, TID: trace.tid, HotSpotIdentity: trace.identity, HotSpotValidation: trace.validation}
+	if o.options.HotSpotObservedPID != 0 && trace.validation.State == libpf.HotSpotValidationUnavailable {
+		return result, symbolizer.ErrStackUnavailable
+	}
 	if task.HotSpotIdentity.State != libpf.HotSpotEpochUnknown || o.options.HotSpotEpochTarget.PID != 0 || trace.identity.State != libpf.HotSpotEpochUnknown {
 		if err := task.HotSpotIdentity.Validate(); err != nil {
 			return result, err

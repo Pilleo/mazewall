@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io.mazewall/experiments/hotspot-agentless/internal/driver"
+	"io.mazewall/experiments/hotspot-agentless/internal/preflight"
+	"io.mazewall/experiments/hotspot-agentless/internal/tooling"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,6 +20,11 @@ type candidateCase struct {
 	label   string
 	flags   []string
 	virtual bool
+}
+
+type candidateDocker interface {
+	Output(time.Duration, ...string) (string, error)
+	Start(*os.File, *os.File, ...string) (*exec.Cmd, error)
 }
 
 func Run(root string, args []string) error {
@@ -39,7 +46,13 @@ func Run(root string, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := tooling.Run(root, []string{"verify", "--bundle", assetRoot}); err != nil {
+		return err
+	}
 	if err := os.Mkdir(out, 0755); err != nil {
+		return err
+	}
+	if err := writeCaptureAudit(assetRoot, out); err != nil {
 		return err
 	}
 	classes := filepath.Join(out, "classes")
@@ -75,41 +88,45 @@ func Run(root string, args []string) error {
 		}
 		results = append(results, result)
 	}
-	return driver.WriteJSON(filepath.Join(out, "summary.json"), map[string]any{"jdk_image": lock.Images["jdk"], "go_image": lock.Images["go"], "asset_manifest": manifest, "experimental_schema": 1, "results": results, "production_qualified": false})
+	return driver.WriteJSON(filepath.Join(out, "summary.json"), map[string]any{"jdk_image": lock.Images["jdk"], "go_image": lock.Images["go"], "asset_manifest": manifest, "capture_audit": "capture-audit.json", "experimental_schema": 1, "results": results, "production_qualified": false})
 }
 
-func compileCandidates(docker driver.Docker, source, out, classes, image string) (failure error) {
-	id, err := docker.Output(20*time.Second, "create", "--pull=never", "--user", strconv.Itoa(os.Getuid()), "--mount", "type=bind,src="+source+",dst="+source+",readonly", "--mount", "type=bind,src="+out+",dst="+out, image, "javac", "-d", classes, filepath.Join(source, "RuntimeCandidateFixture.java"), filepath.Join(source, "VirtualThreadOracle.java"))
+func compileCandidates(docker candidateDocker, source, out, classes, image string) (failure error) {
+	owners := driver.NewContainerOwners(docker)
+	defer func() { failure = owners.Finish(out, failure) }()
+	id, err := owners.Create("candidate-compiler", "--pull=never", "--user", strconv.Itoa(os.Getuid()), "--mount", "type=bind,src="+source+",dst="+source+",readonly", "--mount", "type=bind,src="+out+",dst="+out, image, "javac", "-d", classes, filepath.Join(source, "RuntimeCandidateFixture.java"), filepath.Join(source, "VirtualThreadOracle.java"))
 	if err != nil {
 		return err
 	}
-	id = strings.TrimSpace(id)
-	defer func() { failure = errors.Join(failure, driver.RemoveOwned(docker, id)) }()
 	_, err = docker.Output(60*time.Second, "start", "--attach", id)
 	return err
 }
 
-func runCase(docker driver.Docker, c candidateCase, assets, out, classes string, images map[string]string, image string) (result map[string]any, failure error) {
+func runCase(docker candidateDocker, c candidateCase, assets, out, classes string, images map[string]string, image string) (result map[string]any, failure error) {
 	root := filepath.Join(out, c.label)
 	if err := os.Mkdir(root, 0755); err != nil {
 		return nil, err
 	}
 	var target, collector string
-	var child, owner *exec.Cmd
+	var child, owner *driver.OwnedCommand
+	owners := driver.NewContainerOwners(docker)
+	var logs []*os.File
 	defer func() {
-		failure = errors.Join(failure, driver.RemoveOwned(docker, collector, target))
-		for _, process := range []*exec.Cmd{owner, child} {
-			if process != nil {
-				failure = errors.Join(failure, driver.WaitChild(process, 10*time.Second))
-			}
+		failure = owners.Finish(root, failure, logs...)
+		if failure == nil {
+			result["resources_retired"] = true
+			failure = driver.WriteJSON(filepath.Join(root, "result.json"), result)
+		}
+		if failure != nil {
+			result = nil
 		}
 	}()
 	targetLog, err := os.Create(filepath.Join(root, "target.log"))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { failure = errors.Join(failure, targetLog.Close()) }()
-	argv := []string{"create", "--pull=never", "--user", strconv.Itoa(os.Getuid()), "--pid=host", "--mount", "type=bind,src=" + out + ",dst=" + out, images["jdk"], "java"}
+	logs = append(logs, targetLog)
+	argv := []string{"--pull=never", "--user", strconv.Itoa(os.Getuid()), "--pid=host", "--mount", "type=bind,src=" + out + ",dst=" + out, images["jdk"], "java"}
 	argv = append(argv, c.flags...)
 	argv = append(argv, "-XX:+PrintCompilation", "-cp", classes)
 	if c.virtual {
@@ -117,13 +134,11 @@ func runCase(docker driver.Docker, c candidateCase, assets, out, classes string,
 	} else {
 		argv = append(argv, "RuntimeCandidateFixture", root, "40")
 	}
-	target, err = docker.Output(20*time.Second, argv...)
+	target, err = owners.Create("candidate-target", argv...)
 	if err != nil {
-		target = ""
 		return nil, err
 	}
-	target = strings.TrimSpace(target)
-	child, err = docker.Start(targetLog, targetLog, "start", "--attach", target)
+	child, err = owners.Start(targetLog, targetLog, target)
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +154,17 @@ func runCase(docker driver.Docker, c candidateCase, assets, out, classes string,
 	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
 	if err != nil || pid <= 0 {
 		return nil, fmt.Errorf("invalid fixture PID: %q", pidBytes)
+	}
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return nil, err
+	}
+	ticks, err := preflight.ParseStartTicks(string(stat))
+	if err != nil {
+		return nil, err
+	}
+	if err := driver.WriteJSON(filepath.Join(root, "identity.json"), targetIdentity{PID: uint32(pid), StartTicks: ticks, FixtureRoot: root}); err != nil {
+		return nil, err
 	}
 	flags, flagsErr := docker.Output(20*time.Second, "exec", target, "jcmd", strconv.Itoa(pid), "VM.flags", "-all")
 	flagsCode := 0
@@ -157,19 +183,17 @@ func runCase(docker driver.Docker, c candidateCase, assets, out, classes string,
 	if err != nil {
 		return nil, err
 	}
-	defer func() { failure = errors.Join(failure, stdout.Close()) }()
+	logs = append(logs, stdout)
 	stderr, err := os.Create(filepath.Join(root, "collector.log"))
 	if err != nil {
 		return nil, err
 	}
-	defer func() { failure = errors.Join(failure, stderr.Close()) }()
-	collector, err = docker.Output(20*time.Second, "create", "--pull=never", "--privileged", "--pid=host", "--mount", "type=bind,src="+assets+",dst="+assets+",readonly", "--mount", "type=bind,src=/sys,dst=/sys,readonly", images["go"], filepath.Join(assets, "mw-hotspot-collector"), "--capture", "--protocol-version=1", "--hotspot-identity=unknown", "--pid", strconv.Itoa(pid), "--store", filepath.Join(assets, "oci"), "--image", image, "--duration", "15s")
+	logs = append(logs, stderr)
+	collector, err = owners.Create("candidate-collector", "--pull=never", "--privileged", "--pid=host", "--mount", "type=bind,src="+assets+",dst="+assets+",readonly", "--mount", "type=bind,src=/sys,dst=/sys,readonly", images["go"], filepath.Join(assets, "mw-hotspot-collector"), "--capture", "--protocol-version=1", "--hotspot-identity=unknown", "--pid", strconv.Itoa(pid), "--store", filepath.Join(assets, "oci"), "--image", image, "--duration", "15s")
 	if err != nil {
-		collector = ""
 		return nil, err
 	}
-	collector = strings.TrimSpace(collector)
-	owner, err = docker.Start(stdout, stderr, "start", "--attach", collector)
+	owner, err = owners.Start(stdout, stderr, collector)
 	if err != nil {
 		return nil, err
 	}
@@ -181,15 +205,11 @@ func runCase(docker driver.Docker, c candidateCase, assets, out, classes string,
 	if err := os.WriteFile(filepath.Join(root, "measure"), []byte("measure"), 0644); err != nil {
 		return nil, err
 	}
-	process := owner
-	owner = nil
-	collectorErr := driver.WaitChild(process, 30*time.Second)
+	collectorErr := owner.Wait(30 * time.Second)
 	if err := os.WriteFile(filepath.Join(root, "release"), []byte("release"), 0644); err != nil {
 		return nil, errors.Join(collectorErr, err)
 	}
-	process = child
-	child = nil
-	targetErr := driver.WaitChild(process, 10*time.Second)
+	targetErr := child.Wait(10 * time.Second)
 	if err := errors.Join(collectorErr, targetErr); err != nil {
 		return nil, err
 	}
@@ -206,10 +226,10 @@ func runCase(docker driver.Docker, c candidateCase, assets, out, classes string,
 		verdict = map[string]any{"oracle_rejected": err.Error(), "production_qualified": false}
 	}
 	result = map[string]any{"label": c.label, "pid": pid, "flags": c.flags, "flags_observed_exit": flagsCode, "collector_exit": 0, "target_exit": 0, "verdict": verdict, "production_qualified": false}
-	return result, driver.WriteJSON(filepath.Join(root, "result.json"), result)
+	return result, nil
 }
 
-func readyOrExited(docker driver.Docker, id string, predicate func() (bool, error)) (bool, error) {
+func readyOrExited(docker candidateDocker, id string, predicate func() (bool, error)) (bool, error) {
 	ready, err := predicate()
 	if err != nil || ready {
 		return ready, err

@@ -1,9 +1,12 @@
 # Loom carrier versus mounted logical identity qualification
 
 Review update: carrier/token counts are historical diagnostic observations, not
-promotion proof. The carrier-only verifier skips terminal and target identity checks;
-see [implementation review](2026-10-05-hotspot-implementation-review.md). Rerun with
-independent expected PID/birth/path context after hardening, not self-derived identity.
+promotion proof. The original carrier-only verifier skipped terminal and target identity checks;
+see [implementation review](2026-10-05-hotspot-implementation-review.md). Older
+packets cannot supply their own independent expected PID/birth/path context.
+The [remediation rerun](2026-10-05-hotspot-review-remediation-evidence.md) now passes
+all256tokens per1/2/4carrier case with independent live identity.json, complete
+terminal validation and checked owner retirement. Logical/parent proof stays absent.
 
 Implemented offline carrier/mount/object scope gate and oracle-only virtual-thread
 fixture/verifier. The actual candidate experiment does not inject oracle logical

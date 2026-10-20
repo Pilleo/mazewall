@@ -2,7 +2,9 @@ package io.mazewall.profiler.hotspot
 
 import io.mazewall.profiler.hotspot.performance.HotSpotWorkloadMeasurementSettings
 import io.mazewall.profiler.hotspot.performance.measureReplay
+import io.mazewall.profiler.hotspot.performance.measureReplayAndRender
 import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceAssembler
+import io.mazewall.profiler.internal.hotspot.HotSpotEvidenceDocument
 import io.mazewall.profiler.internal.hotspot.HotSpotProtocolException
 import io.mazewall.profiler.internal.hotspot.HotSpotReplayLimits
 import org.junit.jupiter.api.Test
@@ -12,6 +14,17 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class HotSpotPerformanceMeasurementTest {
+    @Test
+    fun `rendered measurement preserves exact validated diagnostics`() {
+        val bytes = projection()
+        val actual = measureReplayAndRender(bytes.inputStream(), HotSpotReplayLimits())
+        val expected = HotSpotEvidenceDocument.encode(HotSpotEvidenceAssembler().read(bytes.inputStream()))
+        assertEquals(expected, actual.canonicalJson)
+        assertEquals(3, actual.replay.wireRecords)
+        assertFalse(actual.replay.evidence.collectionLossComplete)
+        assertTrue(actual.renderNanos >= 0)
+    }
+
     @Test
     fun `diagnostic settings preserve accepted defaults and enforce bounds`() {
         assertEquals(HotSpotWorkloadMeasurementSettings(20, 40, 100), HotSpotWorkloadMeasurementSettings())

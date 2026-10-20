@@ -7,9 +7,12 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/cilium/ebpf"
+	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
 	"golang.org/x/sys/unix"
 )
 
@@ -81,5 +84,73 @@ func TestStrictFullFinalizationHookRunsBeforeResourceRetirement(t *testing.T) {
 	err := (nativeEventStopBackend{instance: i}).Join(context.Background())
 	if !called || !errors.Is(err, unix.EPERM) {
 		t.Fatal("definition hook skipped or downgraded", called, err)
+	}
+}
+
+func TestSelectedTargetMetadataNeedsNoCollection(t *testing.T) {
+	target := &operators.SelectedAccountingTarget{Session: "s", PID: 123, Birth: 456}
+	if err := validateSelectedAccountingTarget(target, "123", "456"); err != nil {
+		t.Fatal(err)
+	}
+	for _, pair := range [][2]string{{"", "456"}, {"4294967296", "456"}, {"-1", "456"}, {"123", "18446744073709551616"}, {"123", "457"}} {
+		if err := validateSelectedAccountingTarget(target, pair[0], pair[1]); err == nil {
+			t.Fatal("invalid target parsed", pair)
+		}
+	}
+	i := eventFinalizationScopeFixture()
+	i.eventStopOptions = &operators.EventFinalizationOptions{Accounting: target}
+	if err := i.bindPreparedSelectedAccounting(); err == nil {
+		t.Fatal("receipt invented before actual collection acquisition")
+	}
+	if _, ok := i.SelectedAccountingBinding(); ok {
+		t.Fatal("failed binding published")
+	}
+}
+
+func TestSelectedActualMapLayoutIsIndependentOfSpec(t *testing.T) {
+	good := ebpf.MapInfo{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 32, MaxEntries: 1}
+	if !validSelectedCounterInfo(&good) || validSelectedCounterInfo(nil) {
+		t.Fatal("layout admission")
+	}
+	bad := good
+	bad.ValueSize = 8
+	if validSelectedCounterInfo(&bad) {
+		t.Fatal("actual incompatible map accepted")
+	}
+}
+
+func TestSelectedPrepareCopiesMetadataAndRejectsMissingParameters(t *testing.T) {
+	for _, missing := range []string{"", "target_pid", "target_start_ticks"} {
+		i := eventFinalizationScopeFixture()
+		gc := gadgetcontext.New(context.Background(), "selected-prepare")
+		defer gc.Cancel()
+		target := &operators.SelectedAccountingTarget{Session: "s", PID: 123, Birth: 456}
+		opts := &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute), Accounting: target}
+		gc.SetVar(operators.EventFinalizationOptionsKey, opts)
+		parameters := map[string]*params.Param{}
+		for key, value := range map[string]string{"collect_ustack": "false", "collect_otel_stack": "false", ParamTraceKernel: "false", "target_pid": "123", "target_start_ticks": "456"} {
+			parameters[key] = (&params.ParamDesc{Key: key, DefaultValue: value}).ToParam()
+		}
+		if missing != "" {
+			delete(parameters, missing)
+		}
+		err := i.prepareEventFinalization(gc, parameters)
+		if missing != "" {
+			if err == nil {
+				t.Fatal("missing target accepted", missing)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		target.PID = 999
+		opts.Accounting = nil
+		if i.eventStopOptions.Accounting.PID != 123 {
+			t.Fatal("target aliases caller options")
+		}
+		if _, ok := i.SelectedAccountingBinding(); ok {
+			t.Fatal("prepare invented map receipt")
+		}
 	}
 }
