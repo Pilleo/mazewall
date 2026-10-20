@@ -16,7 +16,6 @@ target_files:
   - "buildSrc/src/test/java/io/mazewall/build/VerificationActionsTest.java"
   - "buildSrc/src/test/java/io/mazewall/build/VerificationWorkflowInputFunctionalTest.java"
   - "docs/internals/designs/core/testing-strategy.md"
-  - "docs/internals/build/gradle-baseline.md"
   - "CONTRIBUTING.md"
 target_symbols: []
 open_questions: false
@@ -30,67 +29,16 @@ has_side_effects: true
 # 🟡 [Severity: MEDIUM]: Run build-tool regression checks once while preserving required security validation
 
 **Context:**
-Execute approved docs/internals/plans/2026-10-20-ci-rollout-and-build-logic.md on merged512565a7. Default security cold update/persistence/analysis and ten module-plus-marker uploads succeeded; warm/due, non-PIT memory, full dependency scope and immutable remote identity remain open, not inferred. Selectively recover heldf8f41c52 code only, never restore removed superpowers folders or overwrite mergedsecurity/workflowinput/rootfixture fixes. Explicit public GradleBuild rootcheck gate and independent required CI lane eliminate repeated jar-bootstrap regressions, with full local coverage and strict cache/input/failure/ordering proof. Preserve security as fourth literal-success prerequisite and existing thresholds/heaps/workers/native freshness. No new service/dependency/worktree/credential or benchmark republication.
+The complete build-tool regression suite currently runs during every fresh
+buildSrc JAR bootstrap. Move it to an explicit local verification task and one
+required CI lane, while keeping complete builds mandatory and preserving security,
+native checks, verifier inputs and failure handling.
 
 **Needed:**
 1. TDD selective local bridge and applied production DSL fixtures, including direct root/heavy/same-name ordering edges and workflow-input stale-marker failure.
 2. TDD independent memory-qualified build-logic CI lane and 625 actual four-result join combinations, retaining all security/publish/cache controls.
 3. Real executed-suite and reuse receipts, focused checks, complete included-module build and independent whole-change review.
 4. Scoped PR and real hosted timing/runner/memory/native evidence; merge only through approval path with remaining security rollout gaps explicit.
-
-## Approved scope and open rollout evidence
-
-[Execution plan](../plans/2026-10-20-ci-rollout-and-build-logic.md) and
-[actual default cold observations](../evidence/2026-10-20-ci-rollout.md) retain all
-merged security and review fixes. The plan's local-start condition was explicitly
-revised after the publication audit: safe local TDD/nonpublishing PR checks can
-proceed after bounded cold evidence review, without manufacturing a benchmark
-republication. Default warm/due evidence and broader resource/coverage assurances
-remain open; this work package cannot close those gaps by implication.
-
-Only port declared code from held `f8f41c52`; never merge that branch wholesale,
-restore deleted folders, overwrite workflow-input/foreign-owner fixes, or remove
-security from the new four-result join. Do not auto-archive the security repair,
-Portal investigation or this work package on a green but incomplete observation.
-
-## Local implementation and qualification
-
-Task3 `ad8addf1` selectively ports the public local bridge and applied DSL/block
-fixtures, retaining actual workflow/settings inputs and current ownership fixes.
-Focused RED/GREEN, strict-cache input failure/stale-marker checks, real direct
-root/heavy/same-name ordering edges and unsafe-anchor negative controls passed.
-Actual help/assemble graphs remain fast; complete check/build graphs select the
-gate first after ordinary buildSrc compilation. Task review passed scoped source.
-
-Task4 `3571f7a5` adds only the required lane and four-result policy/join changes.
-Actual625 shell tuples accept only all-success; legacy projections and current
-security/persistence/eligibility controls remain. Actual YAML/33-shell and baseline
-job-map checks pass: security and publisher blocks are byte-identical. Task review
-passed with no findings; normal commits were used for this task.
-
-The real strict-cache nested suite executed locally in259.34s and qualified with
-11,688,038,400bytes minimum headroom/0 additional OOM kills. An unchanged repeat
-reused strict configuration cache and left the nested verifier UP-TO-DATE in14.78s;
-that repeat is not a second executed-workload memory witness. Focused ktlint passed.
-The complete local build with Koog/bootstrap/Spring included passed in19m13s,
-282 tasks (188 executed,4 cached,90 up-to-date). No project heap/worker increase,
-cache exemption, missing test or input was used to obtain those outcomes.
-
-Task3 used a superfluous per-command hook override; no installed hook was present
-(hooksPath unset, only samples), no hook success is claimed, and the required real
-completion build subsequently passed. Do not repeat the override or rewrite history.
-
-Whole-branch review and hosted first/warm new-gate qualification remain pending.
-Default warm/due security, baseline non-PIT memory,
-full scan scope and registry-byte identity remain separate open holds.
-
-Matched host measurement is now recorded: three warmed strict-cache invocations
-per task on512565a7/candidate0c0608df, same host/argv/wrapper. Help medians8.359s/
-8.343s; unitCheck17.583s/17.378s, ratio0.9884 passes the10% guard. The difference
-is small noise-scale evidence of no regression, not a steady speedup. Baseline
-prime really executed the implicit suite; candidate help did not, but prime cache
-states differ and are not a controlled cold comparison. Whole-branch review and
-hosted qualification remain pending; neither deleted folder was recreated.
 
 ---
 <!-- id: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser  file: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md -->

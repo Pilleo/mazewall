@@ -42,7 +42,7 @@ snapshot taken immediately before and after that gate was byte-for-byte equal.
 The task-graph contract is also enforced by the BuildSrc TestKit suite and
 `scripts/check_gradle_lifecycle.sh`.
 
-## Historical OWASP Dependency-Check cache observation
+## OWASP Dependency-Check cache
 
 Pull-request run `34255417287`, attempt 1 (`ae809e89`), performed the expected
 cold refresh: `dependencyCheckAnalyze` downloaded all 387,494 NVD records in
@@ -54,51 +54,3 @@ MB entry, including `dependency-check-data`; `dependencyCheckAnalyze` completed
 in 16s (17:31:07–17:31:23 UTC) without logging a complete NVD-record download.
 The vulnerability analysis and CVSS gate both remained active, and the rerun
 completed successfully.
-
-## Current security rollout and explicit-gate comparison
-
-The older setup-gradle data-cache mechanism above is historical. Current security
-has its own completed-data-only cache with exact membership verification before
-analysis; see [testing strategy](../designs/core/testing-strategy.md). A saved data
-snapshot is not a security scan or publication pass.
-
-[Default run39483882935](https://github.com/Pilleo/mazewall/actions/runs/39483882935)
-at512565a7 completed in38m49s with93.72 summed runner-minutes. Actual cold scanner
-update took20m29s, security21m09s, core21m31s, optional acceptance28m31s, mutation
-12m17s and publication10m12s. This is a cold-data operational baseline, not a
-controlled warm comparison or guarantee for another hosted runner.
-
-The selectively recovered explicit build-logic gate requires real-suite memory,
-local warm help/unitCheck and hosted first/warm observations before a numerical
-benefit is claimed. Local results below do not substitute for hosted acceptance.
-Match scanner due/cold state and cache warmth; compare wall,
-queue/setup/execute time and total runner minutes. Cached PIT/verifier paths are
-not executed-workload memory witnesses; fresh native results remain required.
-Warm unitCheck's existing10% regression guard applies to matched local observations,
-not a49-minute cold download versus a fresh-cache scan or old subsecond measurements.
-
-[Rollout evidence](../evidence/2026-10-20-ci-rollout.md) records bounds and open
-warm/due, scan-coverage, rootful, non-PIT memory and registry-identity gaps. No
-default benchmark rerun may implicitly republish SNAPSHOT packages without the
-normal release approval.
-
-### Matched local warm host checks
-
-After local correctness/resource checks, the same checkout was serially switched
-between merged512565a7 and candidate0c0608df, then restored to its feature branch.
-No worktree, cache purge, publication or concurrent local Gradle build was used.
-Both used identical strict-cache/no-daemon/max-workers2 argv and the same resource
-wrapper; each task had a prime followed by three measured warm runs.
-
-| Task | Baseline warm median | Candidate warm median |
-|---|---:|---:|
-| help | 8.359s | 8.343s |
-| unitCheck | 17.583s | 17.378s |
-
-All warm runs reused strict configuration cache. UnitCheck ratio0.9884 passes the
-<=1.10 guard, but these tiny differences do not demonstrate a meaningful steady
-speedup. The baseline help prime executed its implicit verifier; candidate help
-did not. Prime cache states differed, so their236.16s/21.06s times are not a
-controlled cold benchmark or a hosted-CI saving. Raw argv/logs/receipts and medians
-are external `host-{baseline,candidate}-summary.json` and `host-comparison.json`
-under `/tmp/opencode/ci-rollout-20261020/`. Hosted first/warm results remain pending.

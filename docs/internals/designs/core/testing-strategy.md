@@ -219,15 +219,9 @@ has no outer cached-success output or skip predicate: actual nested inputs and
 marker invalidation remain authoritative.
 
 JAR bootstrap/help/compile/assemble do not implicitly select the verifier, though
-ordinary buildSrc compilation can still run. Lazy direct `mustRunAfter` edges put
-other root/child tasks after the gate only when it is selected, without adding it
-to fast paths. Applied-production DSL/block fixtures check bootstrap isolation,
-mandatory failures, strict cache reuse, input changes and stale-marker removal.
-Actual root/child-heavy/same-name ordering edges are inspected and unsafe mutations
-rejected; a one-worker execution under parallel-enabled configuration is not a
-concurrent-overlap stress test. Newly read buildSrc settings are named relative-path
-inputs, alongside the retained actual workflow and existing source/configuration
-inputs; independent input fixtures stage those real files, not exemptions.
+ordinary buildSrc compilation can still run. Lazy `mustRunAfter` edges put other
+root/child tasks after the gate only when it is selected, without adding it to fast
+paths. Workflow and buildSrc settings remain declared verifier inputs.
 
 Build-tool regression fixtures use `$GRADLE_USER_HOME/caches/mazewall-test-kit`
 as their TestKit home rather than `buildSrc/build/test-kit`. The current Gradle
