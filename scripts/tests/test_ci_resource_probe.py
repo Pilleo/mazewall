@@ -334,7 +334,7 @@ class OwnedCommandTest(LinuxFixtureTest):
         receipt = self.root / "receipt.json"
         initial = self.collect()
         subreaper = probe._subreaper()
-        with patch.object(probe, "collect_sample", side_effect=[initial, OSError("collection failed")]):
+        with patch.object(probe, "collect_sample", side_effect=[initial, OSError("collection failed"), OSError("collection failed")]):
             status = probe.main(["--output", str(receipt), "--", sys.executable, "-c", "raise SystemExit(42)"])
         self.assertEqual(status, 42)
         self.assertEqual(probe._subreaper(), subreaper)
@@ -379,7 +379,7 @@ class OwnedCommandTest(LinuxFixtureTest):
         def collect():
             nonlocal collections
             collections += 1
-            if collections == 2:
+            if collections == 3:
                 owned.extend(json.loads(pids.read_text()))
                 os.kill(os.getpid(), signal.SIGTERM)
             return initial
@@ -472,6 +472,83 @@ class OwnedCommandTest(LinuxFixtureTest):
         self.assertNotEqual(status, 0)
         self.assertEqual(receipt["minimum_headroom_bytes"], GIB)
         self.assertGreaterEqual(len(receipt["samples"]), 3)
+
+    def test_sampling_covers_primary_tail_and_detached_retirement_grace(self):
+        self.counters(self.group)
+        self.counters(self.group.parent)
+        ready = self.root / "detached-pid"
+        release = self.root / "release"
+        recovered = self.root / "recovered.json"
+        memory_writer = (
+            "from pathlib import Path\n"
+            f"memory = Path({str(self.proc / 'meminfo')!r})\n"
+            "def write_memory(kb):\n"
+            "    pending = memory.with_suffix('.pending')\n"
+            "    pending.write_text(f'MemAvailable: {kb} kB\\n')\n"
+            "    pending.replace(memory)\n"
+        )
+        for low_at in ("term_grace", "primary_completion"):
+            with self.subTest(low_at=low_at):
+                self.mem_available(7 * GIB)
+                for marker in (ready, release, recovered):
+                    marker.unlink(missing_ok=True)
+                detached = (
+                    "import json, os, signal, time\n" + memory_writer +
+                    "def on_term(*_):\n"
+                    "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                    "    started = time.monotonic()\n"
+                    + ("    write_memory(1048576)\n    time.sleep(1.5)\n" if low_at == "term_grace" else "") +
+                    "    write_memory(7340032)\n"
+                    f"    Path({str(recovered)!r}).write_text(json.dumps(time.monotonic() - started))\n"
+                    "    time.sleep(60)\n"
+                    "signal.signal(signal.SIGTERM, on_term)\n"
+                    f"p = Path({str(ready) + '.pending'!r}); p.write_text(str(os.getpid())); p.replace({str(ready)!r})\n"
+                    "time.sleep(60)\n"
+                )
+                child = (
+                    "import subprocess, sys, time\n" + memory_writer +
+                    f"subprocess.Popen([sys.executable, '-c', {detached!r}], start_new_session=True, "
+                    "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+                    f"while not Path({str(release)!r}).exists(): time.sleep(0.01)\n"
+                    + ("write_memory(1048576)\n" if low_at == "primary_completion" else "") +
+                    "raise SystemExit(0)\n"
+                )
+                process, receipt_path, _ = self.launch(child)
+                descriptor = None
+                try:
+                    deadline = time.monotonic() + 5
+                    while not ready.exists() and process.poll() is None and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(ready.exists())
+                    descriptor = os.pidfd_open(int(ready.read_text()))
+                    release.touch()
+                    process.communicate(timeout=8)
+                    receipt = json.loads(receipt_path.read_text())
+                    self.assertEqual(receipt["command_exit_code"], 0)
+                    self.assertTrue(select.select([descriptor], [], [], 0)[0], "descendant is live")
+                    self.assertTrue(recovered.exists(), "headroom did not recover during grace")
+                    if low_at == "term_grace":
+                        self.assertGreaterEqual(json.loads(recovered.read_text()), 1.5)
+                    self.assertEqual(receipt["samples"][0]["headroom_bytes"], 7 * GIB)
+                    self.assertEqual(receipt["samples"][-1]["headroom_bytes"], 7 * GIB)
+                    self.assertEqual(receipt["qualification"], "unsafe", f"wrapper status: {process.returncode}")
+                    self.assertNotEqual(process.returncode, 0)
+                    self.assertEqual(receipt["minimum_headroom_bytes"], GIB)
+                    self.assertEqual(receipt["oom_kill_delta"], 0)
+                finally:
+                    if descriptor is not None:
+                        try:
+                            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        os.close(descriptor)
+                    if process.poll() is None:
+                        process.terminate()
+                    try:
+                        process.communicate(timeout=8)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.communicate(timeout=3)
 
     def test_sigterm_retires_owned_child_group_and_returns_143(self):
         ready = self.root / "ready"

@@ -1,6 +1,6 @@
 """Measure Linux memory evidence while running one owned command."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import argparse
 import ctypes
 from dataclasses import dataclass, field
@@ -297,11 +297,14 @@ def _acquire_ownership() -> int:
     return previous
 
 
-def _retire(child: subprocess.Popen, signum: int) -> str | None:
+def _retire(child: subprocess.Popen, signum: int, sample: Callable[[], None]) -> str | None:
     descriptors = {}
     killed = set()
-    deadline = time.monotonic() + 3
+    started = time.monotonic()
+    deadline = started + 3
+    next_sample = started + 1
     try:
+        sample()  # Observe the primary's tail before signalling descendants.
         while True:
             # Drain direct roots and newly adopted orphans, not racy ancestry
             # snapshots; setsid/double-forks from any JVM thread remain owned.
@@ -335,6 +338,9 @@ def _retire(child: subprocess.Popen, signum: int) -> str | None:
                 return None
             if time.monotonic() >= deadline + 1:
                 return "owned descendants did not retire within cleanup bound"
+            if time.monotonic() >= next_sample:
+                sample()
+                next_sample += 1
             time.sleep(0.02)
     except (OSError, ValueError) as error:
         return f"owned descendant cleanup failed: {error}"
@@ -411,7 +417,7 @@ def main(argv: Sequence[str]) -> int:
                                 sample()
                 finally:
                     if child is not None:
-                        cleanup_error = _retire(child, interrupted or signal.SIGTERM)
+                        cleanup_error = _retire(child, interrupted or signal.SIGTERM, sample)
                 code = child.returncode if child is not None else None
                 exit_code = None if code is None else (128 - code if code < 0 else code)
                 sample()
