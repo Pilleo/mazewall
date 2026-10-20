@@ -5,7 +5,7 @@ on:
         branches: [triage/selected-launch-retirement]
 
 jobs:
-    selected-launch-class:
+    kernel-context:
         runs-on: ubuntu-26.04
         timeout-minutes: 30
         permissions:
@@ -54,10 +54,10 @@ jobs:
                   if [ -f .cache/podman-image/mazewall-test-runner.tar ]; then
                       podman load -i .cache/podman-image/mazewall-test-runner.tar
                   fi
-            - name: Run Original Selected Launch Test Class
+            - name: Run Original Kernel Aggregate Context
               run: |
                   set -o pipefail
-                  ./scripts/run_containerized_tests.sh :portals:runtime:integrationTest --tests '*RequiredWorkerLaunchProfileTest' --console=plain --max-workers=1 2>&1 | tee selected-launch-probe.log
+                  ./scripts/run_containerized_tests.sh :kernelCheck assemble --console=plain 2>&1 | tee selected-launch-probe.log
             - name: Verify Workspace and Cache Ownership
               if: always()
               run: |
