@@ -159,6 +159,22 @@ distinct exhaustion result; do not add a test-only production bypass.
 
 ## Fast iteration and cache reuse
 
+Build-tool regression fixtures use `$GRADLE_USER_HOME/caches/mazewall-test-kit`
+as their TestKit home rather than `buildSrc/build/test-kit`. The current Gradle
+User Home owns this path, including explicit `-g` overrides; the existing host and
+dedicated container homes remain separate. Its location under `caches` lets the
+existing Gradle cache archives retain nested-build dependencies, compiled scripts
+and compilation outputs across disposable producer checkouts. It does not reuse
+old native acceptance outcomes or remove the mandatory build-tool regression suite.
+The JVM argument provider declares the relative cache layout as input and the
+absolute Gradle home as internal transport. This prevents host/container cache-home
+switches from invalidating the same verification task and rerunning its suite
+inside the demo's bounded startup. Verification sources and classpaths remain
+declared inputs; only cache-location plumbing is excluded.
+The real two-checkout TestKit regression asserts the configured nested home and
+requires the second independent Java compilation to be `FROM-CACHE` with a real
+class output. Run it directly with `./gradlew -p buildSrc testKitCacheTest`.
+
 CI computes `scripts/ci_cache_key.sh` once immediately after checkout in each validation job.
 Container Gradle restore/save keys share that immutable job output, retaining their
 OS prefixes, SHA suffixes and dedicated cache layout. Saves

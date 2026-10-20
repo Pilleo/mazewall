@@ -2,6 +2,18 @@ plugins {
     `kotlin-dsl`
 }
 
+class TestKitJvmArguments(
+    @get:org.gradle.api.tasks.Internal val gradleUserHome: java.io.File,
+) : org.gradle.process.CommandLineArgumentProvider {
+    @get:org.gradle.api.tasks.Input
+    val cacheLayout = "caches/mazewall-test-kit"
+
+    override fun asArguments() = listOf(
+        "-Dorg.gradle.testkit.dir=${gradleUserHome.resolve(cacheLayout).absolutePath}",
+        "-Dmazewall.test.gradleUserHome=${gradleUserHome.absolutePath}",
+    )
+}
+
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(25))
 }
@@ -73,6 +85,11 @@ configurations.named(verification.runtimeOnlyConfigurationName) {
 }
 
 val verificationActionsMarker = layout.buildDirectory.file("verification/verification-actions.success")
+tasks.register<JavaExec>("testKitCacheTest") {
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    mainClass.set("io.mazewall.build.TestKitCacheFunctionalTest")
+}
 tasks.register<JavaExec>("spotbugsReportTest") {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
@@ -108,10 +125,20 @@ tasks.register<JavaExec>("failureTriageTest") {
     doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
-    systemProperty("org.gradle.testkit.dir", layout.buildDirectory.dir("test-kit").get().asFile.absolutePath)
+    // Cache transport is not verification input: host/container homes intentionally differ.
+    jvmArgumentProviders.add(TestKitJvmArguments(gradle.gradleUserHomeDir))
+    doFirst {
+        val properties = inputs.properties["systemProperties"] as Map<*, *>
+        check("org.gradle.testkit.dir" !in properties && "mazewall.test.gradleUserHome" !in properties) {
+            "TestKit cache locations must not invalidate verification when switching Gradle homes"
+        }
+        check(inputs.properties.keys.none { it.endsWith(".gradleUserHome") }) {
+            "TestKit argument-provider home must remain an internal transport location"
+        }
+    }
     inputs.files(sourceSets.main.get().allSource, sourceSets.test.get().allSource, verification.allSource)
         .withPropertyName("verificationSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -141,7 +168,7 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
 tasks.test {
     useJUnitPlatform()
     dependsOn(verificationActionsTest)
-    systemProperty("org.gradle.testkit.dir", layout.buildDirectory.dir("test-kit").get().asFile.absolutePath)
+    jvmArgumentProviders.add(TestKitJvmArguments(gradle.gradleUserHomeDir))
 }
 
 tasks.named("check") { dependsOn(verificationActionsTest) }

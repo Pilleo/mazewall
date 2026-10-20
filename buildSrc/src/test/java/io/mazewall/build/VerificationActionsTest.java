@@ -11,6 +11,11 @@ public final class VerificationActionsTest {
     public static void main(String[] args) {
         Path successMarker = requireSuccessMarker(args);
         Path rootBuild = successMarker.getParent().getParent().getParent().getParent().resolve("build.gradle.kts");
+        try {
+            TestKitCacheFunctionalTest.verify();
+        } catch (Exception failure) {
+            throw new AssertionError("Persistent nested Gradle cache contract failed", failure);
+        }
         if (args.length == 2) {
             verifiesFailureTriageWaits();
             RootVerificationFunctionalTest.verifyFailureTriage(rootBuild);
