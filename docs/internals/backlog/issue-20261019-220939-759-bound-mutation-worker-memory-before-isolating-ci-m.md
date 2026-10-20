@@ -54,5 +54,31 @@ kernel sharding and additional cache archives remain separate follow-ups. The
 new runner requires at least2GiB measured headroom, unchanged mutation floors and
 zero OOM-kill increase. Heap limits are proposed caps, not an unmeasured guarantee.
 
+## Implementation evidence (in progress)
+
+- Task1 `d7cdaf63`: one shared Groovy Gradle limits script, real project/system
+  override tests, configuration-cache changes and unchanged target/floor checks.
+  Focused tests passed; task-scoped spec and quality review passed. The redundant
+  root property was removed to preserve legacy `-Dpitest.threads` behavior.
+- Task2 initial `1821ecf4`:32 unit tests passed; a real serial three-module mutation
+  run passed all unchanged thresholds, with15,308,599,296bytes minimum sampled
+  local headroom and zero new OOM kills. Later parser/cancellation corrections
+  had unit/live-smoke/replay coverage rather than a repeat mutation workload.
+- Task2 review found a late-cancellation finalization race. Fix `0cae7925` adds
+  both dedicated RED/GREEN regressions; all34 unit tests and a final-code live
+  smoke pass. Scoped re-review confirms the finding addressed, spec PASS and
+  quality APPROVE. This checkpoint is not hosted final-code acceptance.
+- Task3 `dbc4d084` plus minor-name alignment `27016eb1`: isolated host mutation
+  runner, stable fail-closed required-check join and cache-output forwarding.
+  Focused policy/root-policy/TestKit tests, actual YAML/base comparison and25
+  real-shell prerequisite combinations pass. Task review found only the corrected
+  display-name mismatch; whole-branch review will verify the final range.
+- Complete local build on `27016eb1` passes:286 tasks in22m21s,212 executed,
+  12 from cache and62 up-to-date. The final Python34-test rerun, backlog validation
+  and whitespace checks pass. This is local verification, not a CI speed result.
+- Final whole-branch review and cold/warm hosted memory qualification remain
+  pending. PR545 is still the unmerged prerequisite; no implicit merge or
+  branch-protection change is authorized.
+
 ---
 <!-- id: issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m  file: issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m.md -->

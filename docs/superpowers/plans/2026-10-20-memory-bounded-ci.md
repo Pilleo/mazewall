@@ -61,9 +61,9 @@ Read-only references: `gradle.properties`, `BuildPolicy.kt`, `TestKitCacheFuncti
 ## Before implementation
 
 - [x] Obtain operator review of this spec/plan. #545 remains open; use its accepted head on a separate stacked branch, without merging or modifying that PR.
-- [ ] Inspect `git status` and current remote/default-branch state. Start a scoped branch in the current checkout from the accepted prerequisite; no worktree or history rewrite.
-- [ ] Read nearest instructions and inspect task-input/cache behavior preserved by #545. Capture the current run39327392885 timing reference and existing thresholds below.
-- [ ] Run focused host baselines only; do not launch local builds concurrently to imitate the isolated-runner graph.
+- [x] Inspect `git status` and current remote/default-branch state. Scoped branch `perf/memory-bounded-ci` starts from the accepted prerequisite; no worktree or history rewrite.
+- [x] Read nearest instructions and inspect task-input/cache behavior preserved by #545. Current run39327392885 remains the timing reference; thresholds are retained below.
+- [x] Run focused host baselines only; no concurrent local builds were launched to imitate isolated runners.
 
 ### Task 1: Make actual PIT concurrency and JVM budgets consistent
 
@@ -138,6 +138,14 @@ Read-only references: `gradle.properties`, `BuildPolicy.kt`, `TestKitCacheFuncti
 - [ ] **Step 7: Hosted acceptance before claiming improvement.** Collect one cold and one unchanged-head warm run. Require independent runner starts, all three real mutation reports, the same kernel/native/adapter assertions, green stable required checks, no OOM delta, qualified memory receipts and at least2GiB headroom. Report wall time, queue/setup/cache/execute times and total runner minutes against run39327392885. If evidence is unknown or budgets fail, stop rollout; do not rerun blindly, move workloads onto one runner, drop targets or raise limits automatically. PR publication must skip; actual release publication is qualified only on a later approved default-branch run.
 
 ## Self-review and handoff
+
+Implementation checkpoint: Task1 `d7cdaf63` and Task2 `1821ecf4`/`0cae7925`
+passed task-scoped review; Task3 `dbc4d084`/`27016eb1` passed focused checks with
+its sole review minor corrected. The complete local optional build passes286
+tasks; final Python34-test, backlog and whitespace checks pass. One whole-branch
+review and hosted cold/warm final-code memory qualification remain pending. The
+earlier all-module memory witness predates final parser/cancellation fixes and is
+not represented as a current-head hosted run. See the scoped backlog evidence.
 
 - [x] Spec coverage: memory limits/evidence, compatibility, cache boundaries, failure graph and rollout are assigned to Tasks1-3.
 - [x] Step/type scan: file names, CLI, output wire values, PIT settings and cache-output forwarding agree with the spec.
