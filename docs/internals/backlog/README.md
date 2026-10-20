@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 169 | *Total Resolved Issues:* 715
+*Total Active Issues:* 170 | *Total Resolved Issues:* 715
 
-Active status detail: 168 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 169 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261020-094438-599](issue-20261020-094438-599-identify-incomplete-selected-launch-retirement-aft.md) | Identify incomplete selected-launch retirement after interrupted close | high | portal |
 | [issue-20261019-203415-734](issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab.md) | Reuse nested Gradle TestKit caches across disposable CI checkouts | high | ci |
 | [issue-20261019-182206-556](issue-20261019-182206-556-remove-serialized-ci-validation-delay-while-preser.md) | Remove serialized CI validation delay while preserving complete gates | high | ci |
 | [issue-20261019-094851-103](issue-20261019-094851-103-compare-spring-implementation-origins-without-url-.md) | Compare Spring implementation origins without URL-handler or DNS effects | high | spring |
