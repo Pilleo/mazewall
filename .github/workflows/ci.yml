@@ -104,9 +104,8 @@ jobs:
                       integrations/**/build/test-results/**/*.xml
                       build/test-results/optionalIntegrationCheck/*.xml
                   if-no-files-found: ignore
-    build-test-publish:
-        # Keep the required check name stable; publication joins both jobs below.
-        name: Build, Test, Security Scan & Publish
+    core-quality:
+        name: Core Quality
         # Dedicated-process worker correctness requires Landlock TSYNC (ABI 8+).
         runs-on: ubuntu-26.04
         timeout-minutes: 90
@@ -145,6 +144,7 @@ jobs:
                           - '**/gradle.properties'
                           - '**/Containerfile'
                           - 'scripts/**'
+                          - '.github/workflows/ci.yml'
 
             - name: Restore Container Gradle Cache
               uses: actions/cache/restore@v4
@@ -214,9 +214,6 @@ jobs:
                   set -o pipefail
                   # unitCheck already ran on the host for this exact checkout.
                   ./scripts/run_containerized_tests.sh :kernelCheck assemble 2>&1 | tee build.log
-            - name: Run PITest (Host Unit Tests Only)
-              if: steps.filter.outputs.code == 'true'
-              run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Pmazewall.pitest.threads=2
             - name: Run Vulnerability Exploitation Demo
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh
@@ -276,6 +273,75 @@ jobs:
                   path: |
                       ~/.cache/mazewall/container-gradle
                   key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+    mutation-tests:
+        name: Mutation Tests
+        runs-on: ubuntu-26.04
+        timeout-minutes: 90
+        permissions:
+            contents: read
+            pull-requests: read
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Set up JDK 25
+              uses: actions/setup-java@v5
+              with:
+                  java-version: "25"
+                  distribution: "temurin"
+            - name: Check file changes
+              id: filter
+              uses: dorny/paths-filter@v3
+              with:
+                  filters: |
+                      code:
+                          - '**/*.kt'
+                          - '**/*.java'
+                          - '**/*.kts'
+                          - '**/*.gradle'
+                          - 'gradle/libs.versions.toml'
+                          - '**/gradle.lockfile'
+                          - 'gradle/verification-metadata.xml'
+                          - 'config/spotbugs/**'
+                          - '**/gradle.properties'
+                          - '**/Containerfile'
+                          - 'scripts/**'
+                          - '.github/workflows/ci.yml'
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v6
+              with:
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+                  cache-read-only: false
+            - name: Run PITest (Host Unit Tests Only)
+              if: steps.filter.outputs.code == 'true'
+              run: >-
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/mutation.json --
+                  ./gradlew :enforcer:pitest :platform:pitest :profiler:pitest
+                  --no-daemon --max-workers=1 --no-parallel
+                  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+            - name: Upload Mutation Diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: mutation-diagnostics
+                  path: |
+                      build/reports/ci-resources/mutation.json
+                      enforcer/build/reports/pitest/
+                      platform/build/reports/pitest/
+                      profiler/build/reports/pitest/
+                  if-no-files-found: ignore
+    build-test-publish:
+        # Keep the required check stable and fail closed for either skipped/failed lane.
+        name: Build, Test, Security Scan & Publish
+        needs: [core-quality, mutation-tests]
+        if: always()
+        runs-on: ubuntu-26.04
+        permissions:
+            contents: read
+        outputs:
+            container_cache_hash: ${{ needs.core-quality.outputs.container_cache_hash }}
+        steps:
+            - name: Require Core and Mutation Success
+              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success
     publish:
         name: Publish Verified Packages
         needs: [optional-integrations, build-test-publish]
