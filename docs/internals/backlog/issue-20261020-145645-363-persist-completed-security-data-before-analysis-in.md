@@ -76,5 +76,33 @@ The corrected complete local build passed in16m36s,245 tasks (180 executed,
 cold/warm/update-due persistence/analysis/publication remain outstanding. Neither
 local fake-task controls nor exact lookup membership alone close this issue.
 
+## Additional pre-merge review findings
+
+Operator-requested ponytail review found two build-verification defects beyond the
+earlier prefix fix. The foreign-ownership fixture assumes `/etc/hostname` is owned
+by another UID, which is false for root builds (including the development image's
+default user). Also, the new executable policy checks read the actual workflow,
+but that file is absent from the marker-producing verifier's declared inputs;
+workflow-only edits can therefore skip those checks as UP-TO-DATE.
+
+The operator approved fixes: select and verify a truly foreign-owned test fixture
+without changing production ownership rules, and declare the actual workflow as
+a relative-path-sensitive verifier input with an applied-wiring invalidation test.
+Commit `0905b992` addresses both findings. Ownership controls reject caller-owned
+candidates, verify the foreign UID, and preserve actual positive/negative shell
+checks. Root-only fixture ownership assignment is limited to an exclusive temporary
+file; UID-0 selection was modeled on a UID-1000 host, not executed as root.
+
+The input regression applies the actual production JavaExec registration: prime
+SUCCESS, unchanged UP-TO-DATE, workflow-only edit SUCCESS, and invalid workflow
+FAILED with the old marker removed. Both regressions observed intended RED before
+GREEN. Root policy passed with the mandatory aggregate bootstrap; the corrected
+full local build passed in4m24s (245 tasks,31 executed,214 up-to-date). Scoped
+independent review marks both addressed with no new Critical/Important findings.
+
+Renewed hosted qualification is pending. Existing PR cold/warm evidence belongs
+to the old head and must not be relabelled current-head proof. No claim is made
+that all preexisting tests or the entire repository now support root execution.
+
 ---
 <!-- id: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in  file: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in.md -->

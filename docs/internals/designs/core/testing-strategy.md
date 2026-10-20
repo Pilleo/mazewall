@@ -260,6 +260,12 @@ calls; simulated outcomes do not establish actual cache persistence. Cache ident
 compatibility keys, not native protection attestations: cache isolation, ownership,
 required native freshness and publication gates are unchanged.
 
+The marker-producing build-tool verifier declares the actual CI workflow as a
+named relative-path-sensitive input. An applied-registration fixture checks that
+a workflow-only edit reruns executable policy checks and an invalid edit removes
+the old success marker. Ownership fixtures verify a different numeric UID rather
+than assuming a system file is foreign; production ownership checks are unchanged.
+
 The `optional-integrations`, `core-quality`, `mutation-tests` and `security-check` jobs run
 independently on separate `ubuntu-26.04` runners with JDK 25; heavy commands are
 never backgrounded together in one checkout. Core retains host quality,
