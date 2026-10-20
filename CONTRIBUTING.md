@@ -113,10 +113,16 @@ The Podman environment provides the correct kernel capabilities and nested secco
 
 ```bash
 ./gradlew :enforcer:unitCheck  # host-safe coverage thresholds
-./gradlew :enforcer:pitest :platform:pitest :profiler:pitest -Dpitest.threads=2 # host-only mutation thresholds
+# Host-only mutation thresholds: serial modules, two PIT workers, one ordinary test fork
+./gradlew :enforcer:pitest :platform:pitest :profiler:pitest \
+  --max-workers=1 --no-parallel \
+  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
 ./gradlew :enforcer:kernelCheck # combined native-contract thresholds
 ./gradlew :profiler:unitCheck
 ```
+
+PIT defaults to two workers in every module. `-Pmazewall.pitest.threads` takes
+precedence over the compatible `-Dpitest.threads`; the selected value must be a positive integer.
 
 ---
 

@@ -270,10 +270,8 @@ pitest {
         ),
     )
 
-    jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
-    threads.set(System.getProperty("pitest.threads")?.toInt() ?: 4)
 
     // These are host-unit floors for the deterministic security-policy slice above.
     // They are intentionally not a substitute for kernelCheck's native contracts.
@@ -281,6 +279,8 @@ pitest {
     mutationThreshold.set(61)
     testStrengthThreshold.set(76)
 }
+
+apply(from = rootProject.file("gradle/pitest-limits.gradle"))
 
 classDiagrams {
     plantumlServer = null

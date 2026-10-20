@@ -203,6 +203,7 @@ class ProcessBrokerIntegrationTest {
     fun `join timeout retains late process publication until it is reaped`() {
         assumeTrue(System.getProperty("os.name").lowercase().contains("linux"))
         val launchEntered = CountDownLatch(1)
+        val setupObserved = CountDownLatch(1)
         val releaseLaunch = CountDownLatch(1)
         var lateChild: Process? = null
         val launcher = object : ProcessLauncher by RealProcessLauncher {
@@ -212,24 +213,52 @@ class ProcessBrokerIntegrationTest {
                 preparation: io.mazewall.platform.process.JvmLaunchPreparation,
             ): Process {
                 launchEntered.countDown()
+                setupObserved.countDown()
                 assertTrue(releaseLaunch.await(5, TimeUnit.SECONDS))
                 return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also { lateChild = it }
             }
         }
-        val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(startupTimeoutMs = 100, closeTimeoutMs = 100))
+        // Only close/join is under a short deadline; real prelaunch measurement uses the normal startup budget.
+        val broker = ProcessBroker(launcher = launcher, limits = PortalRuntimeLimits(closeTimeoutMs = 100))
         val startup = CompletableFuture.runAsync { broker.start() }
-        assertTrue(launchEntered.await(5, TimeUnit.SECONDS))
+        startup.whenComplete { _, _ -> setupObserved.countDown() }
+        var primaryFailure: Throwable? = null
+        try {
+            val observed = setupObserved.await(5, TimeUnit.SECONDS)
+            if (!observed || launchEntered.count != 0L) {
+                val failure = if (startup.isDone) runCatching { startup.get(0, TimeUnit.SECONDS) }.exceptionOrNull() else null
+                throw AssertionError(
+                    "launcher entry not observed: startupDone=${startup.isDone}, state=${broker.lifecycleState()}, provisional=${broker.provisionalWorkers()}",
+                    failure?.cause ?: failure,
+                )
+            }
 
-        assertThrows(IncompleteBrokerCleanupException::class.java) { broker.close() }
+            assertThrows(IncompleteBrokerCleanupException::class.java) { broker.close() }
 
-        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
-        assertEquals(1, broker.provisionalWorkers(), "active acquisition must remain registered after join timeout")
-        releaseLaunch.countDown()
-        assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
-        awaitCondition(java.time.Duration.ofSeconds(5), "late child reaped") { lateChild?.isAlive == false }
-        broker.close()
-        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
-        assertEquals(0, broker.provisionalWorkers())
+            assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+            assertEquals(1, broker.provisionalWorkers(), "active acquisition must remain registered after join timeout")
+            releaseLaunch.countDown()
+            assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
+            awaitCondition(java.time.Duration.ofSeconds(5), "late child reaped") { lateChild?.isAlive == false }
+            broker.close()
+            assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+            assertEquals(0, broker.provisionalWorkers())
+        } catch (failure: Throwable) {
+            primaryFailure = failure
+            throw failure
+        } finally {
+            releaseLaunch.countDown()
+            try {
+                try {
+                    startup.handle { _, _ -> Unit }.get(10, TimeUnit.SECONDS)
+                } finally {
+                    broker.close()
+                }
+            } catch (cleanupFailure: Throwable) {
+                if (primaryFailure == null) throw cleanupFailure
+                primaryFailure.addSuppressed(cleanupFailure)
+            }
+        }
     }
 
     @Test

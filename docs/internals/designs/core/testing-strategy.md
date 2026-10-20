@@ -136,10 +136,61 @@ and daemon-reactor specifications raised the observed host-unit platform report
 to about 69% without adding synthetic tests. The host floor is 65%, retaining
 more than four percentage points of change tolerance below that result.
 
-`./gradlew :enforcer:pitest :platform:pitest :profiler:pitest` adds an
-assertion-quality gate for the deterministic policy, protocol, and profiling
-slices. It runs only named host unit tests and enforces line reach, mutation
-score, and test strength independently. The current floors are:
+The host-only mutation gate adds an assertion-quality check for the deterministic
+policy, protocol, and profiling slices. Run the three modules serially, with two
+PIT workers and one ordinary test fork:
+
+```bash
+./gradlew :enforcer:pitest :platform:pitest :profiler:pitest \
+  --max-workers=1 --no-parallel \
+  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+```
+
+`gradle/pitest-limits.gradle` supplies the shared default of two PIT workers.
+`-Pmazewall.pitest.threads` takes precedence over compatible `-Dpitest.threads`;
+selected values must be positive integers. Each PIT parent uses
+`-Xms128m -Xmx512m -XX:MaxMetaspaceSize=256m`, and each minion uses
+`-Xms128m -Xmx256m -XX:MaxMetaspaceSize=256m`. Both retain
+`--enable-native-access=ALL-UNNAMED`. These limits do not change Gradle's JVM
+budget or the native suites' fresh-process requirements.
+
+CI runs that command through the host wrapper (not the container runner):
+
+```bash
+python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/mutation.json -- \
+  ./gradlew :enforcer:pitest :platform:pitest :profiler:pitest \
+  --no-daemon --max-workers=1 --no-parallel \
+  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+```
+
+The schema-1 receipt records `command_exit_code`, `oom_kill_delta` and
+`qualification` (`pass`, `unsafe` or `unknown`), with raw memory observations.
+A qualified pass requires at least 2147483648 bytes of observed headroom and zero
+additional OOM kills; unknown evidence is not a pass. The wrapper preserves a
+failing command's exit status and rejects unsafe or unknown memory evidence even
+when PIT succeeds. CI always uploads the receipt and all three PIT report paths,
+including after failure or cancellation when artifact upload can still execute.
+On Linux, the wrapper acquires a child-subreaper lifetime before launch and uses
+pidfds to retire its descendants, including detached single-use Gradle daemons
+and workers. Retirement also drains descendants after a normal launcher exit,
+before final observations/publication; cancellation preserves the actual launcher
+status separately from the wrapper's signal status. Cleanup allows three seconds
+before SIGKILL and one further second to reap; a cleanup failure is not success.
+Unavailable ownership primitives prevent launch. This is a single-threaded CLI,
+not a general-purpose in-process supervisor: it refuses pre-existing children or
+custom SIGCHLD handling and restores the prior subreaper setting afterward.
+Run the wrapper regression separately with
+`python3 -m unittest discover -s scripts/tests -p 'test_ci_resource_probe.py' -v`.
+
+`./gradlew -p buildSrc pitestLimitsTest --console=plain --max-workers=1` resolves
+the actual shared script, root properties, and PIT plugin in an independent
+three-project fixture. It checks precedence, invalid values, JVM budgets,
+unrelated extension settings, and changed properties with configuration-cache
+reuse. The regression also runs in mandatory `verificationActionsTest`; both
+tasks declare the shared script and root properties as inputs.
+
+PIT runs only named host unit tests and enforces line reach, mutation score, and
+test strength independently. The current floors are:
 
 | Module | Line reach | Mutation score | Test strength |
 | --- | ---: | ---: | ---: |
@@ -175,7 +226,8 @@ The real two-checkout TestKit regression asserts the configured nested home and
 requires the second independent Java compilation to be `FROM-CACHE` with a real
 class output. Run it directly with `./gradlew -p buildSrc testKitCacheTest`.
 
-CI computes `scripts/ci_cache_key.sh` once immediately after checkout in each validation job.
+CI computes `scripts/ci_cache_key.sh` once immediately after checkout in each
+container-owning validation job (`optional-integrations` and `core-quality`).
 Container Gradle restore/save keys share that immutable job output, retaining their
 OS prefixes, SHA suffixes and dedicated cache layout. Saves
 require successful key computation as well as their existing conditions.
@@ -197,17 +249,36 @@ a digest. Computation assumes an immutable checkout, not race-proof containment.
 
 `./gradlew -p buildSrc ciCachePolicyTest --console=plain --max-workers=1` runs real
 owned-Git fixtures and workflow-policy mutations. These checks also run in mandatory
-`verificationActionsTest`, whose inputs include the helper. Cache identities are
+`verificationActionsTest`, whose inputs include the helper. The policy fixtures
+retain cache-identity/save/host-container regressions and reject serialized,
+skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
+unsafe required-check joins. They execute the extracted join shell command for
+all 25 pairs of success/failure/cancelled/skipped/null prerequisite results; only
+two successes pass. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
 required native freshness and publication gates are unchanged.
 
-The optional integration acceptance and main quality jobs run on independent
-runners in parallel; both existing required check names are retained. Publication
-is a separate default-branch-push-only job with `needs` edges to BOTH validations.
-Its normal success condition prevents publication after a failed, skipped or
-cancelled prerequisite. It consumes the main job's computed cache identity and
-uses the same container runner and publication command; it does not rerun host
-quality checks as another publication gate.
+The `optional-integrations`, `core-quality` and `mutation-tests` jobs run
+independently on separate `ubuntu-26.04` runners with JDK 25; heavy commands are
+never backgrounded together in one checkout. Core retains host quality, security,
+kernel/fresh-JVM and exploitation gates; mutation uses host Gradle without Podman
+or another container-cache archive. Core and mutation independently filter code
+changes, including `.github/workflows/ci.yml`. A docs-only mutation step may skip
+while its job succeeds; the required join is never job-level skipped.
+
+Both existing required check names remain: `Koog and Spring Integration Acceptance`
+and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
+join with `needs: [core-quality, mutation-tests]` and `if: always()`; its shell
+requires both results to equal `success`. Failure, cancellation, skipping or a
+missing result cannot turn the join green. It forwards
+`core-quality.outputs.container_cache_hash` unchanged.
+
+Publication remains a separate default-branch-push-only job with `needs` edges to
+optional acceptance and that required join. Its normal success condition prevents
+publication after a failed, skipped or cancelled prerequisite; PRs cannot publish.
+Only publication has package-write permission. It consumes the forwarded core
+cache identity and retains the same container runner, publication command and
+credential bindings; it does not rerun host quality checks as another gate.
 
 Superseded PR runs cancel within their PR-specific concurrency group. Push events
 use unique run-ID groups and do not cancel or replace separate release runs.
@@ -215,6 +286,13 @@ Serial merge handling remains with the existing operator/orchestrator control
 plane. Fresh native tests remain uncached; parallel scheduling and cached build
 inputs must not be described as reuse of old native pass results. Measure actual
 hosted job overlap and durations before claiming an end-to-end speed improvement.
+Hosted acceptance needs a cold and an unchanged-head warm run with independent
+lane starts, qualified mutation receipts, all three real PIT reports and the same
+native/adapter assertions. Compare wall time, queue/setup/cache/execute time and
+total runner minutes against run `39327392885`; unknown evidence or unsafe budgets
+stop rollout rather than automatically raising limits or dropping targets. Local
+focused checks do not qualify the GitHub runner budget or release publication;
+the latter needs a later approved default-branch run.
 
 Root verification follows source plugins rather than optional module paths.
 Non-demo grouping projects retain lazy child `build` and `check` dependencies
