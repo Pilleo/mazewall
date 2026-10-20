@@ -1,0 +1,84 @@
+name: Selected Launch Retirement Probe
+
+on:
+    pull_request:
+        branches: [triage/selected-launch-retirement]
+
+jobs:
+    selected-launch-class:
+        runs-on: ubuntu-26.04
+        timeout-minutes: 30
+        permissions:
+            contents: read
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Compute Container Gradle Cache Key
+              id: container_cache_key
+              run: |
+                  hash=$(./scripts/ci_cache_key.sh)
+                  echo "hash=$hash" >> "$GITHUB_OUTPUT"
+            - name: Record Diagnostic Source and Kernel
+              run: |
+                  git rev-parse HEAD
+                  sha256sum \
+                      portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/RequiredWorkerLaunchProfileTest.kt \
+                      portals/runtime/src/main/kotlin/io/mazewall/portal/PortalGenerationCaptures.kt \
+                      portals/runtime/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt
+                  uname -sr
+            - name: Setup Podman Socket
+              run: |
+                  mkdir -p ~/.config/containers
+                  echo -e '[engine]\nruntime = "runc"' > ~/.config/containers/containers.conf
+                  systemctl --user enable --now podman.socket
+                  echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
+                  echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
+            - name: Restore Container Gradle Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      ~/.cache/mazewall/container-gradle
+                  key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+                  restore-keys: |
+                      container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+                      optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+                      optional-container-gradle-${{ runner.os }}-
+                      container-gradle-${{ runner.os }}-
+            - name: Restore Existing Test Runner Image
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ github.workspace }}/.cache/podman-image
+                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+            - name: Load Existing Test Runner Image
+              run: |
+                  if [ -f .cache/podman-image/mazewall-test-runner.tar ]; then
+                      podman load -i .cache/podman-image/mazewall-test-runner.tar
+                  fi
+            - name: Run Original Selected Launch Test Class
+              run: |
+                  set -o pipefail
+                  ./scripts/run_containerized_tests.sh :portals:runtime:integrationTest --tests '*RequiredWorkerLaunchProfileTest' --console=plain --max-workers=1 2>&1 | tee selected-launch-probe.log
+            - name: Verify Workspace and Cache Ownership
+              if: always()
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
+                      if [ -d "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned build output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
+            - name: Upload Selected Launch Diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: selected-launch-retirement-${{ github.run_attempt }}
+                  path: |
+                      selected-launch-probe.log
+                      portals/runtime/build/test-results/integrationTest/*.xml
+                      portals/runtime/build/reports/tests/integrationTest/
+                      build/reports/test-health/fragments/
+                      build/reports/test-health/test-tier-health.json
+                  if-no-files-found: ignore
