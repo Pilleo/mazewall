@@ -82,5 +82,30 @@ global thread enumeration, new logger threads/synchronization and deadline reset
 Even these stores can perturb timing; another invocation requires explicit
 authorization and is not a production fix or repeat-until-red permission.
 
+## Additional authorized buffered run: passed, still inconclusive
+
+The operator approved replacing synchronous diagnostics and one further focused
+invocation. The bounded preallocated records retain original evaluation/order,
+limits, interruption and assertions; no material fidelity issue was found by
+independent review. Rendering occurs only after body/finally cleanup on failure.
+No new synchronization/logger thread, filesystem/process re-probes or hot-path
+formatting/I/O was added. Even field stores/preallocation can perturb timing.
+
+That single invocation passes (one testcase, zero failures/errors/skips, both
+cancellation/expiry iterations complete original272/282 and physical assertions).
+Failure-only rendering therefore emits no runtime predicate/owner trace. The pass
+does not establish specific predicate values, fix the CI failure, explain the old
+local child exit or rule out a lifetime defect. Failure rendering remains unexercised.
+
+New patch/source hashes/JUnit/log/review are preserved under the investigation's
+`buffered-attempt/` directory and recoverable stash
+`5f81c92764ad60b4351bb43c506c39eca6aad8fc` (three changed sources; the old operation-
+owner probe was restored to baseline). Original stash/evidence remain intact.
+No runtime fix, code commit, push, CI retry, merge or further test was performed.
+
+The relevant next context, if separately authorized, is the original hosted/
+container final-normal-close barrier with actual iteration/predicate records,
+not another identical local pass. PR548 remains frozen pending that evidence.
+
 ---
 <!-- id: issue-20261020-094438-599-identify-incomplete-selected-launch-retirement-aft  file: issue-20261020-094438-599-identify-incomplete-selected-launch-retirement-aft.md -->
