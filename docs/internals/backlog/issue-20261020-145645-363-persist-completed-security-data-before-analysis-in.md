@@ -45,5 +45,24 @@ unless cancelled. Failed update/ownership still blocks use/save; no partial-data
 resume or stale fallback. Keep separate from the unshipped build-logic optimization
 and reconcile both join prerequisites explicitly if that branch later integrates.
 
+## Local implementation evidence — hosted qualification pending
+
+Commit `00095123` implements only workflow and existing policy/test files. Focused
+RED/GREEN controls include actual metadata/Unicode eligibility/ownership/task shell,
+all125 join triples and exact-hit assertion true/false/unset/nonexact cases.
+Actual YAML duplicate rejection,32 shell syntax checks and baseline job-map checks
+passed. No real cache operation or NVD scan was executed by these controls.
+
+The first root policy invocation timed out at120 seconds inside the existing
+implicit build-tool verifier; it was not counted as a pass. The controller then
+ran the complete local `./gradlew build --console=plain --max-workers=2` with enough
+harness time: it passed in20m52s,245 tasks (183 executed,7 cached,55 up-to-date),
+including root policy and existing mandatory bootstrap. No project heap, timeout
+or verifier-success marker was enlarged or bypassed.
+
+Task review passed spec and quality with no findings. Whole-branch review and real
+trusted cold/warm/update-due persistence and analysis remain pending. Exact cache
+membership is not archive integrity/retention, nor a security/publication pass.
+
 ---
 <!-- id: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in  file: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in.md -->

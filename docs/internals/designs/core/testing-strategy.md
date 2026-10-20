@@ -253,23 +253,57 @@ owned-Git fixtures and workflow-policy mutations. These checks also run in manda
 retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. They execute the extracted join shell command for
-all 25 pairs of success/failure/cancelled/skipped/null prerequisite results; only
-two successes pass. Cache identities are
+all 125 triples of success/failure/cancelled/skipped/null prerequisite results; only
+three successes pass. Actual security metadata/eligibility/ownership/task shells,
+snapshot assertion and lifecycle conditions are exercised without scanner/network
+calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
 required native freshness and publication gates are unchanged.
 
-The `optional-integrations`, `core-quality` and `mutation-tests` jobs run
+The `optional-integrations`, `core-quality`, `mutation-tests` and `security-check` jobs run
 independently on separate `ubuntu-26.04` runners with JDK 25; heavy commands are
-never backgrounded together in one checkout. Core retains host quality, security,
-kernel/fresh-JVM and exploitation gates; mutation uses host Gradle without Podman
-or another container-cache archive. Core and mutation independently filter code
+never backgrounded together in one checkout. Core retains host quality,
+kernel/fresh-JVM and exploitation gates; independent security retains the real
+vulnerability scan. Mutation uses host Gradle without Podman
+or another container-cache archive. Core, mutation and security independently filter code
 changes, including `.github/workflows/ci.yml`. A docs-only mutation step may skip
 while its job succeeds; the required join is never job-level skipped.
 
+Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
+container's separate data mount. Its explicit data-only cache is the sole owner;
+setup-gradle excludes that directory. Compatibility keys include OS, architecture
+and the actual catalog scanner version, with unique run-ID/attempt snapshots and
+only the compatible restore prefix. No previous matched key is overwritten, no
+cross-version/container fallback is allowed, and a cache hit never skips analysis.
+
+The independent security job has a bounded 180-minute cold budget, including a
+150-minute `dependencyCheckUpdate` step. This separates the observed slow full NVD
+bootstrap from already successful native work; it is not a latency guarantee.
+After a successful update, caller ownership is checked before explicit snapshot
+save. Failed/cancelled updates and foreign ownership never publish a snapshot;
+there is no permission repair or partial-database resume assumption.
+
+Because cache/save may warn and exit successfully after upload failure, a supported
+lookup-only restore checks the identical new primary key/path without fallback,
+with fail-on-cache-miss. An explicit assertion also requires literal `cache-hit ==
+true`, rejecting false/unset/nonexact results even when unavailable cache features
+return without an action error. This proves membership only, not archive integrity,
+retention or successful future restoration. Missing/evicted/not-yet-visible data
+fails closed rather than invoking a retry or accepting warning-only upload success.
+
+After successful update and ownership, `dependencyCheckAnalyze` runs even if save,
+lookup or assertion failed, unless cancelled. Persistence failures keep the job
+red; successful analysis cannot erase them. Failed update/ownership prevents data
+use/save/analysis. Existing CVSS 7 threshold, suppression/configuration/demo/OSSIndex
+selection, normal freshness checks and scanner errors remain unchanged. Missing or
+blank NVD credentials and docs-only changes retain the existing no-scan policy;
+an eligible-key flag or a green skipped job is not evidence of executed analysis.
+Always-scheduled ownership and diagnostics retain update/analysis logs and reports.
+
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests]` and `if: always()`; its shell
-requires both results to equal `success`. Failure, cancellation, skipping or a
+join with `needs: [core-quality, mutation-tests, security-check]` and `if: always()`;
+its shell requires all three results to equal `success`. Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
 
@@ -293,6 +327,15 @@ total runner minutes against run `39327392885`; unknown evidence or unsafe budge
 stop rollout rather than automatically raising limits or dropping targets. Local
 focused checks do not qualify the GitHub runner budget or release publication;
 the latter needs a later approved default-branch run.
+
+The completed-data repair additionally requires actual trusted-default cold
+update/ownership/save/exact-membership/analysis evidence and compatible warm
+restoration followed by real analysis. A later update-due observation must show a
+new completed snapshot; a run inside the scanner's normal validity window does
+not prove refreshed NVD data. PR-only caches cannot seed default-branch bootstrap.
+Record cache size/ref/version, durations and task outcomes; eviction and external
+API latency remain possible. A failed security lane and its dependent gates are
+the bounded recovery unit, not a reason to replay successful native pipelines.
 
 Root verification follows source plugins rather than optional module paths.
 Non-demo grouping projects retain lazy child `build` and `check` dependencies
