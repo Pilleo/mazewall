@@ -845,16 +845,16 @@ pitest {
         ),
     )
 
-    jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
-    threads.set(providers.gradleProperty("mazewall.pitest.threads").orElse("2").map(String::toInt))
 
     // Host-unit floor for profile-evidence and policy-compilation behavior.
     coverageThreshold.set(93)
     mutationThreshold.set(65)
     testStrengthThreshold.set(75)
 }
+
+apply(from = rootProject.file("gradle/pitest-limits.gradle"))
 
 classDiagrams {
     plantumlServer = null

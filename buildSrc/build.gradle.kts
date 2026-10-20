@@ -106,6 +106,10 @@ tasks.register<JavaExec>("ciCachePolicyTest") {
     classpath = verification.runtimeClasspath
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
 }
+tasks.register<JavaExec>("pitestLimitsTest") {
+    mainClass.set("io.mazewall.build.PitestLimitsFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
 
 val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest") {
     mainClass.set("io.mazewall.build.VerificationActionsTest")
@@ -117,6 +121,15 @@ val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest"
     doFirst { verificationActionsMarker.get().asFile.delete() }
 }
 
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "pitestLimitsTest") }.configureEach {
+    inputs.file(layout.projectDirectory.file("../gradle/pitest-limits.gradle"))
+        .withPropertyName("sharedPitestLimits")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(layout.projectDirectory.file("../gradle.properties"))
+        .withPropertyName("rootGradleProperties")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 val failureTriageMarker = layout.buildDirectory.file("verification/failure-triage.success")
 tasks.register<JavaExec>("failureTriageTest") {
     mainClass.set("io.mazewall.build.VerificationActionsTest")
@@ -125,7 +138,7 @@ tasks.register<JavaExec>("failureTriageTest") {
     doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "pitestLimitsTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
     // Cache transport is not verification input: host/container homes intentionally differ.

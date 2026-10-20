@@ -49,6 +49,7 @@ public final class VerificationActionsTest {
         verifiesFreshJvmClassMetadata();
         CiCachePolicyTest.run();
         CiCacheKeyFunctionalTest.verify(rootBuild.getParent());
+        PitestLimitsFunctionalTest.verify(rootBuild.getParent());
         GradleSourceGuardTest.run();
         GradleSourceInventoryTest.run();
         verifiesBacklogContracts();

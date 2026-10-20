@@ -18,16 +18,27 @@ internal enum class CiCacheViolation(val explanation: String) {
     CONTAINER_CACHE_IDENTITY("Both jobs must compute one tracked-input identity immediately after checkout and reuse its output"),
     CONTAINER_CACHE_SAVE("Container cache saves must require successful identity computation"),
     CONTAINER_CACHE_REUSE("Main verification must try compatible optional PR caches before the broad main fallback"),
-    SERIAL_VALIDATION("Both required validation jobs must run independently with unchanged check names"),
+    SERIAL_VALIDATION("Optional, core and mutation validation must run independently without allowing failure"),
+    VALIDATION_RUNNER("All three validation lanes must use ubuntu-26.04 and JDK 25"),
+    CODE_CHANGE_FILTER("Core and mutation need unconditional PR-readable code filters including the CI workflow"),
+    MUTATION_EXECUTION("Run all three PIT tasks once, serially through the host resource probe with bounded workers and forks"),
+    MUTATION_DIAGNOSTICS("Always upload the mutation resource receipt and all three PIT reports"),
+    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core and mutation success"),
     PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
+    PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
 }
 
 internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
-    val containerJobs = listOf("optional-integrations", "build-test-publish").map { workflowJob(workflow, it) }
+    val validationNames = listOf("Koog and Spring Integration Acceptance", "Core Quality and Kernel Validation", "Mutation Validation")
+    val validationJobs = listOf("optional-integrations", "core-quality", "mutation-tests").map { workflowJob(workflow, it) }
+    val containerJobs = validationJobs.take(2)
+    val mutation = validationJobs[2]
+    val join = workflowJob(workflow, "build-test-publish")
     return CiCacheViolation.entries.filter { violation ->
         when (violation) {
-            CiCacheViolation.PR_CACHE_WRITES -> "cache-read-only: false" !in workflow
+            CiCacheViolation.PR_CACHE_WRITES -> "cache-read-only: false" !in workflow ||
+                validationJobs.filter(String::isNotEmpty).any { "cache-read-only: false" !in workflowStep(it, "Setup Gradle") }
             CiCacheViolation.DEPENDENCY_CHECK_DATA -> "dependency-check-data" !in workflow
             CiCacheViolation.HOST_DEPENDENCY_CHECK -> "run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon" !in workflow
             CiCacheViolation.CONTAINER_DEPENDENCY_CHECK -> "run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze" in workflow
@@ -48,12 +59,26 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
                     "container-gradle-${'$'}{{ runner.os }}-",
                 )
             }
-            CiCacheViolation.SERIAL_VALIDATION -> containerJobs.withIndex().any { (index, job) ->
-                val headers = job.substringBefore("        steps:").lines().map(String::trim)
-                val name = if (index == 0) "Koog and Spring Integration Acceptance" else "Build, Test, Security Scan & Publish"
-                "name: $name" !in headers || headers.any { it.startsWith("needs:") || it.startsWith("if:") }
+            CiCacheViolation.SERIAL_VALIDATION -> validationJobs.withIndex().any { (index, job) ->
+                val headers = workflowHeaders(job)
+                headers.filter { it.startsWith("name:") } != listOf("name: ${validationNames[index]}") ||
+                    headers.any { it.startsWith("needs:") || it.startsWith("if:") || it.startsWith("continue-on-error:") }
             }
-            CiCacheViolation.PUBLISH_GRAPH -> !hasGatedPublication(workflow, containerJobs[1])
+            CiCacheViolation.VALIDATION_RUNNER -> validationJobs.any { job ->
+                val java = workflowStep(job, "Set up JDK 25")
+                workflowHeaders(job).filter { it.startsWith("runs-on:") } != listOf("runs-on: ubuntu-26.04") ||
+                    "uses: actions/setup-java@v5" !in java || "java-version: \"25\"" !in java
+            }
+            CiCacheViolation.CODE_CHANGE_FILTER -> validationJobs.drop(1).any { !hasCodeFilter(it) }
+            CiCacheViolation.MUTATION_EXECUTION -> !hasBoundedMutation(workflow, mutation)
+            CiCacheViolation.MUTATION_DIAGNOSTICS -> !hasMutationDiagnostics(mutation)
+            CiCacheViolation.REQUIRED_CHECK_JOIN -> !hasRequiredCheckJoin(join)
+            CiCacheViolation.PUBLISH_GRAPH -> !hasGatedPublication(workflow, containerJobs[1], join)
+            CiCacheViolation.PACKAGE_WRITE_SCOPE -> {
+                val outsidePublication = workflow.replace(workflowJobBlock(workflow, "publish"), "")
+                val packageWrite = Regex("(?m)^\\s*(?:packages:\\s*write\\b|permissions:.*(?:write-all|packages:\\s*write\\b))")
+                packageWrite.containsMatchIn(outsidePublication)
+            }
             CiCacheViolation.PR_RUN_CONCURRENCY -> {
                 val concurrency = """
                     concurrency:
@@ -68,10 +93,76 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
 }
 
 private fun workflowJob(workflow: String, job: String): String =
-    Regex("(?ms)^    $job:\\n(.*?)(?=^    [a-zA-Z0-9_-]+:|^[^ \\r\\n]|\\z)").find(workflow)
-        ?.groupValues?.get(1).orEmpty().lines().joinToString("\n") { it.removePrefix("            ") }
+    workflowJobBlock(workflow, job).substringAfter('\n', "").lines().joinToString("\n") { it.removePrefix("            ") }
 
-private fun hasGatedPublication(workflow: String, main: String): Boolean {
+private fun workflowJobBlock(workflow: String, job: String): String =
+    Regex("(?ms)^    $job:\\n(.*?)(?=^    [a-zA-Z0-9_-]+:|^[^ \\r\\n]|\\z)").find(workflow)
+        ?.value.orEmpty()
+
+private fun workflowHeaders(job: String): List<String> = job.substringBefore("        steps:").lines().map(String::trim)
+
+private fun workflowStep(job: String, name: String): String =
+    job.substringAfter("- name: $name\n", "").substringBefore("\n- name: ")
+
+private fun hasCodeFilter(job: String): Boolean {
+    val prefix = """
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+            filters: |
+                code:
+    """.trimIndent() + "\n"
+    val filter = workflowStep(job, "Check file changes").trimIndent().trim()
+    val paths = filter.substringAfter(prefix, "").lines()
+    return filter.startsWith(prefix) && paths.all { Regex(" {12}- '[^']+'").matches(it) } &&
+        "            - '.github/workflows/ci.yml'" in paths &&
+        workflowHeaders(job).any { it == "pull-requests: read" || it == "pull-requests: write" }
+}
+
+private fun hasBoundedMutation(workflow: String, mutation: String): Boolean {
+    val execution = """
+        if: steps.filter.outputs.code == 'true'
+        run: >-
+            python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/mutation.json --
+            ./gradlew :enforcer:pitest :platform:pitest :profiler:pitest
+            --no-daemon --max-workers=1 --no-parallel
+            -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+    """.trimIndent()
+    val step = workflowStep(mutation, "Run PITest (Host Unit Tests Only)").trimIndent().trim()
+    return step == execution && Regex(":(enforcer|platform|profiler):pitest\\b").findAll(workflow).count() == 3 &&
+        listOf("podman", "run_containerized_tests.sh", "container-gradle", "actions/cache/").none { it in mutation } &&
+        "uses: actions/checkout@v6" in mutation && "uses: gradle/actions/setup-gradle@v6" in workflowStep(mutation, "Setup Gradle")
+}
+
+private fun hasMutationDiagnostics(mutation: String): Boolean {
+    val upload = """
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+            name: mutation-diagnostics
+            path: |
+                build/reports/ci-resources/mutation.json
+                enforcer/build/reports/pitest/
+                platform/build/reports/pitest/
+                profiler/build/reports/pitest/
+            if-no-files-found: ignore
+    """.trimIndent()
+    return workflowStep(mutation, "Upload Mutation Diagnostics").trimIndent().trim() == upload
+}
+
+private fun hasRequiredCheckJoin(join: String): Boolean {
+    val headers = workflowHeaders(join)
+    val step = """
+        - name: Require Core and Mutation Success
+          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success
+    """.trimIndent()
+    return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
+        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests]") &&
+        headers.filter { it.startsWith("if:") } == listOf("if: always()") &&
+        headers.none { it.startsWith("continue-on-error:") } && join.substringAfter("        steps:\n", "").trim() == step
+}
+
+private fun hasGatedPublication(workflow: String, main: String, join: String): Boolean {
     val publish = workflowJob(workflow, "publish")
     val headers = publish.substringBefore("        steps:").lines().map(String::trim)
     val command = "publishAllPublicationsToGitHubPackagesRepository"
@@ -82,6 +173,7 @@ private fun hasGatedPublication(workflow: String, main: String): Boolean {
         headers.count { it.startsWith("needs:") } == 1 && headers.count { it.startsWith("if:") } == 1 &&
         command in publish && Regex(command).findAll(workflow).count() == 1 &&
         "container_cache_hash: ${'$'}{{ steps.container_cache_key.outputs.hash }}" in main &&
+        "container_cache_hash: ${'$'}{{ needs.core-quality.outputs.container_cache_hash }}" in join &&
         restore.lines().map(String::trim).filter { it.startsWith("key: ") } == listOf(key)
 }
 
