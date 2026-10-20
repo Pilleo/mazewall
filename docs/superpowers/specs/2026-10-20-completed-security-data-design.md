@@ -35,9 +35,12 @@ dependency-check-data from setup-gradle so the explicit data cache is its sole o
 
 After setup derive data directory from actual required GRADLE_USER_HOME, parse
 versions.dependencyCheck from actual TOML with Python standard library and reject
-unsafe version tokens. Emit `dc-data-v1-${runner.os}-${runner.arch}-dc${version}-`
+unsafe version tokens. Emit `dc-data-v1-${runner.os}-${runner.arch}-dc${version}_`
 compatibility prefix and unique run_id/run_attempt primary key. Never use source
 hash/commit as DB compatibility, previously matched key for save, or broad fallback.
+The underscore terminates the version component and is excluded by its accepted
+grammar. Actual metadata tests must prove stable and prerelease snapshot keys do
+not start with each other's restore prefixes; retain OS/architecture isolation.
 
 Capture NVD eligibility only, never its value, using existing secret binding and
 Kotlin isNullOrBlank semantics. Stdlib Unicode-category/separator checks may be

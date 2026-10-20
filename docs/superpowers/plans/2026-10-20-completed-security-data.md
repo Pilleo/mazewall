@@ -43,11 +43,14 @@ Controller owns testing-strategy and scoped issue/index/spec/plan updates.
 No changes to root scanner configuration, catalog/locks, native runner or resources.
 
 New job `security-check`, display `Security Validation`; job180min, update150min.
-Compatibility prefix `dc-data-v1-${runner.os}-${runner.arch}-dc${version}-`, version
+Compatibility prefix `dc-data-v1-${runner.os}-${runner.arch}-dc${version}_`, version
 parsed from catalog, primary suffix run_id/run_attempt. Actual data under required
 GRADLE_USER_HOME; restore/save only that path. Stable existing join needs exactly
 `[core-quality, mutation-tests, security-check]` and all three literal successes.
 Publisher optional/join dependency and container hash forwarding unchanged.
+The version delimiter must be excluded by the accepted version grammar; actual
+metadata-shell regressions assert stable/prerelease mutual prefix nonmatch plus
+OS/architecture isolation, attempt uniqueness and unsafe-version rejection.
 
 Supported-action ruling: cache/save v4 warns on upload errors. After save, use
 cache/restore v4 lookup-only:true/fail-on-cache-miss:true for identical path/new
