@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 173 | *Total Resolved Issues:* 715
+*Total Active Issues:* 174 | *Total Resolved Issues:* 715
 
-Active status detail: 172 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 173 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261020-202040-181](issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md) | Run build-tool regression checks once while preserving required security validation | high | ci |
 | [issue-20261020-145645-363](issue-20261020-145645-363-persist-completed-security-data-before-analysis-in.md) | Persist completed security data before analysis in an independent required lane | high | ci |
 | [issue-20261020-090040-415](issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l.md) | Retain prelaunch failure evidence and cleanup in late-publication portal fixture | high | portal |
 | [issue-20261020-083727-843](issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md) | Drain consumer command evidence before normal process cleanup closes streams | high | testing |
