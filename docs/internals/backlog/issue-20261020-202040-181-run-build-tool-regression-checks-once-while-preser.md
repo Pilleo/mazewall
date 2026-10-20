@@ -80,9 +80,17 @@ Task3 used a superfluous per-command hook override; no installed hook was presen
 (hooksPath unset, only samples), no hook success is claimed, and the required real
 completion build subsequently passed. Do not repeat the override or rewrite history.
 
-Matched warm host measurements, whole-branch review and hosted first/warm new-gate
-qualification remain pending. Default warm/due security, baseline non-PIT memory,
+Whole-branch review and hosted first/warm new-gate qualification remain pending.
+Default warm/due security, baseline non-PIT memory,
 full scan scope and registry-byte identity remain separate open holds.
+
+Matched host measurement is now recorded: three warmed strict-cache invocations
+per task on512565a7/candidate0c0608df, same host/argv/wrapper. Help medians8.359s/
+8.343s; unitCheck17.583s/17.378s, ratio0.9884 passes the10% guard. The difference
+is small noise-scale evidence of no regression, not a steady speedup. Baseline
+prime really executed the implicit suite; candidate help did not, but prime cache
+states differ and are not a controlled cold comparison. Whole-branch review and
+hosted qualification remain pending; neither deleted folder was recreated.
 
 ---
 <!-- id: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser  file: issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md -->

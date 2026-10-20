@@ -86,3 +86,12 @@ Spring passed19m13s,282 tasks (188 executed/4 cached/90 up-to-date). These obser
 qualify the actual candidate local workload only; they do not fill missing baseline
 lane memory, actual root execution, all-dependency coverage or hosted cache/native/
 publication evidence. No numerical optimization benefit is claimed yet.
+
+Matched local warm help/unitCheck measurements used the same host, argv, wrapper
+and three warmed repetitions at512565a7 versus0c0608df. Medians: help8.359s/8.343s,
+unitCheck17.583s/17.378s; ratio0.9884 passes the10% regression guard. All warm runs
+reused strict cache. This is essentially unchanged steady performance, not a
+numerical hosted speedup. Prime logs distinguish actual baseline implicit-suite
+execution from candidate help isolation, but their cache states differ. The
+feature branch was restored cleanly; no publication or deleted-folder restoration
+was used to obtain these observations.
