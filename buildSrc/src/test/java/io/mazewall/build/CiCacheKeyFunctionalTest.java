@@ -29,6 +29,7 @@ public final class CiCacheKeyFunctionalTest {
             failure.addSuppressed(policyFailure);
         }
         if (failure != null) throw failure;
+        VerificationWorkflowInputFunctionalTest.verify(Path.of(args[0]));
     }
 
     static void verify(Path repository) {

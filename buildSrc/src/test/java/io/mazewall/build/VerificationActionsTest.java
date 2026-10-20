@@ -48,6 +48,7 @@ public final class VerificationActionsTest {
         equal(true, malformedRejected);
         verifiesFreshJvmClassMetadata();
         CiCachePolicyTest.run();
+        VerificationWorkflowInputFunctionalTest.verify(rootBuild.getParent());
         CiCacheKeyFunctionalTest.verify(rootBuild.getParent());
         PitestLimitsFunctionalTest.verify(rootBuild.getParent());
         GradleSourceGuardTest.run();

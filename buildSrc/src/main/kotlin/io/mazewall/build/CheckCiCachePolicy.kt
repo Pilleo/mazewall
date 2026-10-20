@@ -11,7 +11,8 @@ import org.gradle.work.DisableCachingByDefault
 
 internal enum class CiCacheViolation(val explanation: String) {
     PR_CACHE_WRITES("PR reruns must save merge-ref-scoped Gradle state"),
-    DEPENDENCY_CHECK_DATA("setup-gradle must include OWASP Dependency-Check data"),
+    DEPENDENCY_CHECK_DATA("Only the explicit compatible completed-data cache may own Dependency-Check data"),
+    SECURITY_LIFECYCLE("Independent security must restore owned data, update successfully, save completed data and always analyze unless cancelled"),
     HOST_DEPENDENCY_CHECK("Dependency-Check must use host Gradle User Home without configuration cache"),
     CONTAINER_DEPENDENCY_CHECK("Dependency-Check must not cross the host/container cache boundary"),
     IMMUTABLE_NVD_CACHE("An immutable daily NVD key can pin stale data"),
@@ -23,7 +24,7 @@ internal enum class CiCacheViolation(val explanation: String) {
     CODE_CHANGE_FILTER("Core and mutation need unconditional PR-readable code filters including the CI workflow"),
     MUTATION_EXECUTION("Run all three PIT tasks once, serially through the host resource probe with bounded workers and forks"),
     MUTATION_DIAGNOSTICS("Always upload the mutation resource receipt and all three PIT reports"),
-    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core and mutation success"),
+    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation and security success"),
     PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
@@ -34,13 +35,16 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
     val validationJobs = listOf("optional-integrations", "core-quality", "mutation-tests").map { workflowJob(workflow, it) }
     val containerJobs = validationJobs.take(2)
     val mutation = validationJobs[2]
+    val security = workflowJob(workflow, "security-check")
     val join = workflowJob(workflow, "build-test-publish")
     return CiCacheViolation.entries.filter { violation ->
         when (violation) {
             CiCacheViolation.PR_CACHE_WRITES -> "cache-read-only: false" !in workflow ||
-                validationJobs.filter(String::isNotEmpty).any { "cache-read-only: false" !in workflowStep(it, "Setup Gradle") }
-            CiCacheViolation.DEPENDENCY_CHECK_DATA -> "dependency-check-data" !in workflow
-            CiCacheViolation.HOST_DEPENDENCY_CHECK -> "run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon" !in workflow
+                (validationJobs + security).filter(String::isNotEmpty).any { "cache-read-only: false" !in workflowStep(it, "Setup Gradle") }
+            CiCacheViolation.DEPENDENCY_CHECK_DATA -> !hasExclusiveSecurityCache(workflow, security)
+            CiCacheViolation.SECURITY_LIFECYCLE -> !hasCompletedSecurityLifecycle(security)
+            CiCacheViolation.HOST_DEPENDENCY_CHECK -> workflowStep(security, "Run Security Check").lines().map(String::trim)
+                .filter { it.startsWith("run:") } != listOf("run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon")
             CiCacheViolation.CONTAINER_DEPENDENCY_CHECK -> "run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze" in workflow
             CiCacheViolation.IMMUTABLE_NVD_CACHE -> "key: nvd-database-" in workflow
             CiCacheViolation.CONTAINER_CACHE_IDENTITY -> containerJobs.withIndex().any { (index, job) ->
@@ -69,7 +73,8 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
                 workflowHeaders(job).filter { it.startsWith("runs-on:") } != listOf("runs-on: ubuntu-26.04") ||
                     "uses: actions/setup-java@v5" !in java || "java-version: \"25\"" !in java
             }
-            CiCacheViolation.CODE_CHANGE_FILTER -> validationJobs.drop(1).any { !hasCodeFilter(it) }
+            CiCacheViolation.CODE_CHANGE_FILTER -> validationJobs.drop(1).any { !hasCodeFilter(it) } ||
+                workflowStep(security, "Check file changes").trim() != workflowStep(containerJobs[1], "Check file changes").trim()
             CiCacheViolation.MUTATION_EXECUTION -> !hasBoundedMutation(workflow, mutation)
             CiCacheViolation.MUTATION_DIAGNOSTICS -> !hasMutationDiagnostics(mutation)
             CiCacheViolation.REQUIRED_CHECK_JOIN -> !hasRequiredCheckJoin(join)
@@ -154,12 +159,158 @@ private fun hasRequiredCheckJoin(join: String): Boolean {
     val headers = workflowHeaders(join)
     val step = """
         - name: Require Core and Mutation Success
-          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success
+          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success
     """.trimIndent()
     return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
-        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests]") &&
+        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check]") &&
         headers.filter { it.startsWith("if:") } == listOf("if: always()") &&
         headers.none { it.startsWith("continue-on-error:") } && join.substringAfter("        steps:\n", "").trim() == step
+}
+
+private fun hasExclusiveSecurityCache(workflow: String, security: String): Boolean {
+    val setup = workflowStep(security, "Setup Gradle")
+    val restore = workflowStep(security, "Restore Security Data").trimIndent().trim()
+    val save = workflowStep(security, "Save Completed Security Data").trimIndent().trim()
+    val data = "${'$'}{{ steps.security_metadata.outputs.data_dir }}"
+    val key = "${'$'}{{ steps.security_metadata.outputs.key }}"
+    val prefix = "${'$'}{{ steps.security_metadata.outputs.prefix }}"
+    val outside = workflow.replace(workflowJobBlock(workflow, "security-check"), "")
+    return "gradle-home-cache-excludes: dependency-check-data" in setup &&
+        "gradle-home-cache-includes:" !in setup && "dependency-check-data" !in outside.substringAfter("jobs:") &&
+        restore.substringAfter("uses: ").trim() == """
+            actions/cache/restore@v4
+            with:
+                path: $data
+                key: $key
+                restore-keys: $prefix
+        """.trimIndent() && save.substringAfter("uses: ").trim() == """
+            actions/cache/save@v4
+            with:
+                path: $data
+                key: ${'$'}{{ steps.security_restore.outputs.cache-primary-key }}
+        """.trimIndent() && Regex("uses: actions/cache/").findAll(security).count() == 3
+}
+
+private fun hasCompletedSecurityLifecycle(security: String): Boolean {
+    val eligible = "steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true'"
+    val completed = "${'$'}{{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && $eligible }}"
+    val binding = "NVD_API_KEY: ${'$'}{{ secrets.NVD_API_KEY }}"
+    val headers = workflowHeaders(security).filter(String::isNotBlank)
+    if (headers != listOf(
+            "name: Security Validation", "runs-on: ubuntu-26.04", "timeout-minutes: 180",
+            "permissions:", "contents: read", "pull-requests: read",
+        ) || !hasCodeFilter(security) ||
+        workflowStep(security, "Checkout Code").trim() != "uses: actions/checkout@v6" ||
+        workflowStep(security, "Set up JDK 25").trimIndent().trim() != """
+            uses: actions/setup-java@v5
+            with:
+                java-version: "25"
+                distribution: "temurin"
+        """.trimIndent() ||
+        workflowStep(security, "Setup Gradle").trimIndent().trim().replace("cache-read-only: true", "cache-read-only: false") != """
+            uses: gradle/actions/setup-gradle@v6
+            with:
+                cache-encryption-key: ${'$'}{{ secrets.GRADLE_ENCRYPTION_KEY }}
+                cache-read-only: false
+                gradle-home-cache-excludes: dependency-check-data
+        """.trimIndent()
+    ) return false
+    val expectedNames = listOf(
+        "Checkout Code", "Set up JDK 25", "Check file changes", "Setup Gradle", "Compute Security Data Metadata",
+        "Restore Security Data", "Verify Restored Security Ownership", "Update Security Data", "Verify Updated Security Ownership",
+        "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot",
+        "Run Security Check", "Verify Final Security Ownership", "Upload Security Diagnostics",
+    )
+    if (security.lines().map(String::trim).filter { it.startsWith("- name: ") }.map { it.removePrefix("- name: ") } != expectedNames) return false
+    val metadata = """
+        id: security_metadata
+        env:
+            $binding
+        run: |
+            python3 - <<'PY'
+            import os
+            import re
+            import tomllib
+            import unicodedata
+            from pathlib import Path
+
+            with open('gradle/libs.versions.toml', 'rb') as catalog:
+                version = tomllib.load(catalog)['versions']['dependencyCheck']
+            if not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)+(?:-[A-Za-z0-9.]+)?', version):
+                raise SystemExit('Unsafe Dependency-Check version')
+            home = os.environ['GRADLE_USER_HOME']
+            if not Path(home).is_absolute() or any(char in home for char in '\r\n'):
+                raise SystemExit('Expected absolute GRADLE_USER_HOME')
+            prefix = f"dc-data-v1-{os.environ['RUNNER_OS']}-{os.environ['RUNNER_ARCH']}-dc{version}_"
+            key = f"{prefix}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+            value = os.environ.get('NVD_API_KEY', '')
+            blank = all(unicodedata.category(char) in ('Zs', 'Zl', 'Zp') or char in '\t\n\v\f\r\x1c\x1d\x1e\x1f' for char in value)
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                print(f'data_dir={Path(home) / "dependency-check-data"}', file=output)
+                print(f'prefix={prefix}', file=output)
+                print(f'key={key}', file=output)
+                print(f'eligible={str(not blank).lower()}', file=output)
+            PY
+    """.trimIndent()
+    val ownership = """
+        run: |
+            for path in "${'$'}GITHUB_WORKSPACE" "${'$'}{GRADLE_USER_HOME:?}" "${'$'}{GRADLE_USER_HOME:?}/dependency-check-data"; do
+                if [ -e "${'$'}path" ]; then
+                    foreign=${'$'}(find "${'$'}path" -xdev ! -user "${'$'}(id -u)" -print -quit)
+                    if [ -n "${'$'}foreign" ]; then
+                        echo "Unexpected non-caller-owned security output: ${'$'}foreign" >&2
+                        exit 1
+                    fi
+                fi
+            done
+    """.trimIndent()
+    fun matches(name: String, expected: String): Boolean = workflowStep(security, name).trimIndent().trim() == expected
+    val restoreHeader = workflowStep(security, "Restore Security Data").substringBefore("uses: ").trimIndent().trim()
+    val saveHeader = workflowStep(security, "Save Completed Security Data").substringBefore("uses: ").trim()
+    val analyze = workflowStep(security, "Run Security Check").trimIndent().trim()
+        .replace(Regex("(?m)^run:.*$"), "run: ANALYZE")
+    return matches("Compute Security Data Metadata", metadata) &&
+        restoreHeader == "id: security_restore\nif: $eligible" && saveHeader == "if: $completed" &&
+        matches("Verify Restored Security Ownership", "id: restored_ownership\nif: $eligible\n$ownership") &&
+        matches("Update Security Data", """
+            id: security_update
+            if: $eligible && steps.restored_ownership.outcome == 'success'
+            timeout-minutes: 150
+            env:
+                $binding
+            run: |
+                set -o pipefail
+                ./gradlew dependencyCheckUpdate --info --no-configuration-cache --no-daemon 2>&1 | tee security-update.log
+        """.trimIndent()) &&
+        matches("Verify Updated Security Ownership", "id: updated_ownership\nif: $eligible && steps.security_update.outcome == 'success'\n$ownership") &&
+        matches("Look Up Completed Security Snapshot", """
+            id: security_snapshot_lookup
+            if: $completed
+            uses: actions/cache/restore@v4
+            with:
+                path: ${'$'}{{ steps.security_metadata.outputs.data_dir }}
+                key: ${'$'}{{ steps.security_restore.outputs.cache-primary-key }}
+                lookup-only: true
+                fail-on-cache-miss: true
+        """.trimIndent()) &&
+        matches("Require Completed Security Snapshot", """
+            if: $completed
+            env:
+                CACHE_HIT: ${'$'}{{ steps.security_snapshot_lookup.outputs.cache-hit }}
+            run: test "${'$'}{CACHE_HIT:-}" = true
+        """.trimIndent()) &&
+        analyze == "if: $completed\nrun: ANALYZE\nenv:\n    $binding" &&
+        matches("Verify Final Security Ownership", "if: always()\n$ownership") &&
+        matches("Upload Security Diagnostics", """
+            if: always()
+            uses: actions/upload-artifact@v4
+            with:
+                name: security-diagnostics
+                path: |
+                    security-update.log
+                    **/build/reports/dependency-check*
+                if-no-files-found: ignore
+        """.trimIndent())
 }
 
 private fun hasGatedPublication(workflow: String, main: String, join: String): Boolean {
