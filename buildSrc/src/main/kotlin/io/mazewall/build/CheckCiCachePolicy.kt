@@ -30,7 +30,7 @@ internal enum class CiCacheViolation(val explanation: String) {
 }
 
 internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
-    val validationNames = listOf("Koog and Spring Integration Acceptance", "Core Quality", "Mutation Tests")
+    val validationNames = listOf("Koog and Spring Integration Acceptance", "Core Quality and Kernel Validation", "Mutation Validation")
     val validationJobs = listOf("optional-integrations", "core-quality", "mutation-tests").map { workflowJob(workflow, it) }
     val containerJobs = validationJobs.take(2)
     val mutation = validationJobs[2]

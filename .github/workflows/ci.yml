@@ -105,7 +105,7 @@ jobs:
                       build/test-results/optionalIntegrationCheck/*.xml
                   if-no-files-found: ignore
     core-quality:
-        name: Core Quality
+        name: Core Quality and Kernel Validation
         # Dedicated-process worker correctness requires Landlock TSYNC (ABI 8+).
         runs-on: ubuntu-26.04
         timeout-minutes: 90
@@ -274,7 +274,7 @@ jobs:
                       ~/.cache/mazewall/container-gradle
                   key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
     mutation-tests:
-        name: Mutation Tests
+        name: Mutation Validation
         runs-on: ubuntu-26.04
         timeout-minutes: 90
         permissions:

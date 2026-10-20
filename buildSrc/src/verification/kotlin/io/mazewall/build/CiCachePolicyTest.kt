@@ -50,7 +50,7 @@ object CiCachePolicyTest {
                           with:
                               key: optional-container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
                 core-quality:
-                    name: Core Quality
+                    name: Core Quality and Kernel Validation
                     runs-on: ubuntu-26.04
                     permissions:
                         contents: read
@@ -97,7 +97,7 @@ object CiCachePolicyTest {
                           with:
                               key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
                 mutation-tests:
-                    name: Mutation Tests
+                    name: Mutation Validation
                     runs-on: ubuntu-26.04
                     permissions:
                         contents: read
@@ -226,6 +226,12 @@ object CiCachePolicyTest {
             "missing mutation runner", valid.removeRange(mutationStart, joinStart),
             "SERIAL_VALIDATION", "VALIDATION_RUNNER", "CODE_CHANGE_FILTER", "MUTATION_EXECUTION", "MUTATION_DIAGNOSTICS",
         )
+        for ((approved, abbreviated) in listOf(
+            "Core Quality and Kernel Validation" to "Core Quality",
+            "Mutation Validation" to "Mutation Tests",
+        )) {
+            expectViolations("approved lane name $approved", valid.replace("name: $approved", "name: $abbreviated"), "SERIAL_VALIDATION")
+        }
         for (lane in listOf("optional-integrations", "core-quality", "mutation-tests")) {
             for (header in listOf("if: false", "needs: [core-quality]", "continue-on-error: true")) {
                 expectViolations("$lane $header", valid.replace("    $lane:\n", "    $lane:\n        $header\n"), "SERIAL_VALIDATION")
