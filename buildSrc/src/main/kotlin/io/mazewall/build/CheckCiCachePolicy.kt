@@ -310,7 +310,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
     val headers = workflowHeaders(security).filter(String::isNotBlank)
     if (headers != listOf(
             "name: Security Validation", "runs-on: ubuntu-26.04", "timeout-minutes: 180",
-            "permissions:", "contents: read", "pull-requests: read",
+            "permissions:", "contents: read", "pull-requests: read", "actions: read",
         ) || !hasCodeFilter(security) ||
         workflowStep(security, "Checkout Code").trim() != "uses: actions/checkout@v6" ||
         workflowStep(security, "Set up JDK 25").trimIndent().trim() != """
@@ -329,7 +329,10 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
     ) return false
     val expectedNames = listOf(
         "Checkout Code", "Set up JDK 25", "Check file changes", "Setup Gradle", "Compute Security Data Metadata",
-        "Restore Security Data", "Verify Restored Security Ownership", "Update Security Data", "Verify Updated Security Ownership",
+        "Restore Security Data", "Prepare Security Snapshot Tools", "Select Retained Security Snapshot",
+        "Download Retained Security Snapshot", "Restore Retained Security Snapshot",
+        "Verify Restored Security Ownership", "Update Security Data", "Verify Updated Security Ownership",
+        "Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot",
         "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot",
         "Run Security Check", "Verify Final Security Ownership", "Upload Security Diagnostics",
     )
@@ -381,7 +384,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
     val saveHeader = workflowStep(security, "Save Completed Security Data").substringBefore("uses: ").trim()
     val analyze = workflowStep(security, "Run Security Check").trimIndent().trim()
         .replace(Regex("(?m)^run:.*$"), "run: ANALYZE")
-    return matches("Compute Security Data Metadata", metadata) &&
+    return hasRetainedSecurityLifecycle(security, eligible, completed) && matches("Compute Security Data Metadata", metadata) &&
         restoreHeader == "id: security_restore\nif: $eligible" && saveHeader == "if: $completed" &&
         matches("Verify Restored Security Ownership", "id: restored_ownership\nif: $eligible\n$ownership") &&
         matches("Update Security Data", """
@@ -423,6 +426,64 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                     **/build/reports/dependency-check*
                 if-no-files-found: ignore
         """.trimIndent())
+}
+
+private fun hasRetainedSecurityLifecycle(security: String, eligible: String, completed: String): Boolean {
+    fun matches(name: String, expected: String): Boolean = workflowStep(security, name).trimIndent().trim() == expected.trimIndent()
+    val tools = workflowStep(security, "Prepare Security Snapshot Tools").trimIndent().trim()
+    val selector = workflowStep(security, "Select Retained Security Snapshot")
+    return tools.startsWith("if: $eligible\nrun: |\n    cat > \"\$RUNNER_TEMP/security-snapshot.py\" <<'PY'\n") &&
+        selector.substringBefore("script: |").trimIndent().trim() == """
+            id: security_artifact
+            if: $eligible && steps.security_restore.outputs.cache-matched-key == ''
+            uses: actions/github-script@v8
+            env:
+                SNAPSHOT_PREFIX: ${'$'}{{ steps.security_metadata.outputs.prefix }}
+            with:
+        """.trimIndent() &&
+        matches("Download Retained Security Snapshot", """
+            id: security_artifact_download
+            if: $eligible && steps.security_artifact.outputs.artifact_id != ''
+            uses: actions/download-artifact@v5
+            with:
+                artifact-ids: ${'$'}{{ steps.security_artifact.outputs.artifact_id }}
+                run-id: ${'$'}{{ steps.security_artifact.outputs.run_id }}
+                repository: ${'$'}{{ github.repository }}
+                github-token: ${'$'}{{ github.token }}
+                path: ${'$'}{{ runner.temp }}/security-snapshot-restore
+                merge-multiple: true
+        """) &&
+        matches("Restore Retained Security Snapshot", """
+            if: $eligible && steps.security_artifact_download.outcome == 'success'
+            env:
+                SNAPSHOT_KEY: ${'$'}{{ steps.security_artifact.outputs.key }}
+            run: python3 "${'$'}RUNNER_TEMP/security-snapshot.py" restore "${'$'}RUNNER_TEMP/security-snapshot-restore" "${'$'}GRADLE_USER_HOME/dependency-check-data"
+        """) &&
+        matches("Prepare Completed Security Artifact", """
+            id: security_artifact_prepare
+            if: $completed
+            env:
+                SNAPSHOT_KEY: ${'$'}{{ steps.security_metadata.outputs.key }}
+            run: python3 "${'$'}RUNNER_TEMP/security-snapshot.py" pack "${'$'}GRADLE_USER_HOME/dependency-check-data" "${'$'}RUNNER_TEMP/security-snapshot-upload"
+        """) &&
+        matches("Upload Completed Security Artifact", """
+            id: security_artifact_upload
+            if: ${completed.removeSuffix(" }}")} && steps.security_artifact_prepare.outcome == 'success' }}
+            uses: actions/upload-artifact@v4
+            with:
+                name: security-snapshot-${'$'}{{ steps.security_metadata.outputs.key }}
+                path: ${'$'}{{ runner.temp }}/security-snapshot-upload
+                retention-days: 14
+                include-hidden-files: true
+                if-no-files-found: error
+        """) &&
+        matches("Require Retained Security Snapshot", """
+            if: $completed
+            env:
+                ARTIFACT_ID: ${'$'}{{ steps.security_artifact_upload.outputs.artifact-id }}
+            run: |
+                [[ "${'$'}{ARTIFACT_ID:-}" =~ ^[1-9][0-9]*$ ]]
+        """)
 }
 
 private fun hasGatedPublication(workflow: String, main: String, join: String): Boolean {

@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 object CiCachePolicyTest {
     @JvmStatic
     fun run() {
+        verifySecuritySnapshotRecovery()
         verifyCompletedSecurityLifecycle()
         verifyBuildLogicLane()
         verifyGoLane()
@@ -507,6 +508,156 @@ object CiCachePolicyTest {
         return process.exitValue() == 0
     }
 
+    private fun verifySecuritySnapshotRecovery() {
+        val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
+        val security = job(repository.resolve(".github/workflows/ci.yml").readText(), "security-check")
+        val selection = step(security, "Select Retained Security Snapshot")
+        check(selection.isNotEmpty()) { "A missing NVD cache must recover a compatible retained snapshot before cold bootstrap" }
+        val selectionCondition = selection.lineSequence().map(String::trim).first { it.startsWith("if: ") }.removePrefix("if: ")
+        for (code in listOf(false, true)) for (eligible in listOf(false, true)) {
+            for ((matched, exact) in listOf("" to false, "dc-data-v1-Linux-X64-dc10.0.4_90-1" to false, "dc-data-v1-Linux-X64-dc10.0.4_100-1" to true)) {
+                val expression = selectionCondition.replace("steps.filter.outputs.code", "'$code'")
+                    .replace("steps.security_metadata.outputs.eligible", "'$eligible'")
+                    .replace("steps.security_restore.outputs.cache-matched-key", "'$matched'")
+                    .replace("steps.security_restore.outputs.cache-hit", "'$exact'")
+                check(shellSucceeds("[[ $expression ]]") == (code && eligible && matched.isEmpty())) {
+                    "Artifact recovery must distinguish a prefix cache hit from a genuine miss"
+                }
+            }
+        }
+        val scratch = Files.createTempDirectory("ci-security-recovery-").toFile()
+        try {
+            val preparation = shell(step(security, "Prepare Security Snapshot Tools"))
+            check(preparation.isNotBlank()) { "Missing executable snapshot integrity validation" }
+            val runnerTemp = scratch.resolve("runner-temp").apply { mkdir() }
+            val prepare = ProcessBuilder("bash", "-euo", "pipefail", "-c", preparation).apply {
+                environment()["RUNNER_TEMP"] = runnerTemp.path
+            }.inheritIO().start()
+            check(prepare.waitFor(5, TimeUnit.SECONDS) && prepare.exitValue() == 0)
+            val controls = scratch.resolve("selection.py").apply {
+                writeText("""
+                    import json, os, pathlib, subprocess, sys
+                    root, tool = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+                    prefix = 'dc-data-v1-Linux-X64-dc10.0.4_'
+                    def run(ident, **changes):
+                        return dict(id=ident, workflow_id=7, event='push', head_branch='master', head_sha='abc',
+                                    repository={'id': 11}, head_repository={'id': 11}, pull_requests=[], run_attempt=2,
+                                    status='completed', conclusion='failure') | changes
+                    def artifact(ident, run_id, **changes):
+                        return dict(id=ident, name=f'security-snapshot-{prefix}{run_id}-1', expired=False,
+                                    size_in_bytes=123, created_at='2026-10-21T10:00:00Z', expires_at='2099-01-01T00:00:00Z',
+                                    workflow_run=dict(id=run_id, repository_id=11, head_repository_id=11,
+                                                      head_branch='master', head_sha='abc')) | changes
+                    def choose(candidates, current=None):
+                        output = root / 'selection-output'
+                        output.write_text('')
+                        payload = root / 'candidates.json'
+                        payload.write_text(json.dumps(dict(repository_id=11, default_branch='master', pr_number=554,
+                                                           current=current or run(100), candidates=candidates)))
+                        result = subprocess.run([sys.executable, str(tool), 'select', str(payload)], capture_output=True,
+                                                text=True, env=dict(os.environ, GITHUB_OUTPUT=str(output), SNAPSHOT_PREFIX=prefix), timeout=5)
+                        assert result.returncode == 0, result.stdout + result.stderr
+                        return dict(line.split('=', 1) for line in output.read_text().splitlines())
+                    good = artifact(201, 90)
+                    assert choose([]) == {}
+                    assert choose([dict(artifact=good, run=run(90))]) == dict(artifact_id='201', run_id='90', key=prefix + '90-1')
+                    newer = artifact(202, 91, created_at='2026-10-21T11:00:00Z')
+                    assert choose([dict(artifact=good, run=run(90)), dict(artifact=newer, run=run(91))])['artifact_id'] == '202'
+                    for changes in [
+                        dict(expired=True), dict(size_in_bytes=0), dict(size_in_bytes=2147483649),
+                        dict(created_at='invalid'), dict(expires_at='2000-01-01T00:00:00Z'),
+                        dict(name=good['name'].replace('10.0.4_', '10.0.4-rc1_')),
+                        dict(name=good['name'].replace('X64', 'ARM64')), dict(name=good['name'].replace('Linux', 'Windows')),
+                        dict(name=good['name'].replace('90-1', '90-0')), dict(name=good['name'] + '-incomplete')
+                    ]:
+                        assert choose([dict(artifact=good | changes, run=run(90))]) == {}, changes
+                    for changes in [
+                        dict(workflow_id=8), dict(repository={'id': 12}), dict(head_repository={'id': 12}),
+                        dict(head_repository=None), dict(head_branch='feature'), dict(event='workflow_dispatch'),
+                        dict(head_sha='different'), dict(run_attempt=0),
+                        dict(event='pull_request', head_branch='feature', pull_requests=[{'number': 554}])
+                    ]:
+                        assert choose([dict(artifact=good, run=run(90, **changes))]) == {}, changes
+                    pr = run(100, event='pull_request', head_branch='feature', head_repository={'id': 12}, pull_requests=[{'number': 554}])
+                    own_pr = pr | dict(id=90)
+                    pr_artifact = artifact(201, 90, workflow_run=dict(id=90, repository_id=11,
+                                          head_repository_id=12, head_branch='feature', head_sha='abc'))
+                    assert choose([dict(artifact=pr_artifact, run=own_pr)], pr)['artifact_id'] == '201'
+                    assert choose([dict(artifact=pr_artifact, run=own_pr | dict(pull_requests=[{'number': 555}]))], pr) == {}
+                    assert choose([dict(artifact=good, run=run(90))], pr)['artifact_id'] == '201'
+                    assert choose([dict(artifact=pr_artifact, run=own_pr)]) == {}
+                    print('Retained snapshot selection: recovery, newest, scope, compatibility and deleted fork passed.')
+                """.trimIndent())
+            }
+            val process = ProcessBuilder("python3", controls.path, scratch.path, runnerTemp.resolve("security-snapshot.py").path)
+                .inheritIO().start()
+            check(process.waitFor(20, TimeUnit.SECONDS)) { "Snapshot selection controls timed out" }
+            check(process.exitValue() == 0) { "Retained snapshot selection controls failed" }
+
+            val integrity = scratch.resolve("integrity.py").apply {
+                writeText("""
+                    import json, os, pathlib, shutil, subprocess, sys
+                    root = pathlib.Path(sys.argv[1])
+                    tool = pathlib.Path(sys.argv[2])
+                    source = root / 'database'
+                    source.mkdir()
+                    (source / 'odc.mv.db').write_bytes(b'fixture database, not a real scanner pass')
+                    (source / 'cache').mkdir()
+                    (source / 'cache' / '.state').write_bytes(b'preserved hidden file')
+                    artifact = root / 'artifact'
+                    destination = root / 'restored'
+                    def invoke(mode, src, dst, key='dc-data-v1-Linux-X64-dc10.0.4_90-1'):
+                        env = dict(os.environ, SNAPSHOT_KEY=key)
+                        result = subprocess.run([sys.executable, str(tool), mode, str(src), str(dst)], env=env,
+                                                capture_output=True, text=True, timeout=5)
+                        return result.returncode, result.stdout + result.stderr
+                    code, log = invoke('pack', source, artifact)
+                    assert code == 0, log
+                    code, log = invoke('restore', artifact, destination)
+                    assert code == 0, log
+                    assert (destination / 'odc.mv.db').read_bytes() == (source / 'odc.mv.db').read_bytes()
+                    assert (destination / 'cache' / '.state').read_bytes() == b'preserved hidden file'
+                    assert not (destination / 'manifest.json').exists()
+                    assert invoke('restore', artifact, root / 'wrong-version', 'dc-data-v1-Linux-X64-dc11.0.0_90-1')[0] != 0
+                    assert not (root / 'wrong-version').exists()
+                    assert invoke('restore', artifact, destination)[0] != 0
+                    assert (destination / 'odc.mv.db').read_bytes() == (source / 'odc.mv.db').read_bytes()
+                    original = (artifact / 'data' / 'odc.mv.db').read_bytes()
+                    for payload in [b'corrupted', b'X' * len(original)]:
+                        (artifact / 'data' / 'odc.mv.db').write_bytes(payload)
+                        assert invoke('restore', artifact, root / 'corrupt')[0] != 0
+                        assert not (root / 'corrupt').exists()
+                    (artifact / 'data' / 'odc.mv.db').write_bytes(original)
+                    extra = artifact / 'data' / 'unexpected'
+                    extra.write_bytes(b'extra')
+                    assert invoke('restore', artifact, root / 'extra')[0] != 0
+                    extra.unlink()
+                    link = source / 'symlink'
+                    link.symlink_to(source / 'odc.mv.db')
+                    assert invoke('pack', source, root / 'symlink-artifact')[0] != 0
+                    link.unlink()
+                    manifest = artifact / 'manifest.json'
+                    valid = manifest.read_bytes()
+                    manifest.write_text('{invalid json')
+                    assert invoke('restore', artifact, root / 'invalid')[0] != 0
+                    manifest.write_bytes(valid)
+                    shutil.rmtree(artifact / 'data' / 'cache')
+                    assert invoke('restore', artifact, root / 'incomplete')[0] != 0
+                    empty = root / 'empty'
+                    empty.mkdir()
+                    assert invoke('pack', empty, root / 'empty-artifact')[0] != 0
+                    print('Snapshot integrity: round trip, hidden files, incompatible, corrupt, incomplete, symlink and no-overwrite passed.')
+                """.trimIndent())
+            }
+            val validation = ProcessBuilder("python3", integrity.path, scratch.path, runnerTemp.resolve("security-snapshot.py").path)
+                .inheritIO().start()
+            check(validation.waitFor(20, TimeUnit.SECONDS)) { "Snapshot integrity controls timed out" }
+            check(validation.exitValue() == 0) { "Snapshot integrity controls failed" }
+        } finally {
+            scratch.deleteRecursively()
+        }
+    }
+
     private fun verifyCompletedSecurityLifecycle() {
         val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
         val workflow = repository.resolve(".github/workflows/ci.yml").readText()
@@ -547,6 +698,15 @@ object CiCachePolicyTest {
             "!cancelled() && steps.security_update" to "steps.security_update",
             "if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true'" to "if: steps.security_restore.outputs.cache-hit != 'true'",
             "find \"\$path\" -xdev ! -user" to "find \"\$path\" -xdev -user",
+            "steps.security_restore.outputs.cache-matched-key == ''" to "steps.security_restore.outputs.cache-hit != 'true'",
+            "actions: read" to "actions: write",
+            "actions/download-artifact@v5" to "actions/download-artifact@v4",
+            "merge-multiple: true" to "merge-multiple: false",
+            "retention-days: 14" to "retention-days: 1",
+            "include-hidden-files: true" to "include-hidden-files: false",
+            "if-no-files-found: error" to "if-no-files-found: ignore",
+            "steps.security_artifact_prepare.outcome == 'success'" to "steps.security_artifact_prepare.outcome != 'failure'",
+            "steps.security_artifact_download.outcome == 'success'" to "steps.security_artifact_download.outcome != 'failure'",
         )
         for ((from, to) in mutations) {
             check(from in workflow) { "Ineffective security mutation: $from" }
@@ -667,13 +827,14 @@ object CiCachePolicyTest {
                 "Actual 125-way join failed: $core/$mutation/$securityResult"
             }
         }
-        fun condition(name: String, code: Boolean, eligible: Boolean, cancelled: Boolean, update: String, owned: String, restored: String = "success", priorSuccess: Boolean = true): Boolean {
+        fun condition(name: String, code: Boolean, eligible: Boolean, cancelled: Boolean, update: String, owned: String, restored: String = "success", priorSuccess: Boolean = true, prepared: String = "success"): Boolean {
             var expression = step(security, name).lineSequence().map(String::trim).first { it.startsWith("if: ") }.removePrefix("if: ")
                 .removePrefix("\${{ ").removeSuffix(" }}")
             for ((from, to) in mapOf(
                 "steps.filter.outputs.code" to "'$code'", "steps.security_metadata.outputs.eligible" to "'$eligible'",
                 "steps.security_update.outcome" to "'$update'", "steps.updated_ownership.outcome" to "'$owned'",
                 "steps.restored_ownership.outcome" to "'$restored'", "!cancelled()" to "'$cancelled' != 'true'", "always()" to "'true' == 'true'",
+                "steps.security_artifact_prepare.outcome" to "'$prepared'",
             )) expression = expression.replace(from, to)
             val hasStatus = "cancelled()" in step(security, name) || "always()" in step(security, name) || "success()" in step(security, name)
             return (hasStatus || priorSuccess) && shellSucceeds("[[ $expression ]]")
@@ -682,14 +843,19 @@ object CiCachePolicyTest {
             for (update in results) for (owned in results) {
                 val expected = code && eligible && !cancelled && update == "success" && owned == "success"
                 for (priorSuccess in listOf(false, true)) {
-                    for (name in listOf("Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot", "Run Security Check")) {
+                    for (name in listOf("Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot", "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot", "Run Security Check")) {
                         check(condition(name, code, eligible, cancelled, update, owned, priorSuccess = priorSuccess) == expected) { "Actual $name condition failed" }
                     }
                 }
             }
         }
         for (restored in results) check(condition("Update Security Data", true, true, false, "", "", restored) == (restored == "success"))
-        for (failedStep in listOf("Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot")) {
+        for (prepared in results) {
+            check(condition("Upload Completed Security Artifact", true, true, false, "success", "success", prepared = prepared) == (prepared == "success")) {
+                "Incomplete preparation must never publish a snapshot"
+            }
+        }
+        for (failedStep in listOf("Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot", "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot")) {
             for (analysis in listOf("success", "failure")) {
                 check(condition("Run Security Check", true, true, false, "success", "success", priorSuccess = false)) { "$failedStep failure must not prevent $analysis analysis" }
                 check("continue-on-error:" !in step(security, failedStep)) { "$failedStep failure must not be allowed" }
@@ -699,6 +865,13 @@ object CiCachePolicyTest {
     }
 
     private fun verifyPersistenceProof(workflow: String, security: String) {
+        val artifactAssertion = shell(step(security, "Require Retained Security Snapshot"))
+        check(artifactAssertion.isNotBlank()) { "Missing retained-snapshot publication assertion" }
+        for (id in listOf("1", "1234567890123")) check(shellSucceeds(artifactAssertion, mapOf("ARTIFACT_ID" to id)))
+        for (id in listOf("", "0", "-1", "true", "123x", "123\n456")) {
+            check(!shellSucceeds(artifactAssertion, mapOf("ARTIFACT_ID" to id))) { "Snapshot publication accepted invalid ID '$id'" }
+        }
+        check(!shellSucceeds("unset ARTIFACT_ID\n$artifactAssertion"))
         val lookup = step(security, "Look Up Completed Security Snapshot")
         val assertion = step(security, "Require Completed Security Snapshot")
         check(lookup.isNotEmpty() && assertion.isNotEmpty()) { "Missing exact completed-snapshot lookup and literal-true assertion" }

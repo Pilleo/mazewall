@@ -319,17 +319,38 @@ commands; `make vuln` scans that same graph. No vulnerability suppressions or
 report-only success fallback are configured.
 
 Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
-container's separate data mount. Its explicit data-only cache is the sole owner;
-setup-gradle excludes that directory. Compatibility keys include OS, architecture
+container's separate data mount. The security lane alone owns its data-only cache
+and retained snapshot artifacts; setup-gradle excludes that directory. Compatibility keys include OS, architecture
 and the actual catalog scanner version, with unique run-ID/attempt snapshots and
 only the compatible restore prefix. No previous matched key is overwritten, no
 cross-version/container fallback is allowed, and a cache hit never skips analysis.
+
+On a genuine cache miss (empty matched key, not the exact-hit boolean), the lane
+looks for the newest compatible, non-expired completed snapshot artifact. Artifacts
+are retained for 14 days outside the evictable build-cache quota. Default-branch
+consumers accept only same-repository default-branch push artifacts from this CI
+workflow; PRs may additionally consume their own PR's artifacts, never another PR's.
+Source run/repository/commit/attempt metadata and the exact compatibility prefix
+are checked. Overall workflow success is not required: a completed database remains
+usable when a later analysis or another job failed. Deleted-fork metadata is rejected.
+API/download errors are failures, not evidence that no snapshot exists.
+
+Snapshots contain a versioned compatibility manifest and SHA-256/size inventory of
+all database files, including hidden cache files. Preparation and restoration reject
+links, foreign ownership, non-regular files, missing/empty `odc.mv.db`, more than
+10,000 entries, more than 2 GiB of data or a manifest larger than 2 MiB. Restoration
+checks the inventory before admitting data through an owned temporary directory;
+existing nonempty data is never overwritten. Snapshot age is not a freshness waiver:
+the normal updater must still succeed before real analysis. With neither a compatible
+cache nor retained artifact, an explicit cold bootstrap is still necessary.
 
 The independent security job has a bounded 180-minute cold budget, including a
 150-minute `dependencyCheckUpdate` step. This separates the observed slow full NVD
 bootstrap from already successful native work; it is not a latency guarantee.
 After a successful update, caller ownership is checked before explicit snapshot
-save. Failed/cancelled updates and foreign ownership never publish a snapshot;
+save and a separate retained-artifact upload. Artifact preparation/publication has
+its own success guard and nonempty artifact-ID assertion before analysis; persistence
+failures leave the lane red. Failed/cancelled updates and foreign ownership never publish a snapshot;
 there is no permission repair or partial-database resume assumption.
 
 Because cache/save may warn and exit successfully after upload failure, a supported
@@ -386,6 +407,13 @@ not prove refreshed NVD data. PR-only caches cannot seed default-branch bootstra
 Record cache size/ref/version, durations and task outcomes; eviction and external
 API latency remain possible. A failed security lane and its dependent gates are
 the bounded recovery unit, not a reason to replay successful native pipelines.
+Retained recovery additionally needs a real cache-miss/artifact-download/validated
+restore followed by update and analysis. Offline fixture round trips do not establish
+GitHub artifact availability, retention or an executed vulnerability scan. Qualify
+this by rerunning the security job, not successful native lanes; do not delete shared
+caches to manufacture the miss. Artifacts can also expire or be deleted, and their
+storage usage is separate from the build-cache quota. The historical cache-removal
+cause remains unproven; recovery does not depend on assuming eviction.
 
 Root verification follows source plugins rather than optional module paths.
 Non-demo grouping projects retain lazy child `build` and `check` dependencies
