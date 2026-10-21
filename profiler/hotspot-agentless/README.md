@@ -216,6 +216,9 @@ USER_NOTIF and recorded-EBPF behavior remain unchanged.
 ## Verification
 
 `make unit` runs canonical race tests and local graph packaging/install controls.
+`make vuln` scans the prepared module graph with `govulncheck`; install the pinned
+tool with `go install golang.org/x/vuln/cmd/govulncheck@v1.9.0`. Findings or scanner
+errors fail the command. CI runs both commands when either Go module changes.
 The [experiment harness](../../experiments/hotspot-agentless/README.md) runs the
 upstream race/native finalization/live attribution controls against this engine.
 Promotion does not broaden runtime, syscall, virtual-thread or loss guarantees.

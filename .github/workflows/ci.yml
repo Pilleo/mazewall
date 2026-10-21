@@ -517,10 +517,69 @@ jobs:
                       security-update.log
                       **/build/reports/dependency-check*
                   if-no-files-found: ignore
+    go-validation:
+        name: Agentless Go Validation
+        runs-on: ubuntu-26.04
+        timeout-minutes: 45
+        permissions:
+            contents: read
+            pull-requests: read
+        env:
+            GOWORK: "off"
+            GOTOOLCHAIN: local
+            GOMAXPROCS: "2"
+            GOMEMLIMIT: 4GiB
+            DOCKER_HOST: unix:///var/run/docker.sock
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Check Go Changes
+              id: go_changes
+              uses: dorny/paths-filter@v3
+              with:
+                  filters: |
+                      go:
+                          - 'profiler/hotspot-agentless/**'
+                          - 'experiments/hotspot-agentless/**'
+                          - '.github/workflows/ci.yml'
+                          - 'scripts/ci_resource_probe.py'
+            - name: Set up Go
+              if: steps.go_changes.outputs.go == 'true'
+              uses: actions/setup-go@v6
+              with:
+                  go-version-file: profiler/hotspot-agentless/go.mod
+                  cache-dependency-path: |
+                      profiler/hotspot-agentless/go.sum
+                      experiments/hotspot-agentless/go.sum
+            - name: Install Pinned Vulnerability Scanner
+              if: steps.go_changes.outputs.go == 'true'
+              run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+            - name: Run Go Checks
+              if: steps.go_changes.outputs.go == 'true'
+              run: |
+                  set -o pipefail
+                  mkdir -p build/reports/ci-resources
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/go.json -- bash -euo pipefail -c '
+                      result=0
+                      for module in profiler/hotspot-agentless experiments/hotspot-agentless; do
+                          if ! make -C "$module" unit; then result=1; fi
+                          if ! make -C "$module" vuln; then result=1; fi
+                      done
+                      exit "$result"
+                  ' 2>&1 | tee build/reports/ci-resources/go.log
+            - name: Upload Go Diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: go-diagnostics
+                  path: |
+                      build/reports/ci-resources/go.json
+                      build/reports/ci-resources/go.log
+                  if-no-files-found: ignore
     build-test-publish:
         # Keep the required check stable and fail closed for every skipped/failed lane.
         name: Build, Test, Security Scan & Publish
-        needs: [core-quality, mutation-tests, security-check, build-logic-validation]
+        needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]
         if: always()
         runs-on: ubuntu-26.04
         permissions:
@@ -529,7 +588,7 @@ jobs:
             container_cache_hash: ${{ needs.core-quality.outputs.container_cache_hash }}
         steps:
             - name: Require Core and Mutation Success
-              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success
+              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && test "${{ needs.go-validation.result }}" = success
     publish:
         name: Publish Verified Packages
         needs: [optional-integrations, build-test-publish]

@@ -266,9 +266,10 @@ owned-Git fixtures and workflow-policy mutations. These checks also run in manda
 retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. They execute the extracted join shell command for
-all 625 quadruples of success/failure/cancelled/skipped/null prerequisite results; only
-four successes pass. The existing security125/legacy25 projections fix the extra
-results explicitly to success. Actual security metadata/eligibility/ownership/task shells,
+all 625 core/mutation/security/build-logic combinations with Go fixed to success,
+then every Go result with the other prerequisites successful. Only five literal
+successes pass. Existing security125/legacy25 projections fix the extra results
+explicitly to success. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
 calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
@@ -280,8 +281,8 @@ a workflow-only edit reruns executable policy checks and an invalid edit removes
 the old success marker. Ownership fixtures verify a different numeric UID rather
 than assuming a system file is foreign; production ownership checks are unchanged.
 
-The `optional-integrations`, `core-quality`, `mutation-tests`, `security-check` and
-`build-logic-validation` jobs run
+The `optional-integrations`, `core-quality`, `mutation-tests`, `security-check`,
+`build-logic-validation` and `go-validation` jobs run
 independently on separate `ubuntu-26.04` runners with JDK 25; heavy commands are
 never backgrounded together in one checkout. Core retains host quality,
 kernel/fresh-JVM and exploitation gates; independent security retains the real
@@ -306,6 +307,16 @@ UP-TO-DATE/cached nested verifier can demonstrate reuse but is not full-workload
 memory evidence. Other CI lanes compile build logic as needed without implicitly
 repeating its complete regression suite. Intentional bounded fixture builds can
 reuse verifier task names; global task-name counts are not duplicate-suite proof.
+
+Go validation installs Go from the canonical module's directive and pins
+`govulncheck` v1.9.0. Race tests and vulnerability scans run serially for both
+agentless modules when either tree, the CI workflow or resource wrapper changes.
+Unrelated changes skip those steps, not the required job. Both modules are checked
+even if one fails; any test, scanner, vulnerability or resource failure blocks the
+publication join. The job bounds Go concurrency/memory and uses the existing
+resource probe. `make unit` propagates the prepared modfile to capture-test child
+commands; `make vuln` scans that same graph. No vulnerability suppressions or
+report-only success fallback are configured.
 
 Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
 container's separate data mount. Its explicit data-only cache is the sole owner;
@@ -340,8 +351,8 @@ Always-scheduled ownership and diagnostics retain update/analysis logs and repor
 
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation]`
-and `if: always()`; its shell requires all four results to equal `success`.
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]`
+and `if: always()`; its shell requires all five results to equal `success`.
 Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.

@@ -7,12 +7,15 @@ SOURCE_DATE_EPOCH ?= 1790985600
 GO_IMAGE := $(shell $(GO) run ./cmd/mw-collector-tools image --key go)
 GADGET_BUILDER := $(shell $(GO) run ./cmd/mw-collector-tools image --key gadget_builder)
 
-.PHONY: deps unit build container-build gadget bundle verify-bundle install
+.PHONY: deps unit vuln build container-build gadget bundle verify-bundle install
 deps:
 	$(GO) run ./cmd/mw-collector-tools prepare
 
 unit: deps
 	$(GO) test -race -modfile build/experiment.go.mod ./...
+
+vuln: deps
+	GOFLAGS='$(GOFLAGS) "-modfile=$(CURDIR)/build/experiment.go.mod" -mod=readonly' govulncheck ./...
 
 build: deps
 	patch=$$($(GO) run ./cmd/mw-collector-tools patch-id) && \

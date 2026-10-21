@@ -25,7 +25,8 @@ internal enum class CiCacheViolation(val explanation: String) {
     MUTATION_EXECUTION("Run all three PIT tasks once, serially through the host resource probe with bounded workers and forks"),
     MUTATION_DIAGNOSTICS("Always upload the mutation resource receipt and all three PIT reports"),
     BUILD_LOGIC_VALIDATION("Independent read-only build logic must run with strict configuration cache, bounded resources and always-uploaded diagnostics"),
-    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security and build-logic success"),
+    GO_VALIDATION("Path-gated Go tests and pinned vulnerability scanning must be required, bounded and fail closed for both modules"),
+    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic and Go success"),
     PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
@@ -79,6 +80,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
             CiCacheViolation.MUTATION_EXECUTION -> !hasBoundedMutation(workflow, mutation)
             CiCacheViolation.MUTATION_DIAGNOSTICS -> !hasMutationDiagnostics(mutation)
             CiCacheViolation.BUILD_LOGIC_VALIDATION -> !hasBuildLogicValidation(workflow)
+            CiCacheViolation.GO_VALIDATION -> !hasGoValidation(workflow)
             CiCacheViolation.REQUIRED_CHECK_JOIN -> !hasRequiredCheckJoin(join)
             CiCacheViolation.PUBLISH_GRAPH -> !hasGatedPublication(workflow, containerJobs[1], join)
             CiCacheViolation.PACKAGE_WRITE_SCOPE -> {
@@ -200,14 +202,79 @@ private fun hasBuildLogicValidation(workflow: String): Boolean {
     return workflowJobBlock(workflow, "build-logic-validation").trimEnd().trimIndent() == expected
 }
 
+private fun hasGoValidation(workflow: String): Boolean {
+    val expected = """
+        go-validation:
+            name: Agentless Go Validation
+            runs-on: ubuntu-26.04
+            timeout-minutes: 45
+            permissions:
+                contents: read
+                pull-requests: read
+            env:
+                GOWORK: "off"
+                GOTOOLCHAIN: local
+                GOMAXPROCS: "2"
+                GOMEMLIMIT: 4GiB
+                DOCKER_HOST: unix:///var/run/docker.sock
+            steps:
+                - name: Checkout Code
+                  uses: actions/checkout@v6
+                - name: Check Go Changes
+                  id: go_changes
+                  uses: dorny/paths-filter@v3
+                  with:
+                      filters: |
+                          go:
+                              - 'profiler/hotspot-agentless/**'
+                              - 'experiments/hotspot-agentless/**'
+                              - '.github/workflows/ci.yml'
+                              - 'scripts/ci_resource_probe.py'
+                - name: Set up Go
+                  if: steps.go_changes.outputs.go == 'true'
+                  uses: actions/setup-go@v6
+                  with:
+                      go-version-file: profiler/hotspot-agentless/go.mod
+                      cache-dependency-path: |
+                          profiler/hotspot-agentless/go.sum
+                          experiments/hotspot-agentless/go.sum
+                - name: Install Pinned Vulnerability Scanner
+                  if: steps.go_changes.outputs.go == 'true'
+                  run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+                - name: Run Go Checks
+                  if: steps.go_changes.outputs.go == 'true'
+                  run: |
+                      set -o pipefail
+                      mkdir -p build/reports/ci-resources
+                      python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/go.json -- bash -euo pipefail -c '
+                          result=0
+                          for module in profiler/hotspot-agentless experiments/hotspot-agentless; do
+                              if ! make -C "${'$'}module" unit; then result=1; fi
+                              if ! make -C "${'$'}module" vuln; then result=1; fi
+                          done
+                          exit "${'$'}result"
+                      ' 2>&1 | tee build/reports/ci-resources/go.log
+                - name: Upload Go Diagnostics
+                  if: always()
+                  uses: actions/upload-artifact@v4
+                  with:
+                      name: go-diagnostics
+                      path: |
+                          build/reports/ci-resources/go.json
+                          build/reports/ci-resources/go.log
+                      if-no-files-found: ignore
+    """.trimIndent()
+    return workflowJobBlock(workflow, "go-validation").trimEnd().trimIndent() == expected
+}
+
 private fun hasRequiredCheckJoin(join: String): Boolean {
     val headers = workflowHeaders(join)
     val step = """
         - name: Require Core and Mutation Success
-          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success
+          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success && test "${'$'}{{ needs.go-validation.result }}" = success
     """.trimIndent()
     return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
-        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation]") &&
+        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]") &&
         headers.filter { it.startsWith("if:") } == listOf("if: always()") &&
         headers.none { it.startsWith("continue-on-error:") } && join.substringAfter("        steps:\n", "").trim() == step
 }

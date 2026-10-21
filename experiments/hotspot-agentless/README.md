@@ -31,6 +31,11 @@ make verify
 make container-build
 ```
 
+`make unit` runs the race-enabled tests against prepared dependencies, including
+their child Go commands. `make vuln` scans that graph with `govulncheck` (install
+with `go install golang.org/x/vuln/cmd/govulncheck@v1.9.0`). Findings and scanner
+errors fail the command; neither module's failures are ignored by CI.
+
 Live preflight acceptance/refusal test (a privileged collector and an
 ordinary-user HotSpot fixture, both removed after the test):
 
