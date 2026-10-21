@@ -11,6 +11,7 @@ target_files:
   - "profiler/hotspot-agentless/go.sum"
   - "experiments/hotspot-agentless/go.mod"
   - "experiments/hotspot-agentless/go.sum"
+  - "buildSrc/gradle/verification-metadata.xml"
 target_symbols: []
 open_questions: false
 needs_kernel: true
@@ -33,6 +34,7 @@ the Java dependency scan does not cover them.
 1. Update both module pins and checksums to the patched release without unrelated upgrades.
 2. Verify overflow rejection, selected module versions and race-enabled Go tests.
 3. Run the project quality gate and use the scoped review/merge path.
+4. Restore the existing trusted JUnit and coroutines BOM POM checksums in buildSrc metadata so the required CI gate can compile.
 
 ---
 <!-- id: issue-20261020-213826-813-assess-and-patch-high-severity-compress-advisories  file: issue-20261020-213826-813-assess-and-patch-high-severity-compress-advisories.md -->
