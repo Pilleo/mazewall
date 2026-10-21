@@ -17,6 +17,14 @@ target_files:
   - "profiler/hotspot-agentless/README.md"
   - "experiments/hotspot-agentless/README.md"
   - "docs/internals/designs/core/testing-strategy.md"
+  - "profiler/hotspot-agentless/go.mod"
+  - "profiler/hotspot-agentless/go.sum"
+  - "profiler/hotspot-agentless/dependencies.lock.json"
+  - "experiments/hotspot-agentless/go.mod"
+  - "experiments/hotspot-agentless/go.sum"
+  - "experiments/hotspot-agentless/dependencies.lock.json"
+  - "profiler/src/test/kotlin/io/mazewall/profiler/hotspot/HotSpotNativeAttachTest.kt"
+  - "profiler/src/integrationTest/kotlin/io/mazewall/profiler/hotspot/HotSpotAcceptanceHarness.kt"
 target_symbols: []
 open_questions: false
 needs_kernel: false
@@ -28,7 +36,12 @@ has_side_effects: true
 # 🟡 [Severity: HIGH]: Require path-gated agentless Go tests and vulnerability checks in CI
 
 **Context:**
-Automate both Go modules' race tests and pinned govulncheck only for relevant changes. Fix capture test subprocesses to use the prepared modfile so ordinary make unit works. Require Go job success in the stable publication join and preserve failures from either module. Current real scanner reports existing Go1.26.0 standard-library findings and containerd findings; do not suppress, ignore or claim those fixed by CI wiring.
+Automate both Go modules' race tests and pinned govulncheck only for relevant changes.
+Fix capture test subprocesses to use the prepared modfile so ordinary make unit works.
+Require Go job success in the publication join and preserve failures from either module.
+Use Go1.26.10 and patched x/net with its minimum required x/* versions; keep locked
+images and native fixtures aligned. Containerd findings remain blocking while their
+unreviewed v1 attribution is disputed upstream; do not suppress scanner failures.
 
 **Needed:**
 1. Fix and regression-check ordinary make unit in both modules.

@@ -22,7 +22,7 @@ targets or the Go/Docker toolchains.
 ## Explicit build, verification and installation
 
 ```bash
-# Go 1.26 and an explicitly configured rootful Docker builder are needed at build time.
+# Go 1.26.10 and an explicitly configured rootful Docker builder are needed at build time.
 DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:buildHotSpotAssets
 ./gradlew :profiler:verifyHotSpotAssets
 ./gradlew :profiler:installHotSpotAssets -PhotSpotAssetsDirectory=/absolute/new/assets-directory

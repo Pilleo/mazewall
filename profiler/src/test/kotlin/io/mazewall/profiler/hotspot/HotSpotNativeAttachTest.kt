@@ -31,7 +31,7 @@ class HotSpotNativeAttachTest {
         val assets = Path.of(requireNotNull(System.getenv("MW_HOTSPOT_ASSET_TEST_DIR")))
         val docker = listOf("docker", "--host", "unix:///var/run/docker.sock")
         val jdk = "eclipse-temurin@sha256:119a3d18f160a3e7655a66034d0f43beee31cd7b3b9142d57a5de29772011de6"
-        val go = "golang@sha256:fb612b7831d53a89cbc0aaa7855b69ad7b0caf603715860cf538df854d047b84"
+        val go = "golang@sha256:672c944cfd07599b5f1bb179869270cdc94c6254e41db4d431259693cb286b82"
         val fixture = Path.of("../experiments/hotspot-agentless/fixtures/java/InlineOpenFixture.java").toAbsolutePath().normalize()
         val uid = Files.getAttribute(directory, "unix:uid").toString()
         val target = command(

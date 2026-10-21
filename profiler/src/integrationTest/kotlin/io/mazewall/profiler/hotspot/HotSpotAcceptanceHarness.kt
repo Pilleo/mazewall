@@ -122,7 +122,7 @@ internal class HotSpotAcceptanceHarness(
 
     companion object {
         const val JDK = "eclipse-temurin@sha256:119a3d18f160a3e7655a66034d0f43beee31cd7b3b9142d57a5de29772011de6"
-        const val GO = "golang@sha256:fb612b7831d53a89cbc0aaa7855b69ad7b0caf603715860cf538df854d047b84"
+        const val GO = "golang@sha256:672c944cfd07599b5f1bb179869270cdc94c6254e41db4d431259693cb286b82"
 
         fun command(
             argv: List<String>,

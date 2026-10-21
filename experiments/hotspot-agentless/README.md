@@ -521,7 +521,7 @@ docker run --rm --privileged --pid=host \
   --mount type=bind,src=/sys,dst=/sys,readonly \
   --mount type=bind,src="$PWD",dst=/work,readonly \
   --entrypoint /work/build/mw-hotspot-demo \
-  golang@sha256:fb612b7831d53a89cbc0aaa7855b69ad7b0caf603715860cf538df854d047b84 \
+  golang@sha256:672c944cfd07599b5f1bb179869270cdc94c6254e41db4d431259693cb286b82 \
   --preflight --pid 12345
 ```
 
