@@ -440,6 +440,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                 path: |
                     security-update.log
                     security-analysis.log
+                    build/reports/dependency-verification/
                     **/build/reports/dependency-check*
                 if-no-files-found: ignore
         """.trimIndent())
