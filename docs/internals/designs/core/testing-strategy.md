@@ -324,6 +324,10 @@ and retained snapshot artifacts; setup-gradle excludes that directory. Compatibi
 and the actual catalog scanner version, with unique run-ID/attempt snapshots and
 only the compatible restore prefix. No previous matched key is overwritten, no
 cross-version/container fallback is allowed, and a cache hit never skips analysis.
+Dependency-Check 13.0.0's task data-directory property is explicitly bound to the
+configured extension directory, so update and analysis cannot silently use its
+separate default `11.0` directory. Old scanner/database versions are not migrated
+by copying their databases across compatibility prefixes.
 
 On a genuine cache miss (empty matched key, not the exact-hit boolean), the lane
 looks for the newest compatible, non-expired completed snapshot artifact. Artifacts
@@ -339,19 +343,34 @@ Snapshots contain a versioned compatibility manifest and SHA-256/size inventory 
 all database files, including hidden cache files. Preparation and restoration reject
 links, foreign ownership, non-regular files, missing/empty `odc.mv.db`, more than
 10,000 entries, more than 2 GiB of data or a manifest larger than 2 MiB. Restoration
-checks the inventory before admitting data through an owned temporary directory;
+first requires the downloaded ZIP's SHA-256 to match GitHub's recorded artifact
+digest, before extraction; an internally consistent replacement manifest is not
+sufficient. Downloads are streamed and bounded by their recorded archive size,
+with missing/mismatched digests, truncation, unsafe ZIP paths and non-regular entries
+remaining blocking failures. Restoration checks the inventory before admitting data through an owned temporary directory;
 existing nonempty data is never overwritten. Snapshot age is not a freshness waiver:
 the normal updater must still succeed before real analysis. With neither a compatible
-cache nor retained artifact, an explicit cold bootstrap is still necessary.
+cache nor retained artifact, the cold path seeds from Dependency-Check's
+[maintainer-published NVD feed](https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/cache.properties),
+then requires a separate live NVD API update with `nvd.api.check.validforhours=0`.
+The seed alone is never accepted as fresh security data. Warm updates retain the
+normal validity window. API requests use 500 records per page to bound response
+size; every page is still consumed, with no CVE filtering or retry-count increase.
 
 The independent security job has a bounded 180-minute cold budget, including a
-150-minute `dependencyCheckUpdate` step. This separates the observed slow full NVD
-bootstrap from already successful native work; it is not a latency guarantee.
+150-minute `dependencyCheckUpdate` step covering both seed and forced live refresh
+when cold. This separates bootstrap from already successful native work; it is not
+a latency guarantee, and seed/API errors remain blocking.
 After a successful update, caller ownership is checked before explicit snapshot
 save and a separate retained-artifact upload. Artifact preparation/publication has
 its own success guard and nonempty artifact-ID assertion before analysis; persistence
 failures leave the lane red. Failed/cancelled updates and foreign ownership never publish a snapshot;
 there is no permission repair or partial-database resume assumption.
+An updater or analyzer that logs `Failed to process CVE-` is rejected even if
+Gradle exits successfully, including an implicit refresh at the validity-window
+boundary. Omitted records are not a completed database. This guards the known
+[NVD record-processing failure](../../backlog/issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md)
+without suppressing CVEs or modifying upstream data.
 
 Because cache/save may warn and exit successfully after upload failure, a supported
 lookup-only restore checks the identical new primary key/path without fallback,

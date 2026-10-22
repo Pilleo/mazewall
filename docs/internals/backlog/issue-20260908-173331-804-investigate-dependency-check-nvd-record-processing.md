@@ -8,6 +8,13 @@ component: "ci"
 target_modules: [":platform", ":enforcer", ":profiler"]
 target_files:
   - ".github/workflows/ci.yml"
+  - "gradle/libs.versions.toml"
+  - "gradle/verification-metadata.xml"
+  - "gradle.lockfile"
+  - "build.gradle.kts"
+  - "buildSrc/src/main/kotlin/io/mazewall/build/CheckCiCachePolicy.kt"
+  - "buildSrc/src/verification/kotlin/io/mazewall/build/CiCachePolicyTest.kt"
+  - "docs/internals/designs/core/testing-strategy.md"
 target_symbols:
   - "Run Security Check"
 open_questions: false
@@ -19,7 +26,8 @@ open_questions: false
 CI run 34255417287 attempt 1 logged DatabaseException while processing CVE-2026-6785 because an NVD reference URL exceeded the plugin database column length; the scan still succeeded, but the affected record may be omitted.
 
 **Needed:**
-1. Reproduce with the pinned Dependency-Check plugin and determine whether upgrading or a documented suppression preserves complete NVD ingestion.
+1. Reproduce with the pinned Dependency-Check plugin, then upgrade to 13.0.0 and review regenerated dependency verification/locks; do not suppress or truncate CVE data.
+2. Reject record-processing errors even when the updater returns success. Verify both affected CVEs retain their references and software matches after complete ingestion.
 
 ## Reconfirmed 2026-10-15
 

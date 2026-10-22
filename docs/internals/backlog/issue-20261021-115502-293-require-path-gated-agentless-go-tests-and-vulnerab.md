@@ -8,6 +8,10 @@ component: "ci"
 target_modules: ["profiler"]
 target_files:
   - ".github/workflows/ci.yml"
+  - "build.gradle.kts"
+  - "gradle/libs.versions.toml"
+  - "gradle/verification-metadata.xml"
+  - "docs/internals/backlog/issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md"
   - "buildSrc/src/main/kotlin/io/mazewall/build/CheckCiCachePolicy.kt"
   - "buildSrc/src/verification/kotlin/io/mazewall/build/CiCachePolicyTest.kt"
   - "profiler/hotspot-agentless/Makefile"
@@ -42,11 +46,15 @@ Require Go job success in the publication join and preserve failures from either
 Use Go1.26.10 and patched x/net with its minimum required x/* versions; keep locked
 images and native fixtures aligned. Containerd findings remain blocking while their
 unreviewed v1 attribution is disputed upstream; do not suppress scanner failures.
+The approved NVD repair also includes compatible retained-data recovery, the
+Dependency-Check 13.0.0 ingestion fix, and cold seeding followed by mandatory live
+NVD refresh. Reject dropped records during update or analysis; preserve all gates.
 
 **Needed:**
 1. Fix and regression-check ordinary make unit in both modules.
 2. Add pinned vulnerability target and bounded, path-gated required CI job; test actual workload failure propagation and publication join.
 3. Verify local unit/policy/full-build checks; keep real vulnerability findings blocking until separately remediated.
+4. Qualify completed NVD bootstrap, warm reuse and retained-artifact recovery without stale-data bypasses, timeout increases or shared-cache deletion.
 
 ---
 <!-- id: issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab  file: issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab.md -->

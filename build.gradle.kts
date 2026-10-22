@@ -1,5 +1,7 @@
 import io.mazewall.build.TriageArguments
 import io.mazewall.build.VerifyDependencyState
+import org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension
+import org.owasp.dependencycheck.gradle.tasks.ConfiguredTask
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
@@ -373,12 +375,18 @@ dependencyCheck {
     }
     // Disable OSS Index as it requires separate credentials and is currently failing in CI
     analyzers {
-        ossIndexEnabled = false
+        ossIndex.enabled = false
     }
     // Skip checking demo projects since they are deliberately vulnerable
     skipProjects = listOf(":demos:cli-demo", ":demos:vulnerable-web-app")
     // Only scan production compile and runtime configurations to avoid scanning build tooling like detekt and ktlint
     scanConfigurations = listOf("compileClasspath", "runtimeClasspath")
+}
+
+// 13.0.0 task defaults otherwise override the extension's data-directory convention.
+tasks.withType<ConfiguredTask>().configureEach {
+    val extension = project.extensions.getByType<DependencyCheckExtension>()
+    data.directory.set(extension.data.directory)
 }
 
 tasks.named("dependencyCheckAnalyze").configure {
