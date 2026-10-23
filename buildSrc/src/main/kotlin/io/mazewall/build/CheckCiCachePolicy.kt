@@ -25,7 +25,8 @@ internal enum class CiCacheViolation(val explanation: String) {
     MUTATION_EXECUTION("Run all three PIT tasks once, serially through the host resource probe with bounded workers and forks"),
     MUTATION_DIAGNOSTICS("Always upload the mutation resource receipt and all three PIT reports"),
     BUILD_LOGIC_VALIDATION("Independent read-only build logic must run with strict configuration cache, bounded resources and always-uploaded diagnostics"),
-    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security and build-logic success"),
+    GO_VALIDATION("Path-gated Go tests and pinned vulnerability scanning must be required, bounded and fail closed for both modules"),
+    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic and Go success"),
     PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
@@ -45,7 +46,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
             CiCacheViolation.DEPENDENCY_CHECK_DATA -> !hasExclusiveSecurityCache(workflow, security)
             CiCacheViolation.SECURITY_LIFECYCLE -> !hasCompletedSecurityLifecycle(security)
             CiCacheViolation.HOST_DEPENDENCY_CHECK -> workflowStep(security, "Run Security Check").lines().map(String::trim)
-                .filter { it.startsWith("run:") } != listOf("run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon")
+                .filter { it.startsWith("./gradlew") } != listOf("./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon -Dnvd.api.results.per.page=500 2>&1 | tee security-analysis.log")
             CiCacheViolation.CONTAINER_DEPENDENCY_CHECK -> "run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze" in workflow
             CiCacheViolation.IMMUTABLE_NVD_CACHE -> "key: nvd-database-" in workflow
             CiCacheViolation.CONTAINER_CACHE_IDENTITY -> containerJobs.withIndex().any { (index, job) ->
@@ -79,6 +80,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
             CiCacheViolation.MUTATION_EXECUTION -> !hasBoundedMutation(workflow, mutation)
             CiCacheViolation.MUTATION_DIAGNOSTICS -> !hasMutationDiagnostics(mutation)
             CiCacheViolation.BUILD_LOGIC_VALIDATION -> !hasBuildLogicValidation(workflow)
+            CiCacheViolation.GO_VALIDATION -> !hasGoValidation(workflow)
             CiCacheViolation.REQUIRED_CHECK_JOIN -> !hasRequiredCheckJoin(join)
             CiCacheViolation.PUBLISH_GRAPH -> !hasGatedPublication(workflow, containerJobs[1], join)
             CiCacheViolation.PACKAGE_WRITE_SCOPE -> {
@@ -200,14 +202,79 @@ private fun hasBuildLogicValidation(workflow: String): Boolean {
     return workflowJobBlock(workflow, "build-logic-validation").trimEnd().trimIndent() == expected
 }
 
+private fun hasGoValidation(workflow: String): Boolean {
+    val expected = """
+        go-validation:
+            name: Agentless Go Validation
+            runs-on: ubuntu-26.04
+            timeout-minutes: 45
+            permissions:
+                contents: read
+                pull-requests: read
+            env:
+                GOWORK: "off"
+                GOTOOLCHAIN: local
+                GOMAXPROCS: "2"
+                GOMEMLIMIT: 4GiB
+                DOCKER_HOST: unix:///var/run/docker.sock
+            steps:
+                - name: Checkout Code
+                  uses: actions/checkout@v6
+                - name: Check Go Changes
+                  id: go_changes
+                  uses: dorny/paths-filter@v3
+                  with:
+                      filters: |
+                          go:
+                              - 'profiler/hotspot-agentless/**'
+                              - 'experiments/hotspot-agentless/**'
+                              - '.github/workflows/ci.yml'
+                              - 'scripts/ci_resource_probe.py'
+                - name: Set up Go
+                  if: steps.go_changes.outputs.go == 'true'
+                  uses: actions/setup-go@v6
+                  with:
+                      go-version-file: profiler/hotspot-agentless/go.mod
+                      cache-dependency-path: |
+                          profiler/hotspot-agentless/go.sum
+                          experiments/hotspot-agentless/go.sum
+                - name: Install Pinned Vulnerability Scanner
+                  if: steps.go_changes.outputs.go == 'true'
+                  run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+                - name: Run Go Checks
+                  if: steps.go_changes.outputs.go == 'true'
+                  run: |
+                      set -o pipefail
+                      mkdir -p build/reports/ci-resources
+                      python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/go.json -- bash -euo pipefail -c '
+                          result=0
+                          for module in profiler/hotspot-agentless experiments/hotspot-agentless; do
+                              if ! make -C "${'$'}module" unit; then result=1; fi
+                              if ! make -C "${'$'}module" vuln; then result=1; fi
+                          done
+                          exit "${'$'}result"
+                      ' 2>&1 | tee build/reports/ci-resources/go.log
+                - name: Upload Go Diagnostics
+                  if: always()
+                  uses: actions/upload-artifact@v4
+                  with:
+                      name: go-diagnostics
+                      path: |
+                          build/reports/ci-resources/go.json
+                          build/reports/ci-resources/go.log
+                      if-no-files-found: ignore
+    """.trimIndent()
+    return workflowJobBlock(workflow, "go-validation").trimEnd().trimIndent() == expected
+}
+
 private fun hasRequiredCheckJoin(join: String): Boolean {
     val headers = workflowHeaders(join)
     val step = """
         - name: Require Core and Mutation Success
-          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success
+          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success && test "${'$'}{{ needs.go-validation.result }}" = success
     """.trimIndent()
     return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
-        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation]") &&
+        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]") &&
         headers.filter { it.startsWith("if:") } == listOf("if: always()") &&
         headers.none { it.startsWith("continue-on-error:") } && join.substringAfter("        steps:\n", "").trim() == step
 }
@@ -237,13 +304,14 @@ private fun hasExclusiveSecurityCache(workflow: String, security: String): Boole
 }
 
 private fun hasCompletedSecurityLifecycle(security: String): Boolean {
+    if ("continue-on-error:" in security) return false
     val eligible = "steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true'"
     val completed = "${'$'}{{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && $eligible }}"
     val binding = "NVD_API_KEY: ${'$'}{{ secrets.NVD_API_KEY }}"
     val headers = workflowHeaders(security).filter(String::isNotBlank)
     if (headers != listOf(
             "name: Security Validation", "runs-on: ubuntu-26.04", "timeout-minutes: 180",
-            "permissions:", "contents: read", "pull-requests: read",
+            "permissions:", "contents: read", "pull-requests: read", "actions: read",
         ) || !hasCodeFilter(security) ||
         workflowStep(security, "Checkout Code").trim() != "uses: actions/checkout@v6" ||
         workflowStep(security, "Set up JDK 25").trimIndent().trim() != """
@@ -262,7 +330,10 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
     ) return false
     val expectedNames = listOf(
         "Checkout Code", "Set up JDK 25", "Check file changes", "Setup Gradle", "Compute Security Data Metadata",
-        "Restore Security Data", "Verify Restored Security Ownership", "Update Security Data", "Verify Updated Security Ownership",
+        "Restore Security Data", "Prepare Security Snapshot Tools", "Select Retained Security Snapshot",
+        "Download Retained Security Snapshot", "Restore Retained Security Snapshot",
+        "Verify Restored Security Ownership", "Update Security Data", "Verify Updated Security Ownership",
+        "Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot",
         "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot",
         "Run Security Check", "Verify Final Security Ownership", "Upload Security Diagnostics",
     )
@@ -313,8 +384,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
     val restoreHeader = workflowStep(security, "Restore Security Data").substringBefore("uses: ").trimIndent().trim()
     val saveHeader = workflowStep(security, "Save Completed Security Data").substringBefore("uses: ").trim()
     val analyze = workflowStep(security, "Run Security Check").trimIndent().trim()
-        .replace(Regex("(?m)^run:.*$"), "run: ANALYZE")
-    return matches("Compute Security Data Metadata", metadata) &&
+    return hasRetainedSecurityLifecycle(security, eligible, completed) && matches("Compute Security Data Metadata", metadata) &&
         restoreHeader == "id: security_restore\nif: $eligible" && saveHeader == "if: $completed" &&
         matches("Verify Restored Security Ownership", "id: restored_ownership\nif: $eligible\n$ownership") &&
         matches("Update Security Data", """
@@ -325,7 +395,15 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                 $binding
             run: |
                 set -o pipefail
-                ./gradlew dependencyCheckUpdate --info --no-configuration-cache --no-daemon 2>&1 | tee security-update.log
+                : > security-update.log
+                api_options=(-Dnvd.api.results.per.page=500)
+                if [[ ! -s "${'$'}GRADLE_USER_HOME/dependency-check-data/odc.mv.db" ]]; then
+                    ./gradlew dependencyCheckUpdate --info --no-configuration-cache --no-daemon '-Dnvd.api.datafeed.url=https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/nvdcve-{0}.json.gz' 2>&1 | tee -a security-update.log
+                    python3 "${'$'}RUNNER_TEMP/security-snapshot.py" check-records security-update.log
+                    api_options+=(-Dnvd.api.check.validforhours=0)
+                fi
+                ./gradlew dependencyCheckUpdate --info --no-configuration-cache --no-daemon "${'$'}{api_options[@]}" 2>&1 | tee -a security-update.log
+                python3 "${'$'}RUNNER_TEMP/security-snapshot.py" check-records security-update.log
         """.trimIndent()) &&
         matches("Verify Updated Security Ownership", "id: updated_ownership\nif: $eligible && steps.security_update.outcome == 'success'\n$ownership") &&
         matches("Look Up Completed Security Snapshot", """
@@ -344,7 +422,15 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                 CACHE_HIT: ${'$'}{{ steps.security_snapshot_lookup.outputs.cache-hit }}
             run: test "${'$'}{CACHE_HIT:-}" = true
         """.trimIndent()) &&
-        analyze == "if: $completed\nrun: ANALYZE\nenv:\n    $binding" &&
+        analyze == """
+            if: $completed
+            run: |
+                set -o pipefail
+                ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon -Dnvd.api.results.per.page=500 2>&1 | tee security-analysis.log
+                python3 "${'$'}RUNNER_TEMP/security-snapshot.py" check-records security-analysis.log
+            env:
+                $binding
+        """.trimIndent() &&
         matches("Verify Final Security Ownership", "if: always()\n$ownership") &&
         matches("Upload Security Diagnostics", """
             if: always()
@@ -353,9 +439,70 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                 name: security-diagnostics
                 path: |
                     security-update.log
+                    security-analysis.log
+                    build/reports/dependency-verification/
                     **/build/reports/dependency-check*
                 if-no-files-found: ignore
         """.trimIndent())
+}
+
+private fun hasRetainedSecurityLifecycle(security: String, eligible: String, completed: String): Boolean {
+    fun matches(name: String, expected: String): Boolean = workflowStep(security, name).trimIndent().trim() == expected.trimIndent()
+    val tools = workflowStep(security, "Prepare Security Snapshot Tools").trimIndent().trim()
+    val selector = workflowStep(security, "Select Retained Security Snapshot")
+    val download = workflowStep(security, "Download Retained Security Snapshot")
+    return tools.startsWith("if: $eligible\nrun: |\n    cat > \"\$RUNNER_TEMP/security-snapshot.py\" <<'PY'\n") &&
+        selector.substringBefore("script: |").trimIndent().trim() == """
+            id: security_artifact
+            if: $eligible && steps.security_restore.outputs.cache-matched-key == ''
+            uses: actions/github-script@v8
+            env:
+                SNAPSHOT_PREFIX: ${'$'}{{ steps.security_metadata.outputs.prefix }}
+            with:
+        """.trimIndent() &&
+        download.substringBefore("script: |").trimIndent().trim() == """
+            id: security_artifact_download
+            if: $eligible && steps.security_artifact.outputs.artifact_id != ''
+            uses: actions/github-script@v8
+            env:
+                SNAPSHOT_ARTIFACT_ID: ${'$'}{{ steps.security_artifact.outputs.artifact_id }}
+                SNAPSHOT_SIZE: ${'$'}{{ steps.security_artifact.outputs.size }}
+            with:
+        """.trimIndent() && "request: {parseSuccessResponseBody: false}" in download &&
+        "archiveSize > 2147483648" in download && "bytes > archiveSize" in download && "bytes !== archiveSize" in download &&
+        "{flags: 'wx', mode: 0o600}" in download &&
+        matches("Restore Retained Security Snapshot", """
+            if: $eligible && steps.security_artifact_download.outcome == 'success'
+            env:
+                SNAPSHOT_KEY: ${'$'}{{ steps.security_artifact.outputs.key }}
+                SNAPSHOT_DIGEST: ${'$'}{{ steps.security_artifact.outputs.digest }}
+            run: python3 "${'$'}RUNNER_TEMP/security-snapshot.py" restore "${'$'}RUNNER_TEMP/security-snapshot.zip" "${'$'}GRADLE_USER_HOME/dependency-check-data"
+        """) &&
+        matches("Prepare Completed Security Artifact", """
+            id: security_artifact_prepare
+            if: $completed
+            env:
+                SNAPSHOT_KEY: ${'$'}{{ steps.security_metadata.outputs.key }}
+            run: python3 "${'$'}RUNNER_TEMP/security-snapshot.py" pack "${'$'}GRADLE_USER_HOME/dependency-check-data" "${'$'}RUNNER_TEMP/security-snapshot-upload"
+        """) &&
+        matches("Upload Completed Security Artifact", """
+            id: security_artifact_upload
+            if: ${completed.removeSuffix(" }}")} && steps.security_artifact_prepare.outcome == 'success' }}
+            uses: actions/upload-artifact@v4
+            with:
+                name: security-snapshot-${'$'}{{ steps.security_metadata.outputs.key }}
+                path: ${'$'}{{ runner.temp }}/security-snapshot-upload
+                retention-days: 14
+                include-hidden-files: true
+                if-no-files-found: error
+        """) &&
+        matches("Require Retained Security Snapshot", """
+            if: $completed
+            env:
+                ARTIFACT_ID: ${'$'}{{ steps.security_artifact_upload.outputs.artifact-id }}
+            run: |
+                [[ "${'$'}{ARTIFACT_ID:-}" =~ ^[1-9][0-9]*$ ]]
+        """)
 }
 
 private fun hasGatedPublication(workflow: String, main: String, join: String): Boolean {

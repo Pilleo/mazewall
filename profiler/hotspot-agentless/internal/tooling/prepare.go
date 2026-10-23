@@ -27,7 +27,7 @@ const (
 	identityObservations
 )
 
-var gadgetPatches = []string{"gadget-structured.patch", "gadget-health.patch", "gadget-epoch.patch", "gadget-shutdown.patch", "gadget-event-loss.patch", "gadget-finalization.patch", "gadget-definition-drain.patch", "gadget-auxiliary-ownership.patch"}
+var gadgetPatches = []string{"gadget-structured.patch", "gadget-health.patch", "gadget-epoch.patch", "gadget-shutdown.patch", "gadget-event-loss.patch", "gadget-finalization.patch", "gadget-definition-drain.patch", "gadget-auxiliary-ownership.patch", "gadget-containerd-v2.patch"}
 var profilerPatches = []string{"profiler-health.patch", "profiler-quality.patch", "profiler-identity.patch", "profiler-epoch-capture.patch", "profiler-epoch-memory.patch", "profiler-epoch-handler.patch", "profiler-shutdown.patch", "profiler-definition-drain.patch", "profiler-metadata-retirement.patch", "profiler-auxiliary-ownership.patch"}
 
 func additions(root, directory string) ([]string, error) {

@@ -1,10 +1,48 @@
 package tooling
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestPreparedContainerdGraphUsesPatchedV2Client(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "list", "-mod=readonly", "-modfile="+filepath.Join(root, "build", "experiment.go.mod"), "-deps", "-f", "{{if .Module}}{{.Module.Path}} {{.Module.Version}}{{end}}", "./...", "github.com/inspektor-gadget/inspektor-gadget/pkg/container-utils/testutils", "github.com/inspektor-gadget/inspektor-gadget/cmd/ig/utils")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("selected dependency graph: %v\n%s", err, out)
+	}
+	found := false
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case "github.com/containerd/containerd":
+			t.Fatal("prepared collector/tools still import the containerd v1 client")
+		case "github.com/containerd/containerd/v2":
+			if len(fields) != 2 || fields[1] != "v2.3.7" {
+				t.Fatalf("unexpected containerd v2 selection: %q", line)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("prepared collector/tools do not use the patched containerd v2 client")
+	}
+}
 
 func TestPreparationIdentityMatchesAcceptedSource(t *testing.T) {
 	root := filepath.Join("..", "..")
@@ -12,7 +50,7 @@ func TestPreparationIdentityMatchesAcceptedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50" {
+	if id != "b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3" {
 		t.Fatalf("accepted preparation identity changed: %s", id)
 	}
 	identity, err := patchID(root, identityObservations)

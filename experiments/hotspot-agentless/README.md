@@ -8,6 +8,12 @@ local tree. Benchmark, oracle, stress fixtures and historical results stay here.
 The existing Go import namespace is retained for internal-package compatibility.
 Snapshot updates are explicit source changes with a recorded source revision;
 later canonical edits do not silently change this experiment.
+The current overlay fingerprint is
+`b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3`.
+The mirrored containerd overlay uses the real patched v2.3.7 client, retaining
+`k8s.io` discovery, explicit namespace overrides and permission-error propagation.
+Rebuild and verify candidate bundles separately; older installations are not
+qualified for this source fingerprint.
 The current implementation covers dependency/preflight verification, live
 event-triggered capture and **typed, bounded enrichment**. The `--capture` mode
 emits versioned event, terminal enrichment and session-summary JSONL records.
@@ -30,6 +36,11 @@ cd experiments/hotspot-agentless
 make verify
 make container-build
 ```
+
+`make unit` runs the race-enabled tests against prepared dependencies, including
+their child Go commands. `make vuln` scans that graph with `govulncheck` (install
+with `go install golang.org/x/vuln/cmd/govulncheck@v1.9.0`). Findings and scanner
+errors fail the command; neither module's failures are ignored by CI.
 
 Live preflight acceptance/refusal test (a privileged collector and an
 ordinary-user HotSpot fixture, both removed after the test):
@@ -516,7 +527,7 @@ docker run --rm --privileged --pid=host \
   --mount type=bind,src=/sys,dst=/sys,readonly \
   --mount type=bind,src="$PWD",dst=/work,readonly \
   --entrypoint /work/build/mw-hotspot-demo \
-  golang@sha256:fb612b7831d53a89cbc0aaa7855b69ad7b0caf603715860cf538df854d047b84 \
+  golang@sha256:672c944cfd07599b5f1bb179869270cdc94c6254e41db4d431259693cb286b82 \
   --preflight --pid 12345
 ```
 

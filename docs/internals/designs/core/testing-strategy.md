@@ -266,9 +266,10 @@ owned-Git fixtures and workflow-policy mutations. These checks also run in manda
 retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. They execute the extracted join shell command for
-all 625 quadruples of success/failure/cancelled/skipped/null prerequisite results; only
-four successes pass. The existing security125/legacy25 projections fix the extra
-results explicitly to success. Actual security metadata/eligibility/ownership/task shells,
+all 625 core/mutation/security/build-logic combinations with Go fixed to success,
+then every Go result with the other prerequisites successful. Only five literal
+successes pass. Existing security125/legacy25 projections fix the extra results
+explicitly to success. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
 calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
@@ -280,8 +281,8 @@ a workflow-only edit reruns executable policy checks and an invalid edit removes
 the old success marker. Ownership fixtures verify a different numeric UID rather
 than assuming a system file is foreign; production ownership checks are unchanged.
 
-The `optional-integrations`, `core-quality`, `mutation-tests`, `security-check` and
-`build-logic-validation` jobs run
+The `optional-integrations`, `core-quality`, `mutation-tests`, `security-check`,
+`build-logic-validation` and `go-validation` jobs run
 independently on separate `ubuntu-26.04` runners with JDK 25; heavy commands are
 never backgrounded together in one checkout. Core retains host quality,
 kernel/fresh-JVM and exploitation gates; independent security retains the real
@@ -307,19 +308,79 @@ memory evidence. Other CI lanes compile build logic as needed without implicitly
 repeating its complete regression suite. Intentional bounded fixture builds can
 reuse verifier task names; global task-name counts are not duplicate-suite proof.
 
+Go validation installs Go from the canonical module's directive and pins
+`govulncheck` v1.9.0. Race tests and vulnerability scans run serially for both
+agentless modules when either tree, the CI workflow or resource wrapper changes.
+Unrelated changes skip those steps, not the required job. Both modules are checked
+even if one fails; any test, scanner, vulnerability or resource failure blocks the
+publication join. The job bounds Go concurrency/memory and uses the existing
+resource probe. `make unit` propagates the prepared modfile to capture-test child
+commands; `make vuln` scans that same graph. No vulnerability suppressions or
+report-only success fallback are configured.
+
+Explicit HotSpot native acceptance starts a fixture-owned idle container, then
+supervises the actual collector with `docker exec -i`. Collector exit and joined
+streams must still satisfy the existing two-second finish budget. Container-runtime
+teardown is separate fixture ownership: the fixture first verifies that only its
+idle process remains, then stops/removes the container and checks that it is gone.
+This avoids charging Docker's post-exit runtime teardown to collector retirement;
+it neither substitutes container termination for a collector join nor extends any
+native or JVM deadline. The standalone comparison retains `docker run --rm` and
+signals its container by identity; it does not signal a saved numeric host PID.
+
 Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
-container's separate data mount. Its explicit data-only cache is the sole owner;
-setup-gradle excludes that directory. Compatibility keys include OS, architecture
+container's separate data mount. The security lane alone owns its data-only cache
+and retained snapshot artifacts; setup-gradle excludes that directory. Compatibility keys include OS, architecture
 and the actual catalog scanner version, with unique run-ID/attempt snapshots and
 only the compatible restore prefix. No previous matched key is overwritten, no
 cross-version/container fallback is allowed, and a cache hit never skips analysis.
+Dependency-Check 13.0.0's task data-directory property is explicitly bound to the
+configured extension directory, so update and analysis cannot silently use its
+separate default `11.0` directory. Old scanner/database versions are not migrated
+by copying their databases across compatibility prefixes.
+
+On a genuine cache miss (empty matched key, not the exact-hit boolean), the lane
+looks for the newest compatible, non-expired completed snapshot artifact. Artifacts
+are retained for 14 days outside the evictable build-cache quota. Default-branch
+consumers accept only same-repository default-branch push artifacts from this CI
+workflow; PRs may additionally consume their own PR's artifacts, never another PR's.
+Source run/repository/commit/attempt metadata and the exact compatibility prefix
+are checked. Overall workflow success is not required: a completed database remains
+usable when a later analysis or another job failed. Deleted-fork metadata is rejected.
+API/download errors are failures, not evidence that no snapshot exists.
+
+Snapshots contain a versioned compatibility manifest and SHA-256/size inventory of
+all database files, including hidden cache files. Preparation and restoration reject
+links, foreign ownership, non-regular files, missing/empty `odc.mv.db`, more than
+10,000 entries, more than 2 GiB of data or a manifest larger than 2 MiB. Restoration
+first requires the downloaded ZIP's SHA-256 to match GitHub's recorded artifact
+digest, before extraction; an internally consistent replacement manifest is not
+sufficient. Downloads are streamed and bounded by their recorded archive size,
+with missing/mismatched digests, truncation, unsafe ZIP paths and non-regular entries
+remaining blocking failures. Restoration checks the inventory before admitting data through an owned temporary directory;
+existing nonempty data is never overwritten. Snapshot age is not a freshness waiver:
+the normal updater must still succeed before real analysis. With neither a compatible
+cache nor retained artifact, the cold path seeds from Dependency-Check's
+[maintainer-published NVD feed](https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/cache.properties),
+then requires a separate live NVD API update with `nvd.api.check.validforhours=0`.
+The seed alone is never accepted as fresh security data. Warm updates retain the
+normal validity window. API requests use 500 records per page to bound response
+size; every page is still consumed, with no CVE filtering or retry-count increase.
 
 The independent security job has a bounded 180-minute cold budget, including a
-150-minute `dependencyCheckUpdate` step. This separates the observed slow full NVD
-bootstrap from already successful native work; it is not a latency guarantee.
+150-minute `dependencyCheckUpdate` step covering both seed and forced live refresh
+when cold. This separates bootstrap from already successful native work; it is not
+a latency guarantee, and seed/API errors remain blocking.
 After a successful update, caller ownership is checked before explicit snapshot
-save. Failed/cancelled updates and foreign ownership never publish a snapshot;
+save and a separate retained-artifact upload. Artifact preparation/publication has
+its own success guard and nonempty artifact-ID assertion before analysis; persistence
+failures leave the lane red. Failed/cancelled updates and foreign ownership never publish a snapshot;
 there is no permission repair or partial-database resume assumption.
+An updater or analyzer that logs `Failed to process CVE-` is rejected even if
+Gradle exits successfully, including an implicit refresh at the validity-window
+boundary. Omitted records are not a completed database. This guards the known
+[NVD record-processing failure](../../backlog/issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md)
+without suppressing CVEs or modifying upstream data.
 
 Because cache/save may warn and exit successfully after upload failure, a supported
 lookup-only restore checks the identical new primary key/path without fallback,
@@ -340,8 +401,8 @@ Always-scheduled ownership and diagnostics retain update/analysis logs and repor
 
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation]`
-and `if: always()`; its shell requires all four results to equal `success`.
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]`
+and `if: always()`; its shell requires all five results to equal `success`.
 Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
@@ -375,6 +436,13 @@ not prove refreshed NVD data. PR-only caches cannot seed default-branch bootstra
 Record cache size/ref/version, durations and task outcomes; eviction and external
 API latency remain possible. A failed security lane and its dependent gates are
 the bounded recovery unit, not a reason to replay successful native pipelines.
+Retained recovery additionally needs a real cache-miss/artifact-download/validated
+restore followed by update and analysis. Offline fixture round trips do not establish
+GitHub artifact availability, retention or an executed vulnerability scan. Qualify
+this by rerunning the security job, not successful native lanes; do not delete shared
+caches to manufacture the miss. Artifacts can also expire or be deleted, and their
+storage usage is separate from the build-cache quota. The historical cache-removal
+cause remains unproven; recovery does not depend on assuming eviction.
 
 Root verification follows source plugins rather than optional module paths.
 Non-demo grouping projects retain lazy child `build` and `check` dependencies
