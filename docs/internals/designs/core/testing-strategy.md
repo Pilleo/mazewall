@@ -318,6 +318,16 @@ resource probe. `make unit` propagates the prepared modfile to capture-test chil
 commands; `make vuln` scans that same graph. No vulnerability suppressions or
 report-only success fallback are configured.
 
+Explicit HotSpot native acceptance starts a fixture-owned idle container, then
+supervises the actual collector with `docker exec -i`. Collector exit and joined
+streams must still satisfy the existing two-second finish budget. Container-runtime
+teardown is separate fixture ownership: the fixture first verifies that only its
+idle process remains, then stops/removes the container and checks that it is gone.
+This avoids charging Docker's post-exit runtime teardown to collector retirement;
+it neither substitutes container termination for a collector join nor extends any
+native or JVM deadline. The standalone comparison retains `docker run --rm` and
+signals its container by identity; it does not signal a saved numeric host PID.
+
 Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
 container's separate data mount. The security lane alone owns its data-only cache
 and retained snapshot artifacts; setup-gradle excludes that directory. Compatibility keys include OS, architecture

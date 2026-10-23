@@ -27,6 +27,7 @@ internal class HotSpotAcceptanceHarness(
         .take(16)
     private var target: String? = null
     private val collectorNames = mutableListOf<String>()
+    private val standaloneNames = mutableSetOf<String>()
     val pid: Int get() = command(endpoint.command("inspect", "--format", "{{.State.Pid}}", checkNotNull(target))).trim().toInt()
 
     fun start(operations: Int = 400) {
@@ -61,6 +62,7 @@ internal class HotSpotAcceptanceHarness(
         retained: Int = 4096,
         privileged: Boolean = true,
         timeout: Duration = Duration.ofSeconds(10),
+        standalone: Boolean = false,
     ): HotSpotOptions {
         val name = "hs-collector-$run-${collectorNames.size}"
         collectorNames.add(name)
@@ -70,7 +72,7 @@ internal class HotSpotAcceptanceHarness(
                 "run",
                 "--pull=never",
                 "--rm",
-                "-i",
+                if (standalone) "-i" else "-d",
                 "--name",
                 name,
                 "--pid=host",
@@ -81,7 +83,13 @@ internal class HotSpotAcceptanceHarness(
             ) +
             (if (privileged) listOf("--privileged") else listOf("--user", uid)) +
             GO
-        return HotSpotOptions(assets, prefix, readinessTimeout = timeout, maxRetainedOccurrences = retained)
+        if (standalone) {
+            standaloneNames.add(name)
+            return HotSpotOptions(assets, prefix, readinessTimeout = timeout, maxRetainedOccurrences = retained)
+        }
+        // Docker run waits for runtime teardown after collector exit; keep that outside its stop budget.
+        command(prefix + listOf("sleep", "infinity"))
+        return HotSpotOptions(assets, endpoint.command("exec", "-i", name), readinessTimeout = timeout, maxRetainedOccurrences = retained)
     }
 
     fun prepare() {
@@ -105,11 +113,25 @@ internal class HotSpotAcceptanceHarness(
     }
 
     fun stopStandalone() {
-        command(endpoint.command("kill", "--signal", "SIGTERM", collectorNames.last()))
+        val name = collectorNames.last()
+        check(name in standaloneNames)
+        command(endpoint.command("kill", "--signal", "SIGTERM", name))
     }
 
     fun assertCollectorsGone() {
         for (name in collectorNames) {
+            if (name !in standaloneNames) {
+                await {
+                    val processes = command(endpoint.command("top", name, "-eo", "pid,comm"))
+                        .trim()
+                        .lineSequence()
+                        .drop(1)
+                        .map { it.trim().split(Regex("\\s+"), limit = 2)[1] }
+                        .toList()
+                    processes == listOf("sleep")
+                }
+                command(endpoint.command("kill", name))
+            }
             await { runCommand(endpoint.command("inspect", name)).first != 0 }
         }
     }

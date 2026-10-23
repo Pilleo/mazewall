@@ -55,7 +55,14 @@ stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
 The current accepted source overlay is
-`89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50`.
+`b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3`.
+
+The containerd overlay migrates Gadget's actual client and test utilities to
+patched `github.com/containerd/containerd/v2 v2.3.7`. Discovery retains `k8s.io`
+as its default namespace and preserves explicit overrides and permission failures.
+Both modules' prepared graphs must pass their race suites and `govulncheck`;
+there are no vulnerability suppressions. Older bundles are not admitted by this
+fingerprint and must be rebuilt into a new destination, not overwritten in place.
 
 The [owned-drain repair](../../docs/plans/2026-10-19-hotspot-observed-drain-evidence.md)
 wires actual auxiliary ownership for both HotSpot modes without fabricating an
