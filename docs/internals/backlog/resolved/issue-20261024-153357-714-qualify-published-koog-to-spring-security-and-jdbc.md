@@ -1,7 +1,7 @@
 ---
 title: "Qualify published Koog to Spring Security and JDBC invocation"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "integrations"
@@ -89,8 +89,8 @@ One independent whole-branch review finds no Critical, Important or Minor issues
 no corrective pass or deferred minors remain. Hosted CI on `f91d7815` passed in
 [run 40113574874](https://github.com/Pilleo/mazewall/actions/runs/40113574874), with
 downloaded JUnit confirming both composed native caller variants and every prior
-phase executed without skips. CI must pass again after the default-branch update;
-operator merge/publication approval remains separate.
+phase executed without skips. The post-update merged-default qualification is
+recorded in the resolution below.
 
 **Ruling:** Native receipt expectations are tested before wiring the consumer into
 the aggregate, so parent corruption controls are already meaningful when native
@@ -106,11 +106,30 @@ the author's existing-approval comparison and fresh official-byte checks remain
 the evidence, not a new provenance claim. PR556 and NVD freshness remain separate
 tracks; neither is silently closed by this consumer acceptance.
 
-**Administrative state:** PR556 merged as `d3e0ec7ad9668c98ccc632da64045b25ec473247`.
-PR557 incorporates that default-branch update, preserving the Portal archive and
-this active issue. The index is reconciled to 176 active / 716 resolved, including
-175 open / 1 deferred. NVD freshness qualification is observed only on eligible
-ordinary default runs, with no timer or artificial publication run.
+## Resolution
+
+[PR #557](https://github.com/Pilleo/mazewall/pull/557) merged as
+`2f80586bf7d5a33df43b301d8258ee41603f4bf7`, incorporating the earlier Portal archive
+from PR556 without changing executable code during conflict reconciliation.
+[Merged-default CI run 40137910686](https://github.com/Pilleo/mazewall/actions/runs/40137910686)
+passed all validation lanes and package publication.
+
+Downloaded `optional-integration-junit` artifact `12578023019` confirms that
+`OptionalIntegrationAcceptanceTest` executed once with zero skips, failures or
+errors in 227.763 seconds against that exact merged producer. Every original
+Portal, thread, JDBC/Security and finished-Boot phase passed. The new strict
+published Koog/Spring phase emitted exactly one complete platform and one complete
+virtual caller summary after actual worker/resource retirement, each with
+`identity=restored`, `jdbc=commit-and-rollback`, `business=preserved`,
+`callerTransaction=rejected`, `fs=denied`, `cancellation=cooperative`,
+`retirement=complete`, `fallback=false` and `replay=false`.
+
+The consumer-only contract, runtime/dependency versions, finite resource limits,
+deadlines, failure propagation and trusted synchronous ordinary-JAR limitations
+remain unchanged. This closes the scoped Koog/Spring acceptance item, not a broader
+web/reactive/ACE guarantee or the separate NVD freshness qualification. The latter
+is observed only on eligible ordinary default runs, with no timer or artificial
+publication run.
 
 ---
-<!-- id: issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc  file: issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc.md -->
+<!-- id: issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc  file: resolved/issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc.md -->

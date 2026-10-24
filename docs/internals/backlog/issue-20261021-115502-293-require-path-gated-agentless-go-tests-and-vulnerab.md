@@ -98,9 +98,40 @@ the old launcher and passes with the separated ownership. Final-source native
 acceptance passes all nine cases with zero skips, including retention pressure,
 standalone SIGTERM and the new lifecycle regression. The full repository build
 passes in 5m11s, and both modules' race/vulnerability gates pass again afterward.
-Required CI qualification and approved integration remain pending; this item stays
-open. The cleanup deadline and retirement checks are unchanged.
+That was the pre-integration local qualification; merged CI evidence and the
+remaining NVD checkpoint are recorded below. The cleanup deadline and retirement
+checks are unchanged.
 This failure is separate from the previously observed Portal retirement failure.
+
+## Integrated CI and remaining NVD checkpoint — 2026-10-25
+
+[PR #554](https://github.com/Pilleo/mazewall/pull/554) merged as
+`594fdaca70abb377a8da04a4b46cca02278e0c2e`; its
+[default run 40038896483](https://github.com/Pilleo/mazewall/actions/runs/40038896483)
+passed validation and publication. Both Go modules retain Go1.26.10, compression
+1.18.7, `x/net`0.60.0 and pinned `govulncheck`1.9.0, with actual containerd v2.3.7
+and no vulnerability suppressions. The serial race/scanner lane and fail-closed
+publication join are integrated, not awaiting implementation.
+
+NVD qualification now includes cold bootstrap plus authenticated 4,092/4,092-record
+refresh in run `40038896483`, expired-cache restoration plus 149/149-record refresh
+in [default run 40090736520](https://github.com/Pilleo/mazewall/actions/runs/40090736520),
+and genuine cache-miss retained-artifact recovery in
+[default run 40137910686](https://github.com/Pilleo/mazewall/actions/runs/40137910686).
+The latter recovered artifact `12558567452` from run `40090736520`, validated its
+artifact-service digest and snapshot manifest, refreshed 5,271/5,271 records, ran
+actual analysis, and saved the new cache plus snapshot artifact `12578102443`.
+Required security and publication gates passed.
+
+**The remaining checkpoint is fresh cross-run warm reuse on an ordinary
+default-branch run that actually performs analysis.** PR555's fresh-cache reuse
+is PR evidence only. Run `40137910686` refreshed before its analysis step skipped
+updating; that same-run skip does not qualify cross-run freshness. Docs-only run
+`40117220432` skipped scanning and cannot qualify. This item and the linked
+[NVD ingestion item](issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md)
+remain open until the remaining evidence exists. Do not create artificial runs,
+remove shared caches, extend budgets, weaken gates or start a future-window
+watcher to close this checkpoint.
 
 ---
 <!-- id: issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab  file: issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab.md -->
