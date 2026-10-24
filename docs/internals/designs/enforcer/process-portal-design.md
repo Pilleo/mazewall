@@ -69,6 +69,12 @@ or interruption cannot orphan a late child. Cleanup drains independent resources
 fatal failures, publishes `Failed`, and releases concurrent close waiters before rethrowing the
 fatal-first aggregate. `Closed` therefore never precedes acquisition completion and child reaping.
 
+Accept-producer ownership also covers a task cancelled before dispatch. Such a
+task never enters the producer's `finally`; executor termination must establish
+its producer-completion boundary instead. Only then may a fully retired handoff
+leave the registry. A pre-native accepted-descriptor close failure remains owned for retry;
+executor termination does not substitute for descriptor retirement.
+
 Broker-launched workers now require a bounded parent startup control frame on the
 owned RPC channel before containment or guest construction. A fresh session and the
 actual child PID must match the command-line expectation; the parent sends authorization

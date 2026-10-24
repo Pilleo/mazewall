@@ -8,8 +8,15 @@ component: "core"
 target_modules: []
 target_files:
   - "portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/RequiredWorkerLaunchProfileTest.kt"
-target_symbols: []
+  - "portals/runtime/src/integrationTest/kotlin/io/mazewall/portal/AcceptedSocketCancellationIntegrationTest.kt"
+  - "portals/runtime/src/main/kotlin/io/mazewall/portal/ProcessBroker.kt"
+  - "docs/internals/designs/enforcer/process-portal-design.md"
+target_symbols: ["ProcessBroker"]
 open_questions: false
+needs_kernel: true
+core_lock: true
+autonomy: "supervised"
+has_side_effects: true
 ---
 
 # 🟡 [Severity: MEDIUM]: Separate launch cancellation control from final retirement budget
@@ -46,6 +53,33 @@ PR533 CI38877672965 fails selected launch cancellation and expiry cleanup at Req
   delegated-cgroup prerequisite is not claimed as a new native pass.
 - Exact-head hosted CI remains the acceptance gate before the explicitly
   authorized PR merge. No failed check or incomplete retirement is waived.
+
+## Reopened: cancelled accept producer
+
+Run `39814424290` at `ac2c987c` failed final close in 3.61 seconds even with the
+separate five-second budget. Its primary and suppressed cleanup exceptions name
+no failed resource. Portal code is unchanged at the merged `594fdaca` baseline.
+A fresh focused run passes, so that pass is not treated as a correction.
+
+A deterministic real-broker regression now holds the sole virtual carrier until
+an expired startup cancels its queued accept and enters executor shutdown. The
+producer never enters native accept; the real child, output pump, listener and
+endpoint retire, but `broker.close()` still throws the same incomplete-cleanup
+exception. A task cancelled before dispatch never runs the producer's `finally`,
+leaving its registered handoff permanently incomplete.
+
+The approved correction scope is to certify producer completion only after its
+executor has actually terminated, then forget only a fully retired handoff. Keep
+failed descriptor retirement registered, preserve failures and all existing
+startup/close budgets, and add no close-retry loop or test-only production hook.
+
+The real-broker regression fails before the correction with the same primary and
+suppressed `IncompleteBrokerCleanupException`, after its real process/descriptor/
+endpoint checks pass. It passes after executor-terminal handoff reconciliation.
+Focused validation passes 148 unit tests and 32 executed integration tests; the
+existing delegated-cgroup prerequisite case remains skipped, not claimed as proof.
+Owning ktlint/static analysis and `./gradlew build` pass (8m14s). Exact-head hosted
+CI and review/merge approval remain required before resolving this item.
 
 ---
 <!-- id: issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re  file: issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md -->
