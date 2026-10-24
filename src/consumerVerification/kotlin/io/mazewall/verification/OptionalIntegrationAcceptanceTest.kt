@@ -40,7 +40,11 @@ internal fun requireKoogSpringSummaries(output: String): Set<String> {
     return summaries.toSet()
 }
 
-internal fun withKoogSpringPublicationChecksums(metadata: String, repository: Path, version: String): String {
+internal fun withKoogSpringPublicationChecksums(
+    metadata: String,
+    repository: Path,
+    version: String,
+): String {
     require(Regex("0\\.1\\.0-integration\\.[a-f0-9]{12}").matches(version)) { "Exact producer revision coordinate required" }
     check("version=\"$version\"" !in metadata && metadata.split("</components>").size == 2) { "New coordinate and intact verification metadata required" }
     val additions = buildString {

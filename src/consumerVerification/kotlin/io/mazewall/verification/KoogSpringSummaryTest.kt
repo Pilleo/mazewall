@@ -5,7 +5,9 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 class KoogSpringSummaryTest {
-    private val platform = "KOOG_SPRING_V1_OK caller=platform registry=upstream binding=approved worker=platform identity=restored jdbc=commit-and-rollback pre=denied post=rolled-back business=preserved callerTransaction=rejected fs=denied cancellation=cooperative retirement=complete fallback=false replay=false"
+    private val platform =
+        "KOOG_SPRING_V1_OK caller=platform registry=upstream binding=approved worker=platform identity=restored jdbc=commit-and-rollback pre=denied post=rolled-back " +
+            "business=preserved callerTransaction=rejected fs=denied cancellation=cooperative retirement=complete fallback=false replay=false"
     private val virtual = platform.replace("caller=platform", "caller=virtual")
 
     @Test

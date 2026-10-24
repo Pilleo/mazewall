@@ -10,7 +10,7 @@ import java.nio.file.Path
 
 class KoogSpringPublicationTest {
     @TempDir
-    lateinit var repository: Path
+    private lateinit var repository: Path
 
     private val version = "0.1.0-integration.123456789abc"
     private val original = """

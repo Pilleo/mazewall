@@ -76,6 +76,15 @@ checksums append only the fixed six staged first-party coordinates, without
 rewriting existing approval records or historical locks. Exact-commit aggregate,
 full build, final review and hosted CI remain pending.
 
+**Exact-publication acceptance:** `optionalIntegrationCheck` passes all original
+Portal/thread/JDBC/Security/Boot phases plus both composed native callers against
+committed producer `0bfde97cea6c14e9332c0807094eb87c71499340`, in 9m48s, with no
+skips. The five parent contracts and five consumer host tests pass without skips.
+The initial full gate detects two new formatting violations and a public lateinit
+test-accessor SpotBugs finding; standard formatting and a private fixture field
+fix those without suppressions. Focused ktlint, SpotBugs and the entire consumer
+harness suite pass. Full completion gate and independent review remain pending.
+
 **Ruling:** Native receipt expectations are tested before wiring the consumer into
 the aggregate, so parent corruption controls are already meaningful when native
 output arrives. This changes task order only, not scope or verification.
