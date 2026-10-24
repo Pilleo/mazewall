@@ -144,6 +144,19 @@ executors, construction/init and late work are outside the proxy body boundary.
 In-process containment is not an arbitrary-code isolation boundary. Closing a
 runtime or receipt does not uninstall permanent restrictions from live threads.
 
+## Calling an approved service from Koog
+
+The [independent Koog/Spring consumer](../../../tests/consumers/koog-spring/README.md)
+calls the actual bound singleton proxy through a consumer-local upstream Tool.
+It does not add another protected executor. The interruptible synchronous wait
+stays on the original application-selected caller, so the existing transaction
+guard and per-call Security capture remain effective. Business exceptions unwrap
+outside that wait; cancellation requests the original owned invocation without
+claiming physical end. The published-JAR gate proves both platform and virtual
+callers with real pre/post authorization, JDBC effects, filesystem denial and
+complete worker/resource retirement. It is not a general nonblocking, Boot-web,
+reactive or suspend-method adapter.
+
 ## Focused verification
 
 ```bash

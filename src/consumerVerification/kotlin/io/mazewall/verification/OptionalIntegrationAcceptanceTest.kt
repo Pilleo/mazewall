@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.time.Duration
 import java.util.concurrent.TimeUnit
 
@@ -28,6 +29,39 @@ internal fun requireKoogThreadSummary(output: String): String {
         "Expected exactly one complete Koog thread summary; found: $summaries"
     }
     return summaries.single()
+}
+
+internal fun requireKoogSpringSummaries(output: String): Set<String> {
+    val contract = "registry=upstream binding=approved worker=platform identity=restored jdbc=commit-and-rollback pre=denied post=rolled-back " +
+        "business=preserved callerTransaction=rejected fs=denied cancellation=cooperative retirement=complete fallback=false replay=false"
+    val expected = setOf("KOOG_SPRING_V1_OK caller=platform $contract", "KOOG_SPRING_V1_OK caller=virtual $contract")
+    val summaries = output.lineSequence().filter { it.startsWith("KOOG_SPRING_V1_") }.toList()
+    check(summaries.size == 2 && summaries.toSet() == expected) { "Expected exactly one complete platform and virtual Koog/Spring summary; found: $summaries" }
+    return summaries.toSet()
+}
+
+internal fun withKoogSpringPublicationChecksums(
+    metadata: String,
+    repository: Path,
+    version: String,
+): String {
+    require(Regex("0\\.1\\.0-integration\\.[a-f0-9]{12}").matches(version)) { "Exact producer revision coordinate required" }
+    check("version=\"$version\"" !in metadata && metadata.split("</components>").size == 2) { "New coordinate and intact verification metadata required" }
+    val additions = buildString {
+        for (module in listOf("platform", "enforcer", "runtime", "koog", "mazewall-spring-boot", "mazewall-spring-boot-starter")) {
+            appendLine("<component group=\"io.mazewall\" name=\"$module\" version=\"$version\">")
+            for (extension in listOf("jar", "pom", "module")) {
+                val name = "$module-$version.$extension"
+                val artifact = repository.resolve("io/mazewall/$module/$version/$name")
+                require(Files.isRegularFile(artifact)) { "Missing exact publication bytes: $artifact" }
+                val sha = MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(artifact)).joinToString("") { "%02x".format(it) }
+                appendLine("<artifact name=\"$name\"><sha256 value=\"$sha\" origin=\"Exact committed producer publication\"/></artifact>")
+            }
+            appendLine("</component>")
+        }
+    }
+    // Add only this producer's fixed coordinates; all historical and external approvals stay byte-identical.
+    return metadata.replace("</components>", additions + "</components>")
 }
 
 /** Real source-bound publications and consumers; fixture approval is never production authority. */
@@ -127,6 +161,20 @@ class OptionalIntegrationAcceptanceTest {
                         properties +
                         listOf("verifyNative", "verifySecurityNative", "presentationTest"),
                 )
+                val springConsumer = root.resolve("tests/consumers/koog-spring")
+                val spring = gradle + listOf("-p", springConsumer.toString()) + properties
+                val verification = springConsumer.resolve("gradle/verification-metadata.xml")
+                val historicalSpringLocks = Files.walk(springConsumer.resolve("locks")).use { paths ->
+                    paths.filter(Files::isRegularFile).toList().associateWith(Files::readString)
+                }
+                val pinned = withKoogSpringPublicationChecksums(Files.readString(verification), repository, version)
+                Files.writeString(verification, pinned)
+                run("new-koog-spring-coordinate-locks", spring + listOf("dependencies", "--write-locks"))
+                val springNative = run("strict-published-koog-spring", spring + listOf("test", "verifyPublishedClosure", "verifyFreshNative"))
+                requireKoogSpringSummaries(springNative).forEach(::println)
+                check(Files.readString(verification) == pinned && historicalSpringLocks.all { (path, content) -> Files.readString(path) == content }) {
+                    "Koog/Spring acceptance changed historical locks or verification approvals"
+                }
                 run(
                     "finished-boot-showcase",
                     gradle + listOf("-p", root.resolve("demos/spring-boot-sandbox").toString()) + properties + listOf("bootJar", "presentationTest"),
