@@ -1,7 +1,7 @@
 ---
 title: "Separate launch cancellation control from final retirement budget"
 severity: "MEDIUM"
-status: "open"
+status: "resolved"
 priority: high
 dependencies: []
 component: "core"
@@ -81,5 +81,17 @@ existing delegated-cgroup prerequisite case remains skipped, not claimed as proo
 Owning ktlint/static analysis and `./gradlew build` pass (8m14s). Exact-head hosted
 CI and review/merge approval remain required before resolving this item.
 
+## Resolution
+
+[PR #555](https://github.com/Pilleo/mazewall/pull/555) merged as
+`723e1b4e6b88424c835c669b814b40ed07dc9843`. Its
+[default-branch run 40090736520](https://github.com/Pilleo/mazewall/actions/runs/40090736520)
+passed all validation lanes and publication. Retrieved hosted XML confirms the new
+cancelled-producer regression executed with zero skips/failures, the original
+cancellation/expiry case passed, and all 148 Portal unit tests passed. The separate
+delegated-cgroup prerequisite case remains skipped and is not claimed as proof.
+Independent review found no blocking issues; deadline, interruption, descriptor
+ownership and physical-retirement assertions remain intact.
+
 ---
-<!-- id: issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re  file: issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md -->
+<!-- id: issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re  file: resolved/issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md -->
