@@ -86,8 +86,11 @@ fix those without suppressions. Focused ktlint, SpotBugs and the entire consumer
 harness suite pass. The full `./gradlew build --console=plain --no-configuration-cache`
 then passes in 5m09s on `d9285d7c`, with its configured prerequisite skips unchanged.
 One independent whole-branch review finds no Critical, Important or Minor issues;
-no corrective pass or deferred minors remain. Exact-head hosted CI and separate
-operator merge/publication approval remain outstanding.
+no corrective pass or deferred minors remain. Hosted CI on `f91d7815` passed in
+[run 40113574874](https://github.com/Pilleo/mazewall/actions/runs/40113574874), with
+downloaded JUnit confirming both composed native caller variants and every prior
+phase executed without skips. CI must pass again after the default-branch update;
+operator merge/publication approval remains separate.
 
 **Ruling:** Native receipt expectations are tested before wiring the consumer into
 the aggregate, so parent corruption controls are already meaningful when native
@@ -103,10 +106,11 @@ the author's existing-approval comparison and fresh official-byte checks remain
 the evidence, not a new provenance claim. PR556 and NVD freshness remain separate
 tracks; neither is silently closed by this consumer acceptance.
 
-**Administrative state:** PR556 remains ready pending separate merge approval;
-that does not block this independent consumer work. NVD freshness qualification
-is observed only on eligible ordinary default runs, with no timer or artificial
-publication run. Counts/index must be reconciled if PR556 lands before integration.
+**Administrative state:** PR556 merged as `d3e0ec7ad9668c98ccc632da64045b25ec473247`.
+PR557 incorporates that default-branch update, preserving the Portal archive and
+this active issue. The index is reconciled to 176 active / 716 resolved, including
+175 open / 1 deferred. NVD freshness qualification is observed only on eligible
+ordinary default runs, with no timer or artificial publication run.
 
 ---
 <!-- id: issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc  file: issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc.md -->
