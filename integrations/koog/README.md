@@ -168,6 +168,19 @@ suspension and lazy/streaming results remain outside the action contract. See th
 [security considerations](../../docs/internals/designs/core/security-considerations.md)
 and the [published native consumer](../../tests/consumers/koog-portal/README.md).
 
+## Composing with an approved synchronous Spring service
+
+The [published Koog/Spring consumer](../../tests/consumers/koog-spring/README.md)
+demonstrates a consumer-local upstream Tool calling the **bound Spring proxy**.
+Spring alone owns protected dispatch; do not wrap that proxy in a thread or Portal
+adapter. Its `runInterruptible { runCatching { service.run(mode) } }.getOrThrow()`
+bridge deliberately keeps the original caller for transaction rejection and
+Security capture, and preserves business interruption. One application-selected
+host waiter blocks per active call; this is not a general nonblocking adapter.
+The existing optional acceptance qualifies platform and virtual callers, actual
+Security/JDBC rollback, kernel denial and retained cancellation through physical
+retirement. No production API or broader web/reactive/ACE contract is added.
+
 ## Integration status
 
 The optional source adapter is selected with `includeKoogIntegration=true`;
