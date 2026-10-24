@@ -6,10 +6,10 @@ import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class SpringServiceArguments(val mode: String)
+internal data class SpringServiceArguments(val mode: String)
 
 /** Consumer-local synchronous bridge; the existing Spring proxy owns protected dispatch. */
-class SpringServiceTool(private val service: JdbcService) : Tool<SpringServiceArguments, String>(
+internal class SpringServiceTool(private val service: JdbcService) : Tool<SpringServiceArguments, String>(
     typeToken<SpringServiceArguments>(), typeToken<String>(), "reviewed_jdbc", "Invoke the fixed approved Spring service",
 ) {
     override suspend fun execute(args: SpringServiceArguments): String {

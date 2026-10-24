@@ -9,6 +9,7 @@ target_modules: []
 target_files:
    - "src/consumerVerification/kotlin/io/mazewall/verification/OptionalIntegrationAcceptanceTest.kt"
    - "src/consumerVerification/kotlin/io/mazewall/verification/KoogSpringSummaryTest.kt"
+   - "src/consumerVerification/kotlin/io/mazewall/verification/KoogSpringPublicationTest.kt"
    - "tests/consumers/koog-spring/settings.gradle.kts"
    - "tests/consumers/koog-spring/build.gradle.kts"
    - "tests/consumers/koog-spring/gradle/verification-metadata.xml"
@@ -64,6 +65,20 @@ the plan. Consumer verification matches 246 existing approvals; 60 stable toolin
 records match fresh official repository bytes. The Kotlin plugin marker POM is
 pinned to the declared Plugin Portal bytes, not Central's different official POM;
 no checksum or verification gate was loosened.
+
+**Native and parent contracts:** Fresh JAR-only platform and virtual consumers
+both pass against the staged baseline publications. Actual upstream registry,
+approved singleton/advice, pre/post Security, JDBC commit/rollback, original business
+interruption/caller transaction, actual sibling denial and cancellation retained
+through physical worker/resource retirement are asserted. Parent summary and
+new-coordinate checksum contracts each fail their no-op baseline before passing;
+checksums append only the fixed six staged first-party coordinates, without
+rewriting existing approval records or historical locks. Exact-commit aggregate,
+full build, final review and hosted CI remain pending.
+
+**Ruling:** Native receipt expectations are tested before wiring the consumer into
+the aggregate, so parent corruption controls are already meaningful when native
+output arrives. This changes task order only, not scope or verification.
 
 **Administrative state:** PR556 remains ready pending separate merge approval;
 that does not block this independent consumer work. NVD freshness qualification
