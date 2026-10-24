@@ -73,8 +73,8 @@ interruption/caller transaction, actual sibling denial and cancellation retained
 through physical worker/resource retirement are asserted. Parent summary and
 new-coordinate checksum contracts each fail their no-op baseline before passing;
 checksums append only the fixed six staged first-party coordinates, without
-rewriting existing approval records or historical locks. Exact-commit aggregate,
-full build, final review and hosted CI remain pending.
+rewriting existing approval records or historical locks. Completion results and
+remaining hosted/operator checkpoints are recorded below.
 
 **Exact-publication acceptance:** `optionalIntegrationCheck` passes all original
 Portal/thread/JDBC/Security/Boot phases plus both composed native callers against
@@ -83,11 +83,25 @@ skips. The five parent contracts and five consumer host tests pass without skips
 The initial full gate detects two new formatting violations and a public lateinit
 test-accessor SpotBugs finding; standard formatting and a private fixture field
 fix those without suppressions. Focused ktlint, SpotBugs and the entire consumer
-harness suite pass. Full completion gate and independent review remain pending.
+harness suite pass. The full `./gradlew build --console=plain --no-configuration-cache`
+then passes in 5m09s on `d9285d7c`, with its configured prerequisite skips unchanged.
+One independent whole-branch review finds no Critical, Important or Minor issues;
+no corrective pass or deferred minors remain. Exact-head hosted CI and separate
+operator merge/publication approval remain outstanding.
 
 **Ruling:** Native receipt expectations are tested before wiring the consumer into
 the aggregate, so parent corruption controls are already meaningful when native
 output arrives. This changes task order only, not scope or verification.
+
+**Final review rulings:** Keep the documented trusted synchronous ordinary-JAR
+boundary, not a general nonblocking/web/reactive/ACE contract; using it outside
+that boundary would not acquire those protections. Keep reference-based Security
+capture and immutable deployment assumptions, not deep authentication snapshots
+or hostile concurrent JAR mutation support; concurrent mutation is unsupported.
+The reviewer does not independently reauthenticate external repository provenance;
+the author's existing-approval comparison and fresh official-byte checks remain
+the evidence, not a new provenance claim. PR556 and NVD freshness remain separate
+tracks; neither is silently closed by this consumer acceptance.
 
 **Administrative state:** PR556 remains ready pending separate merge approval;
 that does not block this independent consumer work. NVD freshness qualification
