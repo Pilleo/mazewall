@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 176 | *Total Resolved Issues:* 715
+*Total Active Issues:* 177 | *Total Resolved Issues:* 715
 
-Active status detail: 175 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 176 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261024-153357-714](issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc.md) | Qualify published Koog to Spring Security and JDBC invocation | high | integrations |
 | [issue-20261021-115502-293](issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab.md) | Require path-gated agentless Go tests and vulnerability checks in CI | high | ci |
 | [issue-20261020-213826-813](issue-20261020-213826-813-assess-and-patch-high-severity-compress-advisories.md) | Assess and patch high-severity compress advisories in agentless Go modules | high | profiler |
 | [issue-20261020-202040-181](issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md) | Run build-tool regression checks once while preserving required security validation | high | ci |
