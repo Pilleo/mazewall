@@ -83,5 +83,14 @@ Java output directory; required resource capture correctly rejects that path.
 Packaging removes the nonexistent entry rather than weakening resource resolution
 or silently filtering missing artifacts. The Koog runnable tasks use the same shape.
 
+**Task 2:** Host reader tests first reject an unbounded compiling baseline at
+65,537 bytes; the native registry contract first fails because missing argument
+validation reaches the filesystem instead of rejecting before admission. The
+bounded strict-UTF-8 reader and real ThreadToolAdapter validators then pass. The
+two-stage producer wrapper runs the entire Koog demo test suite, both presentation
+cases, generated Portal package check and both separate fresh-JVM runnable commands
+successfully. Portal presentation uses the same application path, retaining actual
+child identity/lifecycle, immutable diagnostics, bounds and physical-death checks.
+
 ---
 <!-- id: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r  file: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md -->

@@ -59,6 +59,11 @@ waiting admitted invocation**; keep finite domain admission limits.
 
 ### Bounded UTF-8 reader
 
+The [runnable thread example](../../demos/koog-contained-tool/README.md#start-here-thread-backed-file-reader)
+and its native JUnit case implement this pattern with private synthetic files and
+actual allowed/denied controls. The separate Portal entry point remains independently
+runnable; neither example needs Spring or a model account.
+
 This self-contained command-line example uses only synthetic files. Run it in its
 own fresh Linux/JDK 25 JVM with `--enable-native-access=ALL-UNNAMED`, the optional
 adapter, upstream Koog and kotlinx serialization on the classpath, and the Kotlin
