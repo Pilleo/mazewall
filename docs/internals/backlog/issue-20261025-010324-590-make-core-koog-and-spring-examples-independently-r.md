@@ -119,8 +119,30 @@ claim replaces it. Full agent loops, live models and HTTP/Security remain follow
 **Ruling:** The three new runnable tasks are selected by the existing optional
 producer/acceptance phase so exact-head CI exercises the documented entry points,
 not just adjacent test helpers. No workflow/job or verification budget is added or
-increased. Focused native/host gates pass; final exact-publication aggregate, full
-build, independent review and hosted CI are pending.
+increased. Focused native/host gates pass; completion and post-review checkpoints
+are recorded below.
+
+**Completion checkpoint:** Exact committed producer `6c9f819cd808e7423536035e0cdac7389b2a522d`
+passes optional integration acceptance in 8m05s. Inspected fresh-clone output
+confirms all three runnable entry points executed, four Boot presentation cases
+passed without skips, and the existing native phases plus 21 ownership controls
+passed. The full build on that source passed in 5m14s.
+
+**Final review correction:** The one independent review found one Important gap:
+the optional Spring phase selected only bootJar/presentationTest, omitting the two
+new ordinary-service host tests. Replaying that exact completed source-bound
+command reproduces RED: no ReportServiceTest JUnit report exists. Adding `test`
+to the same invocation produces both passing host cases, zero skips/failures.
+The parent now requires that exact two-case successful JUnit suite, with external
+XML entities/DTDs disabled, so later task omission or skipped cases cannot pass.
+Consumer host tests, ktlint and SpotBugs pass; post-correction aggregate/full-build
+verification and exact-head hosted CI remain pending. No second review is needed.
+
+**Final review boundaries:** Full agent/live-provider/HTTP/Security expansion,
+hostile-Java/shared-heap/preopened-FD/concurrent-deployment guarantees and human
+usability/timing remain outside this scoped implementation. Human rehearsal and
+operator merge/publication approval remain separate, not silently certified by
+the engineering checks. No Critical or Minor findings were reported.
 
 ---
 <!-- id: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r  file: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md -->

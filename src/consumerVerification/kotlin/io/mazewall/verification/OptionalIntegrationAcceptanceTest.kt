@@ -8,6 +8,8 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.time.Duration
 import java.util.concurrent.TimeUnit
+import javax.xml.XMLConstants
+import javax.xml.parsers.DocumentBuilderFactory
 
 internal const val KOOG_CONTAINMENT_SUMMARY = "KOOG_CONTAINMENT_V1_OK read=denied write=denied symlink=denied network=denied process=denied controls=pass retirement=pass"
 
@@ -180,8 +182,28 @@ class OptionalIntegrationAcceptanceTest {
                 }
                 run(
                     "finished-boot-showcase",
-                    gradle + listOf("-p", root.resolve("demos/spring-boot-sandbox").toString()) + properties + listOf("bootJar", "presentationTest"),
+                    gradle + listOf("-p", root.resolve("demos/spring-boot-sandbox").toString()) + properties + listOf("test", "bootJar", "presentationTest"),
                 )
+                val hostReport = root.resolve("demos/spring-boot-sandbox/build/test-results/test/TEST-demo.boot.ReportServiceTest.xml")
+                check(Files.isRegularFile(hostReport)) { "Ordinary ReportService host tests did not execute" }
+                val factory = DocumentBuilderFactory.newInstance()
+                factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+                factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+                factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+                val report = factory
+                    .newDocumentBuilder()
+                    .parse(hostReport.toFile())
+                    .documentElement
+                check(
+                    report.tagName == "testsuite" &&
+                        report.getAttribute("name") == "demo.boot.ReportServiceTest" &&
+                        report.getAttribute("tests") == "2" &&
+                        report.getElementsByTagName("testcase").length == 2 &&
+                        listOf("failures", "errors", "skipped").all { report.getAttribute(it) == "0" },
+                ) {
+                    "Both ordinary ReportService host contracts must execute without skips/failures"
+                }
+                println("OPTIONAL_INTEGRATION_CASE_OK ordinary-spring-report-host-tests")
                 run(
                     "finished-boot-ownership-and-negative-controls",
                     gradle +
