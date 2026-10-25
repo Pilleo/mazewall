@@ -36,7 +36,7 @@ flock "$LOCK" ./gradlew -PincludeSpringIntegration=true \
   --no-configuration-cache --max-workers=1
 flock "$LOCK" ./gradlew -p demos/spring-boot-sandbox \
   -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
-  test ownershipTest bootJar presentationTest --console=plain --no-configuration-cache
+  test ownershipTest bootJar presentationTest --console=plain --no-configuration-cache --max-workers=1
 ```
 
 The JUnit harness deploys fresh private fixtures and independently approves only

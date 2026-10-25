@@ -37,6 +37,7 @@ target_files:
    - "demos/spring-boot-sandbox/src/test/java/demo/boot/ReportServiceTest.java"
    - "demos/spring-boot-sandbox/src/test/java/demo/boot/BootPresentationTest.java"
    - "src/consumerVerification/kotlin/io/mazewall/verification/SpringBootPackagedAcceptanceTest.kt"
+   - "src/consumerVerification/kotlin/io/mazewall/verification/OptionalIntegrationAcceptanceTest.kt"
    - "src/consumerVerification/kotlin/io/mazewall/verification/SpringBootMeasurementOwnershipTest.kt"
    - "tests/consumers/spring-boot/README.md"
 target_symbols: ["readWorkspaceFile", "threadReadTool", "ReportService", "ReportBootstrap"]
@@ -109,6 +110,17 @@ ordinary host tests actually execute. Native worker observation moves to the
 existing trusted bootstrap context bridge; ordinary `ReportService.generate`
 contains neither fixture modes nor a worker-observation hook. Its selected Class,
 review/generation, unchanged advice and actual physical retirement remain required.
+
+**Task 4:** Root/demo/presenter guides now lead with three independent runnable
+paths, prerequisites, expected observations, copyable source and guided changes.
+The existing real-human rehearsal item stays open; no agent timing/comprehension
+claim replaces it. Full agent loops, live models and HTTP/Security remain follow-ups.
+
+**Ruling:** The three new runnable tasks are selected by the existing optional
+producer/acceptance phase so exact-head CI exercises the documented entry points,
+not just adjacent test helpers. No workflow/job or verification budget is added or
+increased. Focused native/host gates pass; final exact-publication aggregate, full
+build, independent review and hosted CI are pending.
 
 ---
 <!-- id: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r  file: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md -->

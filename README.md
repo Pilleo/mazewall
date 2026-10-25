@@ -18,6 +18,30 @@ A successful exploit in your YAML importer is a successful exploit of your entir
 
 mazewall lets you wrap trusted code that processes risky input in **kernel-enforced behavioral contracts**. On a contained worker, configured syscalls and filesystem accesses are denied by the Linux kernel. This limits direct data-plane attacks; it does not isolate arbitrary hostile Java code or remove capabilities already present elsewhere in the JVM.
 
+## Try an independent runnable example
+
+With JDK 25 on Linux and the required Seccomp/Landlock support, start with:
+
+```bash
+./gradlew :demos:cli-demo:runWorkspaceExample --console=plain
+```
+
+It reads an approved file, proves a real denied sibling open while the host can
+still read that sibling, and requires actual worker cleanup. It creates only
+private synthetic files and launches a fresh JVM for the permanent process baseline.
+Setup/containment failures fail the command rather than falling back unprotected.
+
+- [Core walkthrough](demos/cli-demo/README.md#start-here-an-owned-workspace-read): copy the explicit owner/domain/call pattern.
+- [Koog thread and process tools](demos/koog-contained-tool/README.md): run actual upstream Tools without Spring or a model account.
+- [Spring report application](demos/spring-boot-sandbox/README.md#start-here-ordinary-report-generation): normal Java service code, real JDBC and separately approved finished-JAR binding, without an agent or web server.
+
+The [full feature tour](demos/README.md) retains the deeper profiling, lifecycle,
+supervision and negative controls. The public synchronous core entry accepts
+`Callable<T>` from Java and other JVM languages; see the existing
+[Java](tests/consumers/java-api/src/main/java/consumer/JavaApiConsumer.java) and
+[Kotlin](tests/consumers/kotlin-api/src/main/kotlin/consumer/KotlinApiConsumer.kt)
+consumer examples for API syntax, not additional native proof.
+
 ---
 
 ## The Problem

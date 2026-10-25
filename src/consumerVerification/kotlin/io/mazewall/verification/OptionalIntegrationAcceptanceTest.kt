@@ -116,6 +116,9 @@ class OptionalIntegrationAcceptanceTest {
                         ":integrations:spring:mazewall-spring-boot:test",
                     ":demos:koog-contained-tool:test",
                         ":demos:koog-contained-tool:presentationTest",
+                        ":demos:cli-demo:runWorkspaceExample",
+                        ":demos:koog-contained-tool:runPortalExample",
+                        ":demos:koog-contained-tool:runThreadExample",
                     ":demos:koog-contained-tool:portalCheck",
                 ) +
                     listOf(
