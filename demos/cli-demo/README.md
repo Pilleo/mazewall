@@ -46,6 +46,15 @@ bootstrap and `readWorkspaceFile(runtime, domain, path)` call, then
 cancellation and bounded drain handling. The runtime belongs to the application,
 not to each read. One worker/one admission is a demonstration limit, not sizing advice.
 
+Result delivery alone does not release an invocation's admission. This synchronous
+walkthrough keeps the original handle and waits for both its result and
+`executionEnd()` under one ten-second wait deadline before attempting the next
+read. End-wait timeout or interruption requests cancellation of that same handle.
+Any failed end wait remains a failure, retaining delivered errors as additional
+evidence; it cannot pass as an expected denied read. Business interruption is not
+relabeled waiter interruption. Complete runtime
+drain is still required separately for actual worker/resource retirement.
+
 **Try a change:** in a private copy, change the first approved read's `allowed`
 argument to `sibling` without changing the policy. It must fail with the real denied
 open, rather than read the host's private sibling. Keep the later explicit denial

@@ -1,7 +1,6 @@
 package demo
 
 import io.mazewall.enforcer.api.ContainmentViolationException
-import io.mazewall.enforcer.api.Mazewall
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.WorkerPolicyBuilder
@@ -17,7 +16,7 @@ internal fun readWorkspaceFile(
     runtime: ManagedRuntime,
     domain: InProcessDomain,
     path: Path,
-): String = Mazewall.callContained(runtime, domain, Callable { Files.readString(path) })
+): String = OwnedDemoRuntime.await(runtime.submit(domain, Callable { Files.readString(path) }))
 
 /** Run in its own JVM: the explicit process baseline is permanent. */
 internal object WorkspaceExample {

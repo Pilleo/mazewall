@@ -13,6 +13,8 @@ target_files:
    - "demos/cli-demo/README.md"
    - "demos/cli-demo/build.gradle.kts"
    - "demos/cli-demo/src/main/kotlin/demo/WorkspaceExample.kt"
+   - "demos/cli-demo/src/main/kotlin/demo/OwnedDemoRuntime.kt"
+   - "demos/cli-demo/src/test/kotlin/demo/OwnedDemoRuntimeAwaitTest.kt"
    - "demos/cli-demo/src/test/kotlin/demo/WorkspaceExampleTest.kt"
    - "demos/cli-demo/src/test/kotlin/demo/EnforcementPresentationTest.kt"
    - "demos/koog-contained-tool/README.md"
@@ -162,6 +164,13 @@ Both follow-ups are implemented with deterministic native / cold-project evidenc
 Exact committed producer `3126b772995c5779c86ebb6706d295f8e44b0af7` passes optional
 acceptance in 9m52s and the full build in 5m20s. A scoped independent review reports
 no remaining findings; updated PR559 exact-head CI is still required before merge.
+
+Updated run `40191302429` exposed a distinct single-admission workspace race:
+result delivery preceded lease release, and the following read was rejected.
+[The scoped demo-await correction](issue-20261025-121925-834-await-execution-end-before-reusing-single-admissio.md)
+waits for the original handle's execution end without changing core semantics,
+capacity, budgets, or adding retries. The two prior review fixes remain intact;
+no failed CI gate is waived or rerun merely to obtain green.
 
 ---
 <!-- id: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r  file: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md -->

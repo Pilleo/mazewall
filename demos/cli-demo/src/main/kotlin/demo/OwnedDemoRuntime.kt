@@ -8,7 +8,10 @@ import io.mazewall.enforcer.api.execution.DrainReport
 import io.mazewall.enforcer.api.execution.IncompleteDrainException
 import io.mazewall.enforcer.api.execution.InvocationHandle
 import io.mazewall.enforcer.api.execution.ManagedRuntime
+import io.mazewall.platform.fd.CleanupFailures
+import io.mazewall.platform.lifecycle.MazewallInternal
 import java.time.Duration
+import java.util.concurrent.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -44,17 +47,39 @@ internal object OwnedDemoRuntime {
         }
     }
 
-    fun <T> await(invocation: InvocationHandle<T>): T = try {
-        invocation.result().toCompletableFuture().get(timeout.toNanos(), TimeUnit.NANOSECONDS)
-    } catch (failure: ExecutionException) {
-        throw failure.cause ?: failure
-    } catch (failure: TimeoutException) {
-        invocation.requestCancellation()
-        throw failure
-    } catch (failure: InterruptedException) {
-        invocation.requestCancellation()
-        Thread.currentThread().interrupt()
-        throw failure
+    /** Delivery can precede lease release; this synchronous demo waits for both before another admission. */
+    @OptIn(MazewallInternal::class)
+    fun <T> await(invocation: InvocationHandle<T>): T {
+        val started = System.nanoTime()
+        val budget = timeout.toNanos()
+        var delivery: Result<T>? = null
+        try {
+            delivery = try {
+                Result.success(invocation.result().toCompletableFuture().get(budget, TimeUnit.NANOSECONDS))
+            } catch (failure: ExecutionException) {
+                Result.failure(failure.cause ?: failure)
+            } catch (failure: CancellationException) {
+                Result.failure(failure)
+            }
+            invocation.executionEnd().toCompletableFuture().get(
+                (budget - (System.nanoTime() - started)).coerceAtLeast(0L), TimeUnit.NANOSECONDS,
+            )
+        } catch (failure: Throwable) {
+            val cause = if (failure is ExecutionException) failure.cause ?: failure else failure
+            val deliveredFailure = delivery?.exceptionOrNull()
+            // A failed end wait must not look like a completed expected denial.
+            var primary = if (deliveredFailure == null) cause else CleanupFailures.merge(cause, deliveredFailure)
+            if (failure is InterruptedException) Thread.currentThread().interrupt()
+            if (failure is InterruptedException || failure is TimeoutException) {
+                try {
+                    invocation.requestCancellation()
+                } catch (requestFailure: Throwable) {
+                    primary = CleanupFailures.merge(primary, requestFailure)
+                }
+            }
+            throw primary
+        }
+        return checkNotNull(delivery).getOrThrow()
     }
 
     fun drainRetained(): List<DrainReport.Incomplete> = retained.mapNotNull { runtime ->
