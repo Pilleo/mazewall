@@ -59,7 +59,6 @@ public final class ReportApplication {
                     }
                     System.out.println("REPORT_GENERATED " + generated);
                     System.out.println("JDBC_COMMITTED actualRow=quarterly warmedInitRows=0");
-                    bootstrap.lifecycle().stop();
                 } else {
                     ReportVerification.run(report, jdbc, bootstrap, context);
                 }

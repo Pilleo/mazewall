@@ -149,5 +149,14 @@ usability/timing remain outside this scoped implementation. Human rehearsal and
 operator merge/publication approval remain separate, not silently certified by
 the engineering checks. No Critical or Minor findings were reported.
 
+## Subsequent ponytail review
+
+The user requested remediation of two additional findings on PR559:
+[stale final lifecycle state](issue-20261025-111413-642-publish-final-report-lifecycle-state-only-after-ac.md)
+and [undeclared Clang/BPF source-build prerequisites](issue-20261025-111426-953-declare-clang-bpf-prerequisites-for-source-built-c.md).
+These are tracked separately with their actual reproductions and unchanged-budget
+corrections. Updated exact-head qualification is required before merge; earlier
+green CI is not used to waive either finding.
+
 ---
 <!-- id: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r  file: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md -->

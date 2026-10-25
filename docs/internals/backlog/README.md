@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 176 | *Total Resolved Issues:* 717
+*Total Active Issues:* 178 | *Total Resolved Issues:* 717
 
-Active status detail: 175 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 177 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,8 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261025-111413-642](issue-20261025-111413-642-publish-final-report-lifecycle-state-only-after-ac.md) | Publish final report lifecycle state only after actual owner close | high | demos |
+| [issue-20261025-111426-953](issue-20261025-111426-953-declare-clang-bpf-prerequisites-for-source-built-c.md) | Declare Clang BPF prerequisites for source built core quickstart | high | docs |
 | [issue-20261025-010324-590](issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md) | Make core Koog and Spring examples independently runnable and copyable | high | demos |
 | Archived [issue-20261024-153357-714](resolved/issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc.md) | Qualify published Koog to Spring Security and JDBC invocation | high | integrations |
 | [issue-20261021-115502-293](issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab.md) | Require path-gated agentless Go tests and vulnerability checks in CI | high | ci |

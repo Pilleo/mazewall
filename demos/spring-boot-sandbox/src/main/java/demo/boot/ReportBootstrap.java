@@ -140,6 +140,10 @@ final class ReportBootstrap implements AutoCloseable {
     DomainLifecycle lifecycle() { return lifecycle; }
     PreparedOperationResources resources() { return resources; }
     @Override public void close() {
-        try { runtime.close(); } finally { resources.close(); }
+        try {
+            runtime.close();
+            // A previous Incomplete observation does not upgrade when the owner finishes.
+            lifecycle.stop();
+        } finally { resources.close(); }
     }
 }

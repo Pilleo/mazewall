@@ -130,7 +130,7 @@ final class ReportVerification {
         check(state.bodyEnded.await(5, TimeUnit.SECONDS), "Lexical body cleanup ended");
         state.worker.physicalThread().join(5000);
         check(!state.worker.physicalThread().isAlive(), "Captured physical worker actually terminated");
-        bootstrap.lifecycle().stop();
+        bootstrap.close();
         check(bootstrap.lifecycle().lastDrain() == DrainReport.Complete.INSTANCE, "Exact runtime/resources physical retirement");
         var retiredSnapshot = bootstrap.lifecycle().diagnostics();
         check(retiredSnapshot.getState() == ExecutionDiagnosticState.CLOSED && retiredSnapshot.getRetirementComplete()

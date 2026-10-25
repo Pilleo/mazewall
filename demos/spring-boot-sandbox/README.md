@@ -189,3 +189,9 @@ Normal generation separately requires a committed JDBC receipt and matching repo
 bytes. `REPORT_OWNER_RETIRED` is printed only after complete canonical drain, death
 of the actual captured worker and closed genuine resource ownership; it is not
 inferred from delivery of `REPORT_GENERATED`.
+
+`ReportBootstrap.close()` uses the existing ten-second runtime close first, then
+refreshes the lifecycle's final stop result. The 50 ms incomplete observation stays
+in the held-cleanup verification case; it is not a normal-generation shutdown
+deadline. A failed or incomplete owner close still propagates rather than
+publishing a closed lifecycle.
