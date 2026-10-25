@@ -1,5 +1,31 @@
 # Present mazewall through executable JUnit examples
 
+## Start with the runnable application paths
+
+For a first evaluation, choose one independent example rather than building a
+combined Koog/Spring application:
+
+The core CLI source build needs JDK25/Linux/native permissions and Clang with its
+BPF backend because the CLI module also builds profiler resources. Check the
+[compiler probe or configured development-image route](../../demos/cli-demo/README.md#start-here-an-owned-workspace-read)
+before a clean first run. No profiling permission is needed for the workspace read.
+
+- Core: `./gradlew :demos:cli-demo:runWorkspaceExample --console=plain`.
+  [Policy, owned call and expected observations](../../demos/cli-demo/README.md#start-here-an-owned-workspace-read).
+- Koog: the [thread reader and generated Portal commands](../../demos/koog-contained-tool/README.md)
+  use the existing producer wrapper and run in separate JVMs. Their incompatible
+  process baselines must not be combined. These are real Tool examples, not an
+  `AIAgent` loop or a model-selection demonstration.
+- Spring: the [standalone quickstart](../../demos/spring-boot-sandbox/README.md#start-here-ordinary-report-generation)
+  stages explicit local publications, exercises normal `measure-report`/`generate`
+  and retains separate `measure`/`verify` negative scenarios. The JUnit harness is
+  external authority for private known fixtures only, not production approval.
+
+The primary source files are `WorkspaceExample.kt`, `ThreadReadTool.kt` /
+`TextTools.kt`, and `ReportService.java`. Each owning guide separates that ordinary
+application code from bootstrap, approval and verification scaffolding and gives
+one guided modification. Native support failures remain fatal, not skipped.
+
 ## The story (18 minutes plus questions)
 
 1. **Unrestricted behavior (1 minute):** synthetic untrusted input launches a
@@ -102,9 +128,12 @@ Compose setup or extra shell runner is required for the core sequence.
 
 ## Rehearsal record
 
-Automated assertions and native runs are recorded in the implementation ledger at
-`.superpowers/sdd/2026-10-13-junit-presentation/progress.md`. Full completion checks
-must be recorded there before calling the implementation verified. Rehearse two
-fresh offline runs on the presentation host, then have an actual unfamiliar developer
-follow this guide. Human timing/comprehension, recordings and production/CET approvals
-remain open until genuinely observed; no agent result replaces them.
+Automated assertions retain ordinary Gradle JUnit XML/HTML reports and owning
+backlog/PR source-bound qualification. These are not a human usability rehearsal.
+Use the existing [unfamiliar-developer rehearsal item](../internals/backlog/issue-20261013-005319-256-rehearse-the-complete-feature-tour-with-an-unfamil.md):
+have an operator-selected actual developer follow the independent quickstarts and
+guided changes without undocumented help. Record setup time, confusion, which
+files they could adapt, allowed/denied/cleanup observations and live-show timing
+separately. Rehearse two fresh offline runs on the presentation host. Human
+timing/comprehension, recordings and production/CET approvals remain open until
+genuinely observed; no agent result or generated participant replaces them.

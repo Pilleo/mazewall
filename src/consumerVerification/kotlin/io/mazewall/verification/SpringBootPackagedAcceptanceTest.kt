@@ -21,7 +21,7 @@ import java.util.zip.ZipOutputStream
 
 @Tag("consumer-native")
 class SpringBootPackagedAcceptanceTest {
-    private enum class Scenario { MISSING_REVIEW, STALE_REVIEW, CHANGED_JAR, CHANGED_TEMPLATE, UNSUPPORTED, SUCCESS }
+    private enum class Scenario { MISSING_REVIEW, STALE_REVIEW, CHANGED_JAR, CHANGED_TEMPLATE, UNSUPPORTED, SUCCESS, NORMAL, NORMAL_MISSING_REVIEW, CROSS_REVIEW }
 
     @Test
     @Timeout(value = 15, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SAME_THREAD)
@@ -50,9 +50,11 @@ class SpringBootPackagedAcceptanceTest {
                     assertEquals(success, result.exitCode == 0, "$scenario $mode exit=${result.exitCode}; deployment=$root\n$output")
                     return output
                 }
-                launch("measure")
-                if (scenario == Scenario.MISSING_REVIEW) {
-                    assertTrue("trusted-review.properties" in launch("verify", false, "missing-review"))
+                val normal = scenario in setOf(Scenario.NORMAL, Scenario.NORMAL_MISSING_REVIEW, Scenario.CROSS_REVIEW)
+                launch(if (normal) "measure-report" else "measure")
+                if (scenario == Scenario.MISSING_REVIEW || scenario == Scenario.NORMAL_MISSING_REVIEW) {
+                    assertTrue("trusted-review.properties" in launch(if (normal) "generate" else "verify", false, "missing-review"))
+                    assertEquals("", Files.readString(root.resolve("reports/quarterly.txt")))
                     continue
                 }
                 val authority = linkedMapOf(
@@ -75,7 +77,7 @@ class SpringBootPackagedAcceptanceTest {
                 }
                 approve("trusted-review.properties", if (scenario == Scenario.STALE_REVIEW) authority + ("jarSha256" to "0".repeat(64)) else authority)
                 when (scenario) {
-                    Scenario.MISSING_REVIEW -> error("Missing review handled before approval")
+                    Scenario.MISSING_REVIEW, Scenario.NORMAL_MISSING_REVIEW -> error("Missing review handled before approval")
                     Scenario.STALE_REVIEW -> {
                         val output = launch("stale", false)
                         assertTrue("review" in output.lowercase() || "mismatch" in output.lowercase())
@@ -143,6 +145,21 @@ class SpringBootPackagedAcceptanceTest {
                         assertEquals("Reviewed quarterly template", Files.readString(root.resolve("template.txt")))
                         assertEquals("Reviewed quarterly template: approved report", Files.readString(root.resolve("reports/quarterly.txt")))
                         assertEquals(authority.getValue("jarSha256"), BootFixture.hash(root.resolve("application.jar")))
+                    }
+                    Scenario.NORMAL -> {
+                        val output = launch("generate")
+                        assertTrue("REPORT_GENERATED quarterly:Reviewed quarterly template: quarterly report" in output)
+                        assertTrue("JDBC_COMMITTED actualRow=quarterly" in output && "REPORT_OWNER_RETIRED" in output)
+                        assertTrue("BOOT_NATIVE_PASS" !in output, "Normal application path must not run test scenarios")
+                        assertEquals("Reviewed quarterly template: quarterly report", Files.readString(root.resolve("reports/quarterly.txt")))
+                        assertEquals("Reviewed quarterly template", Files.readString(root.resolve("template.txt")))
+                        assertEquals(authority.getValue("jarSha256"), BootFixture.hash(root.resolve("application.jar")))
+                    }
+                    Scenario.CROSS_REVIEW -> {
+                        val output = launch("verify", false, "wrong-implementation-review")
+                        assertTrue("does not match configuration" in output)
+                        assertTrue("BOOT_ACTUAL_ORIGIN" !in output, "Wrong selected implementation must reject before preparation")
+                        assertEquals("", Files.readString(root.resolve("reports/quarterly.txt")))
                     }
                 }
                 Files.writeString(
