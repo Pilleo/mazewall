@@ -45,5 +45,13 @@ ownership remain intact. Two host and four finished-JAR presentation tests plus
 the existing ownership main pass after correction, without skips. The ten-second
 runtime close, five-second joins and 50 ms held observation are unchanged.
 
+Exact committed producer `3126b772995c5779c86ebb6706d295f8e44b0af7` passes the full
+optional integration aggregate in 9m52s, including both Spring host cases, all four
+finished-JAR presentation cases, real held-close regression, all three runnable
+entry points and the unchanged native/21-case ownership matrix. A scoped independent
+review reports no Critical, Important or Minor findings. The full build then passes
+in 5m20s with configured prerequisite skips unchanged. Updated exact-head hosted CI
+remains required; merge approval stays separate.
+
 ---
 <!-- id: issue-20261025-111413-642-publish-final-report-lifecycle-state-only-after-ac  file: issue-20261025-111413-642-publish-final-report-lifecycle-state-only-after-ac.md -->

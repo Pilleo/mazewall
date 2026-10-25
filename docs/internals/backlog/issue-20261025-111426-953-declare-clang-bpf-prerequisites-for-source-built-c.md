@@ -46,5 +46,11 @@ dependency graph, compiler installation, image or workflow change is made. The
 development-container recipe is checked against its existing image/compose inputs;
 a new development image/container was not launched for this fix.
 
+The updated guides' local links and bash syntax pass. Scoped independent review
+finds no Critical, Important or Minor issues in the compiler requirement, probe or
+container-input guidance. The source-bound full optional aggregate also passes on
+`3126b772995c5779c86ebb6706d295f8e44b0af7`, followed by the full build in 5m20s.
+Updated exact-head CI remains required, not a reason to remove the explicit prerequisite.
+
 ---
 <!-- id: issue-20261025-111426-953-declare-clang-bpf-prerequisites-for-source-built-c  file: issue-20261025-111426-953-declare-clang-bpf-prerequisites-for-source-built-c.md -->

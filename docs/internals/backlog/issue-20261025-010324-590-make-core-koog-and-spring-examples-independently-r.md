@@ -158,5 +158,10 @@ These are tracked separately with their actual reproductions and unchanged-budge
 corrections. Updated exact-head qualification is required before merge; earlier
 green CI is not used to waive either finding.
 
+Both follow-ups are implemented with deterministic native / cold-project evidence.
+Exact committed producer `3126b772995c5779c86ebb6706d295f8e44b0af7` passes optional
+acceptance in 9m52s and the full build in 5m20s. A scoped independent review reports
+no remaining findings; updated PR559 exact-head CI is still required before merge.
+
 ---
 <!-- id: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r  file: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md -->
