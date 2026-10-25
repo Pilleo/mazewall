@@ -36,7 +36,7 @@ Approved inline Plan B: qualify actual Koog1.3.0 AIAgent loops using a bounded s
 
 - [x] B1 scripted actual-agent consumer probes and reviewed dependency state.
 - [x] B2 failure/lifetime qualification and mandatory parent evidence gate.
-- [ ] Exact-source acceptance, full build and one independent final review.
+- [x] Exact-source acceptance, full build and one independent final review.
 
 Pre-flight: B2 consumes B1's two fresh-JVM tasks and assertion-bound summaries;
 neither plan changes the published Koog adapter or shares Spring interfaces.
@@ -100,6 +100,14 @@ Final rulings on reviewed exclusions:
 
 Spring's one review gap is corrected separately with RED→GREEN; final-source
 gates are rerun afterward. No deferred review minors remain.
+
+Final code producer `34bb6a89d848e88108b78dacb49d827a44781afc` passes exact-source
+optional acceptance in 9m53s, including both mandatory agent summaries and all prior
+direct-tool/JDBC/Security/Boot/ownership phases. The full build then passes 5m20s;
+no producer/adapter/worker dependency change or CI budget increase was made.
+The shared local branch retains independently scoped commits for the two changes;
+separate PR/hosted CI integration remains for the approved review path. Nothing
+was pushed, merged or published, and this issue remains open until approved landing.
 
 ---
 <!-- id: issue-20261025-223944-611-qualify-owned-koog-tools-inside-deterministic-real  file: issue-20261025-223944-611-qualify-owned-koog-tools-inside-deterministic-real.md -->

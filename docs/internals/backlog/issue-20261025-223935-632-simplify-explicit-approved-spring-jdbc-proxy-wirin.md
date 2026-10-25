@@ -16,7 +16,7 @@ target_files:
    - "demos/spring-boot-sandbox/src/main/java/demo/boot/ReportConfiguration.java"
    - "demos/spring-boot-sandbox/README.md"
    - "tests/consumers/spring-jdbc/src/main/java/consumer/spring/NativeJdbcConsumer.java"
-target_symbols: 
+target_symbols:
   - "SpringOperationBinder"
 open_questions: false
 ---
@@ -33,7 +33,7 @@ Approved inline Plan A: remove mechanical four-advisor assembly while preserving
 
 - [x] A1 typed factory, public API and host behavior tests.
 - [x] A2 published/demo adoption, unchanged negative controls and guides.
-- [ ] Exact-source acceptance, full build and one independent final review.
+- [x] Exact-source acceptance, full build and one independent final review.
 
 Pre-flight: A2 consumes A1's `createJdbcProxy(Class<T>, T, Advisor)`; existing
 `Approval`/`bind`/`validateRequiredBindings` remain authoritative and unchanged.
@@ -69,6 +69,14 @@ exact-source aggregate passed 9m19s on `d6eb4fc014a3230936d0a91737ceaf510fdc8daf
 including the 117 Spring tests, ordinary-JAR JDBC/Security, both Boot host tests,
 four finished-Boot presentations and unchanged ownership matrix; the initial full
 build passed 5m41s. Final-source aggregate/build are rerun after the correction.
+
+Final code producer `34bb6a89d848e88108b78dacb49d827a44781afc` passes exact-source
+optional acceptance in 9m53s (one executed, zero skipped/failed), then the full build
+in 5m20s. No gates, policies, resource limits or existing test budgets were relaxed.
+The independent review's only input-validation gap is fixed with RED→GREEN and
+the complete Spring suite; no deferred review findings remain. Engineering work is
+complete locally; separate scoped PR/CI, operator integration and publication are
+not performed by this change. Keep the issue open until approved landing evidence.
 
 ---
 <!-- id: issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin  file: issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin.md -->
