@@ -54,8 +54,12 @@ barrier. The existing optional phase now selects the five host await tests and
 the real workspace test, without filtering any previously selected test task.
 
 All 42 CLI module tests, eight native presentations and the actual workspace
-command pass without skips. Remaining checks are exact-source aggregate/full
-build and updated exact-head hosted CI; the previous failed gate is not waived.
+command pass without skips. Exact committed producer
+`a4aac5dcc759080228458a382e7dc7d580ac78f0` then passes optional acceptance in
+8m21s and the full build in 5m09s. Fresh-clone JUnit confirms the five await host
+cases, real workspace case, two Spring host cases and four Boot presentations
+execute without skips/failures; all three actual commands and prior phases pass.
+Updated exact-head hosted CI remains required; the previous failed gate is not waived.
 
 ---
 <!-- id: issue-20261025-121925-834-await-execution-end-before-reusing-single-admissio  file: issue-20261025-121925-834-await-execution-end-before-reusing-single-admissio.md -->
