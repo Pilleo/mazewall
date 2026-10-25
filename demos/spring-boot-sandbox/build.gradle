@@ -23,6 +23,11 @@ springBoot { mainClass = 'demo.boot.ReportApplication' }
 tasks.named('bootJar') { archiveFileName = 'report-application.jar' }
 tasks.named('jar') { enabled = false }
 
+tasks.test {
+    useJUnitPlatform { excludeTags 'presentation' }
+    maxParallelForks = 1
+}
+
 tasks.register('presentationTest', Test) {
     dependsOn tasks.named('bootJar')
     testClassesDirs = sourceSets.test.output.classesDirs

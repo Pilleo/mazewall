@@ -1,6 +1,12 @@
 # Finished executable Boot adoption proof
 
 The application is the [clean standalone demo](../../../demos/spring-boot-sandbox/README.md).
+Its normal `measure-report` / `generate` path uses a copyable `ReportService` with
+a bounded business label. The separate `measure` / `verify` target keeps all
+existing denial and cancellation scenarios in `ReportScenarioService` and
+`ReportVerification`. They use the same finished JAR but distinct actual selected
+Classes/resource generations: approval for one cannot authorize the other.
+
 The root Kotlin/JUnit harness is an **external private known-fixture reviewer**
 and disposable non-web `java -jar` acceptance test. It never modifies an operator's
 deployment or unknown files: each case creates and preserves its own private temporary
@@ -117,15 +123,17 @@ flock "$LOCK" ./gradlew -p "$ROOT/demos/spring-boot-sandbox" \
   -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
   ownershipTest bootJar --no-configuration-cache --no-parallel
 ./gradlew consumerHarnessTest
-# consumerNativeCheck above also executes all14 finished-JAR ownership negatives.
+# consumerNativeCheck above also executes all21 finished-JAR ownership negatives.
 ```
 
 The Java gate uses real filesystem collisions, symlinks/hardlinks, replacement identities,
 complete-byte publication and actual permission-denied cleanup. Kotlin checks real
 no-clobber evidence acquisition and timeout/kill/reap with partial streams while a separately
 owned unrelated process survives. The finished-JAR negatives exercise both measurement
-entry points and operator-file/directory aliases; the original eight acceptance cases
-remain intact. Required failures are not skipped when filesystem/permission features are
+entry points (including `measure-report`) and operator-file/directory aliases. The
+existing acceptance scenarios remain intact; normal report generation, missing
+normal review and cross-target review rejection add three finished-JAR cases.
+Required failures are not skipped when filesystem/permission features are
 unavailable. The measurement pair's per-file atomicity/stable topology limits are in the
 demo guide; external finished-JAR approval remains independent trusted fixture authority.
 

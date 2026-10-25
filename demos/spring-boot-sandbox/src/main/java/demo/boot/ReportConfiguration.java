@@ -27,9 +27,11 @@ public class ReportConfiguration {
     @Bean Reports reportService(ReportBootstrap bootstrap, JdbcTemplate jdbc,
                                DataSourceTransactionManager manager, ConfigurableListableBeanFactory beans) {
         bootstrap.configureBinding(beans);
-        var target = bootstrap.unsupported()
-                ? new UnsupportedReportService(jdbc, bootstrap.root(), bootstrap.state())
-                : new ReportService(jdbc, bootstrap.root(), bootstrap.state());
+        Reports target = switch (bootstrap.target()) {
+            case REPORT -> new ReportService(jdbc, bootstrap.root());
+            case VERIFICATION -> new ReportScenarioService(jdbc, bootstrap.root(), bootstrap.state());
+            case UNSUPPORTED -> new UnsupportedReportService(jdbc, bootstrap.root(), bootstrap.state());
+        };
         var factory = new ProxyFactory(target);
         factory.addAdvisor(bootstrap.binder().dispatchAdvisor());
         factory.addAdvisor(bootstrap.guard().transactionAdvisor());

@@ -25,6 +25,7 @@ target_files:
    - "demos/koog-contained-tool/src/test/kotlin/io/mazewall/demo/koog/PortalPresentationTest.kt"
    - "integrations/koog/README.md"
    - "demos/spring-boot-sandbox/README.md"
+   - "demos/spring-boot-sandbox/build.gradle"
    - "demos/spring-boot-sandbox/src/main/java/demo/boot/ReportService.java"
    - "demos/spring-boot-sandbox/src/main/java/demo/boot/Reports.java"
    - "demos/spring-boot-sandbox/src/main/java/demo/boot/ReportConfiguration.java"
@@ -91,6 +92,23 @@ two-stage producer wrapper runs the entire Koog demo test suite, both presentati
 cases, generated Portal package check and both separate fresh-JVM runnable commands
 successfully. Portal presentation uses the same application path, retaining actual
 child identity/lifecycle, immutable diagnostics, bounds and physical-death checks.
+
+**Task 3:** The host RED exposes the old service's fixture-only owned-worker
+metadata requirement even inside a real JDBC transaction. The finished-JAR RED
+rejects the not-yet-implemented normal measurement command. Ordinary report code
+now accepts a bounded business label and commits exactly once; invalid labels
+reject before SQL/file effects. The separate selected verification Class
+keeps every existing denial, rollback, unsupported-binding and held-cleanup case.
+Two host tests, four finished-JAR presentation tests and the native parent matrix
+pass with zero skips. The parent executes all nine acceptance scenarios and 21
+existing/symlink/hardlink/directory-alias controls, including the new normal target.
+
+**Ruling:** The standalone Spring `test` task explicitly uses the existing JUnit
+Platform dependencies and excludes the already-separated presentation tag, so
+ordinary host tests actually execute. Native worker observation moves to the
+existing trusted bootstrap context bridge; ordinary `ReportService.generate`
+contains neither fixture modes nor a worker-observation hook. Its selected Class,
+review/generation, unchanged advice and actual physical retirement remain required.
 
 ---
 <!-- id: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r  file: issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md -->

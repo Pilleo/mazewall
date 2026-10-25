@@ -14,6 +14,8 @@ import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 
 /** Application-owned review/bootstrap. Candidate measurement never supplies review authority. */
 final class ReportBootstrap implements AutoCloseable {
+    enum Target { REPORT, VERIFICATION, UNSUPPORTED }
+
     static final RuntimeProfile PROFILE = RuntimeProfile.HOTSPOT_JIT;
     static final Duration BUDGET = Duration.ofSeconds(10);
     private final Path root;
@@ -21,47 +23,53 @@ final class ReportBootstrap implements AutoCloseable {
     private final ReviewedOperationArtifact artifact;
     private final ManagedRuntime runtime;
     private final DomainLifecycle lifecycle;
-    private final boolean unsupported;
-    private final ReportState state = new ReportState();
+    private final Target target;
+    private final ReportState state;
     private final SpringTransactionEffects effects = new SpringTransactionEffects();
     private SpringTransactionGuard guard;
     private SpringOperationBinder binder;
 
     private ReportBootstrap(Path root, PreparedOperationResources resources, ReviewedOperationArtifact artifact,
-                            ManagedRuntime runtime, DomainLifecycle lifecycle, boolean unsupported) {
+                             ManagedRuntime runtime, DomainLifecycle lifecycle, Target target, ReportState state) {
         this.root = root;
         this.resources = resources;
         this.artifact = artifact;
         this.runtime = runtime;
         this.lifecycle = lifecycle;
-        this.unsupported = unsupported;
+        this.target = target;
+        this.state = state;
     }
 
-    static OperationBinding binding(String sha, String generation, boolean unsupported) {
+    static OperationBinding binding(String sha, String generation, Target target) {
         return new OperationBinding("quarterly-report", OperationAdapter.SPRING_METHOD, sha, generation,
-                Map.of("beanName", "reportService", "className", implementation(unsupported).getName(),
+                Map.of("beanName", "reportService", "className", implementation(target).getName(),
                         "methodDescriptor", "generate(Ljava/lang/String;)Ljava/lang/String;"));
     }
 
-    private static Class<?> implementation(boolean unsupported) {
-        return unsupported ? UnsupportedReportService.class : ReportService.class;
+    private static Class<? extends Reports> implementation(Target target) {
+        return switch (target) {
+            case REPORT -> ReportService.class;
+            case VERIFICATION -> ReportScenarioService.class;
+            case UNSUPPORTED -> UnsupportedReportService.class;
+        };
     }
 
-    static PreparedOperationResources resolve(Path root, boolean unsupported) {
+    static PreparedOperationResources resolve(Path root, Target target) {
         Path jar = root.resolve("application.jar");
         var policy = WorkerPolicyBuilder.denyList(PROFILE)
                 .allowFsRead(jar, root.resolve("template.txt"))
                 .allowFsWrite(root.resolve("reports/quarterly.txt")).build();
-        return PreparedOperationResources.resolve(PROFILE, policy, implementation(unsupported),
+        return PreparedOperationResources.resolve(PROFILE, policy, implementation(target),
                 Set.of(jar, root.resolve("template.txt")));
     }
 
-    static void measure(Path root, boolean unsupported) throws Exception {
-        try (var resources = resolve(root, unsupported)) {
+    static void measure(Path root, Target target) throws Exception {
+        boolean unsupported = target == Target.UNSUPPORTED;
+        try (var resources = resolve(root, target)) {
             var policy = WorkerPolicyBuilder.denyList(PROFILE)
                     .allowFsRead(root.resolve("application.jar"), root.resolve("template.txt"))
                     .allowFsWrite(root.resolve("reports/quarterly.txt")).build();
-            var document = new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration(), unsupported),
+            var document = new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration(), target),
                     CanonicalPolicyArtifact.worker(PROFILE, policy), Set.of(), Map.of());
             CandidatePublication.publish(root, unsupported ? "unsupported-candidate.json" : "candidate.json", document.toJson(),
                     unsupported ? "unsupported-generation.txt" : "candidate-generation.txt", resources.getResourceGeneration());
@@ -70,22 +78,23 @@ final class ReportBootstrap implements AutoCloseable {
         }
     }
 
-    static ReportBootstrap open(Path root, boolean unsupported) throws Exception {
+    static ReportBootstrap open(Path root, Target target) throws Exception {
+        boolean unsupported = target == Target.UNSUPPORTED;
         Properties external = new Properties();
         try (var input = Files.newInputStream(root.resolve(unsupported ? "unsupported-review.properties" : "trusted-review.properties"))) { external.load(input); }
-        var expected = binding(external.getProperty("jarSha256"), external.getProperty("resourceGeneration"), unsupported);
+        var expected = binding(external.getProperty("jarSha256"), external.getProperty("resourceGeneration"), target);
         var review = new TrustedPolicyReview(external.getProperty("reviewer"), external.getProperty("documentSha256"), Set.of());
         var artifact = ReviewedOperationArtifact.load(Files.readString(root.resolve(unsupported ? "unsupported-candidate.json" : "candidate.json")), review, expected);
-        var resources = resolve(root, unsupported);
+        var resources = resolve(root, target);
         try {
             if (!resources.getImplementationSha256().equals(external.getProperty("jarSha256"))
                     || !resources.getResourceGeneration().equals(external.getProperty("resourceGeneration"))) {
                 throw new IllegalArgumentException("Actual finished Boot deployment differs from external trusted review");
             }
-            if (resources.getImplementationSha256().equals(SpringOperationBinder.classResourceSha256(implementation(unsupported)))) {
+            if (resources.getImplementationSha256().equals(SpringOperationBinder.classResourceSha256(implementation(target)))) {
                 throw new IllegalStateException("Selected class hash cannot replace actual finished-JAR hash");
             }
-            Class<?> selected = implementation(unsupported);
+            Class<?> selected = implementation(target);
             System.out.println("BOOT_ACTUAL_ORIGIN loader=" + selected.getClassLoader().getClass().getName()
                     + " resource=" + selected.getResource(selected.getSimpleName() + ".class")
                     + " wholeOuterJar=" + resources.getImplementationSha256()
@@ -94,9 +103,14 @@ final class ReportBootstrap implements AutoCloseable {
             // Explicit operator-owned platform bootstrap; process baseline is permanent, not starter magic.
             var runtime = ManagedRuntime.open(PROFILE, Policy.NO_EXEC_HOTSPOT, BUDGET, BUDGET);
             try {
-                var lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 4), resources, Duration.ofMillis(50));
+                var state = new ReportState();
+                var lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 4), resources, Duration.ofMillis(50),
+                        invocation -> () -> {
+                            state.worker = WorkerMetadata.capture();
+                            return invocation.call();
+                        });
                 lifecycle.start();
-                return new ReportBootstrap(root, resources, artifact, runtime, lifecycle, unsupported);
+                return new ReportBootstrap(root, resources, artifact, runtime, lifecycle, target, state);
             } catch (RuntimeException | Error failure) {
                 try { runtime.close(); } catch (RuntimeException | Error cleanup) { failure.addSuppressed(cleanup); }
                 throw failure;
@@ -112,14 +126,14 @@ final class ReportBootstrap implements AutoCloseable {
         binder = new SpringOperationBinder(beans, lifecycle, guard);
     }
     void bind(Reports registered) throws Exception {
-        binder.bind(new SpringOperationBinder.Approval(artifact, registered, ReportService.class.getClassLoader(),
+        binder.bind(new SpringOperationBinder.Approval(artifact, registered, implementation(target).getClassLoader(),
                 PROFILE, resources.getResourceGeneration(), Set.of(SpringOperationBinder.Phase.BODY,
                 SpringOperationBinder.Phase.TRANSACTION_COMPLETION)));
         binder.validateRequiredBindings(List.of("reportService"));
     }
     Path root() { return root; }
     ReportState state() { return state; }
-    boolean unsupported() { return unsupported; }
+    Target target() { return target; }
     SpringOperationBinder binder() { return binder; }
     SpringTransactionGuard guard() { return guard; }
     SpringTransactionEffects effects() { return effects; }
