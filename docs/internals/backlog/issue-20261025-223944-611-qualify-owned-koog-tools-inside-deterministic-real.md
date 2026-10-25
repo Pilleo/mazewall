@@ -78,5 +78,28 @@ the existing exact-publication checksum helper now also handles the seven Koog
 fixture modules without broad trust exceptions. Exact-source/full gates and final
 independent review are still pending.
 
+Exact-source aggregate passed 9m19s and full build passed 5m41s on
+`d6eb4fc014a3230936d0a91737ceaf510fdc8daf`; both real-agent summaries and every
+pre-existing phase executed. Independent review finds no Koog corrections.
+
+Final rulings on reviewed exclusions:
+- Five graph nodes and Portal mapper entry remain the already-recorded bounded
+  decisions, not relaxed retries or a child-start attestation.
+- A new model request is distinct from adapter replay; business idempotency stays
+  application-owned. Cost if misunderstood: repeated application effects.
+- Raw-target entry, target lifecycle and model-visible error disclosure stay
+  explicit application responsibilities. Cost if ignored: containment bypass,
+  leaked resources or provider-visible data; the helper/qualification grants none
+  of those broader guarantees.
+- Existing interrupted-maintenance warnings are not suppressed. Real canonical
+  close and captured process death still gate success; cost if misunderstood:
+  warnings alone are neither proof of failure nor retirement evidence.
+- Live providers, broader API/result shapes, arbitrary-code isolation and
+  performance qualification remain out of scope. Cost: real-world provider and
+  adoption behavior is not certified by deterministic contract tests.
+
+Spring's one review gap is corrected separately with RED→GREEN; final-source
+gates are rerun afterward. No deferred review minors remain.
+
 ---
 <!-- id: issue-20261025-223944-611-qualify-owned-koog-tools-inside-deterministic-real  file: issue-20261025-223944-611-qualify-owned-koog-tools-inside-deterministic-real.md -->

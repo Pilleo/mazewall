@@ -55,5 +55,20 @@ than duplicating the existing manual-path `OperationBindingTest` fixture. Both
 paths remain tested. Final expensive acceptance/build gates cover both independent
 changes once; their results are still required, not inferred from these host tests.
 
+Final review: no Critical/Important findings initially; the reviewer identified a
+plain-JDK-proxy input accepted by assembly and rejected only by later binding.
+Re-graded as an important approved-contract gap (not an execution bypass): the new
+factory promises non-proxy inputs and should fail at that boundary. Added a real
+`Proxy.newProxyInstance` regression: RED is expected IllegalArgumentException but
+nothing thrown. Rejecting `Proxy.isProxyClass` closes that case without broadening
+the existing binding or core contract. This is the single final review fix pass.
+
+GREEN: Spring build (all 117 tests, zero skipped/failed) and configured static/
+coverage checks pass with configuration-cache reuse after correction. Initial
+exact-source aggregate passed 9m19s on `d6eb4fc014a3230936d0a91737ceaf510fdc8daf`,
+including the 117 Spring tests, ordinary-JAR JDBC/Security, both Boot host tests,
+four finished-Boot presentations and unchanged ownership matrix; the initial full
+build passed 5m41s. Final-source aggregate/build are rerun after the correction.
+
 ---
 <!-- id: issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin  file: issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin.md -->

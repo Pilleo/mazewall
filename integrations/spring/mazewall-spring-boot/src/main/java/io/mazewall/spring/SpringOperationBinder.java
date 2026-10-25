@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.Proxy;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -121,6 +122,7 @@ public final class SpringOperationBinder {
         if (jdbcGuard == null) throw rejected("JDBC proxy construction requires this binder's JDBC guard");
         readiness.get();
         if (!contract.isInterface() || !contract.isInstance(initializedTarget)
+                || Proxy.isProxyClass(initializedTarget.getClass())
                 || AopUtils.isAopProxy(initializedTarget) || initializedTarget instanceof Advised) {
             throw new IllegalArgumentException("An interface and its initialized non-proxy singleton target are required");
         }

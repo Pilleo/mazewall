@@ -89,6 +89,9 @@ class JdbcProxyFactoryTest {
             assertThrows(IllegalArgumentException.class, () -> f.binder.createJdbcProxy(Service.class, f.target, f.authorization));
             Operation nested = (Operation) new ProxyFactory(f.target).getProxy();
             assertThrows(IllegalArgumentException.class, () -> f.binder.createJdbcProxy(Operation.class, nested, f.authorization));
+            Operation plain = (Operation) java.lang.reflect.Proxy.newProxyInstance(Operation.class.getClassLoader(),
+                    new Class<?>[] {Operation.class}, (proxy, method, args) -> "uncontained");
+            assertThrows(IllegalArgumentException.class, () -> f.binder.createJdbcProxy(Operation.class, plain, f.authorization));
             var withoutJdbc = SpringOperationBinder.forTrustedHostCharacterization(f.beans, f.dispatch, f.artifact);
             assertThrows(IllegalStateException.class, () -> withoutJdbc.createJdbcProxy(Operation.class, f.target, f.authorization));
             assertEquals(0, f.target.calls.get());
