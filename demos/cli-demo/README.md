@@ -4,8 +4,22 @@ This application runs executable positive and negative controls and exits non-ze
 
 ## Start here: an owned workspace read
 
-Use JDK 25 on Linux with Seccomp and Landlock available to the JVM. This command
-launches a fresh JVM because its explicitly installed process baseline is permanent:
+Use JDK 25 on Linux with Seccomp and Landlock available to the JVM, plus **Clang
+with its BPF backend** for this source build. The CLI module depends on the profiler
+JAR, whose resources compile `profiler/src/main/c/btf/invocation_state.c` using
+`clang -target bpf`. A compiler binary without that backend is not enough. This
+build-time step is required even though the workspace example performs no profiling;
+it is not a native C runtime dependency or a need for profiling permissions.
+
+From the repository root, check the actual source/tool combination without writing
+repository files:
+
+```bash
+clang -target bpf -g -O2 -c profiler/src/main/c/btf/invocation_state.c -o /dev/null
+```
+
+Then run the example below. It launches a fresh JVM because its explicitly
+installed process baseline is permanent:
 
 ```bash
 ./gradlew :demos:cli-demo:runWorkspaceExample --console=plain
@@ -69,11 +83,18 @@ All attack markers and configuration fixtures are created beneath fresh owner-on
 
 ## Running
 
-Run inside the nested-seccomp development environment when exercising kernel containment:
+The existing [development image](../../infra/dev/Containerfile) already installs
+Clang and LLVM. To use its nested-seccomp environment instead of configuring host
+build tools, run from the repository root with a caller-owned cache directory:
 
 ```bash
-podman compose -f infra/dev/compose.yml up -d
-podman compose -f infra/dev/compose.yml exec mazewall ./gradlew :demos:cli-demo:run
+export MAZEWALL_UID="$(id -u)"
+export MAZEWALL_GID="$(id -g)"
+export MAZEWALL_CONTAINER_CACHE_DIR="$PWD/build/core-example-container-gradle"
+mkdir -p "$MAZEWALL_CONTAINER_CACHE_DIR"
+test "$(stat -c '%u' "$MAZEWALL_CONTAINER_CACHE_DIR")" = "$MAZEWALL_UID"
+podman compose -f infra/dev/compose.yml up -d --build
+podman compose -f infra/dev/compose.yml exec mazewall ./gradlew :demos:cli-demo:runWorkspaceExample --console=plain
 ```
 
 Individual examples:

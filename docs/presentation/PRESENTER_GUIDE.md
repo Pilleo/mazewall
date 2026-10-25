@@ -5,6 +5,11 @@
 For a first evaluation, choose one independent example rather than building a
 combined Koog/Spring application:
 
+The core CLI source build needs JDK25/Linux/native permissions and Clang with its
+BPF backend because the CLI module also builds profiler resources. Check the
+[compiler probe or configured development-image route](../../demos/cli-demo/README.md#start-here-an-owned-workspace-read)
+before a clean first run. No profiling permission is needed for the workspace read.
+
 - Core: `./gradlew :demos:cli-demo:runWorkspaceExample --console=plain`.
   [Policy, owned call and expected observations](../../demos/cli-demo/README.md#start-here-an-owned-workspace-read).
 - Koog: the [thread reader and generated Portal commands](../../demos/koog-contained-tool/README.md)

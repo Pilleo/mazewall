@@ -2,7 +2,10 @@
 
 ## Choose one independent example
 
-Use JDK 25 on Linux with the required Seccomp/Landlock permissions. Each native
+Use JDK 25 on Linux with the required Seccomp/Landlock permissions. The core CLI
+source build also needs Clang's BPF backend for its profiler resource dependency;
+see the [compiler probe and development image](cli-demo/README.md#start-here-an-owned-workspace-read).
+Each native
 entry point launches a fresh JVM and fails if required support is unavailable.
 These examples create owned synthetic fixtures, not arbitrary operator files.
 

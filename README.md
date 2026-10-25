@@ -20,11 +20,18 @@ mazewall lets you wrap trusted code that processes risky input in **kernel-enfor
 
 ## Try an independent runnable example
 
-With JDK 25 on Linux and the required Seccomp/Landlock support, start with:
+From the repository root, use JDK 25 on Linux with the required Seccomp/Landlock
+support **and Clang with a BPF backend** for the source build, then run:
 
 ```bash
 ./gradlew :demos:cli-demo:runWorkspaceExample --console=plain
 ```
+
+The CLI module also builds profiler resources, which invoke `clang -target bpf`
+even though this example does not profile anything. See the
+[compiler probe and configured development-container route](demos/cli-demo/README.md#start-here-an-owned-workspace-read)
+before the first build. This is a source-build tool requirement, not a native C
+runtime dependency of the core API.
 
 It reads an approved file, proves a real denied sibling open while the host can
 still read that sibling, and requires actual worker cleanup. It creates only
