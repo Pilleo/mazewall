@@ -39,3 +39,13 @@ dependencies {
     testImplementation(kotlin("test"))
     testImplementation(rootProject.sourceSets["sharedTest"].output)
 }
+
+tasks.register<JavaExec>("runWorkspaceExample") {
+    group = "application"
+    description = "Read an approved workspace file and demonstrate a real denied sibling open in a fresh JVM."
+    dependsOn(tasks.jar)
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = files(tasks.named<Jar>("jar").flatMap { it.archiveFile }, configurations.named("runtimeClasspath"))
+    mainClass.set("demo.WorkspaceExample")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}

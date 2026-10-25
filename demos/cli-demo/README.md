@@ -2,6 +2,47 @@
 
 This application runs executable positive and negative controls and exits non-zero whenever the observed result differs from the declared expectation. A kernel containment denial, successful operation, and infrastructure failure are distinct outcomes; an unavailable daemon or unrelated I/O error never counts as a successful block.
 
+## Start here: an owned workspace read
+
+Use JDK 25 on Linux with Seccomp and Landlock available to the JVM. This command
+launches a fresh JVM because its explicitly installed process baseline is permanent:
+
+```bash
+./gradlew :demos:cli-demo:runWorkspaceExample --console=plain
+```
+
+It creates private synthetic files, reads `workspace/input.txt` on one restricted
+platform worker, and proves that the same worker cannot open a sibling the host
+can read. A subsequent approved read still succeeds. Expect these observations:
+
+```text
+RESULT: workspace/input.txt = approved input
+BOUNDARY: worker sibling read denied; host sibling read and subsequent approved read succeed
+CLEANUP: actual worker retired and private fixture removed; process restrictions are not uninstalled
+```
+
+The actual file-open failure is labeled `INFERRED_PERMISSION_FAILURE`, not
+authenticated kernel provenance. Setup/permission failures fail the command;
+there is no unprotected fallback. Shared heap, preopened descriptors and unrelated
+executors remain outside the worker body contract.
+
+Read [WorkspaceExample.kt](src/main/kotlin/demo/WorkspaceExample.kt) for the policy,
+bootstrap and `readWorkspaceFile(runtime, domain, path)` call, then
+[OwnedDemoRuntime.kt](src/main/kotlin/demo/OwnedDemoRuntime.kt) for retained owner,
+cancellation and bounded drain handling. The runtime belongs to the application,
+not to each read. One worker/one admission is a demonstration limit, not sizing advice.
+
+**Try a change:** in a private copy, change the first approved read's `allowed`
+argument to `sibling` without changing the policy. It must fail with the real denied
+open, rather than read the host's private sibling. Keep the later explicit denial
+control and never widen permissions merely to get a green result.
+
+For executable assertions in an IDE, run
+[WorkspaceExampleTest](src/test/kotlin/demo/WorkspaceExampleTest.kt) or
+[EnforcementPresentationTest](src/test/kotlin/demo/EnforcementPresentationTest.kt).
+Missing-file failures are checked separately from real denied opens. Continue with
+the profiling and lifecycle lessons in the [feature tour](../README.md).
+
 ## Modes
 
 - `unsafe` expects the simulated JNDI exploit to create a marker inside an owned private temporary directory.
