@@ -142,7 +142,7 @@ fun main() = runBlocking {
     println("KOOG_CONTAINMENT_V1_OK read=denied write=denied symlink=denied network=denied process=denied controls=pass retirement=pass")
 }
 
-private fun captureReadyWorkers(runtime: PortalRuntime, workers: MutableSet<ProcessHandle>) {
+internal fun captureReadyWorkers(runtime: PortalRuntime, workers: MutableSet<ProcessHandle>) {
     for (health in runtime.health()) {
         for (pid in health.workerPids) {
             val worker = ProcessHandle.of(pid).orElseThrow { IllegalStateException("ready worker $pid disappeared") }
@@ -153,7 +153,7 @@ private fun captureReadyWorkers(runtime: PortalRuntime, workers: MutableSet<Proc
     check(workers.isNotEmpty()) { "expected an actual ready worker" }
 }
 
-private inline fun PortalRuntime.useWithWorkerRetirement(action: (PortalRuntime, MutableSet<ProcessHandle>) -> Unit) {
+internal inline fun PortalRuntime.useWithWorkerRetirement(action: (PortalRuntime, MutableSet<ProcessHandle>) -> Unit) {
     val workers = mutableSetOf<ProcessHandle>()
     val outcome = runCatching { use { runtime -> action(runtime, workers) } }
     var failure = outcome.exceptionOrNull()

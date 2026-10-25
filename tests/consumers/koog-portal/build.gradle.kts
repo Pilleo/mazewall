@@ -20,6 +20,7 @@ dependencies {
     implementation("io.mazewall:denied-api:$candidate")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
+    implementation("ai.koog:agents-core:1.3.0")
 }
 
 tasks.register<JavaExec>("nativeProbe") {
@@ -74,6 +75,22 @@ tasks.register<JavaExec>("verifyFreshThreadNative") {
         }
         workingDir = Files.createTempDirectory("mazewall-koog-thread-native-").toFile()
         logger.lifecycle("FRESH_THREAD_NATIVE_CONSUMER directory={} jars={}", workingDir, classpath.files.size)
+    }
+}
+
+for ((task, entry) in listOf("verifyFreshThreadAgent" to "KoogThreadAgentProbeKt", "verifyFreshPortalAgent" to "KoogPortalAgentProbeKt")) {
+    tasks.register<JavaExec>(task) {
+        dependsOn("stageFreshProbe", "verifyPublishedClosure")
+        classpath = fileTree(layout.buildDirectory.dir("fresh-probe/lib")) { include("*.jar") }
+        mainClass.set("io.mazewall.consumer.koog.$entry")
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+        environment("LC_ALL", "C")
+        outputs.upToDateWhen { false }
+        outputs.cacheIf { false }
+        doFirst {
+            require(classpath.files.isNotEmpty() && classpath.files.all { it.isFile && it.extension == "jar" })
+            workingDir = Files.createTempDirectory("mazewall-koog-agent-").toFile()
+        }
     }
 }
 

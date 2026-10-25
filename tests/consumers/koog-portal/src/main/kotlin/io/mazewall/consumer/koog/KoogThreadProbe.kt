@@ -309,7 +309,7 @@ private suspend fun verifyThreadCancellation(runtime: ManagedRuntime, domain: In
     check(entries.get() == 1) { "cancelled queued body must never enter, including after cleanup release" }
 }
 
-private fun awaitHeldCleanup(release: CountDownLatch) {
+internal fun awaitHeldCleanup(release: CountDownLatch) {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
     var interrupted = false
     try {

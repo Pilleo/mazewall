@@ -42,15 +42,16 @@ internal fun requireKoogSpringSummaries(output: String): Set<String> {
     return summaries.toSet()
 }
 
-internal fun withKoogSpringPublicationChecksums(
+internal fun withOptionalPublicationChecksums(
     metadata: String,
     repository: Path,
     version: String,
+    modules: List<String> = listOf("platform", "enforcer", "runtime", "koog", "mazewall-spring-boot", "mazewall-spring-boot-starter"),
 ): String {
     require(Regex("0\\.1\\.0-integration\\.[a-f0-9]{12}").matches(version)) { "Exact producer revision coordinate required" }
     check("version=\"$version\"" !in metadata && metadata.split("</components>").size == 2) { "New coordinate and intact verification metadata required" }
     val additions = buildString {
-        for (module in listOf("platform", "enforcer", "runtime", "koog", "mazewall-spring-boot", "mazewall-spring-boot-starter")) {
+        for (module in modules) {
             appendLine("<component group=\"io.mazewall\" name=\"$module\" version=\"$version\">")
             for (extension in listOf("jar", "pom", "module")) {
                 val name = "$module-$version.$extension"
@@ -64,6 +65,21 @@ internal fun withKoogSpringPublicationChecksums(
     }
     // Add only this producer's fixed coordinates; all historical and external approvals stay byte-identical.
     return metadata.replace("</components>", additions + "</components>")
+}
+
+internal fun requireKoogAgentSummaries(
+    threadOutput: String,
+    portalOutput: String,
+): Set<String> {
+    val expected = listOf(
+        "KOOG_AGENT_V1_OK boundary=thread loop=real validation=rejected denial=preserved overload=rejected cancellation=cooperative deadline=propagated retirement=complete replay=false",
+        "KOOG_AGENT_V1_OK boundary=portal loop=real validation=rejected denial=preserved unknown=terminal cancellation=cooperative deadline=propagated retirement=complete replay=false",
+    )
+    for ((output, summary) in listOf(threadOutput, portalOutput).zip(expected)) {
+        val found = output.lineSequence().filter { it.startsWith("KOOG_AGENT_V1_") }.toList()
+        check(found == listOf(summary)) { "Expected exactly one complete agent summary: $summary; found $found" }
+    }
+    return expected.toSet()
 }
 
 /** Real source-bound publications and consumers; fixture approval is never production authority. */
@@ -145,6 +161,14 @@ class OptionalIntegrationAcceptanceTest {
                     KoogPackageKind.NATIVE_FIXTURE,
                 )
                 val koog = gradle + listOf("-p", root.resolve("tests/consumers/koog-portal").toString()) + properties
+                val koogVerification = root.resolve("tests/consumers/koog-portal/gradle/verification-metadata.xml")
+                val koogPinned = withOptionalPublicationChecksums(
+                    Files.readString(koogVerification),
+                    repository,
+                    version,
+                    listOf("platform", "enforcer", "runtime", "koog", "koog-contained-tool", "denied-api", "service-api"),
+                )
+                Files.writeString(koogVerification, koogPinned)
                 val historicalLocks = Files.readAllBytes(root.resolve("tests/consumers/koog-portal/gradle.lockfile"))
                 val invalidVersion = ConsumerFixture.command(
                     gradle + listOf("-p", root.resolve("tests/consumers/koog-portal").toString(), "-PconsumerVersion=../escape", "-PconsumerRepository=$repository", "help", "--write-locks"),
@@ -164,6 +188,10 @@ class OptionalIntegrationAcceptanceTest {
                 println(requireKoogContainmentSummary(native))
                 val threadNative = run("strict-fresh-native-koog-thread", koog + "verifyFreshThreadNative")
                 println(requireKoogThreadSummary(threadNative))
+                val threadAgent = run("strict-fresh-thread-agent", koog + "verifyFreshThreadAgent")
+                val portalAgent = run("strict-fresh-portal-agent", koog + "verifyFreshPortalAgent")
+                requireKoogAgentSummaries(threadAgent, portalAgent).forEach(::println)
+                check(Files.readString(koogVerification) == koogPinned) { "Agent qualification changed dependency approvals" }
                 run(
                     "ordinary-jar-jdbc-security",
                     gradle +
@@ -177,7 +205,7 @@ class OptionalIntegrationAcceptanceTest {
                 val historicalSpringLocks = Files.walk(springConsumer.resolve("locks")).use { paths ->
                     paths.filter(Files::isRegularFile).toList().associateWith(Files::readString)
                 }
-                val pinned = withKoogSpringPublicationChecksums(Files.readString(verification), repository, version)
+                val pinned = withOptionalPublicationChecksums(Files.readString(verification), repository, version)
                 Files.writeString(verification, pinned)
                 run("new-koog-spring-coordinate-locks", spring + listOf("dependencies", "--write-locks"))
                 val springNative = run("strict-published-koog-spring", spring + listOf("test", "verifyPublishedClosure", "verifyFreshNative"))

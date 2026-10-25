@@ -6,8 +6,16 @@ priority: high
 dependencies: []
 component: "integrations"
 target_modules: []
-target_files: 
-  - "integrations/spring/mazewall-spring-boot/src/main/java/io/mazewall/spring/SpringOperationBinder.java"
+target_files:
+   - "integrations/spring/mazewall-spring-boot/src/main/java/io/mazewall/spring/SpringOperationBinder.java"
+   - "integrations/spring/mazewall-spring-boot/src/test/java/io/mazewall/spring/JdbcProxyFactoryTest.java"
+   - "integrations/spring/mazewall-spring-boot/src/test/java/io/mazewall/spring/PublicBindingApiTest.java"
+   - "integrations/spring/mazewall-spring-boot/src/test/java/io/mazewall/spring/ReviewedJdbcBindingTest.java"
+   - "integrations/spring/mazewall-spring-boot/S1-S2-contract.md"
+   - "integrations/spring/mazewall-spring-boot-starter/README.md"
+   - "demos/spring-boot-sandbox/src/main/java/demo/boot/ReportConfiguration.java"
+   - "demos/spring-boot-sandbox/README.md"
+   - "tests/consumers/spring-jdbc/src/main/java/consumer/spring/NativeJdbcConsumer.java"
 target_symbols: 
   - "SpringOperationBinder"
 open_questions: false

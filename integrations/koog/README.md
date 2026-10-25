@@ -219,6 +219,36 @@ anything, and READY does not establish call admissibility or denial provenance.
 
 ## Verification and delivery
 
+### Actual agent-loop qualification
+
+The independent [published consumer](../../tests/consumers/koog-portal/README.md#real-agent-loops-without-a-model-account)
+also runs Koog 1.3.0 `AIAgent` with a consumer-only scripted `PromptExecutor`, real
+registry/JSON dispatch and actual thread/Portal protection in separate fresh JVMs.
+Only that consumer adds `agents-core:1.3.0`; the published adapters still depend on
+`agents-tools`, and worker bundles acquire no Koog or Spring dependency.
+
+The fixed script requests one tool call and one final response. Five graph nodes
+are allowed (start/model/tool/model/finish), but a third model request rejects.
+Invalid JSON/arguments, unknown tools, oversized results, actual permission denial,
+overload, cancellation, deadlines and terminal unknown Portal completion are
+qualified without automatic retries or permission widening. A new explicit model
+request remains a new application call; these adapters do not promise global
+exactly-once business effects or prevent a model from asking again.
+
+Upstream Koog ordinarily converts tool exceptions into `isError` observations and
+retains original exceptions in failure events. A successful `agent.run()` may thus
+describe a failed tool: it is **not** a successful operation/commit receipt. Unknown
+tool observations are rendered as text by Koog's default missing-tool conversion.
+Cancellation still propagates rather than becoming an ordinary tool result.
+Error messages/history are host/model data, not protected payloads or sanitized
+production telemetry; applications must review what they expose to a live provider.
+
+The native gate separately requires real canonical retirement. The thread test
+holds lexical cleanup and observes incomplete drain; the Portal test holds the
+original host mapping's cleanup, not an asserted child-body start. Both release
+cleanup and join their actual owned threads/processes before reporting completion.
+No live provider, arbitrary Java isolation or forced termination is certified.
+
 For fast host-only adapter contracts:
 
 ```bash
