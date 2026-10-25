@@ -135,8 +135,13 @@ command reproduces RED: no ReportServiceTest JUnit report exists. Adding `test`
 to the same invocation produces both passing host cases, zero skips/failures.
 The parent now requires that exact two-case successful JUnit suite, with external
 XML entities/DTDs disabled, so later task omission or skipped cases cannot pass.
-Consumer host tests, ktlint and SpotBugs pass; post-correction aggregate/full-build
-verification and exact-head hosted CI remain pending. No second review is needed.
+Consumer host tests, ktlint and SpotBugs pass. Post-correction exact committed
+producer `d754da35a6e819791ef09eaa1755342e2d8e9185` passes the complete optional
+aggregate in 7m06s, including the new ordinary-service host-JUnit gate, all three
+runnable entry points, four Boot presentations and every prior native/ownership
+phase. The full build then passes in 5m12s with configured prerequisite skips
+unchanged. Exact-head hosted CI and operator merge approval remain pending;
+no second review is needed after the verified correction pass.
 
 **Final review boundaries:** Full agent/live-provider/HTTP/Security expansion,
 hostile-Java/shared-heap/preopened-FD/concurrent-deployment guarantees and human
