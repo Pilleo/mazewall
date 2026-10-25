@@ -37,6 +37,24 @@ the build; no inclusion patch is required.
 See [the complete narrow S3 contract](../mazewall-spring-boot/S3-contract.md) for evidence
 and its original phase boundaries, supplemented by the current consumer guides.
 
+## Explicit JDBC proxy assembly
+
+After application-owned bootstrap and `lifecycle.start()`, construct the binder
+with your existing qualified `SpringTransactionGuard`. In the explicit service
+`@Bean` method, use:
+
+```java
+return binder.createJdbcProxy(Reports.class, initializedReportService, authorizationAdvisor);
+```
+
+This only assembles the frozen dispatch/transaction/diagnosis/authorization chain.
+It neither initializes/destroys the target nor registers, approves or replaces a
+bean. After Spring registers it, supply the actual singleton in the existing
+`SpringOperationBinder.Approval`, call `bind`, then `validateRequiredBindings` on
+your explicit scope **before accepting traffic**. An unbound proxy rejects calls.
+Security remains opt-in; pass the supported Security advisor when required, not a
+no-op replacement. See the [independent report example](../../../demos/spring-boot-sandbox/README.md).
+
 ## Optional read-only Actuator diagnostics
 
 The normal starter does not force Actuator or a JSON implementation. Add the

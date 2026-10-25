@@ -19,6 +19,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import org.springframework.aop.Advisor;
 import org.springframework.aop.framework.Advised;
+import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.aop.target.SingletonTargetSource;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
@@ -48,6 +49,7 @@ public final class SpringOperationBinder {
     private final Supplier<InvocationDispatcher> readiness;
     private final BoundInvocationInterceptor boundary;
     private final PreparedOperationResources resources;
+    private final SpringTransactionGuard jdbcGuard;
     private Object boundBean;
 
     public SpringOperationBinder(ConfigurableListableBeanFactory beans, DomainLifecycle lifecycle) {
@@ -72,6 +74,7 @@ public final class SpringOperationBinder {
         this.preparedArtifact = Objects.requireNonNull(artifact);
         this.readiness = readiness;
         this.resources = trustedHost ? null : Objects.requireNonNull(resources);
+        this.jdbcGuard = jdbcGuard;
         InvocationDispatcher dispatcher = readiness.get(); // Fail required inactive protection explicitly.
         boundary = jdbcGuard == null ? (trustedHost ? BoundInvocationInterceptor.forTrustedHostCharacterization(dispatcher)
                 : new BoundInvocationInterceptor(dispatcher)) : (trustedHost
@@ -108,6 +111,29 @@ public final class SpringOperationBinder {
 
     /** Install in the existing application's ProxyFactory BEFORE publication and freeze that factory. */
     public Advisor dispatchAdvisor() { return boundary.dispatchAdvisor(); }
+
+    /** Assemble before singleton publication; approval of the actual registered proxy remains explicit. */
+    public synchronized <T> T createJdbcProxy(Class<T> contract, T initializedTarget, Advisor authorization) throws Exception {
+        Objects.requireNonNull(contract);
+        Objects.requireNonNull(initializedTarget);
+        Objects.requireNonNull(authorization);
+        if (boundBean != null) throw rejected("Operation already bound");
+        if (jdbcGuard == null) throw rejected("JDBC proxy construction requires this binder's JDBC guard");
+        readiness.get();
+        if (!contract.isInterface() || !contract.isInstance(initializedTarget)
+                || AopUtils.isAopProxy(initializedTarget) || initializedTarget instanceof Advised) {
+            throw new IllegalArgumentException("An interface and its initialized non-proxy singleton target are required");
+        }
+        var factory = new ProxyFactory();
+        factory.setTarget(initializedTarget);
+        factory.setInterfaces(contract);
+        factory.addAdvisor(dispatchAdvisor());
+        factory.addAdvisor(jdbcGuard.transactionAdvisor());
+        factory.addAdvisor(jdbcGuard.diagnosisAdvisor());
+        factory.addAdvisor(authorization);
+        factory.setFrozen(true);
+        return contract.cast(factory.getProxy(contract.getClassLoader()));
+    }
 
     public synchronized Object bind(Approval approval) throws Exception {
         Objects.requireNonNull(approval);
