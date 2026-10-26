@@ -31,7 +31,7 @@ Authorized follow-up to ponytail review: createJdbcProxy defines the Spring prox
 - [x] GREEN: use Spring's normal `getProxy()` selection, keeping approval and all
   existing rejection/ownership checks. Require exact proxy/target/advisor/manager
   identities, zero unbound body entries and successful registered invocation.
-- [ ] Spring suite/static/cache, committed-source acceptance, full build, scoped
+- [x] Spring suite/static/cache, committed-source acceptance, full build, scoped
   final review and reference/backlog checks.
 
 Base: `68c817be`. Existing S1/S2 contract is authoritative. The public helper's
@@ -55,6 +55,22 @@ body entry, binds the exact registered singleton and invokes the shared interfac
 once. All 118 Spring tests pass without skips/failures/errors; the module build's
 configured analysis/coverage gates and strict configuration-cache reuse pass.
 Exact-source aggregate/full build and scoped final review remain pending.
+
+Final code producer `cbd04e308c7e3440db63b57305f976220f7cc215` passes exact-source
+optional acceptance in 10m56s (one executed, zero skipped/failed), including the new
+classloader regression, all 118 Spring cases, direct/agent Koog modes, ordinary-JAR
+JDBC/Security, finished Boot and the ownership/negative matrix. The full build then
+passes in 5m18s. No budgets, policies, bindings or dependencies were changed.
+
+Independent scoped review reports no Critical, Important or Minor findings and
+confirms default loader selection matches Spring 7.0.9's original manual path.
+Final scope rulings: arbitrary context-loader fallbacks and new Boot/exploded
+compatibility claims are not added; this regression proves real host Spring
+binding, not native attestation. Existing native deployment gates remain required
+and passed. Earlier feature code is not re-audited by this scoped fix review.
+The author's inspected exact-source/full results supply the review's pending gates.
+No deferred review findings remain. Nothing was pushed, merged or published;
+the issue stays open for the ordinary approved landing path.
 
 ---
 <!-- id: issue-20261026-011129-611-use-application-visible-loader-for-explicit-spring  file: issue-20261026-011129-611-use-application-visible-loader-for-explicit-spring.md -->
