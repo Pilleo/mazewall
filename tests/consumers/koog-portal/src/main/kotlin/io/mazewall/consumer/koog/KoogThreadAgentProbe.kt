@@ -95,6 +95,7 @@ fun main() = runBlocking {
     verifyAgentCancellation(allowed, workers, true)
     for (worker in workers) { worker.join(5000); check(!worker.isAlive && !worker.isVirtual) }
     println("KOOG_AGENT_V1_OK boundary=thread loop=real validation=rejected denial=preserved overload=rejected cancellation=cooperative deadline=propagated retirement=complete replay=false")
+    println("KOOG_AGENT_SEQUENCE_V1_OK boundary=thread history=ordered turns=3 deniedThenAllowed=pass repeated=two-explicit-calls queue=bounded queuedCancellation=not-started retirement=complete")
 }
 
 private suspend fun verifyThreadQueuedAgents(allowed: Path, workers: MutableSet<Thread>) = supervisorScope {

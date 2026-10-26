@@ -89,6 +89,7 @@ fun main() = runBlocking {
     verifyPortalAgentCancellation(config, false)
     verifyPortalAgentCancellation(config, true)
     println("KOOG_AGENT_V1_OK boundary=portal loop=real validation=rejected denial=preserved unknown=terminal cancellation=cooperative deadline=propagated retirement=complete replay=false")
+    println("KOOG_AGENT_SEQUENCE_V1_OK boundary=portal history=ordered turns=3 deniedThenAllowed=pass repeated=two-explicit-calls unknown=terminal queue=bounded queuedCancellation=not-started retirement=complete")
 }
 
 private suspend fun verifyPortalQueuedAgents(base: PortalRuntimeConfig) = supervisorScope {

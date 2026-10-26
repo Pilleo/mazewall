@@ -164,9 +164,11 @@ exact fresh producer's seven staged coordinates in the disposable clone, retaini
 historical and external approvals byte-for-byte.
 
 The bounded scripted executor verifies actual tool-result history, call identity
-and error status, permits only two model requests, and uses five graph-node steps
-for one complete tool round. Its self-check rejects missing history and extra
-requests without invoking protected work. No network model, provider credentials,
+and error status. The original one-call script keeps two model requests/five graph
+nodes; separate two-call scripts use three requests/seven nodes. Inputs are copied
+and only these two finite script lengths are supported. Self-checks reject missing,
+reordered, duplicate or altered history, wrong outputs/status and extra requests
+without invoking protected work. No network model, provider credentials,
 provider client or `agents-test` dependency is used.
 
 Both modes cover success, malformed/missing/invalid arguments, unknown tools,
@@ -178,6 +180,25 @@ are not automatically sanitized; these synthetic probes do not certify live-prov
 data handling. One fixed model request leads to one adapter submission; a later
 explicit model request is not adapter replay and requires ordinary authorization.
 
+The two-call cases require actual denied-then-allowed recovery with unchanged
+host-selected tool policies. The thread reader keeps a denied sibling unreadable;
+the Portal registry explicitly supplies both the denied-read and safe transformer
+tools. Two identical arguments with distinct call IDs require two submissions.
+A separate Portal two-call crash sequence retains UNKNOWN_COMPLETION followed by
+STATE_LOST without recreating the lost stateful worker. None of these results
+provide application-wide exactly-once business effects.
+
+New queue cases use one worker and two admissions: active A and queued B fill
+capacity; C is rejected without entry. Cancelling B must leave its body/mapping
+unentered even after A completes, while A still returns its original result.
+Thread admission rejection remains `RejectedExecutionException`; Portal rejection
+is `PortalCallException` with NOT_STARTED. Portal's isolated test configuration
+copies every existing artifact/profile/launch/resource field and lowers capacity
+from eight to two, holding A's host mapping before RPC. It does not claim two
+simultaneously executing child bodies. Read-only diagnostic/yield waits are bounded
+by the existing five-second coordination deadline and never submit again or stand
+in for canonical retirement.
+
 The thread mode retains `DomainLimits(1,1)`, rejects overload without another body
 entry, and qualifies both agent cancellation and a one-second caller deadline.
 Held lexical cleanup keeps work unfinished and canonical drain incomplete. The
@@ -187,9 +208,10 @@ the lost stateful service. Mapper entry does not authenticate when the child bod
 started. Existing setup/close budgets stay ten seconds, latch/join waits five
 seconds and the deliberate incomplete thread drain twenty milliseconds.
 
-Each mode emits its exact `KOOG_AGENT_V1_OK boundary=...` summary only after all
-assertions and captured worker retirement checks. The existing optional aggregate
-requires both complete summaries and rejects absent, duplicate, partial, altered
+Each mode emits its original exact `KOOG_AGENT_V1_OK boundary=...` summary plus
+`KOOG_AGENT_SEQUENCE_V1_OK boundary=...` only after all assertions and captured
+worker retirement checks. The existing optional aggregate requires all four
+complete summaries and rejects absent, duplicate, partial, altered
 or contradictory evidence. This supplements, never replaces, direct-tool, JDBC,
 Security and finished-Boot gates. It is deterministic contract evidence, not a
 real-model usability, hard resource isolation or arbitrary-code security claim.

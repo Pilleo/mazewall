@@ -88,5 +88,16 @@ this isolated test's capacity from eight to two; its mapping is held before RPC.
 Diagnostic reads/yield under five seconds coordinate stable held states, never
 authorize work or substitute for retirement. No submissions are retried.
 
+Task4 parent gate RED: four tests run, three fail because the old parser accepts
+only single-call evidence and ignores required sequence evidence. GREEN: four
+summary tests plus the complete host consumer harness, ktlint and SpotBugs pass.
+Both native executables emit their original summary and one sequence summary only
+after all assertions and captured worker retirement (23s focused run). The parser
+requires all four exactly once and rejects missing/duplicate/altered/contradictory
+evidence. Old-field rejection fixtures include valid new evidence so they cannot
+pass merely because a new marker is absent. Guides retain the independent actual-
+human gate; no participant, timing or released-byte resolution is invented.
+Final exact-source acceptance, full build and scoped independent review are next.
+
 ---
 <!-- id: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio  file: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio.md -->
