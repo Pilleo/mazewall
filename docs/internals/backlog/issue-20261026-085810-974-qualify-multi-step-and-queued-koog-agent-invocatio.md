@@ -37,7 +37,7 @@ Base: `f3ad9e740cdae56546a9dd65629855a26c1d00a7` (merged PR560).
 - [x] Task1: bounded fixture, old constructors/cases preserved, input snapshots and self-checks.
 - [x] Task2: real denied/allowed and repeated sequences, terminal Portal state loss.
 - [x] Task3: two admitted/one queued, cancelled queued body never enters, third rejected.
-- [ ] Task4: four exact summaries mandatory; guides, exact-source/full gates and one review.
+- [x] Task4: four exact summaries mandatory; guides, exact-source/full gates and one review.
 
 Pre-flight: Tasks2/3 consume Task1's actual Tool registry/executor, Task4 consumes
 their post-retirement sequence summaries. Keep one-call two-request/five-node
@@ -98,6 +98,31 @@ evidence. Old-field rejection fixtures include valid new evidence so they cannot
 pass merely because a new marker is absent. Guides retain the independent actual-
 human gate; no participant, timing or released-byte resolution is invented.
 Final exact-source acceptance, full build and scoped independent review are next.
+
+## Final qualification
+
+Committed code producer `d3329d6cf4083cc94d64453afff919041833a590` passes the full
+exact-source optional aggregate in 8m43s (one executed, zero skipped/failed), with
+all four exact agent summaries and every pre-existing direct-tool, JDBC/Security,
+finished-Boot and ownership/negative phase. The complete build then passes 5m31s.
+The independent whole-change review reports no Critical, Important or Minor issues.
+No production library, dependency, protocol, policy or CI/deadline change was made.
+
+Final scope rulings: diagnostic reads coordinate stable held test states only,
+never authorize work or prove retirement; Portal host mapping is not authenticated
+child entry or CPU parallelism. The existing bounded reader reuse is consumer-only
+and its native size/UTF-8 controls remain selected. Exact failure wording/error
+sanitization, live providers, model retry prevention, application-wide exactly-once
+effects and hostile-code isolation are not promised. Existing core machinery was
+examined only where connected to these checks, not given a new whole-core audit.
+Cost if these limits are ignored: false retirement/security claims, duplicate
+business effects or model-visible data. The existing actual-human/timing/released-
+bytes gate remains open; no participant, recordings or remote-byte receipts were
+invented. Author-inspected source-bound/full results satisfy the review's pending
+verification gates. No deferred review findings remain.
+
+Implementation is complete locally on `feat/koog-agent-sequences`; no push, PR,
+merge or publication was performed. Keep this issue open for approved landing/CI.
 
 ---
 <!-- id: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio  file: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio.md -->
