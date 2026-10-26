@@ -10,6 +10,7 @@ target_files:
    - "tests/consumers/koog-portal/src/main/kotlin/io/mazewall/consumer/koog/ScriptedPromptExecutor.kt"
    - "tests/consumers/koog-portal/src/main/kotlin/io/mazewall/consumer/koog/AgentSequenceChecks.kt"
    - "tests/consumers/koog-portal/src/main/kotlin/io/mazewall/consumer/koog/KoogThreadAgentProbe.kt"
+   - "tests/consumers/koog-portal/src/main/kotlin/io/mazewall/consumer/koog/KoogThreadProbe.kt"
    - "tests/consumers/koog-portal/src/main/kotlin/io/mazewall/consumer/koog/KoogPortalAgentProbe.kt"
    - "src/consumerVerification/kotlin/io/mazewall/verification/OptionalIntegrationAcceptanceTest.kt"
    - "src/consumerVerification/kotlin/io/mazewall/verification/KoogAgentSummaryTest.kt"
@@ -34,7 +35,7 @@ Approved inline Tasks1-4: preserve one-call real AIAgent gates; add exactly two 
 Base: `f3ad9e740cdae56546a9dd65629855a26c1d00a7` (merged PR560).
 
 - [x] Task1: bounded fixture, old constructors/cases preserved, input snapshots and self-checks.
-- [ ] Task2: real denied/allowed and repeated sequences, terminal Portal state loss.
+- [x] Task2: real denied/allowed and repeated sequences, terminal Portal state loss.
 - [ ] Task3: two admitted/one queued, cancelled queued body never enters, third rejected.
 - [ ] Task4: four exact summaries mandatory; guides, exact-source/full gates and one review.
 
@@ -58,6 +59,23 @@ checks remain intact. A missing-history exception-shape regression caught during
 refactoring was corrected by restoring the original explicit one-result guard.
 Focused iteration uses the existing pinned published `a4aac5dcc759` fixture only;
 final committed-source qualification remains required.
+
+Task2 RED: ordered-history self-check fails before the validator exists. GREEN:
+both real agent modes pass in 17s with three model requests/seven graph nodes.
+Actual call/result order, IDs, tool names, JSON arguments, error flags and decoded
+success bytes are checked at every turn. Missing/reordered/duplicated/altered
+history rejects. Native cases preserve the actual denied-file exception, then
+allow the independent permitted read/transform; two distinct IDs with identical
+arguments produce two explicit submissions, never an automatic retry. The Portal
+crash sequence retains UNKNOWN_COMPLETION then STATE_LOST and original worker PID.
+
+Ruling: share the existing strict bounded UTF-8 reader by widening its consumer-
+local visibility to internal, instead of adding a second reader implementation.
+Its existing direct-native size/encoding tests remain selected. Cost if wrong:
+both callers fail the same existing boundary checks. A lost Portal service can
+reject before or inside a host mapping; mapping entry is not child-body entry.
+The sequence counts at most one mapping per explicit request, retains both real
+failure events and requires terminal identity plus joined process retirement.
 
 ---
 <!-- id: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio  file: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio.md -->

@@ -1,6 +1,7 @@
 package io.mazewall.consumer.koog
 
 import ai.koog.serialization.typeToken
+import ai.koog.prompt.message.MessagePart
 import io.mazewall.enforcer.api.ContainmentViolationException
 import io.mazewall.enforcer.api.Policy
 import io.mazewall.enforcer.api.RuntimeProfile
@@ -42,21 +43,18 @@ fun main() = runBlocking {
     val budget = Duration.ofSeconds(10)
     val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowJvmClasspath().allowFsRead(allowed).block(Syscall.SOCKET).build()
     ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, budget, budget).use { runtime ->
-        fun tool(entries: AtomicInteger, action: (AgentReadArguments) -> String): ThreadToolAdapter<AgentReadArguments, String> {
-            val domain = runtime.prepare(policy, DomainLimits(1, 1))
+        fun tool(entries: AtomicInteger, limits: DomainLimits = DomainLimits(1, 1), action: (AgentReadArguments) -> String): ThreadToolAdapter<AgentReadArguments, String> {
+            val domain = runtime.prepare(policy, limits)
             return ThreadToolAdapter(runtime, domain, typeToken<AgentReadArguments>(), typeToken<String>(), "read_note", "Consumer-only agent read",
                 { require(it.path.isNotBlank() && '\u0000' !in it.path && it.path.toByteArray().size <= 4096) },
                 { require(it.toByteArray().size <= 65_536) },
                 { workers.add(Thread.currentThread()); entries.incrementAndGet(); action(it) })
         }
         val entries = AtomicInteger()
-        val read = tool(entries) {
-            val bytes = Files.newInputStream(Path.of(it.path)).use { input -> input.readNBytes(65_537) }
-            require(bytes.size <= 65_536)
-            Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
-        }
+        val read = tool(entries) { readBoundedUtf8(Path.of(it.path)) }
         verifyExecutorRejections(read)
         verifySequenceExecutorRejections(listOf(read))
+        verifySequenceHistoryRejections(read.name)
         check(entries.get() == 0 && read.diagnostics().invocations.admitted == 0L)
         AgentAttempt(read, Json.encodeToString(AgentReadArguments(note.toString())), "approved agent input").use { it.verifySuccess() }
         check(entries.get() == 1)
@@ -75,6 +73,20 @@ fun main() = runBlocking {
         val oversized = tool(oversizedEntries) { "x".repeat(65_537) }
         AgentAttempt(oversized, "{\"path\":\"result-control\"}", null).use { check(it.verifyFailure() is IllegalArgumentException) }
         check(oversizedEntries.get() == 1)
+        val sequenceEntries = AtomicInteger()
+        val sequenceRead = tool(sequenceEntries, DomainLimits(1, 2)) { readBoundedUtf8(Path.of(it.path)) }
+        val allowedJson = Json.encodeToString(AgentReadArguments(note.toString()))
+        val failures = verifyAgentSequence(listOf(sequenceRead),
+            ScriptedToolStep(MessagePart.Tool.Call("denied-1", sequenceRead.name, Json.encodeToString(AgentReadArguments(sibling.toString()))), null),
+            ScriptedToolStep(MessagePart.Tool.Call("allowed-2", sequenceRead.name, allowedJson), "approved agent input"))
+        val sequenceFailure = failures.single()
+        check(sequenceFailure is ContainmentViolationException && sequenceFailure.cause is AccessDeniedException)
+        check(sequenceEntries.get() == 2 && Files.readString(sibling) == "HOST_AGENT_CANARY")
+        check(verifyAgentSequence(listOf(sequenceRead),
+            ScriptedToolStep(MessagePart.Tool.Call("read-1", sequenceRead.name, allowedJson), "approved agent input"),
+            ScriptedToolStep(MessagePart.Tool.Call("read-2", sequenceRead.name, allowedJson), "approved agent input")).isEmpty())
+        check(sequenceEntries.get() == 4 && sequenceRead.diagnostics().invocations.admitted == 4L)
+        println("THREAD_AGENT_SEQUENCE deniedThenAllowed=pass explicitRepeatedSubmissions=2 policy=unchanged")
         check(runtime.drain(budget) == DrainReport.Complete)
     }
     verifyAgentCancellation(allowed, workers, false)

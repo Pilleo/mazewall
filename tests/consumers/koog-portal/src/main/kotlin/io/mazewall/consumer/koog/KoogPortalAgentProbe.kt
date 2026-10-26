@@ -1,5 +1,6 @@
 package io.mazewall.consumer.koog
 
+import ai.koog.prompt.message.MessagePart
 import io.mazewall.demo.koog.TextArguments
 import io.mazewall.demo.koog.TextTools
 import io.mazewall.portal.PortalCallException
@@ -46,6 +47,19 @@ fun main() = runBlocking {
         check(Files.readString(sibling) == "HOST_AGENT_CANARY")
         val oversized = boundProbe(runtime, "oversized_result") { service, _ -> service.oversizedText() }
         AgentAttempt(oversized, "{\"value\":\"\"}", null).use { check(it.verifyFailure() is IllegalArgumentException) }
+        verifySequenceExecutorRejections(listOf(denied, text))
+        val failures = verifyAgentSequence(listOf(denied, text),
+            ScriptedToolStep(MessagePart.Tool.Call("denied-1", denied.name, Json.encodeToString(ProbeArguments(sibling.toString()))), null),
+            ScriptedToolStep(MessagePart.Tool.Call("allowed-2", text.name, Json.encodeToString(TextArguments("agent recovery"))), "AGENT RECOVERY"))
+        val sequenceFailure = failures.single()
+        check(sequenceFailure is PortalRemoteCallException && sequenceFailure.remoteType == "java.nio.file.AccessDeniedException")
+        check(sequenceFailure.evidence == PortalInvocationEvidence.COMPLETED && Files.readString(sibling) == "HOST_AGENT_CANARY")
+        val repeatJson = Json.encodeToString(TextArguments("same-input"))
+        check(verifyAgentSequence(listOf(text),
+            ScriptedToolStep(MessagePart.Tool.Call("repeat-1", text.name, repeatJson), "SAME-INPUT"),
+            ScriptedToolStep(MessagePart.Tool.Call("repeat-2", text.name, repeatJson), "SAME-INPUT")).isEmpty())
+        check(text.diagnostics().invocations.admitted == 4L)
+        println("PORTAL_AGENT_SEQUENCE deniedThenAllowed=pass explicitRepeatedSubmissions=2 policy=unchanged")
         val crashEntries = AtomicInteger()
         val crash = boundProbe(runtime, "crash_control") { service, _ -> crashEntries.incrementAndGet(); service.crash() }
         val before = runtime.health().single { it.isolationGroup == "test-denied" }
@@ -63,9 +77,32 @@ fun main() = runBlocking {
         check(ProcessHandle.current().children().use { it.allMatch { child -> child.pid() in childrenBefore } })
         AgentAttempt(text, Json.encodeToString(TextArguments("independent")), "INDEPENDENT").use { it.verifySuccess() }
     }
+    verifyTerminalAgentSequence(config, sibling)
     verifyPortalAgentCancellation(config, false)
     verifyPortalAgentCancellation(config, true)
     println("KOOG_AGENT_V1_OK boundary=portal loop=real validation=rejected denial=preserved unknown=terminal cancellation=cooperative deadline=propagated retirement=complete replay=false")
+}
+
+private suspend fun verifyTerminalAgentSequence(config: PortalRuntimeConfig, sibling: Path) {
+    PortalRuntime.open(config).useWithWorkerRetirement { runtime, workers ->
+        val crashEntries = AtomicInteger()
+        val lostMappings = AtomicInteger()
+        val crash = boundProbe(runtime, "sequence_crash") { service, _ -> crashEntries.incrementAndGet(); service.crash() }
+        val denied = boundProbe(runtime, "sequence_lost") { service, args -> lostMappings.incrementAndGet(); service.read(args.value) }
+        captureReadyWorkers(runtime, workers)
+        val before = runtime.health().single { it.isolationGroup == "test-denied" }
+        val children = ProcessHandle.current().children().use { it.map(ProcessHandle::pid).toList() }
+        val failures = verifyAgentSequence(listOf(crash, denied),
+            ScriptedToolStep(MessagePart.Tool.Call("lost-1", crash.name, "{\"value\":\"\"}"), null),
+            ScriptedToolStep(MessagePart.Tool.Call("lost-2", denied.name, Json.encodeToString(ProbeArguments(sibling.toString()))), null))
+        val unknown = failures.first()
+        check(unknown is PortalCallException && unknown.evidence == PortalInvocationEvidence.UNKNOWN_COMPLETION)
+        check(failures[1] is PortalStateLostException)
+        val after = runtime.health().single { it.isolationGroup == "test-denied" }
+        check(after.state == PortalServiceHealthState.STATE_LOST && after.lastWorkerLifecycle.pid == before.workerPids.single())
+        check(ProcessHandle.current().children().use { it.allMatch { child -> child.pid() in children } })
+        check(crashEntries.get() == 1 && lostMappings.get() <= 1) { "An explicit request must not replay its host mapping" }
+    }
 }
 
 private suspend fun verifyPortalAgentCancellation(config: PortalRuntimeConfig, deadline: Boolean) = supervisorScope {
