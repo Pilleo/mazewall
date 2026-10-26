@@ -13,6 +13,7 @@ import io.mazewall.koog.ThreadToolAdapter
 import io.mazewall.platform.syscall.Syscall
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.supervisorScope
@@ -89,10 +90,60 @@ fun main() = runBlocking {
         println("THREAD_AGENT_SEQUENCE deniedThenAllowed=pass explicitRepeatedSubmissions=2 policy=unchanged")
         check(runtime.drain(budget) == DrainReport.Complete)
     }
+    verifyThreadQueuedAgents(allowed, workers)
     verifyAgentCancellation(allowed, workers, false)
     verifyAgentCancellation(allowed, workers, true)
     for (worker in workers) { worker.join(5000); check(!worker.isAlive && !worker.isVirtual) }
     println("KOOG_AGENT_V1_OK boundary=thread loop=real validation=rejected denial=preserved overload=rejected cancellation=cooperative deadline=propagated retirement=complete replay=false")
+}
+
+private suspend fun verifyThreadQueuedAgents(allowed: Path, workers: MutableSet<Thread>) = supervisorScope {
+    val budget = Duration.ofSeconds(10)
+    val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowJvmClasspath().allowFsRead(allowed).block(Syscall.SOCKET).build()
+    ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, budget, budget).use { runtime ->
+        val entered = CompletableDeferred<Unit>()
+        val release = CountDownLatch(1)
+        val activeEntries = AtomicInteger()
+        val unexpectedEntries = AtomicInteger()
+        val domain = runtime.prepare(policy, DomainLimits(1, 2))
+        val tool = ThreadToolAdapter<AgentReadArguments, String>(runtime, domain, typeToken<AgentReadArguments>(), typeToken<String>(),
+            "queued_read", "Test-only queued-agent ownership", {}, {}, { args ->
+                workers.add(Thread.currentThread())
+                if (args.path != "running") { unexpectedEntries.incrementAndGet(); error("Queued or rejected body entered") }
+                activeEntries.incrementAndGet(); entered.complete(Unit)
+                check(release.await(5, TimeUnit.SECONDS))
+                "RUNNING"
+            })
+        AgentAttempt(tool, "{\"path\":\"running\"}", "RUNNING").use { active ->
+            AgentAttempt(tool, "{\"path\":\"queued\"}", null).use { waiting ->
+                val running = async(start = CoroutineStart.UNDISPATCHED) { active.agent.run("running") }
+                var queued: Deferred<String>? = null
+                try {
+                    withTimeout(5000) {
+                        entered.await()
+                        val next = async(start = CoroutineStart.UNDISPATCHED) { waiting.agent.run("queued") }
+                        queued = next
+                        awaitAgentSnapshot(tool, 2, 2)
+                        AgentAttempt(tool, "{\"path\":\"third\"}", null).use { check(it.verifyFailure() is RejectedExecutionException) }
+                        next.cancel(); next.join()
+                        awaitAgentSnapshot(tool, 2, 1)
+                        check(next.isCancelled && waiting.executor.calls.get() == 1 && waiting.completions.get() == 0 && waiting.failures.isEmpty())
+                        check(activeEntries.get() == 1 && unexpectedEntries.get() == 0 && tool.diagnostics().invocations.cancellationRequests == 1L)
+                        release.countDown()
+                        check(running.await() == "observed-tool-success")
+                        check(active.executor.calls.get() == 2 && active.completions.get() == 1 && active.failures.isEmpty())
+                    }
+                } finally {
+                    release.countDown(); queued?.cancel(); running.cancel()
+                }
+            }
+        }
+        check(runtime.drain(budget) == DrainReport.Complete)
+        val closed = tool.diagnostics()
+        check(closed.retirementComplete && closed.invocations.admitted == 2L && closed.invocations.rejected == 1L)
+        check(activeEntries.get() == 1 && unexpectedEntries.get() == 0)
+    }
+    println("THREAD_AGENT_QUEUE admitted=2 rejected=1 queuedEntries=0 activeResult=RUNNING")
 }
 
 private suspend fun verifyAgentCancellation(allowed: Path, workers: MutableSet<Thread>, deadline: Boolean) = supervisorScope {

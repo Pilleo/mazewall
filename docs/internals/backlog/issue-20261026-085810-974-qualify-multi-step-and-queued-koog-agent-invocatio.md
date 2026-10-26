@@ -36,7 +36,7 @@ Base: `f3ad9e740cdae56546a9dd65629855a26c1d00a7` (merged PR560).
 
 - [x] Task1: bounded fixture, old constructors/cases preserved, input snapshots and self-checks.
 - [x] Task2: real denied/allowed and repeated sequences, terminal Portal state loss.
-- [ ] Task3: two admitted/one queued, cancelled queued body never enters, third rejected.
+- [x] Task3: two admitted/one queued, cancelled queued body never enters, third rejected.
 - [ ] Task4: four exact summaries mandatory; guides, exact-source/full gates and one review.
 
 Pre-flight: Tasks2/3 consume Task1's actual Tool registry/executor, Task4 consumes
@@ -76,6 +76,17 @@ both callers fail the same existing boundary checks. A lost Portal service can
 reject before or inside a host mapping; mapping entry is not child-body entry.
 The sequence counts at most one mapping per explicit request, retains both real
 failure events and requires terminal identity plus joined process retirement.
+
+Task3 RED: the new queued-agent case reaches the missing coordination barrier and
+fails. GREEN: both full fresh agent executables pass in 15s. One actual running
+agent plus one admitted queued agent fill a new one-worker/two-admission fixture;
+the third rejects, queued cancellation reaches the original handle, queued body/
+mapping stays zero even after active release, and the original active agent still
+returns its real result. Canonical drain/close plus captured worker joins remain
+mandatory. Portal preserves every config/profile/launch field and only lowers
+this isolated test's capacity from eight to two; its mapping is held before RPC.
+Diagnostic reads/yield under five seconds coordinate stable held states, never
+authorize work or substitute for retirement. No submissions are retried.
 
 ---
 <!-- id: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio  file: issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio.md -->

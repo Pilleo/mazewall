@@ -9,9 +9,24 @@ import ai.koog.prompt.message.Message
 import ai.koog.prompt.message.MessagePart
 import ai.koog.prompt.message.RequestMetaInfo
 import ai.koog.prompt.message.ResponseMetaInfo
+import io.mazewall.enforcer.api.execution.ExecutionDiagnosticsSource
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import kotlinx.serialization.json.Json
 
 internal data class ScriptedToolStep(val call: MessagePart.Tool.Call, val expectedOutput: String?)
+
+/** A test coordination barrier only; diagnostics never authorize work or prove physical retirement. */
+internal suspend fun awaitAgentSnapshot(source: ExecutionDiagnosticsSource, admitted: Long, unfinished: Int) {
+    withTimeout(5000) {
+        while (true) {
+            val observed = source.diagnostics()
+            check(observed.invocations.admitted <= admitted) { "Unexpected extra admission" }
+            if (observed.invocations.admitted == admitted && observed.unfinishedInvocations == unfinished) return@withTimeout
+            yield()
+        }
+    }
+}
 
 internal suspend fun verifyAgentSequence(tools: List<Tool<*, *>>, first: ScriptedToolStep, second: ScriptedToolStep): List<Throwable?> {
     require(first.call.id != second.call.id && first.call.id != null && second.call.id != null)
