@@ -134,7 +134,7 @@ public final class SpringOperationBinder {
         factory.addAdvisor(jdbcGuard.diagnosisAdvisor());
         factory.addAdvisor(authorization);
         factory.setFrozen(true);
-        return contract.cast(factory.getProxy(contract.getClassLoader()));
+        return contract.cast(factory.getProxy());
     }
 
     public synchronized Object bind(Approval approval) throws Exception {

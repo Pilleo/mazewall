@@ -26,6 +26,9 @@ registers the bean nor grants approval. Return it from the application's explici
 `@Bean` method, then bind and validate the actual registered singleton before use.
 The application still owns target initialization/destruction and must not expose a
 raw target as an alternative protected entry. The manual factory path remains supported.
+Proxy creation uses Spring's normal application-loader selection, not the shared
+interface's defining loader. An interface in a parent loader need not load Spring;
+the actual implementation loader and resources still require exact explicit approval.
 
 Application-owned `Approval` pins the actual registered bean reference, defining
 classloader, runtime, externally reviewed deployment resource generation and both BODY and
