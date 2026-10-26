@@ -56,6 +56,7 @@ fun main() = runBlocking {
             Charsets.UTF_8.newDecoder().decode(java.nio.ByteBuffer.wrap(bytes)).toString()
         }
         verifyExecutorRejections(read)
+        verifySequenceExecutorRejections(listOf(read))
         check(entries.get() == 0 && read.diagnostics().invocations.admitted == 0L)
         AgentAttempt(read, Json.encodeToString(AgentReadArguments(note.toString())), "approved agent input").use { it.verifySuccess() }
         check(entries.get() == 1)

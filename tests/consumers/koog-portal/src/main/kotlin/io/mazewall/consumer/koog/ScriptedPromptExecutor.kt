@@ -29,43 +29,37 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Consumer-only model double; the registry, JSON, agent loop and protected tools are real. */
 internal class ScriptedPromptExecutor(
-    private val registeredName: String,
-    private val requestedName: String,
-    private val arguments: String,
-    private val expectedOutput: String?,
+    registeredNames: Set<String>,
+    responses: List<Message.Assistant>,
+    private val verifyHistory: (Int, Prompt) -> Unit,
 ) : PromptExecutor() {
+    private val names = registeredNames.toSet()
+    private val script = responses.toList()
+    val maximumRequests: Int = script.size
     val calls = AtomicInteger()
     private var closed = false
 
+    init {
+        require(names.size in 1..2 && names.none { it.isBlank() })
+        require(script.size in 2..3) { "Only one-call or two-call scripts are supported" }
+    }
+
+    constructor(registeredName: String, requestedName: String, arguments: String, expectedOutput: String?) : this(
+        setOf(registeredName),
+        listOf(
+            Message.Assistant(MessagePart.Tool.Call("contract-call", requestedName, arguments), ResponseMetaInfo.Empty),
+            Message.Assistant(if (expectedOutput == null) "observed-tool-failure" else "observed-tool-success", ResponseMetaInfo.Empty),
+        ),
+        { turn, prompt -> verifySingleHistory(turn, prompt, registeredName, requestedName, expectedOutput) },
+    )
+
     override suspend fun execute(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): Message.Assistant {
         check(!closed)
-        check(tools.map { it.name } == listOf(registeredName))
-        val results = prompt.messages.flatMap { it.parts }.filterIsInstance<MessagePart.Tool.Result>()
-        return when (calls.incrementAndGet()) {
-            1 -> {
-                check(results.isEmpty())
-                Message.Assistant(MessagePart.Tool.Call("contract-call", requestedName, arguments), ResponseMetaInfo.Empty)
-            }
-            2 -> {
-                if (requestedName != registeredName) {
-                    // Koog's default missing-tool conversion sends this observation as text, not a tool part.
-                    check(results.isEmpty() && expectedOutput == null)
-                    val text = prompt.messages.last().parts.filterIsInstance<MessagePart.Text>().single().text
-                    val missing = Json.parseToJsonElement(text).jsonObject
-                    check(missing["tool_call_id"]?.jsonPrimitive?.content == "contract-call")
-                    check(missing["tool_name"]?.jsonPrimitive?.content == requestedName)
-                    check(missing["tool_result"]?.jsonPrimitive?.content?.contains("not found") == true)
-                    return Message.Assistant("observed-tool-failure", ResponseMetaInfo.Empty)
-                }
-                check(results.size == 1) { "Missing tool result for $requestedName/$arguments: ${prompt.messages}" }
-                val result = results.single()
-                check(result.id == "contract-call" && result.tool == requestedName)
-                check(result.isError == (expectedOutput == null)) { "Tool failure must not become a successful result: $result" }
-                if (expectedOutput != null) check(Json.decodeFromString<String>(result.output) == expectedOutput) { "Unexpected actual tool output: ${result.output}" }
-                Message.Assistant(if (result.isError) "observed-tool-failure" else "observed-tool-success", ResponseMetaInfo.Empty)
-            }
-            else -> error("Unexpected extra model request; scripted qualification never retries tools")
-        }
+        check(tools.size == names.size && tools.map { it.name }.toSet() == names)
+        val turn = calls.incrementAndGet()
+        check(turn <= maximumRequests) { "Unexpected extra model request; scripted qualification never retries tools" }
+        verifyHistory(turn, prompt)
+        return script[turn - 1]
     }
 
     override fun executeStreaming(prompt: Prompt, model: LLModel, tools: List<ToolDescriptor>): Flow<StreamFrame> = error("Streaming is outside this contract")
@@ -73,9 +67,37 @@ internal class ScriptedPromptExecutor(
     override fun close() { closed = true }
 }
 
+private fun verifySingleHistory(turn: Int, prompt: Prompt, registeredName: String, requestedName: String, expectedOutput: String?) {
+    val results = prompt.messages.flatMap { it.parts }.filterIsInstance<MessagePart.Tool.Result>()
+    when (turn) {
+        1 -> check(results.isEmpty())
+        2 -> {
+            if (requestedName != registeredName) {
+                // Koog's default missing-tool conversion sends this observation as text, not a tool part.
+                check(results.isEmpty() && expectedOutput == null)
+                val text = prompt.messages.last().parts.filterIsInstance<MessagePart.Text>().single().text
+                val missing = Json.parseToJsonElement(text).jsonObject
+                check(missing["tool_call_id"]?.jsonPrimitive?.content == "contract-call")
+                check(missing["tool_name"]?.jsonPrimitive?.content == requestedName)
+                check(missing["tool_result"]?.jsonPrimitive?.content?.contains("not found") == true)
+            } else {
+                check(results.size == 1) { "Single-call history must contain exactly one tool result" }
+                val result = results.single()
+                check(result.id == "contract-call" && result.tool == requestedName)
+                check(result.isError == (expectedOutput == null)) { "Tool failure must not become a successful result: $result" }
+                if (expectedOutput != null) check(Json.decodeFromString<String>(result.output) == expectedOutput)
+            }
+        }
+        else -> error("Unexpected single-call model turn")
+    }
+}
+
 /** Observe upstream failure events without changing tool outcomes or installing a production feature. */
-internal class AgentAttempt(tool: Tool<*, *>, arguments: String, expectedOutput: String?, requestedName: String = tool.name) : AutoCloseable {
-    val executor = ScriptedPromptExecutor(tool.name, requestedName, arguments, expectedOutput)
+internal class AgentAttempt(tools: List<Tool<*, *>>, val executor: ScriptedPromptExecutor) : AutoCloseable {
+    private val registeredTools = tools.toList()
+    init { require(registeredTools.size in 1..2 && registeredTools.map { it.name }.distinct().size == registeredTools.size) }
+    constructor(tool: Tool<*, *>, arguments: String, expectedOutput: String?, requestedName: String = tool.name) :
+        this(listOf(tool), ScriptedPromptExecutor(tool.name, requestedName, arguments, expectedOutput))
     val failures = CopyOnWriteArrayList<Throwable?>()
     val completions = AtomicInteger()
     private val events = object : AIAgentGraphFeature<FeatureConfig, Unit> {
@@ -90,8 +112,8 @@ internal class AgentAttempt(tool: Tool<*, *>, arguments: String, expectedOutput:
     val agent = AIAgent(
         promptExecutor = executor,
         llmModel = LLModel(OpenAILLMProvider, "scripted-contract", listOf(LLMCapability.Tools), 4096, 256),
-        toolRegistry = ToolRegistry { tool(tool) },
-        maxIterations = 5, // start, model, tool, model-with-result, finish; executor still permits only two requests.
+        toolRegistry = ToolRegistry { registeredTools.forEach { tool(it) } },
+        maxIterations = 2 * executor.maximumRequests + 1, // Two/three model requests require five/seven graph nodes.
         installFeatures = { install(events) },
     )
 
