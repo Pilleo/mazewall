@@ -63,6 +63,14 @@ for retained singleton/advisor wiring and
 selected-class review, genuine resources, explicit process baseline and lifecycle.
 Worker observation lives at that bootstrap boundary, not in ordinary report code.
 
+`createJdbcProxy(Reports.class, target, authorizationAdvisor)` removes manual
+advisor ordering, not approval. It returns the frozen proxy for Spring's `@Bean`
+registration, retaining the exact target and qualified JDBC guard. Normal startup
+then explicitly binds the actual registered singleton and validates its required
+scope before calling it. Unbound calls reject; the separate verification flow
+deliberately checks that rejection. Target initialization/destruction and runtime
+drain remain application-owned; do not expose a raw-target bypass.
+
 For an application-owned stable deployment containing `application.jar`, the fixed
 resources below and an independently supplied review, the normal executable flow is:
 

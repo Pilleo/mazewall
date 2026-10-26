@@ -26,6 +26,9 @@ class PublicBindingApiTest {
                 """;
         assertTrue(compile("ProductionApi", imports + """
                 public class ProductionApi {
+                    public Runnable proxy(SpringOperationBinder binder, org.springframework.aop.Advisor authorization) throws Exception {
+                        return binder.createJdbcProxy(Runnable.class, () -> {}, authorization);
+                    }
                     public PreparedOperationResources resolve(RuntimeProfile profile, Policy<PolicyScope.ThreadLocalOnly, PolicyState.Uncompiled> policy,
                             Class<?> actualImplementation, java.util.Set<java.nio.file.Path> paths) {
                         return PreparedOperationResources.resolve(profile, policy, actualImplementation, paths);

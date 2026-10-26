@@ -19,7 +19,6 @@ import org.aopalliance.intercept.MethodInterceptor;
 import org.h2.jdbcx.JdbcDataSource;
 import org.springframework.aop.framework.Advised;
 import org.springframework.aop.Advisor;
-import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -255,7 +254,7 @@ public final class NativeJdbcConsumer {
             var binder = new SpringOperationBinder(beans, lifecycle, guard);
             var target = security == null ? new JdbcOperation(jdbc, root.resolve("template.txt"), root.resolve("sibling.txt"))
                     : security.target(jdbc, root.resolve("template.txt"), root.resolve("sibling.txt"));
-            Operation proxy = proxy(beans, "operation", target, binder, guard, security == null ?
+            Operation proxy = proxy(beans, "operation", target, binder, security == null ?
                     new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()) : security.authorization());
             var advisors = ((Advised) proxy).getAdvisors();
             binder.bind(approval(artifact, proxy));
@@ -291,20 +290,14 @@ public final class NativeJdbcConsumer {
     }
 
     private static Operation proxy(DefaultListableBeanFactory beans, String name, Operation target,
-                                   SpringOperationBinder binder, SpringTransactionGuard guard) {
-        return proxy(beans, name, target, binder, guard,
+                                   SpringOperationBinder binder) throws Exception {
+        return proxy(beans, name, target, binder,
                 new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()));
     }
 
     private static Operation proxy(DefaultListableBeanFactory beans, String name, Operation target,
-                                   SpringOperationBinder binder, SpringTransactionGuard guard, Advisor authorization) {
-        var factory = new ProxyFactory(target);
-        factory.addAdvisor(binder.dispatchAdvisor());
-        factory.addAdvisor(guard.transactionAdvisor());
-        factory.addAdvisor(guard.diagnosisAdvisor());
-        factory.addAdvisor(authorization);
-        factory.setFrozen(true);
-        Operation proxy = (Operation) factory.getProxy();
+                                   SpringOperationBinder binder, Advisor authorization) throws Exception {
+        Operation proxy = binder.createJdbcProxy(Operation.class, target, authorization);
         beans.registerSingleton(name, proxy);
         return proxy;
     }
@@ -312,7 +305,7 @@ public final class NativeJdbcConsumer {
     private static void verifyUncapturedClassRejected(DefaultListableBeanFactory beans, DomainLifecycle lifecycle,
             SpringTransactionGuard guard, ReviewedOperationArtifact otherArtifact, Operation target, String name) throws Exception {
         var binder = SpringOperationBinder.inApprovedCommonDomain(beans, lifecycle, otherArtifact, guard);
-        var other = proxy(beans, name, target, binder, guard);
+        var other = proxy(beans, name, target, binder);
         try {
             binder.bind(approval(otherArtifact, other));
             throw new AssertionError("Metadata equality admitted another actual implementation Class");

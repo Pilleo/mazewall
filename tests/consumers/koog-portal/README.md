@@ -53,7 +53,7 @@ flock "$lock" bash scripts/koog-build.sh -I "$root/tests/consumers/stage.init.gr
 
 flock "$lock" ./gradlew -p "$root/tests/consumers/koog-portal" \
   -PconsumerVersion="$version" -PconsumerRepository="$repository" \
-  --write-locks verifyOperationRoot stageFreshProbe verifyPublishedClosure --no-configuration-cache
+   --write-locks --write-verification-metadata sha256 verifyOperationRoot stageFreshProbe verifyPublishedClosure --no-configuration-cache
 
 flock "$lock" ./gradlew -p "$root/tests/consumers/koog-portal" \
   -PconsumerVersion="$version" -PconsumerRepository="$repository" \
@@ -146,6 +146,53 @@ host summary fixtures test that gate and are **not native evidence**. See the
 for the explicit owner/domain API, bounded reader and limits. This is trusted
 synchronous first-party data-plane restriction, not arbitrary Java/ACE, heap or
 tenant isolation, hard CPU/RAM isolation or guaranteed termination.
+
+## Real agent loops without a model account
+
+This consumer alone adds `ai.koog:agents-core:1.3.0`; the adapters' public dependency
+graph and the worker bundle are unchanged. `verifyFreshThreadAgent` and
+`verifyFreshPortalAgent` run actual upstream `AIAgent` loops from staged JARs in
+separate fresh JVMs/directories. Run the complete committed-source qualification
+with `optionalIntegrationCheck`, or run these tasks after the local staging above.
+
+The first local staging command now explicitly writes verification metadata as
+well as the new version's lockfile. Review that diff: only the freshly built local
+fixture coordinates and deliberately approved dependencies may gain checksums;
+unexpected changes to existing external approvals are not acceptable. Ordinary
+strict runs do not rewrite metadata. The parent aggregate adds checksums of its
+exact fresh producer's seven staged coordinates in the disposable clone, retaining
+historical and external approvals byte-for-byte.
+
+The bounded scripted executor verifies actual tool-result history, call identity
+and error status, permits only two model requests, and uses five graph-node steps
+for one complete tool round. Its self-check rejects missing history and extra
+requests without invoking protected work. No network model, provider credentials,
+provider client or `agents-test` dependency is used.
+
+Both modes cover success, malformed/missing/invalid arguments, unknown tools,
+oversized materialized results and genuine kernel-denied host-readable files.
+Koog converts ordinary tool failures to error observations: the probe checks both
+the model-facing error status (or default missing-tool text) and the original
+failure event. Agent completion is not operation success. Model-visible errors
+are not automatically sanitized; these synthetic probes do not certify live-provider
+data handling. One fixed model request leads to one adapter submission; a later
+explicit model request is not adapter replay and requires ordinary authorization.
+
+The thread mode retains `DomainLimits(1,1)`, rejects overload without another body
+entry, and qualifies both agent cancellation and a one-second caller deadline.
+Held lexical cleanup keeps work unfinished and canonical drain incomplete. The
+Portal mode also qualifies cancellation/deadlines, holds the original host mapping's
+cleanup, and verifies unknown completion is terminal with no reconstruction of
+the lost stateful service. Mapper entry does not authenticate when the child body
+started. Existing setup/close budgets stay ten seconds, latch/join waits five
+seconds and the deliberate incomplete thread drain twenty milliseconds.
+
+Each mode emits its exact `KOOG_AGENT_V1_OK boundary=...` summary only after all
+assertions and captured worker retirement checks. The existing optional aggregate
+requires both complete summaries and rejects absent, duplicate, partial, altered
+or contradictory evidence. This supplements, never replaces, direct-tool, JDBC,
+Security and finished-Boot gates. It is deterministic contract evidence, not a
+real-model usability, hard resource isolation or arbitrary-code security claim.
 
 ## Bootstrap freshness and generated packaging checks
 

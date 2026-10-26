@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 179 | *Total Resolved Issues:* 717
+*Total Active Issues:* 182 | *Total Resolved Issues:* 717
 
-Active status detail: 178 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 181 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261026-011129-611](issue-20261026-011129-611-use-application-visible-loader-for-explicit-spring.md) | Use application visible loader for explicit Spring proxy assembly | high | integrations |
+| [issue-20261025-223935-632](issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin.md) | Simplify explicit approved Spring JDBC proxy wiring | high | integrations |
+| [issue-20261025-223944-611](issue-20261025-223944-611-qualify-owned-koog-tools-inside-deterministic-real.md) | Qualify owned Koog tools inside deterministic real agent loops | high | integrations |
 | [issue-20261025-121925-834](issue-20261025-121925-834-await-execution-end-before-reusing-single-admissio.md) | Await execution end before reusing single admission demo domain | high | demos |
 | [issue-20261025-111413-642](issue-20261025-111413-642-publish-final-report-lifecycle-state-only-after-ac.md) | Publish final report lifecycle state only after actual owner close | high | demos |
 | [issue-20261025-111426-953](issue-20261025-111426-953-declare-clang-bpf-prerequisites-for-source-built-c.md) | Declare Clang BPF prerequisites for source built core quickstart | high | docs |

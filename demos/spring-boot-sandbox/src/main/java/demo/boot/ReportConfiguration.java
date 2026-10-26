@@ -2,7 +2,6 @@ package demo.boot;
 
 import org.aopalliance.intercept.MethodInterceptor;
 import org.h2.jdbcx.JdbcDataSource;
-import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
@@ -25,19 +24,14 @@ public class ReportConfiguration {
         return new DataSourceTransactionManager(data);
     }
     @Bean Reports reportService(ReportBootstrap bootstrap, JdbcTemplate jdbc,
-                               DataSourceTransactionManager manager, ConfigurableListableBeanFactory beans) {
+                                DataSourceTransactionManager manager, ConfigurableListableBeanFactory beans) throws Exception {
         bootstrap.configureBinding(beans);
         Reports target = switch (bootstrap.target()) {
             case REPORT -> new ReportService(jdbc, bootstrap.root());
             case VERIFICATION -> new ReportScenarioService(jdbc, bootstrap.root(), bootstrap.state());
             case UNSUPPORTED -> new UnsupportedReportService(jdbc, bootstrap.root(), bootstrap.state());
         };
-        var factory = new ProxyFactory(target);
-        factory.addAdvisor(bootstrap.binder().dispatchAdvisor());
-        factory.addAdvisor(bootstrap.guard().transactionAdvisor());
-        factory.addAdvisor(bootstrap.guard().diagnosisAdvisor());
-        factory.addAdvisor(new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()));
-        factory.setFrozen(true);
-        return (Reports) factory.getProxy();
+        return bootstrap.binder().createJdbcProxy(Reports.class, target,
+                new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()));
     }
 }
