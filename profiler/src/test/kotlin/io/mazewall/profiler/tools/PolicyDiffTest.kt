@@ -17,7 +17,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 class PolicyDiffTest {
-    @TempDir lateinit var root: Path
+    @TempDir private lateinit var root: Path
 
     @Test fun `comparison reports exact policy identity and coverage fields without ordering claims`() {
         val old = document(false)

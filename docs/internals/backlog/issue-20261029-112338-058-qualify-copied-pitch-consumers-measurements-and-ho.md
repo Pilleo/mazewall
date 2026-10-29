@@ -119,5 +119,21 @@ the demo uses trusted regular fixtures and the synchronous HTTP sample does not
 infer physical end from client timeout. Cost if wrong: real blocking I/O can retain
 an incomplete owner and require operator handling, not forced thread termination.
 
+## Completion gate checkpoint
+
+Committed source `012fad220eb8ae9514fd2d9e1b04a6fe67e9c80b` passed the full
+optionalIntegrationCheck in13m01s, including every legacy native case, both copied
+apps, strict cache reuse, published record results and all15 application JVM forks.
+Raw/source/publication receipts are under the command's ordinary temporary evidence
+directory; these remain local candidate evidence, not a remotely downloaded release.
+
+The first full build then caught an unnecessary public Kotlin TempDir getter in
+the new parent fixture (NP_NONNULL_RETURN_VIOLATION). Making the four new Kotlin
+fixture fields private removes those unused getters; no suppression/baseline or
+test weakening was used. Focused SpotBugs/host tests and the Koog host/native suites
+pass after that visibility fix. `build -PincludeSpringIntegration=true` then passes
+in7m06s (253tasks), including normal lint/static/coverage/kernel gates. Final exact
+acceptance is rerun after committing these test-visibility-only changes.
+
 ---
 <!-- id: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho  file: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md -->

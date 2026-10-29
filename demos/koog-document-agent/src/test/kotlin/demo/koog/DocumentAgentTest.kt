@@ -10,7 +10,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class DocumentAgentTest {
-    @TempDir lateinit var root: Path
+    @TempDir private lateinit var root: Path
 
     @Test fun `reader returns actual strict bounded document content`() {
         val note = Files.writeString(root.resolve("note.txt"), "Project owner: Ada é🙂")

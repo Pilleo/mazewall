@@ -13,7 +13,7 @@ import kotlin.test.assertTrue
 
 @Tag("native")
 class DocumentAgentNativeTest {
-    @TempDir lateinit var root: Path
+    @TempDir private lateinit var root: Path
 
     @Test fun `actual agent preserves denial recovery and physical worker retirement`() {
         verifyProgram(

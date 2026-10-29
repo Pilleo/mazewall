@@ -16,7 +16,7 @@ import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
 class PitchExamplesAcceptanceTest {
-    @TempDir lateinit var root: Path
+    @TempDir private lateinit var root: Path
 
     @Test fun `package inspection refuses absent or source substituted publication bytes`() {
         val repository = Files.createDirectory(root.resolve("repo"))
