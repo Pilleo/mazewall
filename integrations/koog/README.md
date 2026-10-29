@@ -227,13 +227,35 @@ registry/JSON dispatch and actual thread/Portal protection in separate fresh JVM
 Only that consumer adds `agents-core:1.3.0`; the published adapters still depend on
 `agents-tools`, and worker bundles acquire no Koog or Spring dependency.
 
-The fixed script requests one tool call and one final response. Five graph nodes
-are allowed (start/model/tool/model/finish), but a third model request rejects.
+The existing single-call script retains two model requests/five graph nodes;
+an unexpected third request rejects. Separate two-call scripts allow exactly
+three model requests/seven nodes and reject a fourth. Every turn checks complete
+ordered call/result history, IDs, registered tool names, JSON arguments, error
+status and exact successful output. A denied call followed by an allowed call
+must preserve the denial in history, not erase it or widen either tool's policy.
 Invalid JSON/arguments, unknown tools, oversized results, actual permission denial,
 overload, cancellation, deadlines and terminal unknown Portal completion are
 qualified without automatic retries or permission widening. A new explicit model
 request remains a new application call; these adapters do not promise global
 exactly-once business effects or prevent a model from asking again.
+
+Two identical argument sets under distinct call IDs therefore produce two
+explicit submissions, not deduplication or hidden replay. A crash followed by an
+explicit request to the lost Portal service remains UNKNOWN_COMPLETION then
+STATE_LOST, with no reconstruction of the stateful service.
+
+New one-worker/two-admission fixtures admit one active and one queued agent,
+reject a third, then cancel the queued original invocation. Its body/mapping
+must never enter, including after active release, and the original active agent
+must still return its result. The Portal case holds the host mapping before RPC
+because mapping and wire admission share capacity; it proves host queue ownership,
+not parallel child-body execution. Existing one-admission/held-cleanup checks and
+all deadlines remain unchanged. Diagnostic waits only coordinate test states;
+canonical drain/close and captured worker death still establish retirement.
+
+The existing acceptance lane requires both single-call and sequence summaries
+for each mode. Missing, duplicate, partial, altered or contradictory evidence
+rejects; no new jobs, dependencies or public APIs are added.
 
 Upstream Koog ordinarily converts tool exceptions into `isError` observations and
 retains original exceptions in failure events. A successful `agent.run()` may thus

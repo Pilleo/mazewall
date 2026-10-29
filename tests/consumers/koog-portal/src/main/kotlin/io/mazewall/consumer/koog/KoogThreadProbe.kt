@@ -182,7 +182,7 @@ fun main() = runBlocking {
     println("KOOG_THREAD_V1_OK registry=upstream worker=platform fs=isolated socket=denied caller=unchanged virtual=true unconfined=true validation=pass overload=rejected cancellation=cooperative ownership=checked retirement=complete fallback=false replay=false")
 }
 
-private fun readBoundedUtf8(path: Path): String {
+internal fun readBoundedUtf8(path: Path): String {
     val bytes = Files.newInputStream(path).use { it.readNBytes(65_537) }
     require(bytes.size <= 65_536) { "File exceeds 64 KiB" }
     return Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)

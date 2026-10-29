@@ -16,6 +16,9 @@ before a clean first run. No profiling permission is needed for the workspace re
   use the existing producer wrapper and run in separate JVMs. Their incompatible
   process baselines must not be combined. These are real Tool examples, not an
   `AIAgent` loop or a model-selection demonstration.
+  Separate [published agent qualification](../../tests/consumers/koog-portal/README.md#real-agent-loops-without-a-model-account)
+  runs actual offline scripted loops, denied/allowed sequences and queued-agent
+  cancellation. Those engineering checks are not an unfamiliar-human rehearsal.
 - Spring: the [standalone quickstart](../../demos/spring-boot-sandbox/README.md#start-here-ordinary-report-generation)
   stages explicit local publications, exercises normal `measure-report`/`generate`
   and retains separate `measure`/`verify` negative scenarios. The JUnit harness is
@@ -137,3 +140,13 @@ files they could adapt, allowed/denied/cleanup observations and live-show timing
 separately. Rehearse two fresh offline runs on the presentation host. Human
 timing/comprehension, recordings and production/CET approvals remain open until
 genuinely observed; no agent result or generated participant replaces them.
+
+For the integration slice, use separate Koog and Spring applications. Identify
+the actual released artifacts before starting: record resolved versions and JAR
+checksums, not only a mutable SNAPSHOT label. Repository credentials remain
+operator configuration; an unavailable publication is a blocker, not permission
+to substitute a sibling source build. Preparation/download time is recorded
+separately from first use and guided modification. After preparation, perform
+two fresh offline JVM runs and verify allowed/denied/cleanup observations without
+undocumented help or widened permissions. These integration observations alone
+do not close the remaining full-tour, recording or hardware acceptance criteria.

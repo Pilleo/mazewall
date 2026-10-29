@@ -72,14 +72,25 @@ internal fun requireKoogAgentSummaries(
     portalOutput: String,
 ): Set<String> {
     val expected = listOf(
-        "KOOG_AGENT_V1_OK boundary=thread loop=real validation=rejected denial=preserved overload=rejected cancellation=cooperative deadline=propagated retirement=complete replay=false",
-        "KOOG_AGENT_V1_OK boundary=portal loop=real validation=rejected denial=preserved unknown=terminal cancellation=cooperative deadline=propagated retirement=complete replay=false",
+        listOf(
+            "KOOG_AGENT_V1_OK boundary=thread loop=real validation=rejected denial=preserved overload=rejected cancellation=cooperative deadline=propagated retirement=complete replay=false",
+            "KOOG_AGENT_SEQUENCE_V1_OK boundary=thread history=ordered turns=3 deniedThenAllowed=pass " +
+                "repeated=two-explicit-calls queue=bounded queuedCancellation=not-started retirement=complete",
+        ),
+        listOf(
+            "KOOG_AGENT_V1_OK boundary=portal loop=real validation=rejected denial=preserved unknown=terminal cancellation=cooperative deadline=propagated retirement=complete replay=false",
+            "KOOG_AGENT_SEQUENCE_V1_OK boundary=portal history=ordered turns=3 deniedThenAllowed=pass " +
+                "repeated=two-explicit-calls unknown=terminal queue=bounded queuedCancellation=not-started retirement=complete",
+        ),
     )
-    for ((output, summary) in listOf(threadOutput, portalOutput).zip(expected)) {
-        val found = output.lineSequence().filter { it.startsWith("KOOG_AGENT_V1_") }.toList()
-        check(found == listOf(summary)) { "Expected exactly one complete agent summary: $summary; found $found" }
+    for ((output, summaries) in listOf(threadOutput, portalOutput).zip(expected)) {
+        for (summary in summaries) {
+            val prefix = summary.substringBefore("_OK") + "_"
+            val found = output.lineSequence().filter { it.startsWith(prefix) }.toList()
+            check(found == listOf(summary)) { "Expected exactly one complete agent summary: $summary; found $found" }
+        }
     }
-    return expected.toSet()
+    return expected.flatten().toSet()
 }
 
 /** Real source-bound publications and consumers; fixture approval is never production authority. */
