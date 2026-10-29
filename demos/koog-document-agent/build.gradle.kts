@@ -1,13 +1,27 @@
 import org.gradle.api.credentials.PasswordCredentials
 import org.gradle.process.CommandLineArgumentProvider
 import java.security.MessageDigest
+import io.mazewall.portal.PortalInstanceMode
+import io.mazewall.portal.codegen.PortalCodegenExtension
+import io.mazewall.portal.codegen.PortalServiceRegistration
 
 plugins {
     kotlin("jvm")
     kotlin("plugin.serialization")
     application
+    id("io.mazewall.portal.codegen")
 }
 kotlin { jvmToolchain(25) }
+val apiSource = sourceSets.create("api")
+val workerSource = sourceSets.create("portalWorker")
+val apiJar = tasks.register<Jar>("apiJar") {
+    from(apiSource.output)
+    archiveFileName.set("document-api.jar")
+}
+sourceSets.test {
+    compileClasspath += workerSource.output
+    runtimeClasspath += workerSource.output
+}
 val mazewallVersion = providers.gradleProperty("consumerVersion").get()
 require(Regex("[0-9]+\\.[0-9]+\\.[0-9]+[-.A-Za-z0-9]*").matches(mazewallVersion)) { "Pinned safe consumerVersion required" }
 repositories {
@@ -24,6 +38,7 @@ repositories {
     mavenCentral()
 }
 dependencies {
+    implementation(files(apiJar))
     implementation("io.mazewall:koog:$mazewallVersion")
     implementation("ai.koog:agents-core:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
@@ -32,6 +47,14 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    add(workerSource.implementationConfigurationName, files(apiJar))
+    add(workerSource.implementationConfigurationName, "io.mazewall:worker:$mazewallVersion")
+}
+configure<PortalCodegenExtension> {
+    workerSourceSet.set("portalWorker")
+    registrations.set(listOf(PortalServiceRegistration("document-outline", "demo.documents.DocumentOutlineService",
+        "demo.documents.MarkdownOutline", "document-outline", PortalInstanceMode.STATEFUL_SINGLETON,
+        "static-baseline", "document-outline-worker")))
 }
 dependencyLocking {
     lockAllConfigurations()
@@ -44,14 +67,23 @@ application {
 }
 tasks.jar { archiveFileName.set("koog-document-agent.jar") }
 val packagedClasspath = files(tasks.jar.flatMap { it.archiveFile }, configurations.runtimeClasspath)
+val boundaryApiJar = files(project(":boundary-fixture").layout.buildDirectory.file("libs/boundary-api.jar")).builtBy(":boundary-fixture:apiJar")
+val boundaryHostJar = files(project(":boundary-fixture").layout.buildDirectory.file("libs/boundary-fixture.jar")).builtBy(":boundary-fixture:jar")
+dependencies { testImplementation(files(boundaryApiJar)); testRuntimeOnly(files(boundaryHostJar)) }
+val nativeProbeJar = tasks.register<Jar>("nativeProbeJar") {
+    from(sourceSets.test.get().output)
+    archiveFileName.set("document-native-probes.jar")
+}
+val boundaryClasspath = packagedClasspath + files(nativeProbeJar, boundaryApiJar, boundaryHostJar)
 abstract class PackagedClasspathArguments : CommandLineArgumentProvider {
     @get:Classpath abstract val jars: ConfigurableFileCollection
-    override fun asArguments(): Iterable<String> = listOf("-Dexample.classpath=${jars.asPath}")
+    @get:Classpath abstract val boundaryJars: ConfigurableFileCollection
+    override fun asArguments(): Iterable<String> = listOf("-Dexample.classpath=${jars.asPath}", "-Dexample.boundary.classpath=${boundaryJars.asPath}")
 }
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     maxParallelForks = 1
-    jvmArgumentProviders.add(objects.newInstance<PackagedClasspathArguments>().apply { jars.from(packagedClasspath) })
+    jvmArgumentProviders.add(objects.newInstance<PackagedClasspathArguments>().apply { jars.from(packagedClasspath); boundaryJars.from(boundaryClasspath) })
     testLogging { events("passed", "failed", "standardOut", "standardError"); showStandardStreams = true }
 }
 tasks.test { useJUnitPlatform { excludeTags("native") } }
@@ -67,6 +99,20 @@ tasks.register<JavaExec>("demoThread") {
     javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
     classpath = packagedClasspath
     mainClass.set("demo.koog.DocumentAgent")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.register<JavaExec>("demoPortal") {
+    group = "application"
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = boundaryClasspath
+    mainClass.set("demo.koog.PortalBoundaryProbe")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.register<JavaExec>("runPortal") {
+    group = "application"
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = packagedClasspath
+    mainClass.set("demo.koog.PortalDocumentAgent")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 tasks.register("verifyPublishedClosure") {

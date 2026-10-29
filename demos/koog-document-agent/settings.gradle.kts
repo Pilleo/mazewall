@@ -22,3 +22,4 @@ pluginManagement {
     }
 }
 rootProject.name = "koog-document-agent"
+include("boundary-fixture")

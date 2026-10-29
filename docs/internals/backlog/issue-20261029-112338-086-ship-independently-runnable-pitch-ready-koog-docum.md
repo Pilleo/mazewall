@@ -26,7 +26,7 @@ Base: merged PR561 `74c1493c963bfd7a063a5ecc800a0059f96c5709`.
 
 - [x] Task0 local exact library and published plugin-marker stage.
 - [x] Task1 standalone reader/real-agent source, host tests and packaged native path.
-- [ ] Task2 generated opaque process outline and test-only boundary controls.
+- [x] Task2 generated opaque process outline and test-only boundary controls.
 - [ ] Task5 safe model-facing observations with original local failures retained.
 - [ ] Task7 copied-artifact acceptance and final whole-change review/gates.
 
@@ -59,6 +59,27 @@ Pre-flight: Task2 consumes the real published plugin and current runtime APIs;
 Task5 consumes upstream failure events and pre-provider prompt handling, not a
 second execution engine. Task7 must freeze copied-project artifacts and never
 present local candidates as remotely downloaded release evidence.
+
+Task2 parser tests observed RED, then GREEN on Unicode/ATX behavior and exact
+64KiB input/16KiB output/128-heading bounds. Ordinary packaged Portal flow observed
+RED at missing behavior, then GREEN with the actual generated service/child.
+The published marker applies normally in this standalone build; no source export
+receipt/classpath injection is used. Separate test-fixture project generates its
+own opaque denial/crash worker; normal app/registry/distribution do not depend on
+it. Native tests exercise actual denial/recovery/unknown-terminal/healthy-group
+behavior and captured actual child retirement. Strict cache store/reuse also
+works with the published generator/plugin path. Final source-bound/full gates and
+one whole-change review remain required.
+Final Task2 XML confirms8 host and3 native cases with zero skips/failures/errors;
+normal host JAR and installDist contain neither guest implementation classes nor
+test-only boundary artifacts. Shared native-program ownership/reap assertions
+replace duplicated process-launch scaffolding without dropping their deadlines.
+
+Ruling: keep controlled fault implementation/presentation in a nested test-only
+project and packaged test entrypoint rather than adding attack branches or hidden
+flags to the ordinary parser. `runPortal` runs the ordinary app; `demoPortal`
+explicitly runs labelled fault controls too. Cost: a small explicit test fixture,
+not a new production backend or broader advertised authority.
 
 ---
 <!-- id: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum  file: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md -->

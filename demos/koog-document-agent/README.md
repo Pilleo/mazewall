@@ -67,3 +67,34 @@ containment is for trusted synchronous code processing untrusted data: shared he
 unrelated executors, already-open descriptors and arbitrary Java execution are not
 isolated. Run process-backed examples in a separate launch-compatible JVM, never
 by weakening this example's no-exec baseline.
+
+## Generated process outline
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" runPortal
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" demoPortal
+```
+
+`runPortal` is the ordinary application: an actual offline AIAgent calls the
+published-plugin-generated `DocumentOutlineService` in a distinct protected JVM.
+It extracts ATX headings as plain text without rendering or following links.
+Input is at most65536 strict UTF-8 bytes, output at most16384 bytes and128 headings;
+empty headings become `(untitled)`. The normal registry has only `outline_document`.
+Only its generated service API is shared; `MarkdownOutline` stays inside the
+opaque verified worker ZIP and cannot be loaded by the normal host classloader.
+
+`demoPortal` adds a clearly labelled **test-only** fixture from the nested
+`boundary-fixture` project. It proves a real denied sibling open, legitimate
+outline recovery, UNKNOWN_COMPLETION followed by terminal STATE_LOST after a
+controlled child crash, and an independent service/host that stays usable. This is
+not an exploit in the ordinary outline parser. Fixture APIs, fault implementations
+and the presentation entrypoint are not normal application runtime dependencies
+or advertised production tools. Both worker bundles are generated through the real
+published plugin marker, not manually edited output or injected classpaths.
+
+The process app explicitly installs a launch-compatible host baseline before
+worker setup. Its static required worker baseline is separate from resource
+profiles. It retains actual acquired child handles and requires them dead after
+canonical close. Run it in its own JVM; the thread app's permanent no-exec baseline
+cannot be reused for child launch. First-party process separation is not a claim
+of a generic hostile-code/MCP sandbox or automatic inherited-secret isolation.
