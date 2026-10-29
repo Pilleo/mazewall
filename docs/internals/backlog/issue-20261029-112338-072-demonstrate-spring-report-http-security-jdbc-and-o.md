@@ -22,7 +22,7 @@ Approved pitch plan Tasks3-5: independent Boot4.1.1 Java25 web/JDBC/Security/Act
 
 ## Inline progress
 
-- [ ] Task3 standalone HTTP/Security/JDBC application and explicit pre-traffic binding.
+- [x] Task3 standalone HTTP/Security/JDBC application and explicit pre-traffic binding.
 - [ ] Task4 readiness, retained cancellation and actual owned shutdown.
 - [ ] Task5 request-specific safe outcomes and serial-worker transaction receipts.
 - [ ] Task7 copied-artifact acceptance and final whole-change review/gates.
@@ -32,6 +32,33 @@ another invocation can overwrite lastCompletion; HTTP threads never use that glo
 latest report as their own receipt. External review stays separate from fixture demo
 approval. Default Boot infrastructure remains active for unrelated application beans.
 Approved starters are application-only; existing library/runtime versions stay fixed.
+
+Task3 business tests observed RED for the absent method then GREEN with real H2.
+Finished-JAR HTTP test observed RED at absent deployment measurement/serve, then
+GREEN:401 before protected work,200/one committed row, actual denied sibling read
+with rollback, reader403 after body with rollback, subsequent approver200, clean
+request/security state and actual owned-worker retirement. Unrelated normal beans
+still receive actual method-security/transaction advice. Exact test totals and
+source-bound acceptance/final review remain completion gates.
+
+Ruling: register preinitialized infrastructure singletons with bean definitions
+because Boot's SQL dependency configurer dereferences JdbcTemplate definitions;
+manual singleton registration alone failed before traffic. Keep the protected
+already-frozen proxy explicitly registered/bound before refresh. This preserves
+normal Boot processing rather than globally disabling it. Cost if wrong: startup
+failure (caught by finished-JAR tests), never raw-target fallback.
+
+Task4 readiness/drain regression observed RED before the operator drain command,
+then GREEN: readiness503 plus refused protected admission before stop; ordinary
+successful requests retain exact request-specific commit/rollback receipts.
+An inactive-drain response has UNKNOWN/no body, not invented rollback evidence.
+Synchronous HTTP disconnect is explicitly NOT a worker-cancellation signal. Held
+in-flight cancellation/incomplete-drain application evidence is still outstanding.
+
+Task5 Spring public failures use bounded categories/server request IDs without
+paths/payloads, retaining original local causes. Single-worker bridge captures
+new transaction completion before release and checks both metadata and Security
+restoration; no HTTP-thread global lastCompletion correlation is used.
 
 ---
 <!-- id: issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o  file: issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o.md -->
