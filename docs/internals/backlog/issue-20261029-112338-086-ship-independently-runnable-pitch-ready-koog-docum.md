@@ -90,5 +90,11 @@ denial/recovery/state-loss paths also pass under this boundary. Fixture-private
 paths are bound by trusted host mapping, not supplied as model arguments. This
 does not make successful content, arbitrary prompts or remote providers safe.
 
+An outline regression observed RED then GREEN for headings inside backtick/tilde
+fenced code (including short nonclosing fences and unclosed fences). Code comments
+do not become outline entries or consume the128-heading budget. The same ordinary
+worker implementation is exercised by host tests and the actual generated worker;
+the current app has10 host and3 native cases without skips.
+
 ---
 <!-- id: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum  file: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md -->

@@ -179,7 +179,7 @@ internal object PitchExamplesAcceptance {
             if (name == "koog-document-agent") {
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.DocumentAgentTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ScriptedModelTest.xml"), 4)
-                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.PortalDocumentAgentTest.xml"), 2)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.PortalDocumentAgentTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.DocumentAgentNativeTest.xml"), 3)
                 val lib = copy.resolve("build/install/koog-document-agent/lib")
                 for (module in listOf("platform", "enforcer", "runtime", "koog")) {

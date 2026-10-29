@@ -118,7 +118,8 @@ by weakening this example's no-exec baseline.
 
 `runPortal` is the ordinary application: an actual offline AIAgent calls the
 published-plugin-generated `DocumentOutlineService` in a distinct protected JVM.
-It extracts ATX headings as plain text without rendering or following links.
+It extracts supported ATX heading lines outside fenced code as plain text, without
+full CommonMark parsing, rendering or following links.
 Input is at most65536 strict UTF-8 bytes, output at most16384 bytes and128 headings;
 empty headings become `(untitled)`. The normal registry has only `outline_document`.
 Only its generated service API is shared; `MarkdownOutline` stays inside the
