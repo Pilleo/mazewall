@@ -17,6 +17,11 @@ import org.springframework.context.SmartLifecycle;
 
 /** Application-owned explicit preparation. The caller bootstraps the runtime beforehand. */
 public final class DomainLifecycle implements SmartLifecycle, ExecutionDiagnosticsSource {
+    /** Typed pre-entry refusal for application outcomes; remains compatible with IllegalStateException callers. */
+    public static final class InactiveDomainException extends IllegalStateException {
+        private static final long serialVersionUID = 1L;
+        private InactiveDomainException(String state) { super("Required Spring domain is inactive: " + state); }
+    }
     private enum State { NEW, PREPARING, READY, DRAINING, CLOSED, FAILED }
     private final Supplier<InvocationDispatcher> prepare;
     private final Function<Duration, DrainReport> drain;
@@ -138,7 +143,7 @@ public final class DomainLifecycle implements SmartLifecycle, ExecutionDiagnosti
     }
 
     synchronized InvocationDispatcher dispatcher() {
-        if (state != State.READY) throw new IllegalStateException("Required Spring domain is inactive: " + state);
+        if (state != State.READY) throw new InactiveDomainException(state.name());
         return dispatcher;
     }
     ReviewedOperationArtifact artifact() { return artifact; }

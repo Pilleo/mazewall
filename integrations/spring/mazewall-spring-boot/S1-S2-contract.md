@@ -11,6 +11,12 @@ owner; an incomplete stop retains the old owner and exposes its `DrainReport` fo
 subsequent draining. A stop callback means the bounded stop returned, not that
 unfinished executions physically ended.
 
+An inactive readiness guard throws `DomainLifecycle.InactiveDomainException`, a
+typed `IllegalStateException` subtype. Callers may identify an admission refusal
+without parsing diagnostic text. This can also arise at nested entry: an HTTP
+request must additionally prove its own body has not entered before labelling the
+whole request BUSY/unstarted. Other execution/configuration failures remain failures.
+
 Create a `SpringOperationBinder` per reviewed operation, and install its immutable
 `dispatchAdvisor()` in the application's existing `ProxyFactory` before publishing
 the bean. Retain the transaction, diagnosis, and authorization advisors after it,
