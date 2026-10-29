@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 183 | *Total Resolved Issues:* 717
+*Total Active Issues:* 188 | *Total Resolved Issues:* 717
 
-Active status detail: 182 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 187 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,11 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261029-112338-086](issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md) | Ship independently runnable pitch ready Koog document agents | high | integrations |
+| [issue-20261029-112338-072](issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o.md) | Demonstrate Spring report HTTP security JDBC and owned shutdown together | high | integrations |
+| [issue-20261029-112338-046](issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou.md) | Explain reviewed integration policy changes without automatic approval | high | profiler |
+| [issue-20261029-112338-058](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md) | Qualify copied pitch consumers measurements and honest rehearsal handoff | high | integrations |
+| [issue-20261029-112338-060](issue-20261029-112338-060-support-bounded-conventional-java-record-results-b.md) | Support bounded conventional Java record results before Spring transaction commit | high | integrations |
 | [issue-20261026-085810-974](issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio.md) | Qualify multi step and queued Koog agent invocations | high | integrations |
 | [issue-20261026-011129-611](issue-20261026-011129-611-use-application-visible-loader-for-explicit-spring.md) | Use application visible loader for explicit Spring proxy assembly | high | integrations |
 | [issue-20261025-223935-632](issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin.md) | Simplify explicit approved Spring JDBC proxy wiring | high | integrations |
