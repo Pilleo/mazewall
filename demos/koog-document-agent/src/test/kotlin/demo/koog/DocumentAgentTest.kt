@@ -1,5 +1,6 @@
 package demo.koog
 
+import demo.koog.DocumentReader.readBoundedDocument
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.charset.CharacterCodingException

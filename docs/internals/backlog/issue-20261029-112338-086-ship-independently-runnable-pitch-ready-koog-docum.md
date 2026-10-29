@@ -27,7 +27,7 @@ Base: merged PR561 `74c1493c963bfd7a063a5ecc800a0059f96c5709`.
 - [x] Task0 local exact library and published plugin-marker stage.
 - [x] Task1 standalone reader/real-agent source, host tests and packaged native path.
 - [x] Task2 generated opaque process outline and test-only boundary controls.
-- [ ] Task5 safe model-facing observations with original local failures retained.
+- [x] Task5 safe model-facing observations with original local failures retained.
 - [ ] Task7 copied-artifact acceptance and final whole-change review/gates.
 
 Task0 stage owns `build/pitch-stage-74c1493c963b` with the exact libraries and real
@@ -80,6 +80,15 @@ project and packaged test entrypoint rather than adding attack branches or hidde
 flags to the ordinary parser. `runPortal` runs the ordinary app; `demoPortal`
 explicitly runs labelled fault controls too. Cost: a small explicit test fixture,
 not a new production backend or broader advertised authority.
+
+Task5 secret-bearing failure test observed RED at an unsafe model observation,
+then GREEN with the application-local pre-executor error-observation boundary.
+The actual failure callback retains original Throwable identity; model result
+keeps the same tool/call ID and isError=true with only category/fresh receipt.
+Missing local correlation refuses provider execution. Actual thread and Portal
+denial/recovery/state-loss paths also pass under this boundary. Fixture-private
+paths are bound by trusted host mapping, not supplied as model arguments. This
+does not make successful content, arbitrary prompts or remote providers safe.
 
 ---
 <!-- id: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum  file: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md -->

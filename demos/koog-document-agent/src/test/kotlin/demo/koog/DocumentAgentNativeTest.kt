@@ -16,8 +16,11 @@ class DocumentAgentNativeTest {
     @TempDir lateinit var root: Path
 
     @Test fun `actual agent preserves denial recovery and physical worker retirement`() {
-        verifyProgram("demo.koog.DocumentAgent", "example.classpath",
-            listOf("MODEL: scripted (offline)", "ALLOWED:", "DENIED:", "RECOVERED:", "RETIRED:"))
+        verifyProgram(
+            "demo.koog.DocumentAgent",
+            "example.classpath",
+            listOf("MODEL: scripted (offline)", "ALLOWED:", "DENIED:", "RECOVERED:", "RETIRED:"),
+        )
     }
 
     @Test fun `generated outline service stays opaque and its actual child retires`() {
@@ -25,16 +28,29 @@ class DocumentAgentNativeTest {
     }
 
     @Test fun `separate test only fault worker cannot poison the ordinary outline service`() {
-        verifyProgram("demo.koog.PortalBoundaryProbe", "example.boundary.classpath",
-            listOf("CONTROL:", "OUTLINE:", "DENIED:", "RECOVERED:", "SURVIVED:", "RETIRED:"))
+        verifyProgram(
+            "demo.koog.PortalBoundaryProbe",
+            "example.boundary.classpath",
+            listOf("CONTROL:", "OUTLINE:", "DENIED:", "RECOVERED:", "SURVIVED:", "RETIRED:"),
+        )
     }
 
-    private fun verifyProgram(mainClass: String, classpathProperty: String, markers: List<String>) {
+    private fun verifyProgram(
+        mainClass: String,
+        classpathProperty: String,
+        markers: List<String>,
+    ) {
         val classpath = assertNotNull(System.getProperty(classpathProperty))
         val log = root.resolve(mainClass.substringAfterLast('.') + ".log")
-        val process = ProcessBuilder(Path.of(System.getProperty("java.home"), "bin/java").toString(),
-            "--enable-native-access=ALL-UNNAMED", "-cp", classpath, mainClass)
-            .redirectErrorStream(true).redirectOutput(log.toFile()).start()
+        val process = ProcessBuilder(
+            Path.of(System.getProperty("java.home"), "bin/java").toString(),
+            "--enable-native-access=ALL-UNNAMED",
+            "-cp",
+            classpath,
+            mainClass,
+        ).redirectErrorStream(true)
+            .redirectOutput(log.toFile())
+            .start()
         try {
             assertTrue(process.waitFor(60, TimeUnit.SECONDS), "Owned application JVM exceeded its deadline")
             val output = Files.readString(log)

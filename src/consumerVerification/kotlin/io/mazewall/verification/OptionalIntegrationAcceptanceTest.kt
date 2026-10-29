@@ -157,8 +157,11 @@ class OptionalIntegrationAcceptanceTest {
                 ) +
                     listOf(
                     ":platform",
-                        ":enforcer",
-                        ":portals:runtime",
+                         ":enforcer",
+                         ":profiler",
+                         ":portals:runtime",
+                         ":portals:worker",
+                         ":portals:codegen",
                         ":integrations:koog",
                     ":integrations:spring:mazewall-spring-boot",
                         ":integrations:spring:mazewall-spring-boot-starter",
@@ -259,6 +262,7 @@ class OptionalIntegrationAcceptanceTest {
                         ),
                     Duration.ofMinutes(15),
                 )
+                PitchExamplesAcceptance.run(root, repository, version, evidence)
                 println("OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence")
             } finally {
                 val after = ConsumerFixture.snapshot(original)

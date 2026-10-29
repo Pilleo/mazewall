@@ -20,7 +20,9 @@ import java.nio.file.Files
 import java.util.Comparator
 
 @Serializable
-data class BoundaryArguments(val path: String = "")
+data class BoundaryArguments(
+    val path: String = "",
+)
 
 /** Test-only native presentation entry; never added to the ordinary application distribution. */
 object PortalBoundaryProbe {
@@ -32,38 +34,75 @@ object PortalBoundaryProbe {
         try {
             println("CONTROL: scripted offline model; denied-read/crash service is a separate test fixture, not an outline exploit")
             for (name in listOf("demo.documents.MarkdownOutline", "demo.boundary.ControlledBoundaryProbe")) {
-                try { Class.forName(name, false, PortalBoundaryProbe::class.java.classLoader); error("Guest leaked onto host classpath") }
-                catch (_: ClassNotFoundException) { /* Generated worker ZIPs are opaque. */ }
+                try {
+                    Class.forName(name, false, PortalBoundaryProbe::class.java.classLoader)
+                    error("Guest leaked onto host classpath")
+                } catch (
+                    _: ClassNotFoundException,
+                ) {
+                    // Generated worker ZIPs are opaque.
+                }
             }
             val privateFile = Files.writeString(root.resolve("private.txt"), "DUMMY_PRIVATE_CANARY")
             PortalRuntime.open(outlineConfiguration(root.resolve("worker-cache"))).use { runtime ->
                 val outline = outlineTool(runtime)
-                val read = PortalToolAdapter(runtime.prepare(BoundaryProbeService::class.java, PortalServiceId("boundary-probe"),
-                    PortalOperationCall<BoundaryProbeService, BoundaryArguments, String> { service, arg -> service.read(arg.path) }),
-                    typeToken<BoundaryArguments>(), typeToken<String>(), "controlled_read", "Test-only denied read",
-                    { require(it.path.length <= 4096 && '\u0000' !in it.path) }, { require(it.length <= 65_536) })
-                val crash = PortalToolAdapter(runtime.prepare(BoundaryProbeService::class.java, PortalServiceId("boundary-probe"),
-                    PortalOperationCall<BoundaryProbeService, BoundaryArguments, String> { service, _ -> service.crash() }),
-                    typeToken<BoundaryArguments>(), typeToken<String>(), "controlled_crash", "Test-only worker loss", {}, {})
+                val read = PortalToolAdapter(
+                    runtime.prepare(
+                        BoundaryProbeService::class.java,
+                        PortalServiceId("boundary-probe"),
+                    PortalOperationCall<BoundaryProbeService, BoundaryArguments, String> { service, _ -> service.read(privateFile.toString()) },
+                    ),
+                    typeToken<BoundaryArguments>(),
+                    typeToken<String>(),
+                    "controlled_read",
+                    "Test-only denied read",
+                    { require(it.path.length <= 4096 && '\u0000' !in it.path) },
+                    { require(it.length <= 65_536) },
+                )
+                val crash = PortalToolAdapter(
+                    runtime.prepare(
+                        BoundaryProbeService::class.java,
+                        PortalServiceId("boundary-probe"),
+                    PortalOperationCall<BoundaryProbeService, BoundaryArguments, String> { service, _ -> service.crash() },
+                    ),
+                    typeToken<BoundaryArguments>(),
+                    typeToken<String>(),
+                    "controlled_crash",
+                    "Test-only worker loss",
+                    {},
+                    {},
+                )
                 runtime.health().flatMap { it.workerPids }.forEach { acquired.add(ProcessHandle.of(it).orElseThrow()) }
                 check(acquired.size == 2 && acquired.all { it.isAlive })
                 val normal = Json.encodeToString(OutlineArguments("# Launch\n## Plan"))
-                val forbidden = Json.encodeToString(BoundaryArguments(privateFile.toString()))
+                val forbidden = "{}"
                 runBlocking {
                     check(runScriptedAgent(listOf(outline), listOf(ScriptStep(MessagePart.Tool.Call("normal", outline.name, normal), "Launch\nPlan"))).completions == 1)
                     println("OUTLINE: Launch / Plan (actual generated service)")
-                    val recovered = runScriptedAgent(listOf(read, outline), listOf(
+                    val recovered = runScriptedAgent(
+                        listOf(read, outline),
+                        listOf(
                         ScriptStep(MessagePart.Tool.Call("denied", read.name, forbidden), null),
-                        ScriptStep(MessagePart.Tool.Call("recover", outline.name, normal), "Launch\nPlan")))
+                        ScriptStep(MessagePart.Tool.Call("recover", outline.name, normal), "Launch\nPlan"),
+                        ),
+                    )
                     val refusal = recovered.failures.single()
                     check(refusal is PortalRemoteCallException && refusal.remoteType == "java.nio.file.AccessDeniedException" && refusal.evidence == PortalInvocationEvidence.COMPLETED)
                     check(Files.readString(privateFile) == "DUMMY_PRIVATE_CANARY")
                     println("DENIED: actual test-worker sibling open refused; original failure retained")
                     println("RECOVERED: legitimate outline still succeeds; policies unchanged")
-                    val original = runtime.health().single { it.isolationGroup == "boundary-probe" }.workerPids.single()
-                    val lost = runScriptedAgent(listOf(crash, read), listOf(
+                    val original = runtime
+                        .health()
+                        .single { it.isolationGroup == "boundary-probe" }
+                        .workerPids
+                        .single()
+                    val lost = runScriptedAgent(
+                        listOf(crash, read),
+                        listOf(
                         ScriptStep(MessagePart.Tool.Call("crash", crash.name, "{}"), null),
-                        ScriptStep(MessagePart.Tool.Call("lost", read.name, forbidden), null)))
+                        ScriptStep(MessagePart.Tool.Call("lost", read.name, forbidden), null),
+                        ),
+                    )
                     val unknown = lost.failures.first()
                     check(unknown is PortalCallException && unknown.evidence == PortalInvocationEvidence.UNKNOWN_COMPLETION)
                     check(lost.failures[1] is PortalStateLostException)

@@ -32,10 +32,18 @@ object DocumentAgent {
             val budget = Duration.ofSeconds(10)
             lateinit var worker: Thread
             ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, budget, budget).use { runtime ->
-                val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
-                    .allowJvmClasspath().allowFsRead(documents).block(Syscall.SOCKET).build()
+                val policy = WorkerPolicyBuilder
+                    .denyList(RuntimeProfile.HOTSPOT_JIT)
+                    .allowJvmClasspath()
+                    .allowFsRead(documents)
+                    .block(Syscall.SOCKET)
+                    .build()
                 val domain = runtime.prepare(policy, DomainLimits(1, 4))
-                worker = runtime.submit(domain, Callable { Thread.currentThread() }).result().toCompletableFuture().get(10, TimeUnit.SECONDS)
+                worker = runtime
+                    .submit(domain, Callable { Thread.currentThread() })
+                    .result()
+                    .toCompletableFuture()
+                    .get(10, TimeUnit.SECONDS)
                 val read = documentReadTool(runtime, domain, documents)
                 val allowed = Json.encodeToString(ReadDocumentArguments("note.md"))
                 val forbidden = Json.encodeToString(ReadDocumentArguments("../private.txt"))
@@ -44,11 +52,19 @@ object DocumentAgent {
                     check(normal.completions == 1 && normal.failures.isEmpty())
                     println("ALLOWED: approved document read through the real AIAgent and owned tool")
                     val before = read.diagnostics().invocations.admitted
-                    try { read.execute(ReadDocumentArguments("")); error("Invalid path admitted") }
-                    catch (_: IllegalArgumentException) { check(read.diagnostics().invocations.admitted == before) }
-                    val observed = runScriptedAgent(listOf(read), listOf(
+                    try {
+                        read.execute(ReadDocumentArguments(""))
+                        error("Invalid path admitted")
+                    } catch (_: IllegalArgumentException) {
+                        check(read.diagnostics().invocations.admitted == before)
+                    }
+                    val observed = runScriptedAgent(
+                        listOf(read),
+                        listOf(
                         ScriptStep(MessagePart.Tool.Call("denied", read.name, forbidden), null),
-                        ScriptStep(MessagePart.Tool.Call("recovered", read.name, allowed), content)))
+                        ScriptStep(MessagePart.Tool.Call("recovered", read.name, allowed), content),
+                        ),
+                    )
                     val denied = observed.failures.single()
                     check(denied is ContainmentViolationException && denied.cause is AccessDeniedException)
                     check(observed.completions == 1 && Files.readString(privateFile) == "DUMMY_PRIVATE_CANARY")

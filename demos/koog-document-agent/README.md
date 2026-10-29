@@ -43,6 +43,17 @@ demonstration settings, not measured capacity. The model sees a failed-tool
 observation and then requests permitted work; the example does not claim that a
 model detected or resisted an injection. No permissions are widened or work replayed.
 
+`SafeToolFailures` replaces failed tool observations **before the prompt executor
+boundary**, using a category and fresh local receipt ID correlated to the exact
+tool-call ID. The original Throwable remains available to local agent failure
+handlers; it is not replaced by a success value or discarded. Unknown correlation
+refuses the provider request. Host tests inject a secret-bearing exception and
+require both a safe model observation and unchanged original failure identity.
+This does not redact successful document contents, model arguments, previous
+user messages or unrelated callbacks. Choosing whether any such data may be sent
+to a real provider remains an application/operator decision; this offline model
+does not qualify disclosure safety for a remote provider.
+
 **Try a change:** in a private copy, change the first normal request's `note.md`
 to `../private.txt` without changing the policy. The actual open must fail; do not
 change the grant to manufacture success. Keep the later explicit denial/recovery
@@ -98,3 +109,44 @@ profiles. It retains actual acquired child handles and requires them dead after
 canonical close. Run it in its own JVM; the thread app's permanent no-exec baseline
 cannot be reused for child launch. First-party process separation is not a claim
 of a generic hostile-code/MCP sandbox or automatic inherited-secret isolation.
+
+## Profile, compare, review, enforce
+
+Development-only tasks use the existing published profiler and the **same actual
+bounded reader member** used by the tool. They are absent from the application
+distribution and must run in fresh JVMs before a no-exec baseline blocks helpers.
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
+  -PprofileDocument=/absolute/path/to/synthetic-note.md profileRead
+```
+
+Retain `PROFILE_DOCUMENT` as measured coverage evidence. `CANDIDATE_DOCUMENT`
+appears only after the existing `toPolicy` completeness gate succeeds. Missing
+coverage refuses conversion; never edit the coverage marker or auto-approve gaps.
+The candidate is a development-only observed-scope filesystem policy plus explicit
+JVM/classpath support, not a claim of an exact universal syscall allow-list. The
+named trace does not cover future paths, arbitrary tools or unrelated threads.
+
+Save only the candidate JSON in a **new private operator-owned** file. Compare it
+with the prior operation document using the repository's development `:profiler:policyDiff`
+task (`-PoldOperationDocument=... -PnewOperationDocument=...`). Review added reads,
+writes, syscall/action/argument changes, actual artifact/resource identity and gaps.
+Neither comparison, measurement nor hashing supplies approval authority.
+
+A separate reviewer must inspect actual bytes and supply `trustedReview` properties
+`reviewer`, `documentSha256`, `jarSha256` and `resourceGeneration`. Then:
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
+  -PprofileDocument=/absolute/path/to/synthetic-note.md \
+  -PoperationDocument=/absolute/path/to/reviewed-candidate.json \
+  -PtrustedReview=/absolute/path/to/trusted-review.properties enforceReviewedRead
+```
+
+The independent launch validates external review, exact actual reader JVM member,
+finished application bytes and pinned resources, prepares the fixed reviewed policy,
+performs the real read and requires actual worker retirement. It never writes or
+updates review properties. Changing application/input/classpath bytes requires new
+measurement and review, not a fallback. The main agent remains a simple static-policy
+demonstration; this development flow does not silently replace its policy.

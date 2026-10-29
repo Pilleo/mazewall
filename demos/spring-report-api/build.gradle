@@ -51,3 +51,20 @@ tasks.register('nativeTest', Test) {
     useJUnitPlatform { includeTags 'native' }
     outputs.upToDateWhen { false }; outputs.cacheIf { false }
 }
+tasks.register('verifyPublishedClosure') {
+    notCompatibleWithConfigurationCache('Fresh publication audit inspects the actual dependency graph')
+    def graph = configurations.runtimeClasspath
+    inputs.files(graph)
+    doLast {
+        def rootId = graph.incoming.resolutionResult.rootComponent.get().id
+        if (graph.incoming.resolutionResult.allComponents.any { it.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier && it.id != rootId }) {
+            throw new GradleException('Published dependencies only; no sibling source substitution')
+        }
+        def artifacts = graph.resolvedConfiguration.resolvedArtifacts.findAll { it.moduleVersion.id.group == 'io.mazewall' }
+        if (artifacts.isEmpty()) throw new GradleException('Actual published mazewall closure required')
+        artifacts.each {
+            if (it.moduleVersion.id.version != candidate) throw new GradleException('Mixed mazewall versions')
+            println "PUBLISHED ${it.moduleVersion.id} sha256=${java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance('SHA-256').digest(it.file.bytes))}"
+        }
+    }
+}

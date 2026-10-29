@@ -47,6 +47,7 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:5.10.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("io.mazewall:profiler:$mazewallVersion")
     add(workerSource.implementationConfigurationName, files(apiJar))
     add(workerSource.implementationConfigurationName, "io.mazewall:worker:$mazewallVersion")
 }
@@ -114,6 +115,27 @@ tasks.register<JavaExec>("runPortal") {
     classpath = packagedClasspath
     mainClass.set("demo.koog.PortalDocumentAgent")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+tasks.register<JavaExec>("profileRead") {
+    group = "application"
+    description = "Development-only measured named reader workload; incomplete coverage refuses policy conversion."
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = packagedClasspath + files(nativeProbeJar) + configurations.testRuntimeClasspath.get()
+    mainClass.set("demo.koog.DocumentProfile")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    val document = providers.gradleProperty("profileDocument")
+    argumentProviders.add(CommandLineArgumentProvider { listOf(document.get()) })
+}
+tasks.register<JavaExec>("enforceReviewedRead") {
+    group = "application"
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = packagedClasspath + files(nativeProbeJar) + configurations.testRuntimeClasspath.get()
+    mainClass.set("demo.koog.ReviewedDocumentRead")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    val document = providers.gradleProperty("profileDocument")
+    val candidate = providers.gradleProperty("operationDocument")
+    val review = providers.gradleProperty("trustedReview")
+    argumentProviders.add(CommandLineArgumentProvider { listOf(document.get(), candidate.get(), review.get()) })
 }
 tasks.register("verifyPublishedClosure") {
     notCompatibleWithConfigurationCache("Fresh publication audit inspects the actual resolved dependency graph")

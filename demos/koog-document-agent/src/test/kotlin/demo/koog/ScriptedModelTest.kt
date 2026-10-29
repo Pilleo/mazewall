@@ -22,10 +22,13 @@ class ScriptedModelTest {
     private val llm = LLModel(OpenAILLMProvider, "self-check", listOf(LLMCapability.Tools), 8192, 256)
     private val call = MessagePart.Tool.Call("one", tool.name, "{}")
 
-    @Test fun `missing wrong or false success history cannot complete a scripted request`(): Unit = runBlocking {
-        for (bad in listOf(Prompt.Empty,
+    @Test fun `missing wrong or false success history cannot complete a scripted request`(): Unit =
+        runBlocking {
+        for (bad in listOf(
+            Prompt.Empty,
             history(MessagePart.Tool.Result("wrong", tool.name, "denied", true)),
-            history(MessagePart.Tool.Result("one", tool.name, "\"wrong\"", false)))) {
+            history(MessagePart.Tool.Result("one", tool.name, "\"wrong\"", false)),
+        )) {
             ScriptedModel(setOf(tool.name), listOf(ScriptStep(call, null))).use { model ->
                 model.execute(Prompt.Empty, llm, listOf(tool.descriptor))
                 assertFailsWith<IllegalStateException> { model.execute(bad, llm, listOf(tool.descriptor)) }
@@ -33,7 +36,8 @@ class ScriptedModelTest {
         }
     }
 
-    @Test fun `correct output completes once and another model request rejects`(): Unit = runBlocking {
+    @Test fun `correct output completes once and another model request rejects`(): Unit =
+        runBlocking {
         ScriptedModel(setOf(tool.name), listOf(ScriptStep(call, "ok"))).use { model ->
             model.execute(Prompt.Empty, llm, listOf(tool.descriptor))
             assertEquals("script-complete", model.execute(history(MessagePart.Tool.Result("one", tool.name, "\"ok\"", false)), llm, listOf(tool.descriptor)).textContent())
@@ -44,7 +48,8 @@ class ScriptedModelTest {
         assertFailsWith<IllegalArgumentException> { ScriptedModel(setOf(tool.name), List(2) { ScriptStep(call, "ok") }) }
     }
 
-    @Test fun `changed successful output or arguments cannot become a completion`(): Unit = runBlocking {
+    @Test fun `changed successful output or arguments cannot become a completion`(): Unit =
+        runBlocking {
         ScriptedModel(setOf(tool.name), listOf(ScriptStep(call, "ok"))).use { model ->
             model.execute(Prompt.Empty, llm, listOf(tool.descriptor))
             assertFailsWith<IllegalStateException> { model.execute(history(MessagePart.Tool.Result("one", tool.name, "\"wrong\"", false)), llm, listOf(tool.descriptor)) }
@@ -52,14 +57,28 @@ class ScriptedModelTest {
         ScriptedModel(setOf(tool.name), listOf(ScriptStep(call, "ok"))).use { model ->
             model.execute(Prompt.Empty, llm, listOf(tool.descriptor))
             val changed = Prompt.Empty.withMessages {
-                listOf(Message.Assistant(call.copy(args = "{\"path\":\"changed\"}"), ResponseMetaInfo.Empty),
-                    Message.User(listOf(MessagePart.Tool.Result("one", tool.name, "\"ok\"", false)), RequestMetaInfo.Empty))
+                listOf(
+                    Message.Assistant(call.copy(args = "{\"path\":\"changed\"}"), ResponseMetaInfo.Empty),
+                    Message.User(listOf(MessagePart.Tool.Result("one", tool.name, "\"ok\"", false)), RequestMetaInfo.Empty),
+                )
             }
             assertFailsWith<IllegalStateException> { model.execute(changed, llm, listOf(tool.descriptor)) }
         }
     }
 
-    private fun history(result: MessagePart.Tool.Result): Prompt = Prompt.Empty.withMessages {
+    private fun history(result: MessagePart.Tool.Result): Prompt =
+        Prompt.Empty.withMessages {
         listOf(Message.Assistant(call, ResponseMetaInfo.Empty), Message.User(listOf(result), RequestMetaInfo.Empty))
+    }
+
+    @Test fun `model sees only correlated category while local failure identity survives`(): Unit =
+        runBlocking {
+        val original = java.nio.file.AccessDeniedException("/private/DUMMY_PRIVATE_CANARY")
+        val failing = object : Tool<ReadDocumentArguments, String>(typeToken<ReadDocumentArguments>(), typeToken<String>(), "read_document", "failure control") {
+            override suspend fun execute(args: ReadDocumentArguments): String = throw original
+        }
+        val observed = runScriptedAgent(listOf(failing), listOf(ScriptStep(MessagePart.Tool.Call("safe-error", failing.name, "{\"path\":\"note.md\"}"), null)))
+        assertEquals(1, observed.failures.size)
+        kotlin.test.assertSame(original, observed.failures.single())
     }
 }

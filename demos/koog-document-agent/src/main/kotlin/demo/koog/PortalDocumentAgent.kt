@@ -24,25 +24,51 @@ import java.nio.file.Path
 import java.util.Comparator
 
 @Serializable
-data class OutlineArguments(val markdown: String)
+data class OutlineArguments(
+    val markdown: String,
+)
 
 internal fun installPortalHostBaseline() {
     check(!Thread.currentThread().isVirtual) { "Trusted process bootstrap requires a platform thread" }
-    ContainedExecutors.installOnProcess(ProcessPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowMmapExec()
-        .block(Syscall.PTRACE, Syscall.MOUNT, Syscall.UNSHARE, Syscall.CHROOT).build())
+    ContainedExecutors.installOnProcess(
+        ProcessPolicyBuilder
+            .denyList(RuntimeProfile.HOTSPOT_JIT)
+            .allowMmapExec()
+        .block(Syscall.PTRACE, Syscall.MOUNT, Syscall.UNSHARE, Syscall.CHROOT)
+            .build(),
+    )
 }
 
-internal fun outlineConfiguration(cache: Path): PortalRuntimeConfig = PortalRuntimeConfig.load(
-    workerBundleCache = cache, workerProfiles = mapOf("static-baseline" to PortalWorkerProfile()),
-    limits = PortalRuntimeLimits(workers = 1, maxAdmissions = 4, callTimeoutMs = 10_000, startupTimeoutMs = 30_000,
-        closeTimeoutMs = 10_000, maxRequestBytes = 131_072, maxResponseBytes = 131_072, maxCapabilities = 0))
+internal fun outlineConfiguration(cache: Path): PortalRuntimeConfig =
+    PortalRuntimeConfig.load(
+    workerBundleCache = cache,
+        workerProfiles = mapOf("static-baseline" to PortalWorkerProfile()),
+    limits = PortalRuntimeLimits(
+        workers = 1,
+        maxAdmissions = 4,
+        callTimeoutMs = 10_000,
+        startupTimeoutMs = 30_000,
+        closeTimeoutMs = 10_000,
+        maxRequestBytes = 131_072,
+        maxResponseBytes = 131_072,
+        maxCapabilities = 0,
+    ),
+)
 
-internal fun outlineTool(runtime: PortalRuntime): PortalToolAdapter<OutlineArguments, String> = PortalToolAdapter(
-    runtime.prepare(DocumentOutlineService::class.java, PortalServiceId("document-outline"),
-        PortalOperationCall<DocumentOutlineService, OutlineArguments, String> { service, args -> service.outline(args.markdown) }),
-    typeToken<OutlineArguments>(), typeToken<String>(), "outline_document", "Extract up to128 ATX headings without rendering Markdown",
+internal fun outlineTool(runtime: PortalRuntime): PortalToolAdapter<OutlineArguments, String> =
+    PortalToolAdapter(
+    runtime.prepare(
+        DocumentOutlineService::class.java,
+        PortalServiceId("document-outline"),
+        PortalOperationCall<DocumentOutlineService, OutlineArguments, String> { service, args -> service.outline(args.markdown) },
+    ),
+    typeToken<OutlineArguments>(),
+        typeToken<String>(),
+        "outline_document",
+        "Extract up to128 ATX headings without rendering Markdown",
     { require(it.markdown.length <= 65_536 && Charsets.UTF_8.newEncoder().canEncode(it.markdown) && it.markdown.toByteArray(Charsets.UTF_8).size <= 65_536) },
-    { require(it.length <= 16_384 && Charsets.UTF_8.newEncoder().canEncode(it) && it.toByteArray(Charsets.UTF_8).size <= 16_384) })
+    { require(it.length <= 16_384 && Charsets.UTF_8.newEncoder().canEncode(it) && it.toByteArray(Charsets.UTF_8).size <= 16_384) },
+)
 
 object PortalDocumentAgent {
     @JvmStatic fun main(args: Array<String>) {
@@ -53,18 +79,23 @@ object PortalDocumentAgent {
             try {
                 Class.forName("demo.documents.MarkdownOutline", false, PortalDocumentAgent::class.java.classLoader)
                 error("Worker implementation must not be loadable in the host")
-            } catch (_: ClassNotFoundException) { /* The worker bundle is opaque host data. */ }
+            } catch (_: ClassNotFoundException) {
+                // The worker bundle is opaque host data.
+            }
             lateinit var worker: ProcessHandle
             lateinit var tool: PortalToolAdapter<OutlineArguments, String>
             PortalRuntime.open(outlineConfiguration(root.resolve("worker-cache"))).use { runtime ->
                 tool = outlineTool(runtime)
-                val pid = runtime.health().single { it.isolationGroup == "document-outline" }.workerPids.single()
+                val pid = runtime
+                    .health()
+                    .single { it.isolationGroup == "document-outline" }
+                    .workerPids
+                    .single()
                 check(pid != ProcessHandle.current().pid())
                 worker = ProcessHandle.of(pid).orElseThrow()
                 check(worker.isAlive)
                 val arguments = Json.encodeToString(OutlineArguments("# Launch é🙂\n\n## Plan\n- useful work"))
-                val observed = runBlocking { runScriptedAgent(listOf(tool), listOf(
-                    ScriptStep(MessagePart.Tool.Call("outline", tool.name, arguments), "Launch é🙂\nPlan"))) }
+                val observed = runBlocking { runScriptedAgent(listOf(tool), listOf(ScriptStep(MessagePart.Tool.Call("outline", tool.name, arguments), "Launch é🙂\nPlan"))) }
                 check(observed.completions == 1 && observed.failures.isEmpty())
                 println("OUTLINE: Launch é🙂 / Plan (actual generated process service, scripted offline model)")
                 println("BOUNDARY: host=${ProcessHandle.current().pid()} worker=$pid; implementation absent from host classpath")

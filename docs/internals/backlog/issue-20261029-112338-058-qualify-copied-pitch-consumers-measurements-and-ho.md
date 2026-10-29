@@ -35,5 +35,14 @@ existing native/CI budgets remain fixed. Baseline libraries and real plugin mark
 are staged in the newly owned local pitch repository; anonymous remote access401
 is not remote-byte verification. No human/performance/production evidence is invented.
 
+Task7 validator tests observed RED at missing package/XML validation, then GREEN:
+source-substituted and absent nested publication bytes reject; missing/skipped/failed
+or zero test observations reject. The existing exact-source optional acceptance now
+stages real profiler/worker/codegen/plugin-marker publications and builds independent
+copied app projects outside the producer tree, with exact checksum-only additions,
+historical lock preservation, strict/cache-reused builds, actual native test reports
+and packaged artifact identity checks. Final committed-source execution is still
+required before marking Task7 complete.
+
 ---
 <!-- id: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho  file: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md -->
