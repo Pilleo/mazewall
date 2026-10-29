@@ -1,5 +1,15 @@
 import unittest
 import measure
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+TEMP_PARENT = '/tmp/opencode' if Path('/tmp/opencode').is_dir() else None
 
 
 def fixture(mode="reader-thread", fork=0):
@@ -23,6 +33,13 @@ def inventory():
 
 
 class MeasurementsTest(unittest.TestCase):
+    def test_portal_child_requires_actual_identity_threads_and_rss(self):
+        for field in ("pid", "threads", "rssKiB"):
+            rows = inventory()
+            next(row for row in rows if row["mode"] == "outline-portal")["childResources"].pop(field)
+            with self.assertRaises(ValueError):
+                measure.validate(rows)
+
     def test_duplicate_fields_cannot_override_evidence(self):
         with self.assertRaises(ValueError):
             measure.decode('{"pid":1,"pid":2}')
@@ -49,6 +66,84 @@ class MeasurementsTest(unittest.TestCase):
             measure.validate([fixture()])
         with self.assertRaises(ValueError):
             measure.validate([fixture()] * 3)
+
+
+class ProcessOwnershipTest(unittest.TestCase):
+    CHILD = """
+import json, os, signal, sys, time
+from pathlib import Path
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+fields = Path('/proc/self/stat').read_text().rsplit(')', 1)[1].split()
+marker = Path(sys.argv[1])
+temporary = marker.with_suffix('.new')
+temporary.write_text(json.dumps({'pid': os.getpid(), 'start': fields[19]}))
+temporary.rename(marker)
+while True: time.sleep(1)
+"""
+    PARENT = """
+import subprocess, sys, time
+from pathlib import Path
+subprocess.Popen([sys.executable, '-c', sys.argv[2], sys.argv[1]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+deadline = time.monotonic() + 5
+while not Path(sys.argv[1]).exists():
+    if time.monotonic() >= deadline: raise RuntimeError('Child did not enter')
+    time.sleep(.01)
+if sys.argv[3] == 'held':
+    while True: time.sleep(1)
+"""
+
+    def child_alive(self, marker):
+        child = json.loads(marker.read_text())
+        try:
+            fields = Path('/proc', str(child['pid']), 'stat').read_text().rsplit(')', 1)[1].split()
+            return fields[19] == child['start'] and fields[0] not in {'Z', 'X'}
+        except FileNotFoundError:
+            return False
+
+    def release_child(self, marker):
+        if not marker.exists() or not self.child_alive(marker):
+            return
+        child = json.loads(marker.read_text())
+        try:
+            fd = os.pidfd_open(child['pid'])
+        except ProcessLookupError:
+            return
+        try:
+            fields = Path('/proc', str(child['pid']), 'stat').read_text().rsplit(')', 1)[1].split()
+            if fields[19] != child['start']:
+                raise AssertionError('Child identity changed; refusing unowned signal')
+            signal.pidfd_send_signal(fd, signal.SIGKILL)
+        finally:
+            os.close(fd)
+
+    def test_exited_parent_does_not_abandon_held_child(self):
+        with tempfile.TemporaryDirectory(dir=TEMP_PARENT) as temporary:
+            marker = Path(temporary, 'child.json')
+            try:
+                try:
+                    measure.owned([sys.executable, '-c', self.PARENT, str(marker), self.CHILD, 'exit'])
+                except ValueError:
+                    pass  # An exited parent with a live child is a failed measurement, even after cleanup.
+                self.assertFalse(self.child_alive(marker), 'Held child survived exited parent cleanup')
+            finally:
+                self.release_child(marker)
+
+    def test_parent_exit_on_sigterm_does_not_skip_child_escalation(self):
+        with tempfile.TemporaryDirectory(dir=TEMP_PARENT) as temporary:
+            marker = Path(temporary, 'child.json')
+            process = subprocess.Popen([sys.executable, '-c', self.PARENT, str(marker), self.CHILD, 'held'], start_new_session=True)
+            try:
+                deadline = time.monotonic() + 5
+                while not marker.exists() and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue(marker.exists())
+                measure.retire(process)
+                self.assertFalse(self.child_alive(marker), 'Child ignored SIGTERM after parent exited')
+            finally:
+                self.release_child(marker)
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=5)
 
 
 if __name__ == "__main__":

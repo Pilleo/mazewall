@@ -26,7 +26,7 @@ final class ReportController {
             return response(receipt, 200, result);
         } catch (Exception failure) {
             LOG.log(System.Logger.Level.ERROR, "Report request " + receipt.id + " failed; original local cause follows", failure);
-            Outcome outcome = outcome(failure);
+            Outcome outcome = outcome(failure, receipt.bodyEntered);
             return response(receipt, outcome.status, outcome.name() + " request=" + receipt.id);
         }
     }
@@ -40,7 +40,11 @@ final class ReportController {
         Outcome(int status) { this.status = status; }
     }
     static Outcome outcome(Throwable failure) {
+        return outcome(failure, false);
+    }
+    static Outcome outcome(Throwable failure, boolean bodyEntered) {
         for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (!bodyEntered && cause instanceof io.mazewall.spring.DomainLifecycle.InactiveDomainException) return Outcome.BUSY;
             if (cause instanceof ContainmentViolationException || cause instanceof java.nio.file.AccessDeniedException) return Outcome.CONTAINMENT_REFUSED;
             if (cause instanceof AccessDeniedException) return Outcome.AUTHORIZATION_DENIED;
             if (cause instanceof TimeoutException || cause instanceof InterruptedException) return Outcome.OUTCOME_UNKNOWN;

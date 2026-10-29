@@ -71,5 +71,24 @@ paths/payloads, retaining original local causes. Single-worker bridge captures
 new transaction completion before release and checks both metadata and Security
 restoration; no HTTP-thread global lastCompletion correlation is used.
 
+Final review fix pass: actual finished-JAR drain-between-check-and-dispatch test
+observed RED (500 after the real proxy's inactive-domain guard), not a fabricated
+body failure. The shared lifecycle now supplies a typed IllegalStateException
+subtype; the application maps that cause to503 only when its receipt proves no
+body entry. Generic business/configuration failures and entered work stay failures.
+Library/starter builds pass; the independent published-app GREEN is recorded below.
+
+GREEN now executed against exact committed typed-API producer
+`597f483649f52970597047ac51056a349a19adbb`:5 host/4 native tests pass with real
+drain-after-ready refusal and no body/SQL. Entered work/generic failures are not
+relabeled unstarted BUSY. Exact coordinate checksums/locks were added, preserving
+the historical namespace; the old baseline cannot compile this new API consumer.
+
+Ruling: expose only the nested InactiveDomainException type (private constructor)
+for actual cross-module outcome classification, preserving IllegalStateException
+compatibility. Do not parse exception messages or broadly hide pre-body failures
+whenever readiness changes. Cost if wrong: older SDKs cannot compile this new
+sample, so its selected published SDK must include this additive lifecycle API.
+
 ---
 <!-- id: issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o  file: issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o.md -->

@@ -39,5 +39,7 @@ class ReportContextTest {
         assertEquals(ReportController.Outcome.CANCELLED, ReportController.outcome(new java.util.concurrent.CancellationException("private")));
         assertEquals(ReportController.Outcome.OUTCOME_UNKNOWN, ReportController.outcome(new java.util.concurrent.TimeoutException("private")));
         assertEquals(ReportController.Outcome.INTERNAL_FAILURE, ReportController.outcome(new Exception("private")));
+        assertEquals(ReportController.Outcome.INTERNAL_FAILURE, ReportController.outcome(new IllegalStateException("genuine pre-entry failure"), false));
+        assertEquals(ReportController.Outcome.INTERNAL_FAILURE, ReportController.outcome(new IllegalStateException("genuine body failure"), true));
     }
 }

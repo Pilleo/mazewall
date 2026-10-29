@@ -70,5 +70,54 @@ that one entry's executable permission. All four archives have valid member path
 source wrappers/locks/checksums and no test-only fault/lifecycle JARs in normal binary
 closures. Public guides link the new app paths; actual human item remains open.
 
+## Independent final review and one fix pass
+
+One fresh read-only whole-branch review found no Critical issue, two Important
+issues (drain/dispatch outcome race, parent-only measurement cleanup) and one
+nominal Minor incomplete child-resource check. No second reviewer is used.
+
+Final: Ruling: grade the incomplete child identity/thread check Important, not
+polish: the raw-evidence gate could approve missing process-resource observations.
+It joins the same fix pass. Cost if wrong: extra bounded corruption tests, not
+expanded runtime authority.
+
+Final fixes observed RED then GREEN: actual finished-JAR drain race (500 ->503
+without body/SQL); measurement parent exits before a held child; parent exits on
+TERM while its child ignores TERM; missing child PID/thread/RSS fields. The six
+Python host self-tests pass, and the Spring published-app suite passes against the
+new additive lifecycle API (five host/four native cases). Final exact-source and
+full-build gates are still required.
+
+Final: Ruling: retain the acquired private group leader unreaped with WNOWAIT until
+all live members stop; use the existing2s TERM/5s KILL bounds, not a generic hostile
+process supervisor or a guessed numeric PID token. Successful parents with live
+children fail measurements even after cleanup. Cost if wrong: fail and report
+unknown cleanup rather than accept data or signal a reused unowned process group.
+
+### Review exclusions resolved explicitly
+
+Final: Ruling: reviewer ran no tests by instruction; focused tests and final exact
+acceptance/full build supply execution evidence separately. Cost if wrong: the
+change remains unqualified, not implicitly green from read-only review.
+
+Final: Ruling: remote release identities, intended presentation-machine data and
+actual unfamiliar-human rehearsal remain external open gates. Cost if wrong: no
+claim of released-byte adoption or completed pitch/human qualification is valid.
+
+Final: Ruling: generated locks/checksums/wrappers are qualified by actual strict
+copied builds, historical-lock preservation, artifact byte comparison and archive
+checks; these do not authenticate an upstream release publisher. Cost if wrong:
+remote provenance stays unqualified and must be supplied by the operator.
+
+Final: Ruling: unchanged kernel/FFM internals and hostile code/shared heap,
+redefinition, mutable deployment and provider disclosure remain outside this
+branch's promises; preserve documented first-party boundaries. Cost if wrong:
+applications still need the appropriate process/trust/disclosure design.
+
+Final: Ruling: reader byte bounds are not stalled-storage/FIFO execution deadlines;
+the demo uses trusted regular fixtures and the synchronous HTTP sample does not
+infer physical end from client timeout. Cost if wrong: real blocking I/O can retain
+an incomplete owner and require operator handling, not forced thread termination.
+
 ---
 <!-- id: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho  file: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md -->

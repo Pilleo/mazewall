@@ -99,6 +99,22 @@ class ReportHttpTest {
         }
     }
 
+    @Test void drainBetweenReadyCheckAndActualProxyDispatchIsBusyWithoutBodyEntry() throws Exception {
+        jarProperty = "example.lifecycleJar";
+        prepare();
+        var log = root.resolve("drain-race.log");
+        Process process = launch("verify-drain-race").redirectOutput(log.toFile()).start();
+        try {
+            assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+            String output = Files.readString(log);
+            assertEquals(0, process.exitValue(), output);
+            assertTrue(output.contains("REPORT_DRAIN_RACE_OK status=503 body=not-entered transaction=not-started"), output);
+        } finally {
+            if (process.isAlive()) process.destroyForcibly();
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS));
+        }
+    }
+
     private void prepare() throws Exception {
         fixture();
         Path candidate = root.resolve("candidate.json");

@@ -30,6 +30,14 @@ custody. A nonzero/timed-out/missing-effect/unretired run fails, rather than acc
 partial data. The validator requires the complete selected mode inventory and exact
 fork/sample counts and rejects changed derived statistics or missing retirement.
 
+The Linux driver keeps its acquired private group leader **unreaped** with WNOWAIT
+until all live group members stop, even when that leader exits first. Cleanup uses
+the existing TERM/KILL bounds and verifies remaining members, not just the parent.
+An otherwise successful parent leaving a live child is a failed measurement, even
+if cleanup later kills it. This handles these first-party launches, not arbitrary
+processes that deliberately escape their private session/group. Host self-tests
+include an exited parent and a TERM-exiting parent with TERM-resistant children.
+
 - **Reader direct vs thread:** same real offline AIAgent construction/run/close and
   actual bounded document read; the protected variant uses the ordinary fixed policy,
   one worker and four admissions. Both install the compatible permanent host baseline.

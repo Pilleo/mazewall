@@ -66,7 +66,8 @@ public final class HeldReportLifecycleProbe {
                         CanonicalPolicyArtifact.worker(profile, policy), Set.of(), Map.of()).toJson());
                 return;
             }
-            check(args[0].equals("verify"), "Explicit verify required");
+            boolean drainRace = args[0].equals("verify-drain-race");
+            check(args[0].equals("verify") || drainRace, "Explicit verify required");
             var external = new Properties();
             try (var input = Files.newInputStream(root.resolve("trusted-review.properties"))) { external.load(input); }
             var artifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("candidate.json")),
@@ -92,44 +93,63 @@ public final class HeldReportLifecycleProbe {
                 beans.registerSingleton("reportService", proxy);
                 binder.bind(new SpringOperationBinder.Approval(artifact, proxy, HeldReportService.class.getClassLoader(), profile,
                         resources.getResourceGeneration(), Set.of(SpringOperationBinder.Phase.BODY, SpringOperationBinder.Phase.TRANSACTION_COMPLETION)));
-                var delivered = new AtomicReference<Throwable>();
-                var receipt = new ReportRequestContext.Receipt();
-                Thread caller = Thread.ofVirtual().start(() -> {
-                    var context = SecurityContextHolder.createEmptyContext();
-                    context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated("approver", null, List.of(new SimpleGrantedAuthority("ROLE_APPROVER"))));
-                    SecurityContextHolder.setContext(context);
-                    try { ReportRequestContext.with(receipt, () -> proxy.generate(receipt.id, "approved")); }
-                    catch (Exception failure) { delivered.set(failure); }
-                    finally { SecurityContextHolder.clearContext(); }
-                });
-                try {
-                    check(target.entered.await(5, TimeUnit.SECONDS), "Actual protected report body not entered");
-                    caller.interrupt();
-                    caller.join(5000);
-                    check(!caller.isAlive() && delivered.get() instanceof InterruptedException, "Caller cancellation must remain delivery only");
-                    check(target.cancellation.await(5, TimeUnit.SECONDS) && worker.get().isAlive(), "Actual cleanup must still be held");
-                    lifecycle.stop();
-                    check(lifecycle.lastDrain() instanceof DrainReport.Incomplete, "Held worker must retain incomplete drain");
-                    var incomplete = (DrainReport.Incomplete) lifecycle.lastDrain();
-                    check(!lifecycle.isRunning() && !lifecycle.diagnostics().getRetirementComplete(), "Incomplete must refuse readiness");
-                    resources.validate();
-                    check(receipt.transaction.get() == null, "Caller interruption is not a transaction completion receipt");
-                    target.release.countDown();
-                    runtime.drain(budget);
-                    lifecycle.stop();
-                    worker.get().join(5000);
-                    check(!worker.get().isAlive() && lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Canonical physical retirement required");
-                    check(incomplete.getLiveWorkers() > 0, "Earlier incomplete receipt must not upgrade itself");
-                    check(jdbc.queryForObject("select count(*) from report_audit", Integer.class) == 0, "Actual cancellation rollback required");
-                    check(receipt.transaction.get() != null && receipt.transactionOutcome().equals("ROLLED_BACK"), "Actual correlated completion required after physical end");
-                } finally {
-                    target.release.countDown();
-                    if (caller.isAlive()) caller.interrupt();
-                    caller.join(5000);
+                if (drainRace) {
+                    Reports concurrentDrain = (id, template) -> {
+                        lifecycle.stop();
+                        return proxy.generate(id, template);
+                    };
+                    var controller = new ReportController(concurrentDrain, new ReportConfiguration.OrdinaryService(), lifecycle);
+                    var response = controller.report("approved");
+                    check(response.getStatusCode().value() == 503 && response.getBody().startsWith("BUSY request="), "Drain after readiness check must refuse as BUSY, not500");
+                    check(response.getHeaders().getFirst("X-Body-Entered").equals("false") && effects.lastCompletion() == null,
+                            "Pre-entry rejection must not invent execution or transaction completion");
+                    check(target.entered.getCount() == 1 && jdbc.queryForObject("select count(*) from report_audit", Integer.class) == 0, "No body or SQL before rejected admission");
+                    try { proxy.generate(java.util.UUID.randomUUID().toString(), "approved"); throw new AssertionError("Inactive proxy admitted"); }
+                    catch (IllegalStateException inactive) {
+                        check(ReportController.outcome(inactive, true) == ReportController.Outcome.INTERNAL_FAILURE,
+                                "An inactive nested entry must not relabel already-entered work as unstarted BUSY");
+                    }
+                } else {
+                    var delivered = new AtomicReference<Throwable>();
+                    var receipt = new ReportRequestContext.Receipt();
+                    Thread caller = Thread.ofVirtual().start(() -> {
+                        var context = SecurityContextHolder.createEmptyContext();
+                        context.setAuthentication(UsernamePasswordAuthenticationToken.authenticated("approver", null, List.of(new SimpleGrantedAuthority("ROLE_APPROVER"))));
+                        SecurityContextHolder.setContext(context);
+                        try { ReportRequestContext.with(receipt, () -> proxy.generate(receipt.id, "approved")); }
+                        catch (Exception failure) { delivered.set(failure); }
+                        finally { SecurityContextHolder.clearContext(); }
+                    });
+                    try {
+                        check(target.entered.await(5, TimeUnit.SECONDS), "Actual protected report body not entered");
+                        caller.interrupt();
+                        caller.join(5000);
+                        check(!caller.isAlive() && delivered.get() instanceof InterruptedException, "Caller cancellation must remain delivery only");
+                        check(target.cancellation.await(5, TimeUnit.SECONDS) && worker.get().isAlive(), "Actual cleanup must still be held");
+                        lifecycle.stop();
+                        check(lifecycle.lastDrain() instanceof DrainReport.Incomplete, "Held worker must retain incomplete drain");
+                        var incomplete = (DrainReport.Incomplete) lifecycle.lastDrain();
+                        check(!lifecycle.isRunning() && !lifecycle.diagnostics().getRetirementComplete(), "Incomplete must refuse readiness");
+                        resources.validate();
+                        check(receipt.transaction.get() == null, "Caller interruption is not a transaction completion receipt");
+                        target.release.countDown();
+                        runtime.drain(budget);
+                        lifecycle.stop();
+                        worker.get().join(5000);
+                        check(!worker.get().isAlive() && lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Canonical physical retirement required");
+                        check(incomplete.getLiveWorkers() > 0, "Earlier incomplete receipt must not upgrade itself");
+                        check(jdbc.queryForObject("select count(*) from report_audit", Integer.class) == 0, "Actual cancellation rollback required");
+                        check(receipt.transaction.get() != null && receipt.transactionOutcome().equals("ROLLED_BACK"), "Actual correlated completion required after physical end");
+                    } finally {
+                        target.release.countDown();
+                        if (caller.isAlive()) caller.interrupt();
+                        caller.join(5000);
+                    }
                 }
             }
             jdbc.execute("shutdown");
-            System.out.println("REPORT_HELD_LIFECYCLE_OK caller=cancelled drain=incomplete resources=retained rollback=actual retirement=physical");
+            System.out.println(drainRace ? "REPORT_DRAIN_RACE_OK status=503 body=not-entered transaction=not-started" :
+                    "REPORT_HELD_LIFECYCLE_OK caller=cancelled drain=incomplete resources=retained rollback=actual retirement=physical");
         }
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }

@@ -11,6 +11,8 @@ report is written.** A denied read and post-authorization failure both roll back
 Use Linux with Seccomp/Landlock support and JDK25. Select the approved Maven
 version/repository; configure named `mazewall` Gradle credentials externally when
 required. The illustrative SNAPSHOT default is not immutable released-byte proof.
+This sample requires the additive typed inactive-domain API from the current SDK;
+an older SDK used by the earlier minimal example cannot compile this new sample.
 
 ```bash
 : "${VERSION:?Select the approved artifact version}"

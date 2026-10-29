@@ -9,7 +9,6 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
-import sys
 import tempfile
 import time
 import urllib.error
@@ -59,7 +58,9 @@ def validate(rows):
             pressure = row.get("pressure") or {}
             require(pressure.get("accepted") == 4 and pressure.get("rejected") == 1 and pressure.get("rejectionNs", 0) > 0, "Bounded pressure control required separately from latency")
         if row["mode"] == "outline-portal":
-            require(row.get("childResources", {}).get("pid") != row["pid"] and row.get("childResources", {}).get("rssKiB", 0) > 0, "Actual distinct child resources required")
+            child = row.get("childResources") or {}
+            require(type(child.get("pid")) is int and child["pid"] > 0 and child["pid"] != row["pid"]
+                    and all(type(child.get(key)) is int and child[key] > 0 for key in ("rssKiB", "threads")), "Actual distinct child identity/RSS/threads required")
 
 
 def digest(path):
@@ -74,25 +75,69 @@ def java():
     return executable
 
 
-def retire(process):
-    if process.poll() is None:
-        os.killpg(process.pid, signal.SIGTERM)
+def exit_status(process):
+    # WNOWAIT retains the genuinely acquired leader PID until every group member is stopped.
+    return os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+
+
+def await_exit(process, timeout):
+    deadline = time.monotonic() + timeout
+    while True:
+        status = exit_status(process)
+        if status is not None:
+            return status.si_status if status.si_code == os.CLD_EXITED else -status.si_status
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        time.sleep(.01)
+
+
+def live_group(leader):
+    members = []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdecimal():
+            continue
         try:
-            process.wait(timeout=2)
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.wait(timeout=5)
+            fields = (entry / 'stat').read_bytes().rsplit(b')', 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if int(fields[2]) == leader and int(fields[3]) == leader and fields[0] not in {b'Z', b'X'}:
+            members.append(int(entry.name))
+    return members
+
+
+def retire(process):
+    exit_status(process)  # A reaped/reused numeric PID is not authority to signal a group.
+    if os.getpgid(process.pid) != process.pid or os.getsid(process.pid) != process.pid:
+        raise ValueError('Acquired private process group/session required')
+    remaining = live_group(process.pid)
+    for sig, timeout in ((signal.SIGTERM, 2), (signal.SIGKILL, 5)):
+        if not remaining:
+            break
+        os.killpg(process.pid, sig)
+        deadline = time.monotonic() + timeout
+        while remaining and time.monotonic() < deadline:
+            time.sleep(.01)
+            remaining = live_group(process.pid)
+    if remaining:
+        raise ValueError('Owned group still has live processes: ' + str(remaining))
+    process.wait(timeout=5)
 
 
 def owned(command):
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
-    try:
-        output = process.communicate(timeout=60)[0].decode("utf-8")
-        if process.returncode != 0:
-            raise ValueError("Owned application failed: " + output[-6000:])
-        return output
-    finally:
-        retire(process)
+    with tempfile.TemporaryFile(dir='/tmp/opencode' if Path('/tmp/opencode').is_dir() else None) as log:
+        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            code = await_exit(process, 60)
+            log.seek(0)
+            data = log.read(2_097_153)
+            if len(data) > 2_097_152:
+                raise ValueError('Owned application log exceeds2MiB')
+            output = data.decode('utf-8')
+            if code != 0 or live_group(process.pid):
+                raise ValueError("Owned application failed or left a live child: " + output[-6000:])
+            return output
+        finally:
+            retire(process)
 
 
 def koog(root):
@@ -151,7 +196,7 @@ def spring(root):
                 try:
                     deadline = time.monotonic() + 40
                     ready = None
-                    while process.poll() is None and time.monotonic() < deadline:
+                    while exit_status(process) is None and time.monotonic() < deadline:
                         ready = re.search(r"^REPORT_READY port=(\d+)$", (fixture / "server.log").read_text(), re.MULTILINE)
                         if ready:
                             break
@@ -202,9 +247,9 @@ def spring(root):
                     request("/reports/approved", 503)
                     process.stdin.write(b"stop\n")
                     process.stdin.flush()
-                    process.wait(timeout=15)
+                    code = await_exit(process, 15)
                     output = (fixture / "server.log").read_text()
-                    if process.returncode != 0 or "REPORT_RETIRED actualWorker=" not in output or "REPORT_AUDIT committed=120 bodyEntries=120 cleanContexts=120" not in output:
+                    if code != 0 or live_group(process.pid) or "REPORT_RETIRED actualWorker=" not in output or "REPORT_AUDIT committed=120 bodyEntries=120 cleanContexts=120" not in output:
                         raise ValueError("Missing actual request effects/retirement: " + output[-6000:])
                     ordered = sorted(samples)
                     runtime_version = re.search(r"Starting ReportApplication using Java ([^ ]+)", output)
