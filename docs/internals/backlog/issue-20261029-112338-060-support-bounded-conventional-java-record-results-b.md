@@ -38,10 +38,18 @@ record binding. Actual H2 rollback covers oversized aggregate output and caught
 nested invalid output; scalar/String/byte[] suites remain unchanged. Accessors are
 checked without executing them; existing Spring ASM is reused, no new dependency,
 serializer or public symbol added. Both Spring library/starter builds pass.
+Java-only shape coverage also observed RED then GREEN for Kotlin metadata: a
+Kotlin @JvmRecord must not slip through merely because it has record components.
+The bytecode check rejects Kotlin metadata without forcing Kotlin linkage into
+the library's runtime path.
 
 An independent ordinary-JAR published consumer has observed RED against the prior
-library at actual record binding. Its GREEN exact-publication/native evidence and
-final review remain outstanding. Normal HTTP report still returns String.
+library at actual record binding. GREEN exact committed producer
+`64687002cee23e370244a407b0ceb2e62f6b0f6a` / coordinate
+`0.1.0-integration.64687002cee2` then proves actual owned-worker UTF8 bounds,
+pre-commit SQL rollback, recovery and physical retirement through published JARs.
+Whole-branch exact acceptance/full gate/final review remain outstanding. Normal
+HTTP report still returns String.
 
 Ruling: admit records only with the qualified JDBC guard and a physical-transaction
 propagation, because value checks must precede commit. S0/no-guard semantics and

@@ -1,5 +1,29 @@
 # Present mazewall through executable JUnit examples
 
+## Lead with one useful application
+
+Choose **one** independent story for the audience:
+
+1. **Koog document agent:** [guide](../../demos/koog-document-agent/README.md).
+   Run `demoThread` for an actual offline scripted AIAgent: permitted document,
+   actual denied sibling read, permitted recovery under the unchanged policy.
+   Run `runPortal` in a separate JVM for useful Markdown outlines in a generated
+   worker; `demoPortal` explicitly adds a separate test-only denied-read/crash
+   fixture. Never describe that controlled fault worker as an exploit in the parser.
+2. **Spring report API:** [guide](../../demos/spring-report-api/README.md).
+   Prepare the exact finished deployment and separate trusted review; `serve`
+   never approves itself. Show401 before body, approver200/commit, real denied
+   read/rollback, reader403/post-authorization rollback, then approver recovery.
+   Show request-correlated outcomes, readiness refusal on `drain` and actual close
+   on `stop`. No filesystem report writes or Koog dependency are involved.
+
+The guides include ordinary distributions/source kits. Do not publish or replace an
+operator installation as part of rehearsal. Complete remote-byte identification,
+the [bounded local measurements](../../benchmarks/integration-boundaries/pitch/README.md),
+and the actual-human rehearsal as separate gates. A scripted model proves adapter
+execution, not model resistance or safe remote-provider disclosure. The newer
+Spring record-result library extension is optional; the headline HTTP path stays String.
+
 ## Start with the runnable application paths
 
 For a first evaluation, choose one independent example rather than building a

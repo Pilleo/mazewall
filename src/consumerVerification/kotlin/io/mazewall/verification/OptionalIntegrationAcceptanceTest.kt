@@ -120,7 +120,23 @@ class OptionalIntegrationAcceptanceTest {
                 }
 
                 val revision = run("producer-revision", listOf("git", "rev-parse", "HEAD")).trim()
-                val producerScopes = listOf("platform", "enforcer", "profiler", "portals", "integrations", "buildSrc", "gradle", "build.gradle.kts", "settings.gradle.kts", "gradle.properties")
+                val producerScopes = listOf(
+                    "platform",
+                    "enforcer",
+                    "profiler",
+                    "portals",
+                    "integrations",
+                    "buildSrc",
+                    "gradle",
+                    "build.gradle.kts",
+                    "settings.gradle.kts",
+                    "gradle.properties",
+                    "demos/koog-document-agent",
+                    "demos/spring-report-api",
+                    "src/consumerVerification",
+                    "tests/consumers/spring-jdbc",
+                    "benchmarks/integration-boundaries/pitch",
+                )
                 run("committed-producer", listOf("git", "diff", "--exit-code", revision, "--") + producerScopes)
                 val unknown = run("identified-producer", listOf("git", "ls-files", "--others", "--exclude-standard", "--") + producerScopes)
                 check(unknown.isBlank()) { "Commit the actual producer inputs before exact-publication acceptance: $unknown" }

@@ -59,7 +59,12 @@ bridge; virtual caller interruption returns while actual cleanup remains held;
 bounded stop retains Incomplete and genuine resources; eventual release yields
 actual SQL rollback, correlated completion and canonical physical retirement. The
 old Incomplete snapshot stays incomplete. No held-cleanup hook enters normal
-ReportService/application.jar.4 host and3 native cases execute with zero skips.
+ReportService/application.jar.5 host and3 native cases execute with zero skips.
+A further readiness-state regression observed RED then GREEN: readiness/admission
+sample actual owned diagnostics, not just SmartLifecycle's READY flag, so a failed
+or retired underlying generation cannot remain ready. Preparation/close budgets
+remain ten seconds; synchronous HTTP has no automatic execution deadline and
+client timeout/disconnect never proves rollback or physical termination.
 
 Task5 Spring public failures use bounded categories/server request IDs without
 paths/payloads, retaining original local causes. Single-worker bridge captures

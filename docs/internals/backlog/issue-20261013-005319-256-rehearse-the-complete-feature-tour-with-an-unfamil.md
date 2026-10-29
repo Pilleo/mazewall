@@ -35,5 +35,13 @@ resolved. Credentials remain operator-owned. No human observations, timings or
 released-byte download evidence have been supplied by this implementation; all
 existing full-tour/recording/hardware acceptance criteria remain open.
 
+The new independent `koog-document-agent` and `spring-report-api` guides now provide
+useful application paths and ordinary source/binary distributions for this exercise.
+Have the actual newcomer choose one, identify the downloaded library/plugin bytes,
+run its normal path and guided modification, then separately inspect its test-only
+denial/crash/held-cleanup controls. Measure setup/adaptation time and two fresh offline
+runs on the intended host. Local automated measurements, generated archives and
+synthetic fixture reviewers are not human observations or remote release evidence.
+
 ---
 <!-- id: issue-20261013-005319-256-rehearse-the-complete-feature-tour-with-an-unfamil  file: issue-20261013-005319-256-rehearse-the-complete-feature-tour-with-an-unfamil.md -->

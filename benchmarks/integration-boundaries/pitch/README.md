@@ -1,0 +1,62 @@
+# Bounded application measurements
+
+This companion follows the boundary harness's separation of setup, ordinary serial
+latency, pressure controls, resource observations and physical retirement. It does
+not relabel the existing ASCII harness results or add a benchmark dependency.
+
+Build the independent projects against your selected reviewed publications first:
+
+```bash
+./gradlew -p demos/koog-document-agent -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" installDist nativeProbeJar
+./gradlew -p demos/spring-report-api -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" bootJar
+python3 -m unittest discover -s benchmarks/integration-boundaries/pitch -p 'test_*.py'
+```
+
+On an otherwise idle compatible Linux/JDK25 host, capture each selected application
+independently into **new** operator-owned raw files:
+
+```bash
+python3 benchmarks/integration-boundaries/pitch/measure.py koog demos/koog-document-agent
+python3 benchmarks/integration-boundaries/pitch/measure.py spring demos/spring-report-api
+python3 benchmarks/integration-boundaries/pitch/measure.py validate /absolute/path/to/raw.jsonl
+```
+
+Each application mode uses three fresh JVMs, 20 warmups and 100 serial successful
+verified operations per JVM. Report each fork's median and p95 separately; never
+pool warmup or pressure observations into normal latency. JSON retains every raw
+latency, actual artifact hashes, runtime/environment, startup/drain scope and proc
+RSS/thread observations. It is observations-only, not authenticated publication
+custody. A nonzero/timed-out/missing-effect/unretired run fails, rather than accepting
+partial data. The validator requires the complete selected mode inventory and exact
+fork/sample counts and rejects changed derived statistics or missing retirement.
+
+- **Reader direct vs thread:** same real offline AIAgent construction/run/close and
+  actual bounded document read; the protected variant uses the ordinary fixed policy,
+  one worker and four admissions. Both install the compatible permanent host baseline.
+- **Outline direct vs Portal:** same actual ATX implementation and offline agent
+  work. The deliberately ordinary direct baseline loads the worker implementation
+  into its own host; the protected mode keeps the normal worker bundle opaque.
+  Portal records the actual distinct child's RSS/threads, not invented child heap.
+- **Spring HTTP:** real loopback report, evaluation Basic authentication, request
+  correlation and committed H2 row for each operation. Three private synthetic
+  fixtures have explicit test-only review outside the implementation JVM. This is
+  absolute application latency, **not a matched unprotected-Spring overhead result**.
+  Each Python request opens a new connection. Host heap is unavailable, not zero.
+
+Koog setup starts inside `main` and includes fixture/baseline/preparation; it excludes
+JVM launch. Spring startup is measured from launch to observed ready. These startup
+numbers are not directly comparable. Readiness polling/stop is included in Spring's
+drain interval. The Kotlin entry checks actual worker/child end before emitting its
+row; Spring additionally requires 120 real committed rows and clean contexts.
+
+Separate Koog pressure controls hold one actual admission, queue three, reject the
+fifth, then verify all four accepted results and canonical close. The Portal gate is
+**host mapping**, not blocked guest computation. This is bounded admission behavior,
+not throughput/capacity qualification. Spring held-cleanup/cancellation is qualified
+by its separate native test, not an HTTP pressure or sustained-load measurement.
+
+No live model, general hostile-code isolation, provider disclosure safety, exactly-once
+external effects, negligible overhead, production load or presentation-machine result
+is inferred. Run these commands on the intended presentation host and perform the
+actual unfamiliar-human rehearsal separately. Do not automatically approve real
+deployment candidates using this synthetic measurement harness.

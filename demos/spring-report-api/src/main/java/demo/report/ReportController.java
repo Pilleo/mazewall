@@ -20,7 +20,7 @@ final class ReportController {
     @GetMapping("/ordinary") String ordinary() { return ordinary.status(); }
     @GetMapping("/reports/{template}") ResponseEntity<String> report(@PathVariable("template") String template) {
         var receipt = new ReportRequestContext.Receipt();
-        if (!domain.isRunning()) return response(receipt, Outcome.BUSY.status, "BUSY request=" + receipt.id);
+        if (!ReportConfiguration.ready(domain.diagnostics().getState())) return response(receipt, Outcome.BUSY.status, "BUSY request=" + receipt.id);
         try {
             String result = ReportRequestContext.with(receipt, () -> reports.generate(receipt.id, template));
             return response(receipt, 200, result);

@@ -39,8 +39,17 @@ private synthetic files and launches a fresh JVM for the permanent process basel
 Setup/containment failures fail the command rather than falling back unprotected.
 
 - [Core walkthrough](demos/cli-demo/README.md#start-here-an-owned-workspace-read): copy the explicit owner/domain/call pattern.
+- [Koog document agent](demos/koog-document-agent/README.md): an actual offline scripted AIAgent reads documents or calls a generated process-backed Markdown outline service; no Spring or model account required.
+- [Spring report HTTP API](demos/spring-report-api/README.md): normal report code, real URL/method Security, request-specific JDBC commit/rollback and readiness; no agent framework required.
 - [Koog thread and process tools](demos/koog-contained-tool/README.md): run actual upstream Tools without Spring or a model account.
 - [Spring report application](demos/spring-boot-sandbox/README.md#start-here-ordinary-report-generation): normal Java service code, real JDBC and separately approved finished-JAR binding, without an agent or web server.
+
+The new applications are standalone published-artifact consumers with their own
+wrappers, locks/checksums and ordinary distributions. Artifact access and exact
+version selection remain explicit; a local stage is not a verified remote release.
+Their guides distinguish ordinary business code from trusted bootstrap/review and
+test-only fault controls. See the [bounded application measurements](benchmarks/integration-boundaries/pitch/README.md)
+for scope and limitations, not a negligible-overhead claim.
 
 The [full feature tour](demos/README.md) retains the deeper profiling, lifecycle,
 supervision and negative controls. The public synchronous core entry accepts

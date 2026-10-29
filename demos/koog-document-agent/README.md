@@ -61,6 +61,36 @@ controls. The fixture contains only synthetic data in an acquired private direct
 
 ## Verify
 
+### Adoption seam
+
+Keep the ordinary reader; change which tool you register, after trusted bootstrap:
+
+```diff
+- register(ordinaryReadTool)
++ register(documentReadTool(runtime, preparedDomain, trustedDocumentRoot))
+```
+
+This is an application-local factory, not automatic protection. Its source retains
+argument/result validation and delegates only the bounded read to the owned worker.
+The runtime/domain, permanent process baseline and fixed grants are still explicit.
+
+### Local distributions (not remote publication)
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" distZip sourceZip
+```
+
+`build/distributions/koog-document-agent.zip` contains the ordinary application and
+its actual runtime JAR closure. Extract into a new private directory; run
+`bin/koog-document-agent` for the thread path. In a separate fresh JVM, run
+`java --enable-native-access=ALL-UNNAMED -cp 'lib/*' demo.koog.PortalDocumentAgent`
+for the ordinary outline path. No Gradle/model account is needed at runtime.
+`koog-document-agent-sources.zip` contains the independent wrapper, source, tests,
+locks and checksum approvals, not a sibling producer tree. Test-only boundary and
+measurement/profile entries are source-kit development controls, not normal binary
+runtime tools. An operator must separately approve any upload/publication or
+installation replacement and identify exact released bytes before distribution.
+
 ```bash
 ./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" test
 ./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" nativeTest verifyPublishedClosure

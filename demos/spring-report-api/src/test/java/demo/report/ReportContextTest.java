@@ -8,6 +8,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class ReportContextTest {
+    @Test void onlyActualReadyOwnerStateCanAdmitTraffic() {
+        for (var state : io.mazewall.enforcer.api.execution.ExecutionDiagnosticState.values()) {
+            assertEquals(state == io.mazewall.enforcer.api.execution.ExecutionDiagnosticState.READY, ReportConfiguration.ready(state));
+        }
+    }
     @Test void receiptsAndSecurityRestoreAfterFailureAndRejectMissingCorrelation() throws Exception {
         var effects = new SpringTransactionEffects();
         var bridge = ReportRequestContext.bridge(effects, new AtomicReference<>());

@@ -26,6 +26,7 @@ public class SpringRecordResultsTest {
     public record TooMany(int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k, int l, int m, int n, int o, int p, int q) {}
     public record Forged(String value) { public String value() { calls.incrementAndGet(); return value; } }
     public record Serialized(String value) implements java.io.Serializable { private Object writeReplace() { return value; } }
+    @kotlin.Metadata public record KotlinRecord(String value) {}
     private static final AtomicInteger calls = new AtomicInteger();
     public interface Operation { Report run(String mode); }
     public static class Service implements Operation {
@@ -54,7 +55,7 @@ public class SpringRecordResultsTest {
         SpringRecordResults.validateShape(Report.class, Service.class);
         SpringRecordResults.validateShape(Scalars.class, Service.class);
         SpringRecordResults.validateValue(Scalars.class, new Scalars(true, null, (byte) 1, null, (short) 1, null, 1, null, 1, null, 1, null, 1, null, 'a', null));
-        for (Class<?> bad : List.of(Empty.class, Nested.class, ArrayResult.class, CollectionResult.class, TooMany.class, Forged.class, Serialized.class)) {
+        for (Class<?> bad : List.of(Empty.class, Nested.class, ArrayResult.class, CollectionResult.class, TooMany.class, Forged.class, Serialized.class, KotlinRecord.class)) {
             assertThrows(IllegalStateException.class, () -> SpringRecordResults.validateShape(bad, Service.class), bad.getName());
         }
         assertEquals(0, calls.get(), "Binding must inspect bytes, never invoke a custom accessor");

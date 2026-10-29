@@ -14,9 +14,15 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @Configuration(proxyBeanMethods = false)
 @EnableAutoConfiguration @EnableMethodSecurity @EnableTransactionManagement
 public class ReportConfiguration {
+    static boolean ready(io.mazewall.enforcer.api.execution.ExecutionDiagnosticState state) {
+        return switch (state) {
+            case READY -> true;
+            case UNKNOWN, PREPARING, DRAINING, CLOSED, FAILED -> false;
+        };
+    }
     @Bean ReportController controller(Reports report, OrdinaryService ordinary, io.mazewall.spring.DomainLifecycle domain) { return new ReportController(report, ordinary, domain); }
     @Bean org.springframework.boot.health.contributor.HealthIndicator protectedReports(io.mazewall.spring.DomainLifecycle domain) {
-        return () -> domain.isRunning() ? org.springframework.boot.health.contributor.Health.up().build()
+        return () -> ready(domain.diagnostics().getState()) ? org.springframework.boot.health.contributor.Health.up().build()
                 : org.springframework.boot.health.contributor.Health.outOfService().build();
     }
     @Bean OrdinaryService ordinaryService() { return new OrdinaryService(); }

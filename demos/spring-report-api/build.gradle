@@ -34,6 +34,22 @@ dependencyLocking { lockAllConfigurations(); lockMode = LockMode.STRICT; lockFil
 springBoot { mainClass = 'demo.report.ReportApplication' }
 tasks.named('bootJar') { archiveFileName = 'application.jar' }
 tasks.named('jar') { enabled = false }
+tasks.register('evaluationZip', Zip) {
+    archiveFileName = 'spring-report-api.zip'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    from(tasks.bootJar.archiveFile)
+    from('README.md')
+    from('fixtures')
+}
+tasks.register('sourceZip', Zip) {
+    archiveFileName = 'spring-report-api-sources.zip'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    from(layout.projectDirectory) {
+        include 'README.md', 'build.gradle', 'settings.gradle', 'gradle.properties', 'gradlew', 'gradlew.bat',
+                'gradle/wrapper/**', 'gradle/verification-metadata.xml', 'locks/**', 'src/**', 'fixtures/**'
+        filesMatching('gradlew') { permissions { unix('rwxr-xr-x') } }
+    }
+}
 abstract class BootJarArguments implements CommandLineArgumentProvider {
     @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getApplicationJar()
     @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLifecycleJar()

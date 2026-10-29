@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Set;
 import org.springframework.asm.ClassReader;
+import org.springframework.asm.AnnotationVisitor;
 import org.springframework.asm.ClassVisitor;
 import org.springframework.asm.Handle;
 import org.springframework.asm.Label;
@@ -42,6 +43,10 @@ final class SpringRecordResults {
             if (bytes.length > 1_048_576) throw rejected();
             new ClassReader(bytes).accept(new ClassVisitor(Opcodes.ASM9) {
                 private int accessors;
+                @Override public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                    if (descriptor.equals("Lkotlin/Metadata;")) throw rejected();
+                    return null;
+                }
                 @Override public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                     for (var component : components) {
                         if (component.getName().equals(name) && descriptor.equals("()" + Type.getDescriptor(component.getType()))) {

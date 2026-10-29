@@ -34,6 +34,36 @@ deployment. Do not approve a candidate simply because it was generated or hashed
 The `nativeTest` harness writes its own explicitly labelled synthetic test approval;
 that is not production-review authority. Normal `serve` never creates approval.
 
+### Adoption seam and local distributions
+
+Business code remains an ordinary interface/service with explicit transaction and
+method-security metadata. Bootstrap changes the published bean, not its business body:
+
+```diff
+- Reports published = initializedTarget;
++ Reports published = binder.createJdbcProxy(Reports.class, initializedTarget,
++     SpringSecurityMethodAdvice.authorizationAdvisor());
++ beans.registerSingleton("reportService", published);
++ binder.bind(explicitApprovalForThatExactRegisteredProxy);
+```
+
+The actual sample also resolves reviewed resources, installs the compatible process
+baseline, starts the domain and validates required bindings **before** context refresh.
+Keep normal Boot infrastructure; do not globally disable its processors or expose
+the raw target as a second protected entry. Binding is deliberately more explicit
+than an annotation or dependency alone.
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" evaluationZip sourceZip
+```
+
+`build/distributions/spring-report-api.zip` contains the finished `application.jar`,
+guide and synthetic templates. Extract only into a new private directory, then do
+the separate measurement/review/serve steps above. `spring-report-api-sources.zip`
+contains this independent wrapper, source/tests, locks/checksums and fixture inputs.
+Neither archive publishes itself, replaces an installation, provides production
+review or establishes remotely downloaded release identities.
+
 ## Serve and observe
 
 Supply evaluation-only passwords of at least12 characters through JVM properties
@@ -87,8 +117,10 @@ is not graceful-retirement evidence.
 The finished-JAR tests require actual HTTP authentication, native denial, real H2
 effects, alternating principals, readiness refusal and physical shutdown. They do
 not skip unsupported native setup. Host tests only qualify ordinary business code
-and context/outcome handling. One worker/four admissions and the existing10-second
-budget are demonstration bounds, not measured production capacity.
+and context/outcome handling. One worker/four admissions and ten-second preparation/
+close budgets are demonstration bounds, not measured production capacity. The
+synchronous HTTP adapter has no automatic per-request execution deadline; a client
+timeout is not proof that its worker stopped or its transaction rolled back.
 
 Thread-scoped enforcement is for trusted synchronous Java operating on untrusted
 data, not arbitrary-code/shared-heap isolation. Construction, controller parsing,

@@ -145,6 +145,9 @@ internal object PitchExamplesAcceptance {
                 pinned = pinned.replace("</components>", "$component</components>")
             }
             Files.writeString(metadata, pinned)
+            val historicalLocks = Files.walk(copy).use { paths ->
+                paths.filter { Files.isRegularFile(it) && it.fileName.toString() == "gradle.lockfile" }.toList().associateWith(Files::readAllBytes)
+            }
             val command = listOf(
                 copy.resolve("gradlew").toString(),
                 "-p",
@@ -154,7 +157,11 @@ internal object PitchExamplesAcceptance {
                 "-PconsumerVersion=$version",
                 "-PconsumerRepository=$repository",
             )
-            val tasks = if (name == "koog-document-agent") listOf("test", "nativeTest", "installDist") else listOf("test", "nativeTest", "bootJar")
+            val tasks = if (name == "koog-document-agent") {
+                listOf("test", "nativeTest", "installDist", "distZip", "sourceZip")
+            } else {
+                listOf("test", "nativeTest", "bootJar", "evaluationZip", "sourceZip")
+            }
             for ((label, flags) in listOf(
                 "locks" to listOf("--write-locks", "--no-configuration-cache"),
                 "strict" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
@@ -165,6 +172,7 @@ internal object PitchExamplesAcceptance {
                 check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}" }
                 if (label == "cache-reuse") check("Configuration cache entry reused" in result.stdout)
                 check(Files.readString(metadata) == pinned) { "Copied consumer changed dependency approvals" }
+                check(historicalLocks.all { (path, bytes) -> Files.readAllBytes(path).contentEquals(bytes) }) { "New-coordinate build changed historical locks" }
             }
             val audit = ConsumerFixture.command(command + listOf("verifyPublishedClosure", "--no-configuration-cache"), copy, evidence, "$name-closure", Duration.ofMinutes(8))
             check(audit.exitCode == 0 && "PUBLISHED io.mazewall:" in audit.stdout) { "Copied consumer closure audit failed: ${audit.stdout}${audit.stderr}" }
@@ -187,9 +195,24 @@ internal object PitchExamplesAcceptance {
             } else {
                 inspectSpring(copy.resolve("build/libs/application.jar"), repository, version)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportServiceTest.xml"), 2)
-                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportContextTest.xml"), 2)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportContextTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 3)
             }
+            val measurement = ConsumerFixture.command(
+                listOf(
+                    "python3",
+                    root.resolve("benchmarks/integration-boundaries/pitch/measure.py").toString(),
+                if (name == "koog-document-agent") "koog" else "spring",
+                    copy.toString(),
+                ),
+                    copy,
+                evidence,
+                "$name-measurements",
+                Duration.ofMinutes(8),
+            )
+            check(measurement.exitCode == 0) { "Source-bound application measurements failed: ${measurement.stderr}${measurement.stdout.takeLast(6000)}" }
+            check(measurement.stdout.lineSequence().count { it.startsWith("{\"schema\":1,") } == if (name == "koog-document-agent") 12 else 3) { "Missing exact application measurement forks" }
+            println("PITCH_APPLICATION_MEASUREMENTS_OK name=$name forksPerMode=3 warmups=20 serialSamples=100 scope=local-only")
             println("PITCH_COPIED_CONSUMER_OK name=$name version=$version native=executed packaging=published-only cache=reused")
         }
     }

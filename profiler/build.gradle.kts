@@ -255,9 +255,11 @@ tasks.register<JavaExec>("policyDiff") {
     mainClass.set("io.mazewall.profiler.tools.PolicyDiff")
     val oldDocument = providers.gradleProperty("oldOperationDocument")
     val newDocument = providers.gradleProperty("newOperationDocument")
-    argumentProviders.add(CommandLineArgumentProvider {
-        listOf(oldDocument.get(), newDocument.get())
-    })
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf(oldDocument.get(), newDocument.get())
+        },
+    )
 }
 
 tasks.register<JavaExec>("tierEVerifyArtifacts") {

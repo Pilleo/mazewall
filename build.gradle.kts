@@ -310,6 +310,15 @@ tasks.register<Test>("consumerCheck") {
 
 tasks.matching { it.name == "unitCheck" }.configureEach { dependsOn("consumerHarnessTest") }
 
+val pitchMeasurementSelfTest =
+    tasks.register<Exec>("pitchMeasurementSelfTest") {
+        group = "verification"
+        description = "Checks bounded application measurement accounting and corruption controls without native setup."
+        commandLine("python3", "-m", "unittest", "discover", "-s", "benchmarks/integration-boundaries/pitch", "-p", "test_*.py")
+    }
+tasks.named("check") { dependsOn(pitchMeasurementSelfTest) }
+tasks.matching { it.name == "unitCheck" }.configureEach { dependsOn(pitchMeasurementSelfTest) }
+
 tasks.register<Test>("verifyIntegrationBoundaryEvidence") {
     group = "verification"
     description = "Validates bounded boundary observations and corruption controls; custody authentication remains separate."
