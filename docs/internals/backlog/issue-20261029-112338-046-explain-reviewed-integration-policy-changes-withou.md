@@ -24,7 +24,7 @@ Approved pitch Task6: bounded2MiB operation-document comparison using existing c
 
 - [x] Task6 bounded typed operation-document comparison and negative controls.
 - [x] Development-only named reader profile, coverage refusal and reviewed enforcement.
-- [ ] Profiler/static checks and final whole-change review/gates.
+- [x] Profiler/static checks and final whole-change review/gates.
 
 Pre-flight: consume existing OperationPolicyDocument/CanonicalPolicyArtifact and
 coverage fields, not a new policy algebra. Comparison reports changes only.
@@ -54,6 +54,16 @@ permissions. Normal agent factory/API and profiler library behavior stay unchang
 Additional opt-in detektTooling invocation exposed86 preexisting tooling findings
 in unrelated sources; no new PolicyDiff finding was reported and no suppression or
 baseline change was made. Normal/full completion gates and final review remain.
+
+## Final qualification
+
+PolicyDiff host/CLI checks, the full profiler/root quality gate and the independent
+whole-change review/fix pass pass. Final exact producer is
+`35e45a7507ceb7764529e00f6b6cb2700765bf59`; the complete copied-app acceptance is
+GREEN in12m26s and `build -PincludeSpringIntegration=true` in7m06s. The additional
+unrelated opt-in detektTooling findings above were not suppressed or relabeled as
+passing. Keep this item open for separately approved landing; no automatic policy
+approval, remotely authenticated release or future-path coverage is inferred.
 
 ---
 <!-- id: issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou  file: issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou.md -->

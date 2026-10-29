@@ -22,10 +22,10 @@ Approved pitch Tasks7-9: copied independent consumer builds with exact artifact/
 
 ## Inline progress
 
-- [ ] Task7 exact copied consumer builds/native evidence and corruption controls.
-- [ ] Task8 three fresh JVM runs,20warmup/100serial samples and honest validators.
+- [x] Task7 exact copied consumer builds/native evidence and corruption controls.
+- [x] Task8 three fresh JVM runs,20warmup/100serial samples and honest validators.
 - [x] Task9 standard distributions, adoption diffs, guides and rehearsal handoff.
-- [ ] Final source-bound/full build, references/backlog and one whole-change review.
+- [x] Final source-bound/full build, references/backlog and one whole-change review.
 - [ ] External gates: real remote bytes, intended presentation machine and actual human.
 
 Pre-flight: Tasks1/2 and3/4 produce two independent application distributions;
@@ -134,6 +134,43 @@ test weakening was used. Focused SpotBugs/host tests and the Koog host/native su
 pass after that visibility fix. `build -PincludeSpringIntegration=true` then passes
 in7m06s (253tasks), including normal lint/static/coverage/kernel gates. Final exact
 acceptance is rerun after committing these test-visibility-only changes.
+
+## Final frozen producer and local handoff
+
+- Code producer: `35e45a7507ceb7764529e00f6b6cb2700765bf59`.
+- Coordinate: `0.1.0-integration.35e45a7507ce` (local candidate, not a remote release).
+- Final exact command: `./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache`
+  ->GREEN in12m26s, zero skipped/failed mandatory cases, including both copied apps,
+  real plugin marker, strict cache reuse, record native proof and15 measured JVM forks.
+- Full command: `./gradlew build -PincludeSpringIntegration=true --console=plain`
+  ->GREEN in7m06s; the actual code is unchanged after its test-visibility fix.
+- Ordinary raw/source/publication/measurement receipts:
+  `/tmp/mazewall-consumer-bootstrap-17449202378688748216/checkout/optional-integration-evidence/`.
+  Final command log: `/tmp/opencode/pitch-final-frozen-acceptance.log`;
+  full-build log: `/tmp/opencode/pitch-final-full-build-green.log`.
+- Both copied projects execute their exact host/native counts with no skips:
+  Koog10/3, Spring5/4. Six Python corruption/ownership self-tests also pass.
+- Four verified ZIPs copied, without replacing an existing installation, to the
+  new `build/pitch-evaluation-35e45a7507ce/` directory. Source wrappers are executable;
+  normal binary closures exclude fault/held-cleanup/probe JARs.
+
+Local per-fork medians/p95 milliseconds (three fresh JVMs each,20warmups and100
+serial verified samples per fork; no pressure samples pooled):
+
+| Mode | Three medians(ms) | Three p95(ms) |
+|---|---|---|
+| Reader direct | 2.310 /2.183 /2.367 | 3.570 /2.636 /3.083 |
+| Reader thread | 5.836 /7.243 /6.810 | 9.176 /11.664 /9.832 |
+| Outline direct | 2.152 /2.137 /2.184 | 2.998 /3.640 /2.654 |
+| Outline Portal | 4.514 /4.433 /5.154 | 7.082 /7.243 /6.980 |
+| Spring HTTP | 174.482 /183.473 /184.423 | 207.762 /228.102 /228.549 |
+
+These are descriptive local observations, not negligible overhead, a matched
+unprotected-Spring comparison, HTTP pressure/capacity, sustained production load or
+presentation-host evidence. Startup/drain/resource scopes remain separate in raw
+rows. Actual unfamiliar-human rehearsal and remotely downloaded released bytes
+remain open. No push, publication, merge or installation replacement was performed;
+keep this item open pending separately approved landing/external qualification.
 
 ---
 <!-- id: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho  file: issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md -->

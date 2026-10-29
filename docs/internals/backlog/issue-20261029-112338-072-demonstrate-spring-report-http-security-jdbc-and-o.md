@@ -25,7 +25,7 @@ Approved pitch plan Tasks3-5: independent Boot4.1.1 Java25 web/JDBC/Security/Act
 - [x] Task3 standalone HTTP/Security/JDBC application and explicit pre-traffic binding.
 - [x] Task4 readiness, retained cancellation and actual owned shutdown.
 - [x] Task5 request-specific safe outcomes and serial-worker transaction receipts.
-- [ ] Task7 copied-artifact acceptance and final whole-change review/gates.
+- [x] Task7 copied-artifact acceptance and final whole-change review/gates.
 
 Pre-flight: request receipt capture occurs on the dedicated serial worker before
 another invocation can overwrite lastCompletion; HTTP threads never use that global
@@ -89,6 +89,15 @@ for actual cross-module outcome classification, preserving IllegalStateException
 compatibility. Do not parse exception messages or broadly hide pre-body failures
 whenever readiness changes. Cost if wrong: older SDKs cannot compile this new
 sample, so its selected published SDK must include this additive lifecycle API.
+
+## Final qualification
+
+Frozen producer `35e45a7507ceb7764529e00f6b6cb2700765bf59` passes exact copied
+published-SDK acceptance, byte-identical Boot closure, strict cache reuse and all
+5 host/4 native cases without skips, including the actual drain race. Current
+matching source/binary kits and absolute local HTTP measurements are recorded in
+item058. Full build and one independent review/fix pass pass. Keep this item open
+for separately approved landing; remote release and actual-human gates stay open.
 
 ---
 <!-- id: issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o  file: issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o.md -->

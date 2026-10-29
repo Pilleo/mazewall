@@ -28,7 +28,7 @@ Base: merged PR561 `74c1493c963bfd7a063a5ecc800a0059f96c5709`.
 - [x] Task1 standalone reader/real-agent source, host tests and packaged native path.
 - [x] Task2 generated opaque process outline and test-only boundary controls.
 - [x] Task5 safe model-facing observations with original local failures retained.
-- [ ] Task7 copied-artifact acceptance and final whole-change review/gates.
+- [x] Task7 copied-artifact acceptance and final whole-change review/gates.
 
 Task0 stage owns `build/pitch-stage-74c1493c963b` with the exact libraries and real
 `io.mazewall.portal.codegen` marker; no existing installation was overwritten.
@@ -95,6 +95,16 @@ fenced code (including short nonclosing fences and unclosed fences). Code commen
 do not become outline entries or consume the128-heading budget. The same ordinary
 worker implementation is exercised by host tests and the actual generated worker;
 the current app has10 host and3 native cases without skips.
+
+## Final qualification
+
+Frozen producer `35e45a7507ceb7764529e00f6b6cb2700765bf59` passed exact copied
+published-library/plugin-marker acceptance, strict cache store/reuse and all10 host/
+3 native cases without skips. One independent whole-branch review plus its single
+RED->GREEN fix pass and `build -PincludeSpringIntegration=true` pass. The final exact
+gate is12m26s; the full build is7m06s. See the shared qualification item058 for raw
+locations, local kits, per-fork measurements and still-open external gates. Keep this
+item open for separately approved landing; local candidate proof is not a release.
 
 ---
 <!-- id: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum  file: issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md -->

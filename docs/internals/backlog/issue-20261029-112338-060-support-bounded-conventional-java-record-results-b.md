@@ -24,7 +24,7 @@ Approved later pitch Task10 additive library extension: concrete reviewed same-d
 
 - [x] Task10 bind-time shape/accessor/deployment checks and negative tests.
 - [x] Worker inside-transaction bounded value validation and actual JDBC rollback.
-- [ ] Published record consumer, docs, focused/static/native/full checks and review.
+- [x] Published record consumer, docs, focused/static/native/full checks and review.
 
 Pre-flight: existing scalar/String/byte[] results remain compatible. Records are
 strict data shapes from the reviewed deployment; reject custom accessors/hooks.
@@ -59,6 +59,16 @@ record operation fails binding, not silent commit of an unvalidated result.
 
 Core-symbol blast-radius lookup returned PARTIAL/INDEX_MISSING; exact source/caller
 reads and the complete Spring suite were used instead of treating that hint as proof.
+
+## Final qualification
+
+The final exact consumer gate also executes verifyRecordNative against producer
+`35e45a7507ceb7764529e00f6b6cb2700765bf59`, with actual bounded record success,
+pre-commit SQL rollback/recovery and physical retirement. Focused Spring builds,
+full `build -PincludeSpringIntegration=true`, and the one independent whole-branch
+review/fix pass pass. Existing scalar/String/byte[] and interface/advisor rejection
+cases remain selected. Keep this item open for separately approved landing; this
+extension is not broader DTO/JPA/reactive/Kotlin support or a hostile-code boundary.
 
 ---
 <!-- id: issue-20261029-112338-060-support-bounded-conventional-java-record-results-b  file: issue-20261029-112338-060-support-bounded-conventional-java-record-results-b.md -->
