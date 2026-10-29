@@ -36,12 +36,22 @@ tasks.named('bootJar') { archiveFileName = 'application.jar' }
 tasks.named('jar') { enabled = false }
 abstract class BootJarArguments implements CommandLineArgumentProvider {
     @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getApplicationJar()
-    List<String> asArguments() { ["-Dexample.bootJar=${applicationJar.get().asFile.absolutePath}".toString()] }
+    @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLifecycleJar()
+    List<String> asArguments() { ["-Dexample.bootJar=${applicationJar.get().asFile.absolutePath}".toString(), "-Dexample.lifecycleJar=${lifecycleJar.get().asFile.absolutePath}".toString()] }
+}
+tasks.register('lifecycleJar', org.springframework.boot.gradle.tasks.bundling.BootJar) {
+    archiveFileName = 'lifecycle-fixture.jar'
+    mainClass = 'demo.report.HeldReportLifecycleProbe'
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.test.output
+    targetJavaVersion = java.targetCompatibility
 }
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
     maxParallelForks = 1
-    jvmArgumentProviders.add(objects.newInstance(BootJarArguments).tap { applicationJar.set(tasks.bootJar.archiveFile) })
+    jvmArgumentProviders.add(objects.newInstance(BootJarArguments).tap {
+        applicationJar.set(tasks.bootJar.archiveFile)
+        lifecycleJar.set(tasks.named('lifecycleJar').flatMap { it.archiveFile })
+    })
     testLogging { events 'passed', 'failed', 'standardOut', 'standardError'; showStandardStreams = true }
 }
 tasks.test { useJUnitPlatform { excludeTags 'native' } }

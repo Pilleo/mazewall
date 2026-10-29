@@ -72,7 +72,12 @@ type `stop` to close gracefully. The application retains the runtime through dra
 and requires actual worker retirement before closing its database. An incomplete
 drain, cancelled delivery or timeout must not be represented as physical termination.
 This synchronous HTTP sample does not infer worker cancellation from a disconnected
-client, and it does not expose a public cancellation or shutdown endpoint. SIGKILL
+client, and it does not expose a public cancellation or shutdown endpoint. A
+separate test-only finished-JAR held-cleanup service exercises virtual-caller
+interruption, retained incomplete drain/resources, eventual actual SQL rollback and
+physical retirement using the same request/Security bridge and qualified advice.
+It is absent from `application.jar`; it is not a hidden fault mode in `ReportService`.
+That test does not claim that an HTTP disconnect automatically cancels work. SIGKILL
 is not graceful-retirement evidence.
 
 ```bash

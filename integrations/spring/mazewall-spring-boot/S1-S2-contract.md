@@ -42,8 +42,17 @@ Discovery inspects declared implementation/interface methods across the hierarch
 including inherited private/protected/package declarations. Required non-public,
 static, final or non-interface-mappable declarations reject; they are never silently
 optional infrastructure. Unannotated private superclass shadows remain unmarked.
-Only the existing scalar/string/byte-array synchronous result allowlist is supported;
-erased generic entries are checked against their actual bridged target result.
+The scalar/string/byte-array synchronous result allowlist is preserved. Qualified
+JDBC additionally admits public nongeneric Java records in the exact reviewed
+target loader/code-source, with1–16 primitive/boxed primitive/String components,
+conventional bytecode field accessors and no serialization hooks. Aggregate string
+values are valid Unicode and at most65536 UTF-8 bytes; null references/whole results
+are allowed. Arrays/collections/nesting/lazy entities/Kotlin data classes reject.
+Shape validation happens at binding; value validation happens inside the worker's
+physical transaction before commit. Invalid output is retained and rolled back,
+including caught nested invalid output; incompatible rollback/propagation metadata
+rejects. S0 without the JDBC guard does not admit records. Erased generic entries
+are checked against their actual bridged target result.
 
 Each binder accepts one exact operation descriptor; a bean containing another
 required annotated operation is rejected rather than partially protected. Multiple

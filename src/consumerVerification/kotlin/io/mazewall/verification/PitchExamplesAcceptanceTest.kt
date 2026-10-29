@@ -85,6 +85,7 @@ internal object PitchExamplesAcceptance {
                 .map { it.name }
                 .toList()
             check(names.size == names.distinct().size)
+            check(names.none { it.startsWith("BOOT-INF/classes/demo/report/HeldReport") }) { "Test-only held-cleanup fixture leaked into normal application" }
             for (module in listOf("platform", "enforcer", "mazewall-spring-boot", "mazewall-spring-boot-starter")) {
                 val expected = "BOOT-INF/lib/$module-$version.jar"
                 val moduleJar = Regex("BOOT-INF/lib/${Regex.escape(module)}-[0-9].*\\.jar")
@@ -159,7 +160,8 @@ internal object PitchExamplesAcceptance {
                 "strict" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
                 "cache-reuse" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
             )) {
-                val result = ConsumerFixture.command(command + tasks + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
+                val seed = if (label == "locks" && name == "koog-document-agent") listOf(":dependencies", ":boundary-fixture:dependencies") else emptyList()
+                val result = ConsumerFixture.command(command + seed + tasks + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
                 check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}" }
                 if (label == "cache-reuse") check("Configuration cache entry reused" in result.stdout)
                 check(Files.readString(metadata) == pinned) { "Copied consumer changed dependency approvals" }
@@ -186,7 +188,7 @@ internal object PitchExamplesAcceptance {
                 inspectSpring(copy.resolve("build/libs/application.jar"), repository, version)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportServiceTest.xml"), 2)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportContextTest.xml"), 2)
-                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 2)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 3)
             }
             println("PITCH_COPIED_CONSUMER_OK name=$name version=$version native=executed packaging=published-only cache=reused")
         }

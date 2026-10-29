@@ -78,6 +78,15 @@ public final class SpringTransactionGuard implements MethodInterceptor {
             throw rejected("NESTED requires enabled JDBC savepoints");
         }
         var rules = (RuleBasedTransactionAttribute) attribute;
+        Method implementation = org.springframework.core.BridgeMethodResolver.findBridgedMethod(org.springframework.aop.support.AopUtils.getMostSpecificMethod(method, target));
+        if (implementation.getReturnType().isRecord()) {
+            if (!rules.rollbackOn(new SpringRecordResults.InvalidValue())) throw rejected("Record result validation must roll back before commit");
+            switch (propagation) {
+                case TransactionDefinition.PROPAGATION_REQUIRED, TransactionDefinition.PROPAGATION_REQUIRES_NEW,
+                     TransactionDefinition.PROPAGATION_NESTED, TransactionDefinition.PROPAGATION_MANDATORY -> { }
+                default -> throw rejected("Bounded record validation requires a physical JDBC transaction");
+            }
+        }
         var bridge = new TransactionalFailureBridge(new IllegalStateException("rollback compatibility probe"), null);
         if (!rules.rollbackOn(bridge)) throw rejected("Effective rollback rules suppress the protected-failure bridge");
         Throwable[] protectedCauses = {bridge, new ContainmentViolationException("probe", null, null, null,
@@ -112,13 +121,15 @@ public final class SpringTransactionGuard implements MethodInterceptor {
         gate();
         try {
             Object value = invocation.proceed();
+            Method implementation = org.springframework.core.BridgeMethodResolver.findBridgedMethod(org.springframework.aop.support.AopUtils.getMostSpecificMethod(invocation.getMethod(), invocation.getThis().getClass()));
+            SpringRecordResults.validateValue(implementation.getReturnType(), value);
             gate();
             return value;
         } catch (TransactionalFailureBridge recorded) {
             throw recorded;
         } catch (Throwable failure) {
             var diagnostic = detector.diagnose(failure);
-            if (diagnostic != null) {
+            if (diagnostic != null || failure instanceof SpringRecordResults.InvalidValue) {
                 scope.record(failure, diagnostic);
                 throw new TransactionalFailureBridge(failure, diagnostic);
             }

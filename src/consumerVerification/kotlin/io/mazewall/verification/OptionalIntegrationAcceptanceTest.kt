@@ -211,7 +211,7 @@ class OptionalIntegrationAcceptanceTest {
                     gradle +
                         listOf("-p", root.resolve("tests/consumers/spring-jdbc").toString(), "-PuseStarter=true") +
                         properties +
-                        listOf("verifyNative", "verifySecurityNative", "presentationTest"),
+                        listOf("verifyNative", "verifySecurityNative", "verifyRecordNative", "presentationTest"),
                 )
                 val springConsumer = root.resolve("tests/consumers/koog-spring")
                 val spring = gradle + listOf("-p", springConsumer.toString()) + properties

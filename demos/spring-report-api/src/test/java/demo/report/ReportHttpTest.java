@@ -20,6 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 class ReportHttpTest {
     @TempDir Path root;
     private static final String PASSWORD = "local-evaluation-only";
+    private String jarProperty = "example.bootJar";
 
     @Test void actualHttpSecurityJdbcDenialRecoveryAndShutdown() throws Exception {
         prepare();
@@ -82,6 +83,22 @@ class ReportHttpTest {
         }
     }
 
+    @Test void cancelledDeliveryRetainsActualWorkerAndResourcesUntilCanonicalDrain() throws Exception {
+        jarProperty = "example.lifecycleJar";
+        prepare();
+        var log = root.resolve("lifecycle.log");
+        Process process = launch("verify").redirectOutput(log.toFile()).start();
+        try {
+            assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+            String output = Files.readString(log);
+            assertEquals(0, process.exitValue(), output);
+            assertTrue(output.contains("REPORT_HELD_LIFECYCLE_OK caller=cancelled drain=incomplete resources=retained rollback=actual retirement=physical"), output);
+        } finally {
+            if (process.isAlive()) process.destroyForcibly();
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS));
+        }
+    }
+
     private void prepare() throws Exception {
         fixture();
         Path candidate = root.resolve("candidate.json");
@@ -102,7 +119,7 @@ class ReportHttpTest {
         try (var output = Files.newOutputStream(root.resolve("trusted-review.properties"))) { review.store(output, "Explicit test harness approval only"); }
     }
     private void fixture() throws Exception {
-        Files.copy(Path.of(System.getProperty("example.bootJar")), root.resolve("application.jar"));
+        Files.copy(Path.of(System.getProperty(jarProperty)), root.resolve("application.jar"));
         Path templates = Files.createDirectory(root.resolve("templates"));
         Files.writeString(templates.resolve("approved.txt"), "Quarterly é🙂");
         Files.writeString(templates.resolve("forbidden.txt"), "DUMMY_PRIVATE_CANARY");

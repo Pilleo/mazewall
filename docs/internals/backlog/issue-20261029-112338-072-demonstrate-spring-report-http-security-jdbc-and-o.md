@@ -23,8 +23,8 @@ Approved pitch plan Tasks3-5: independent Boot4.1.1 Java25 web/JDBC/Security/Act
 ## Inline progress
 
 - [x] Task3 standalone HTTP/Security/JDBC application and explicit pre-traffic binding.
-- [ ] Task4 readiness, retained cancellation and actual owned shutdown.
-- [ ] Task5 request-specific safe outcomes and serial-worker transaction receipts.
+- [x] Task4 readiness, retained cancellation and actual owned shutdown.
+- [x] Task5 request-specific safe outcomes and serial-worker transaction receipts.
 - [ ] Task7 copied-artifact acceptance and final whole-change review/gates.
 
 Pre-flight: request receipt capture occurs on the dedicated serial worker before
@@ -52,8 +52,14 @@ Task4 readiness/drain regression observed RED before the operator drain command,
 then GREEN: readiness503 plus refused protected admission before stop; ordinary
 successful requests retain exact request-specific commit/rollback receipts.
 An inactive-drain response has UNKNOWN/no body, not invented rollback evidence.
-Synchronous HTTP disconnect is explicitly NOT a worker-cancellation signal. Held
-in-flight cancellation/incomplete-drain application evidence is still outstanding.
+Synchronous HTTP disconnect is explicitly NOT a worker-cancellation signal.
+The separate test-only finished-JAR held-report fixture observed RED at missing
+behavior, then GREEN: real report read/SQL begins under the same request/Security
+bridge; virtual caller interruption returns while actual cleanup remains held;
+bounded stop retains Incomplete and genuine resources; eventual release yields
+actual SQL rollback, correlated completion and canonical physical retirement. The
+old Incomplete snapshot stays incomplete. No held-cleanup hook enters normal
+ReportService/application.jar.4 host and3 native cases execute with zero skips.
 
 Task5 Spring public failures use bounded categories/server request IDs without
 paths/payloads, retaining original local causes. Single-worker bridge captures
