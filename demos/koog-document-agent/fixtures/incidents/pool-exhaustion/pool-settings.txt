@@ -1,0 +1,3 @@
+maximumPoolSize=2
+connectionTimeoutMs=1000
+upstreamDatabase=healthy

@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 191 | *Total Resolved Issues:* 717
+*Total Active Issues:* 195 | *Total Resolved Issues:* 717
 
-Active status detail: 190 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 194 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,10 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261030-100712-418](issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag.md) | Deliver useful evidence backed Koog incident triage | high | integrations |
+| [issue-20261030-100712-704](issue-20261030-100712-704-present-real-input-document-output-through-the-gen.md) | Present real input document output through the generated Portal worker | medium | integrations |
+| [issue-20261030-100713-002](issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe.md) | Make the Spring report tour show real request effects | medium | integrations |
+| [issue-20261030-100713-290](issue-20261030-100713-290-qualify-and-package-the-useful-application-first-p.md) | Qualify and package the useful application first pitch | high | integrations |
 | [issue-20261030-075254-853](issue-20261030-075254-853-enforce-the-spring-evaluation-listener-before-refr.md) | Enforce the Spring evaluation listener before refresh | high | integrations |
 | [issue-20261030-075255-171](issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp.md) | Retire owned measurement groups after process inspection fails | high | integrations |
 | [issue-20261030-075255-456](issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in.md) | Classify remote document limits as invalid Koog input | medium | integrations |

@@ -1,0 +1,3 @@
+2026-10-30T10:00:00Z ERROR checkout database connection acquisition timed out
+2026-10-30T10:00:01Z WARN checkout pool active=2 idle=0 waiting=18
+2026-10-30T10:00:02Z INFO checkout process remains alive
