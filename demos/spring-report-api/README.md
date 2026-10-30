@@ -1,5 +1,23 @@
 # A report HTTP API with reviewed worker permissions
 
+## Start here: a useful report and its actual request effects
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" presentationTest
+```
+
+This tagged JUnit tour uses the finished application, real loopback HTTP/authentication,
+the actual retained proxy and same-datasource H2 effects. It prints the returned
+operational report, actual request IDs/status/transaction headers, refusal/recovery,
+and the observed audit/end summary. The harness supplies explicit known-synthetic
+fixture review, not production approval; normal `serve` still requires separate review.
+Every printed outcome comes from a verified response/log, not expected literals.
+
+The guide reuses the Koog demo's useful-result-first and controlled-boundary-change
+patterns, not its code or model runtime. There is no Koog dependency, template
+language or new response DTO. To adapt it, change a template in a new private
+deployment and remeasure/review. Stale deployment review must fail before traffic.
+
 Independent Java25 / Spring Boot4.1.1 application. No Koog dependency. A retained
 interface proxy sends the business method, real JDBC transaction and upstream
 pre/post authorization to one owned platform worker. The request returns the

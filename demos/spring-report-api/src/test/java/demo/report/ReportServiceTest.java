@@ -46,6 +46,29 @@ class ReportServiceTest {
         } finally { jdbc.execute("shutdown"); }
     }
 
+    @Test void differentActualTemplatesReturnDifferentContentWithDistinctAuditRequests() throws Exception {
+        var data = data();
+        var jdbc = new JdbcTemplate(data);
+        jdbc.execute("create table report_audit(request_id varchar(36) primary key, template_name varchar(40))");
+        try {
+            var service = new ReportService(jdbc, root);
+            var transaction = new TransactionTemplate(new DataSourceTransactionManager(data));
+            String first = UUID.randomUUID().toString();
+            String second = UUID.randomUUID().toString();
+            Files.writeString(root.resolve("approved.txt"), "Checkout readiness: pool maximum=2");
+            assertEquals("Checkout readiness: pool maximum=2", transaction.execute(status -> {
+                try { return service.generate(first, "approved"); } catch (Exception failure) { throw new IllegalStateException(failure); }
+            }));
+            Files.writeString(root.resolve("approved.txt"), "Checkout readiness: pool maximum=20");
+            assertEquals("Checkout readiness: pool maximum=20", transaction.execute(status -> {
+                try { return service.generate(second, "approved"); } catch (Exception failure) { throw new IllegalStateException(failure); }
+            }));
+            assertNotEquals(first, second);
+            assertEquals(1, jdbc.queryForObject("select count(*) from report_audit where request_id=?", Integer.class, first));
+            assertEquals(1, jdbc.queryForObject("select count(*) from report_audit where request_id=?", Integer.class, second));
+        } finally { jdbc.execute("shutdown"); }
+    }
+
     private static JdbcDataSource data() {
         var result = new JdbcDataSource();
         result.setURL("jdbc:h2:mem:" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1");

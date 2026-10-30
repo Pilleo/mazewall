@@ -77,6 +77,14 @@ tasks.register('nativeTest', Test) {
     useJUnitPlatform { includeTags 'native' }
     outputs.upToDateWhen { false }; outputs.cacheIf { false }
 }
+tasks.register('presentationTest', Test) {
+    group = 'verification'
+    description = 'Runs the actual HTTP report tour with visible verified request/transaction output.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'presentation' }
+    outputs.upToDateWhen { false }; outputs.cacheIf { false }
+}
 tasks.register('verifyPublishedClosure') {
     notCompatibleWithConfigurationCache('Fresh publication audit inspects the actual dependency graph')
     def graph = configurations.runtimeClasspath

@@ -20,5 +20,23 @@ Approved useful-application Task5: reuse scenario-first presentation, useful rep
 **Needed:**
 1. Pin changed-template actual output and stale-review refusal; add tagged presentation task derived from real verified HTTP responses; meaningful synthetic operational template, docs and exact report counts.
 
+## Execution
+
+- [x] Task5 changed actual template/SQL-ID and stale-review controls pass.
+- [x] Tagged finished-JAR presentation task and actual response/log trace.
+- [ ] Final review/copied acceptance/full gates/report inventory.
+
+Existing behavior already passes the new changed-input and stale-review refusal
+controls; no fabricated RED or unnecessary service change. Presentation entry first
+observed RED at missing task, then GREEN with actual report body/request IDs/status/
+transaction headers and captured audit/worker-end lines. No expected outcome is
+printed instead of its observed value. Normal native selection retains the tour.
+The sample template now has a recognizable operational-report purpose; Reports,
+SQL schema, protected singleton, auth, loopback enforcement and service body stay
+unchanged. No Koog dependency/model/shared presentation module added.
+
+Current verification11host/9native/1presentation cases with strict cache storage,
+zero skips/failures. Logs: `/tmp/opencode/useful-spring-{data-controls,presentation-red,presentation-green}.log`.
+
 ---
 <!-- id: issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe  file: issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe.md -->

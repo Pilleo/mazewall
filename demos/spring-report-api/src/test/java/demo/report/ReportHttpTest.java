@@ -20,9 +20,10 @@ import org.junit.jupiter.api.io.TempDir;
 class ReportHttpTest {
     @TempDir Path root;
     private static final String PASSWORD = "local-evaluation-only";
+    private static final String REPORT_TEXT = "Checkout deployment readiness\nService: checkout\nPool maximum: 20\nOwner: Ada é🙂\nSynthetic evaluation report, not production telemetry.";
     private String jarProperty = "example.bootJar";
 
-    @Test void actualHttpSecurityJdbcDenialRecoveryAndShutdown() throws Exception {
+    @Test @Tag("presentation") void actualHttpSecurityJdbcDenialRecoveryAndShutdown() throws Exception {
         prepare();
         Process server = launch("serve", "0").redirectOutput(root.resolve("serve.log").toFile()).start();
         try {
@@ -40,11 +41,13 @@ class ReportHttpTest {
             try (var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
                 URI base = URI.create("http://127.0.0.1:" + port);
                 assertEquals(200, request(client, base, "/actuator/health/readiness", null).statusCode());
-                assertEquals(401, request(client, base, "/reports/approved", null).statusCode());
-                checkResponse(request(client, base, "/reports/approved", "approver"), 200, "COMMITTED", true, "Quarterly é🙂");
+                var unauthenticated = request(client, base, "/reports/approved", null);
+                assertEquals(401, unauthenticated.statusCode());
+                System.out.println("AUTHENTICATION status=" + unauthenticated.statusCode() + " (actual unauthenticated HTTP response)");
+                checkResponse(request(client, base, "/reports/approved", "approver"), 200, "COMMITTED", true, REPORT_TEXT);
                 checkResponse(request(client, base, "/reports/forbidden", "approver"), 422, "ROLLED_BACK", true, "CONTAINMENT_REFUSED");
                 checkResponse(request(client, base, "/reports/approved", "reader"), 403, "ROLLED_BACK", true, "AUTHORIZATION_DENIED");
-                checkResponse(request(client, base, "/reports/approved", "approver"), 200, "COMMITTED", true, "Quarterly é🙂");
+                checkResponse(request(client, base, "/reports/approved", "approver"), 200, "COMMITTED", true, REPORT_TEXT);
                 assertEquals(403, request(client, base, "/ordinary", "reader").statusCode());
                 assertEquals(200, request(client, base, "/ordinary", "approver").statusCode());
                 server.getOutputStream().write("drain\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -62,6 +65,8 @@ class ReportHttpTest {
             assertTrue(log.contains("REPORT_RETIRED actualWorker="), log);
             assertTrue(log.contains("REPORT_AUDIT committed=2 bodyEntries=4 cleanContexts=4"), log);
             assertFalse(log.contains("DUMMY_PRIVATE_CANARY"));
+            log.lines().filter(line -> line.startsWith("REPORT_AUDIT ") || line.startsWith("REPORT_RETIRED ")).forEach(System.out::println);
+            System.out.println("REPORT_PRESENTATION_COMPLETE actual HTTP, transaction outcomes and physical retirement verified; synthetic fixture review only");
         } finally {
             if (server.isAlive()) server.destroy();
             if (!server.waitFor(2, TimeUnit.SECONDS)) server.destroyForcibly();
@@ -77,6 +82,23 @@ class ReportHttpTest {
             assertTrue(process.waitFor(30, TimeUnit.SECONDS));
             assertNotEquals(0, process.exitValue());
             assertFalse(Files.readString(log).contains("REPORT_READY"));
+        } finally {
+            if (process.isAlive()) process.destroyForcibly();
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test void editedTemplateCannotReuseStaleDeploymentReview() throws Exception {
+        prepare();
+        Files.writeString(root.resolve("templates/approved.txt"), "Changed checkout readiness: maximumPoolSize=20");
+        Path stop = Files.writeString(root.resolve("stale-stop.txt"), "stop\n");
+        Path log = root.resolve("stale-template.log");
+        Process process = launch("serve", "0").redirectInput(stop.toFile()).redirectOutput(log.toFile()).start();
+        try {
+            assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+            String output = Files.readString(log);
+            assertNotEquals(0, process.exitValue(), output);
+            assertFalse(output.contains("REPORT_READY"), output);
         } finally {
             if (process.isAlive()) process.destroyForcibly();
             assertTrue(process.waitFor(5, TimeUnit.SECONDS));
@@ -172,7 +194,7 @@ class ReportHttpTest {
     private void fixture() throws Exception {
         Files.copy(Path.of(System.getProperty(jarProperty)), root.resolve("application.jar"));
         Path templates = Files.createDirectory(root.resolve("templates"));
-        Files.writeString(templates.resolve("approved.txt"), "Quarterly é🙂");
+        Files.writeString(templates.resolve("approved.txt"), REPORT_TEXT);
         Files.writeString(templates.resolve("forbidden.txt"), "DUMMY_PRIVATE_CANARY");
     }
     private ProcessBuilder launch(String... mode) {
@@ -194,5 +216,9 @@ class ReportHttpTest {
         assertDoesNotThrow(() -> java.util.UUID.fromString(response.headers().firstValue("X-Request-Id").orElseThrow()));
         assertTrue(response.body().contains(body), response.body());
         assertFalse(response.body().contains("DUMMY_PRIVATE_CANARY") || response.body().contains(".txt") || response.body().contains("demo.report"));
+        System.out.println("REPORT_REQUEST id=" + response.headers().firstValue("X-Request-Id").orElseThrow()
+                + " status=" + response.statusCode() + " transaction=" + response.headers().firstValue("X-Transaction-Outcome").orElseThrow()
+                + " bodyEntered=" + response.headers().firstValue("X-Body-Entered").orElseThrow());
+        System.out.println(response.body());
     }
 }
