@@ -25,6 +25,11 @@ printed or stored in this project. `ollama` is an alternative only when the oper
 already prepared a tool-capable model on 127.0.0.1:11434. Neither command starts a
 server, pulls a model, selects a fallback or silently becomes a fixture run. A slow
 provider fails at the existing 10-second agent deadline; Ollama is not required.
+Both use Koog's locked JDK HTTP transport adapter. A no-request packaged-classpath
+test constructs/closes the real clients; it does not qualify an actual provider call.
+CLI failures exit nonzero with a safe category, never raw provider/parser diagnostics
+that may contain untrusted terminal controls. The internal runner still propagates
+the original exception; this is terminal presentation, not success or fallback.
 
 The installed launcher accepts `triage <bundle-directory> openai|ollama <model-id>`.
 The three supported document IDs are `application.log`, `deployment.md` and

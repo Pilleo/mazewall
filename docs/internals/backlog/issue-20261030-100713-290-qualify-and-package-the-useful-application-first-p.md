@@ -24,7 +24,7 @@ Approved useful-application Task6: new report/incident/outline/presentation case
 
 - [x] Task6 exact report inventory, packaged inputs and installed-launcher proofs.
 - [x] Useful-first independent guides and explicit bounded policy-maintenance recipe.
-- [ ] One independent final review and one verified fix pass if needed.
+- [x] One independent final review and one verified fix pass if needed.
 - [ ] Committed-source copied acceptance, full build, references/backlog checks.
 - [ ] Stage fresh source/binary kits without replacing older kits/installations.
 
@@ -44,6 +44,45 @@ does not profile the whole incident/model or auto-install its candidate into sta
 agent policy. The legacy small-workload measurement scope remains unchanged.
 Logs: `/tmp/opencode/useful-pitch-{archive-red,archive-green,package-green}.log`
 and `/tmp/opencode/useful-installed-outline.log`.
+
+## Independent review and fix pass
+
+Single read-only review: `5975c92f..d148f5f1`, session
+`ses_e73839f46ffejQVltWLJbalQX3`. No Critical findings. Important findings:
+missing live HTTP transport and untrusted JSON decoder text escaping via terminal
+stderr. The no-request packaged constructor regression reproduces the missing
+factory exactly (`useful-review-live-transport-red.log`). Operator explicitly
+approved adding `ai.koog:http-client-java:1.3.0` and regenerating locks/checksums;
+this uses JDK HTTP, not local inference or a custom transport.
+
+Final: Ruling: regrade escaped lone-surrogate display corruption (finding3) as
+Important — strict UTF-8 output must reject decoded invalid Unicode too — cost if
+wrong: a previously accepted malformed model answer fails instead of being replaced
+silently when printed. Address in the same output-safety fix pass.
+
+Final: minor (deferred): duplicate JSON object fields use the serializer's last-value
+semantics; accepted final citation still must reference actual successful reads.
+Final: minor (deferred): an ordinary outline execution failure can retain its private
+cache even if runtime close retired the child; no success or unknown retirement is
+claimed and no potentially-live cache is deleted.
+
+Final: Ruling: reviewer set aside live reasoning/timing, human rehearsal, remote
+released-byte custody and intended-host/production capacity — these are explicit
+operator/evidence gates, not fixture-CI claims — cost if wrong: a live presentation
+or deployment may fail those unqualified checks and must not be called ready.
+
+Final: fixed missing live HTTP transport — packaged-runtime
+`LiveClientClasspathTest` constructors RED→GREEN, no requests or real credentials.
+Only the approved JDK adapter was added (runtime/testRuntime), with one new locked
+module and its exact JAR/module SHA256 metadata; no transitive version changes.
+Final: fixed unsafe rejected-JSON terminal diagnostics — actual fixture graph with
+escaped unknown-key/literal-control answers RED→GREEN, nonzero safe command category,
+no report/control bytes, original internal runner failures unchanged.
+Final: fixed decoded invalid Unicode — escaped high/low surrogate hypotheses/steps
+RED→GREEN, valid escaped emoji accepted unchanged. Suite25host/10native, no skips;
+root consumerHarnessTest and10Python measurement self-tests also pass. No second
+review or automatic live-model fallback. Logs:
+`/tmp/opencode/useful-review-{live-transport-red,live-transport-green,output-safety-red,cli-safety-red,koog-green,harness-green}.log`.
 
 ---
 <!-- id: issue-20261030-100713-290-qualify-and-package-the-useful-application-first-p  file: issue-20261030-100713-290-qualify-and-package-the-useful-application-first-p.md -->

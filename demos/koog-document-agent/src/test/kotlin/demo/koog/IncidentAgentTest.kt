@@ -29,9 +29,19 @@ class IncidentAgentTest {
         assertFalse(output.contains("# Incident analysis"), output)
     }
 
+    @Test fun `rejected provider JSON cannot emit terminal controls or a report artifact`() {
+        for (mode in listOf("unsafe-key", "literal-control")) {
+            val output = execute("pool-exhaustion", mode, 1)
+            assertFalse(output.contains('\u001b'), "Rejected JSON reached terminal output")
+            assertFalse(output.contains("# Incident analysis"), "Rejected JSON produced a report artifact")
+            assertTrue(output.contains("INCIDENT_FAILED"), "Expected a safe nonzero command failure")
+        }
+    }
+
     private fun execute(
         fixture: String,
         mode: String,
+        expectedExit: Int = 0,
     ): String {
         val log = root.resolve("$mode.log")
         val process = ProcessBuilder(
@@ -48,8 +58,9 @@ class IncidentAgentTest {
         try {
             assertTrue(process.waitFor(60, TimeUnit.SECONDS))
             val output = Files.readString(log)
-            assertEquals(0, process.exitValue(), output)
-            assertTrue(output.contains("MODEL: explicit offline fixture") && output.contains("INCIDENT_RETIRED"), output)
+            assertEquals(expectedExit, process.exitValue(), "Unexpected fixture command status")
+            assertTrue(output.contains("MODEL: explicit offline fixture"), "Missing explicit fixture label")
+            if (expectedExit == 0) assertTrue(output.contains("INCIDENT_RETIRED"), output)
             println(output)
             return output
         } finally {

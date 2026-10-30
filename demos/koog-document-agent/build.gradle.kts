@@ -42,6 +42,7 @@ dependencies {
     implementation(files(apiJar))
     implementation("io.mazewall:koog:$mazewallVersion")
     implementation("ai.koog:agents-core:1.3.0")
+    runtimeOnly("ai.koog:http-client-java:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.10.0")
     testImplementation(kotlin("test"))

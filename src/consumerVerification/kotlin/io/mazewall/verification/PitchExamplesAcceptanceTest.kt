@@ -221,11 +221,12 @@ internal object PitchExamplesAcceptance {
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.DocumentAgentTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ScriptedModelTest.xml"), 5)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.PortalDocumentAgentTest.xml"), 3)
-                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentReportTest.xml"), 6)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentReportTest.xml"), 7)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentInvocationTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ObservedAgentTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.LiveClientClasspathTest.xml"), 1)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.DocumentAgentNativeTest.xml"), 3)
-                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentAgentTest.xml"), 2)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentAgentTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentBoundaryTest.xml"), 1)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.OutlineFileNativeTest.xml"), 3)
                 val inputs = listOf("README.md") +
@@ -252,7 +253,7 @@ internal object PitchExamplesAcceptance {
                     "koog-installed-no-fixture-fallback",
                     Duration.ofMinutes(1),
                 )
-                check(noFallback.exitCode != 0 && "Explicit openai or ollama provider required" in noFallback.stderr && "MODEL: live" !in noFallback.stdout) {
+                check(noFallback.exitCode != 0 && "INCIDENT_FAILED INVALID_INPUT" in noFallback.stderr && "MODEL: live" !in noFallback.stdout) {
                     "Installed incident command accepted an implicit fixture provider"
                 }
                 val lib = copy.resolve("build/install/koog-document-agent/lib")

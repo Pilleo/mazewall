@@ -19,6 +19,7 @@ import java.nio.file.Path
 import java.time.Duration
 import java.util.concurrent.Callable
 import java.util.concurrent.TimeUnit
+import kotlin.system.exitProcess
 
 internal enum class IncidentProvider { OPENAI, OLLAMA }
 
@@ -44,8 +45,24 @@ internal fun requireIncidentOpenAIKey(key: String?): String {
     return key
 }
 
+internal fun runIncidentCommand(action: () -> Unit): Int {
+    return try {
+        action()
+        0
+    } catch (failure: Exception) {
+        // Parser/provider diagnostics can contain untrusted document/model text.
+        System.err.println("INCIDENT_FAILED ${toolFailureKind(failure)}; no fallback (diagnostic text withheld)")
+        1
+    }
+}
+
 object IncidentApplication {
     @JvmStatic fun main(args: Array<String>) {
+        val status = runIncidentCommand { execute(args) }
+        if (status != 0) exitProcess(status)
+    }
+
+    private fun execute(args: Array<String>) {
         val invocation = parseIncidentInvocation(args)
         check(!Thread.currentThread().isVirtual)
         val bundle = invocation.bundle.toRealPath()

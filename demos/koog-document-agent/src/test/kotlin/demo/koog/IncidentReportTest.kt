@@ -57,4 +57,14 @@ class IncidentReportTest {
     @Test fun `terminal control characters cannot disguise the displayed result`() {
         assertFailsWith<IllegalArgumentException> { decodeIncidentReport(valid.replace("Pool capacity was reduced.", "\\u001b[2Jhidden"), reads) }
     }
+
+    @Test fun `decoded display strings must preserve valid Unicode rather than replace escaped lone surrogates`() {
+        for (field in listOf("Pool capacity was reduced.", "Review the pool setting.")) {
+            for (invalid in listOf("\\uD800", "\\uDC00")) {
+                assertFailsWith<IllegalArgumentException> { decodeIncidentReport(valid.replace(field, invalid), reads) }
+            }
+            val report = decodeIncidentReport(valid.replace(field, "\\uD83D\\uDE42"), reads)
+            assertTrue(renderIncidentReport(report).contains("🙂"))
+        }
+    }
 }

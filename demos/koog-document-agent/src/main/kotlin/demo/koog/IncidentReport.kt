@@ -34,6 +34,7 @@ internal fun decodeIncidentReport(
     requireUtf8Bound(json, 16_384)
     require(successfulReads.size in 1..3) { "Actual successful reads required" }
     successfulReads.forEach(::validateIncidentDocument)
+    // shortcut: duplicate keys keep the last value; reject duplicates before reports can authorize actions.
     val report = Json.decodeFromString<IncidentReport>(json)
     require(report.hypothesis.isNotBlank() && report.evidence.size in 1..8 && report.nextSteps.size in 1..5) { "Invalid incident report shape" }
     requireDisplayText(report.hypothesis)
@@ -67,5 +68,6 @@ private fun requireUtf8Bound(
 }
 
 private fun requireDisplayText(text: String) {
+    requireUtf8Bound(text, 16_384)
     require(text.none { it.isISOControl() && it != '\n' && it != '\t' }) { "Terminal control characters are not report content" }
 }
