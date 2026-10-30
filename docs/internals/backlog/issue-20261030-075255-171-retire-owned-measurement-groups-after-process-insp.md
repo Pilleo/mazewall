@@ -45,5 +45,20 @@ The test observer also handles legitimate ENOENT/ESRCH races while reading an ex
 child, matching the existing production inspector without swallowing permission
 failures. Logs: `/tmp/opencode/review-followup-cleanup-{red,green}.log`.
 
+## Independent review disposition
+
+Final: minor (deferred): if emergency group signalling itself is denied after an
+already-exited leader, best-effort leader reaping is skipped until outer cleanup/
+interpreter exit. Both errors remain visible and no measurement is accepted; the
+normal local CLI exits on that failure. It is not a successful-retirement claim.
+
+Final: Ruling: deliberately escaped groups, external reapers or mutable custom
+listener setup remain outside these first-party launches; unverified ownership
+still refuses group signals. Cost if wrong: such extensions require their own
+ownership/lifecycle design rather than a guessed numeric PID or generic supervisor.
+
+The reviewer performed no tests; the actual10-case host suite is independently
+GREEN. No second review is used; final exact-source/full gates remain.
+
 ---
 <!-- id: issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp  file: issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp.md -->

@@ -89,6 +89,8 @@ its defaults: the address must be exactly `127.0.0.1` and the configured port mu
 match the CLI argument. Conflicting system/environment/config-file settings fail
 startup rather than silently changing the listener. A separate management port or
 nonmatching management address is rejected too; unrelated Boot settings remain active.
+Leave the management port unset for an ephemeral CLI port: explicit management
+port `0` creates a second listener in Boot and is rejected, not treated as shared.
 Unauthenticated reports return401 before protected body entry. Approver success
 returns200 and COMMITTED; forbidden sibling reads return422 and ROLLED_BACK; reader
 post-authorization returns403 and ROLLED_BACK. Headers carry a server-generated

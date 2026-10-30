@@ -127,12 +127,17 @@ class ReportHttpTest {
         assertListenerOverrideRejected("management.server.port", "-1");
     }
 
+    @Test void listenerOverrideManagementZeroIsRejectedBeforeReady() throws Exception {
+        assertListenerOverrideRejected("management.server.port", "0");
+    }
+
     private void assertListenerOverrideRejected(String name, String value) throws Exception {
         prepare();
         Path stop = Files.writeString(root.resolve("stop.txt"), "stop\n");
         Path log = root.resolve("listener-override.log");
         var launch = launch("serve", "0").redirectInput(stop.toFile()).redirectOutput(log.toFile());
         launch.command().add(1, "-D" + name + "=" + value);
+        if (name.startsWith("management.")) launch.command().add(1, "-Dmanagement.server.address=127.0.0.1");
         Process process = launch.start();
         try {
             assertTrue(process.waitFor(30, TimeUnit.SECONDS));

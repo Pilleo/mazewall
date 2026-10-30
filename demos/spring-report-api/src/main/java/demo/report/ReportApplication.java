@@ -48,7 +48,7 @@ public final class ReportApplication {
         Integer managementPort = environment.getProperty("management.server.port", Integer.class);
         String managementAddress = environment.getProperty("management.server.address");
         if (!"127.0.0.1".equals(address) || port != requestedPort
-                || (managementPort != null && managementPort != requestedPort)
+                || (managementPort != null && (managementPort == 0 || managementPort != requestedPort))
                 || (managementAddress != null && !"127.0.0.1".equals(managementAddress))) {
             throw new IllegalStateException("Evaluation requires 127.0.0.1 and the CLI port, without a separate management listener");
         }

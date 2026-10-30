@@ -38,5 +38,11 @@ Final focused run:11host/3native cases, zero failures/errors/skips, against the
 approved local74c1493c963b SDK with strict configuration-cache reuse. Logs:
 `/tmp/opencode/review-followup-remote-validation-{red,native-red,final}.log`.
 
+One independent whole-change review found no further classification issue.
+Final: Ruling: hostile-worker authenticity, live-provider safety, full I/O deadlines,
+production load and remote/human qualification remain explicit external/non-goals.
+Cost if wrong: these local typed mappings and fixture observations do not supply
+those broader trust, disclosure, performance or release guarantees.
+
 ---
 <!-- id: issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in  file: issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in.md -->

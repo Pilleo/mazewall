@@ -45,5 +45,24 @@ Verification: `test nativeTest` against the approved local597f483649f5 SDK execu
 10host/7native cases with zero failures/errors/skips and strict configuration-cache
 storage. Logs: `/tmp/opencode/review-followup-listener-{red,green}.log`.
 
+## Independent review/fix pass
+
+Final: Ruling: explicit management port0 is not a shared ephemeral main port in
+Boot4.1.1; its actual ManagementPortType bytecode returns DIFFERENT. Correct the
+plan's equal-port assumption: only absent or matching nonzero management ports are
+admitted. Cost if wrong: operators must unset management port0 to use the single
+ephemeral CLI listener, rather than accidentally opening a second listener.
+
+The host and real finished-JAR management-zero tests both observed RED, including
+two actual loopback-only Tomcat listeners before the fix. The safe regression sets
+management.server.address=127.0.0.1 even on the unfixed version. GREEN now executes
+10host/8native tests with zero skips/errors/failures, without resetting any timeout.
+Logs: `/tmp/opencode/review-followup-management-zero-{red,native-red,green}.log`.
+
+Final: Ruling: Boot's existing rejection of redundant management-address settings
+on shared fixed ports remains upstream validation, not new supported configuration.
+Cost if wrong: startup still fails closed; clear the redundant setting rather than
+silently widening listeners or disabling normal Boot processing.
+
 ---
 <!-- id: issue-20261030-075254-853-enforce-the-spring-evaluation-listener-before-refr  file: issue-20261030-075254-853-enforce-the-spring-evaluation-listener-before-refr.md -->

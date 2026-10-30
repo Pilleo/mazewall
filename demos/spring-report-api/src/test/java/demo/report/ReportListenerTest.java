@@ -16,9 +16,11 @@ class ReportListenerTest {
         for (int port : List.of(0, 8080, 65535)) {
             var environment = defaults(port);
             assertDoesNotThrow(() -> ReportApplication.requireEvaluationListener(environment, port));
-            environment.getPropertySources().addFirst(new MapPropertySource("same-management-listener",
-                    Map.of("management.server.port", port, "management.server.address", "127.0.0.1")));
-            assertDoesNotThrow(() -> ReportApplication.requireEvaluationListener(environment, port));
+            if (port != 0) {
+                environment.getPropertySources().addFirst(new MapPropertySource("same-management-listener",
+                        Map.of("management.server.port", port, "management.server.address", "127.0.0.1")));
+                assertDoesNotThrow(() -> ReportApplication.requireEvaluationListener(environment, port));
+            }
         }
     }
 
@@ -41,7 +43,7 @@ class ReportListenerTest {
     }
 
     @Test void rejectsSeparateManagementAddressOrPort() {
-        for (Map<String, Object> values : List.<Map<String, Object>>of(Map.of("management.server.port", 8081),
+        for (Map<String, Object> values : List.<Map<String, Object>>of(Map.of("management.server.port", 0), Map.of("management.server.port", 8081),
                 Map.of("management.server.port", -1), Map.of("management.server.address", "0.0.0.0"))) {
             var environment = defaults(0);
             environment.getPropertySources().addFirst(new MapPropertySource("management-override", values));
