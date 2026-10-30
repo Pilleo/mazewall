@@ -25,7 +25,7 @@ Approved inline follow-up Task2. Initial/later proc inspection failures currentl
 
 - [x] Initial/later inspection and emergency-signal regressions RED->GREEN.
 - [x] Reaped-anchor no-signal control and all10 Python host cases pass.
-- [ ] Final independent review and source/full gates.
+- [x] Final independent review and source/full gates.
 
 Task2 complete: the original suite produced3 expected failures (abandoned/reapless
 groups and lost signal-failure context). Shared cleanup now revalidates the acquired
@@ -59,6 +59,17 @@ ownership/lifecycle design rather than a guessed numeric PID or generic supervis
 
 The reviewer performed no tests; the actual10-case host suite is independently
 GREEN. No second review is used; final exact-source/full gates remain.
+
+## Final qualification
+
+Frozen code `73ec49e83e4bc8bd5d95d99995215e1d7f50a834` passes all10 Python host
+cases, the full root build with Spring (5m26s), and complete exact-source acceptance
+(17m49s), including all15 fresh application measurement JVM forks and actual child
+retirement on successful runs. Permission-inspection and signal-failure tests retain
+their original causes and never accept failed data. No timeout, dependency, namespace
+authority or containment-policy widening was introduced. Final raw/log locations are
+recorded in the sibling listener issue853. The denied-signal leader-reaping minor
+above stays deferred; keep this item open for landing/follow-up, not false retirement.
 
 ---
 <!-- id: issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp  file: issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp.md -->

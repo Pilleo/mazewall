@@ -25,7 +25,7 @@ Approved inline follow-up Task3. A516-byte129-heading document reaches worker an
 
 - [x] Host classifier and actual generated-Portal limit regression RED->GREEN.
 - [x] Known-type mapping, safe marker/docs/report counts and11host/3native suite.
-- [ ] One final independent review and source/full gates.
+- [x] One final independent review and source/full gates.
 
 Task3 complete: the host test observed INVALID_INPUT expected/INTERNAL_FAILURE
 actual; the packaged native probe also observed RED after the actual worker rejected
@@ -43,6 +43,17 @@ Final: Ruling: hostile-worker authenticity, live-provider safety, full I/O deadl
 production load and remote/human qualification remain explicit external/non-goals.
 Cost if wrong: these local typed mappings and fixture observations do not supply
 those broader trust, disclosure, performance or release guarantees.
+
+## Final qualification
+
+Producer `73ec49e83e4bc8bd5d95d99995215e1d7f50a834` passes exact published-only
+copied acceptance in17m49s with11host/3native Koog cases and no skips, actual
+generated-worker document-limit/recovery proof, strict cache reuse and all12 Koog
+measurement forks. The full build with Spring passes in5m26s. One final independent
+review completed; no further classification issue or second review. Source/binary
+kits are staged locally at `build/pitch-evaluation-73ec49e83e4b/`; logs/raw receipts
+are recorded in the sibling listener issue853. Keep open pending separately approved
+landing; no push, remote publication, installation replacement or merge was performed.
 
 ---
 <!-- id: issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in  file: issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in.md -->
