@@ -37,8 +37,8 @@ freshness, artifact identity, security and process-ownership assertions stay fix
 - [x] Task1 dependencies-only lock seeding, one strict real run, same-graph cached dry-run.
 - [x] Task2 durable checkout-owned evidence, failure-safe JUnit/HTML retention, allowlisted uploads.
 - [x] Task3 earlier application checks, legacy matrix retained, measurements last, six-lane join.
-- [ ] Task4 final focused checks, one independent scope review, full build and exact acceptance.
-- [ ] Commit/update PR562 and inspect the actual hosted result; never merge or publish packages.
+- [x] Task4 final focused checks, one independent scope review, full build and exact acceptance.
+- [x] Implementation committed for PR562; hosted result/artifact qualification follows on the PR without merge or package publication.
 
 Pre-flight interfaces: buildConsumer(command, copy, evidence, tasks) owns the same
 fixed phase protocol for both applications. ConsumerFixture.optionalIntegrationEvidence
@@ -147,6 +147,42 @@ The strengthened cold-output counter case and full consumerHarnessTest now pass
 with one action per forced-fresh task and a restored post-build graph; log
 `/tmp/opencode/ci-pipeline-cold-output-green.log`. The failed end-to-end run is
 retained as failure evidence, not counted as qualification.
+
+## Final local qualification
+
+Verified code producer `bc07cd6d8d224e8aab50b555090f1be29c8f39fe`; final verification
+notes are backlog-only. Review finding1 is fixed: intermediate source/destination
+aliases and unreadable parent metadata have observed RED→GREEN tests; full host
+harness PASS, including9ConsumerFixture/4PitchExamples cases. No review minors.
+
+- Final `./gradlew build -PincludeSpringIntegration=true --console=plain`: PASS,
+ 5m11s,253tasks (36executed/217up-to-date). Log
+ `/tmp/opencode/ci-pipeline-full-build-final.log`.
+- Final committed-source optionalIntegrationCheck with inherited JAVA_TOOL_OPTIONS
+ preserved and harmless preference-path option appended: PASS,12m59s. Log
+ `/tmp/opencode/ci-pipeline-exact-acceptance-final.log`.
+- Durable evidence:
+ `build/reports/optional-integrations/run-11693675086648466158/` (1367808bytes).
+ All phase exit/ownership receipts are successful, reaped and not timed out.
+- Actual task output proves exactly one nativeTest action per copied application
+ and one Spring presentationTest action, all in strict phase. Lock seeding has no
+ tests; both dry-runs have identical argv and no task actions. Final replay restores
+ the post-build cache. Each dry-run took1second in this local observation.
+- Copied/retained exact XML inventories: Koog26host/11native; Spring11host/11native/
+ 1presentation; no failed/skipped/error cases. Retained XML bytes match originals,
+ and every corresponding HTML index exists. Historical locks and approvals held.
+- Both application checks finish before the legacy consumer matrix. All existing
+ legacy outcomes remain selected, and all15measurement forks execute after the
+ final correctness stage. No benchmark or native assertion was dropped.
+
+The previous local source-bound run took21m06s; this one took12m59s. Those are
+observations under different build/cache histories, not a controlled speedup claim.
+Hosted comparison remains against acceptance732seconds/job860seconds from
+run41082880463, and is recorded on PR562 after the new ordinary CI run completes
+so a verification-only commit does not trigger yet another pipeline execution.
+Local Git source inventory remains unchanged by the gate; no new worktree, model
+request, dependency, timeout increase, scanner-policy change or cache deletion.
+The scoped backlog item stays open for the orchestrator-managed landing path.
 
 ---
 <!-- id: issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn  file: issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn.md -->
