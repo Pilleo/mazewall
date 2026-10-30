@@ -3,6 +3,8 @@
 ## Start here: a useful report and its actual request effects
 
 ```bash
+: "${VERSION:?Select the approved artifact version}"
+: "${REPOSITORY:?Select its Maven repository URL or absolute file path}"
 ./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" presentationTest
 ```
 

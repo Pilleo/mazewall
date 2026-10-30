@@ -22,15 +22,15 @@ Configure `OPENAI_API_KEY` through existing operator secret management. Live hos
 selection discloses the supplied document contents to that provider; use only
 synthetic evaluation data unless you have the appropriate approval. No API key is
 printed or stored in this project. `ollama` is an alternative only when the operator
-already prepared a tool-capable model on127.0.0.1:11434. Neither command starts a
+already prepared a tool-capable model on 127.0.0.1:11434. Neither command starts a
 server, pulls a model, selects a fallback or silently becomes a fixture run. A slow
-provider fails at the existing10-second agent deadline; Ollama is not required.
+provider fails at the existing 10-second agent deadline; Ollama is not required.
 
 The installed launcher accepts `triage <bundle-directory> openai|ollama <model-id>`.
 The three supported document IDs are `application.log`, `deployment.md` and
-`pool-settings.txt`: each at most8192 strict UTF8 bytes/256lines. Successful reads
-are snapshotted, with at most8 attempts/24 graph iterations. Final raw JSON is at
-most16384 bytes, with1–8 evidence references and1–5 next steps. Only successfully
+`pool-settings.txt`: each at most 8192 strict UTF-8 bytes/256 lines (24576 bytes total).
+Successful reads are snapshotted, with at most 8 attempts/24 graph iterations.
+Final raw JSON is at most 16384 bytes, with 1–8 evidence references and 1–5 next steps. Only successfully
 read documents/existing lines are valid citations. This does not verify that the
 model's hypothesis is correct. The provider, prompts and report parsing are host
 work, not inside the reader's OS boundary.
@@ -53,8 +53,16 @@ injection resistance. The legacy small qualification commands below remain avail
 
 This is an independent Kotlin 2.4.20 / Koog 1.3.0 / JDK25 application. It has no
 Spring dependency, included mazewall source build or injected producer plugin
-classpath. Its model is explicitly **scripted and offline**; the upstream agent,
-tool registry, codecs, owned workers and native restrictions are real.
+classpath. The legacy `demoThread`/`runPortal` model is explicitly **scripted and
+offline**; `triage` uses only the explicitly selected live provider. In both cases
+the upstream agent, tool registry, codecs, owned workers and native restrictions are real.
+
+**Try a useful change:** run the same live command with
+`-PincidentBundle=fixtures/incidents/wrong-endpoint`. Inspect the actual hypothesis
+and its cited source lines; do not assume the model must agree with a canned answer.
+The named fixture tests exercise both bundles without inference and label their
+answers accordingly. Adding a new document ID requires updating the bounded
+contract and tests, not letting model text grant a new filesystem permission.
 
 ## Run the thread example
 
@@ -136,12 +144,17 @@ The runtime/domain, permanent process baseline and fixed grants are still explic
 ```
 
 `build/distributions/koog-document-agent.zip` contains the ordinary application and
-its actual runtime JAR closure. Extract into a new private directory; run
-`bin/koog-document-agent` for the thread path. In a separate fresh JVM, run
-`java --enable-native-access=ALL-UNNAMED -cp 'lib/*' demo.koog.PortalDocumentAgent`
-for the ordinary outline path. No Gradle/model account is needed at runtime.
+its actual runtime JAR closure, this guide and the two synthetic incident bundles.
+Extract into a new private directory; from its `koog-document-agent` directory run
+`bin/koog-document-agent` for the legacy offline thread path. For live analysis run
+`bin/koog-document-agent triage fixtures/incidents/pool-exhaustion openai "$MODEL"`.
+Live mode still requires operator credentials or a prepared local server/model.
+In a separate fresh JVM, run
+`bin/koog-document-agent outline fixtures/incidents/pool-exhaustion/deployment.md`
+for an actual-file outline. No Gradle or model account is needed for outline or the
+legacy offline path; live analysis is not silently substituted for either.
 `koog-document-agent-sources.zip` contains the independent wrapper, source, tests,
-locks and checksum approvals, not a sibling producer tree. Test-only boundary and
+locks, checksum approvals and the same six incident inputs, not a sibling producer tree. Test-only boundary and
 measurement/profile entries are source-kit development controls, not normal binary
 runtime tools. An operator must separately approve any upload/publication or
 installation replacement and identify exact released bytes before distribution.
@@ -252,3 +265,29 @@ performs the real read and requires actual worker retirement. It never writes or
 updates review properties. Changing application/input/classpath bytes requires new
 measurement and review, not a fallback. The main agent remains a simple static-policy
 demonstration; this development flow does not silently replace its policy.
+
+### Maintain the policy when the application changes
+
+1. Keep the existing approved operation document and source/JAR identity. Copy a
+   synthetic incident input into a **new** private development bundle; never overwrite
+   an operator deployment or modify its grants in place.
+2. Run `profileRead` above with `profileDocument` pointing to that bundle's actual
+   `application.log`. This measures the shared bounded reader only—not the model,
+   all three incident documents, Spring, or arbitrary future tool actions. Exercise
+   each newly required operation separately; incomplete coverage remains a refusal.
+3. Retain the profile/coverage evidence and save its new candidate. From the producer
+   checkout compare old/new documents with `:profiler:policyDiff`. A content change
+   can change resource identity without adding a permission; a new root can add a
+   read grant. Inspect both, rather than accepting every diff as harmless.
+4. Obtain independent review of the candidate, exact application bytes and resources.
+   Run `enforceReviewedRead` in a fresh JVM with those reviewed inputs, and require
+   matching real content and physical retirement. An old review against changed
+   resources must fail, not trigger remeasurement or self-approval at runtime.
+5. Keep the incident agent's explicit static bundle policy separate. This recipe
+   does not auto-install a profiler candidate into the agent. Any changed normal
+   policy/bootstrap is a source change with its own review and native regression.
+
+For the independent Spring application, a template/deployment change similarly
+requires a new candidate and separate deployment review before `serve`; its
+candidate is not a syscall profile. Neither sample broadens permissions, rewrites
+review files or automatically replays failed work to make a demo pass.

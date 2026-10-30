@@ -76,3 +76,8 @@ external effects, negligible overhead, production load or presentation-machine r
 is inferred. Run these commands on the intended presentation host and perform the
 actual unfamiliar-human rehearsal separately. Do not automatically approve real
 deployment candidates using this synthetic measurement harness.
+
+These measurements remain the legacy small reader/outline/report workloads. They
+do not measure incident analysis, provider inference, report validation or the new
+actual-file CLI's end-to-end latency; useful application output does not expand the
+measurement scope.

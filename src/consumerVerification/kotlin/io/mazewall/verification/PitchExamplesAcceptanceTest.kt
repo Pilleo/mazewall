@@ -12,6 +12,9 @@ import java.util.jar.JarEntry
 import java.util.jar.JarFile
 import java.util.jar.JarOutputStream
 import java.util.jar.Manifest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 
@@ -68,9 +71,47 @@ class PitchExamplesAcceptanceTest {
         Files.writeString(file, report(2, 0, 0))
         PitchExamplesAcceptance.requireTestReport(file, 2)
     }
+
+    @Test fun `evaluation archives refuse absent or substituted input bytes`() {
+        val input = Files.writeString(root.resolve("application.log"), "actual synthetic input")
+        val expected = mapOf("fixtures/application.log" to input)
+        for ((label, contents) in listOf("valid" to "actual synthetic input", "substituted" to "different input", "missing" to null)) {
+            val archive = root.resolve("$label.zip")
+            ZipOutputStream(Files.newOutputStream(archive)).use { zip ->
+                if (contents != null) {
+                    zip.putNextEntry(ZipEntry("fixtures/application.log"))
+                    zip.write(contents.toByteArray())
+                    zip.closeEntry()
+                }
+            }
+            if (label == "valid") {
+                PitchExamplesAcceptance.requireArchiveFiles(archive, expected)
+            } else {
+                assertThrows(IllegalStateException::class.java) { PitchExamplesAcceptance.requireArchiveFiles(archive, expected) }
+            }
+        }
+    }
 }
 
 internal object PitchExamplesAcceptance {
+    fun requireArchiveFiles(
+        archive: Path,
+        files: Map<String, Path>,
+    ) {
+        ZipFile(archive.toFile()).use { zip ->
+            val entries = zip
+                .entries()
+                .asSequence()
+                .map { it.name }
+                .toList()
+            check(entries.size == entries.distinct().size) { "Duplicate evaluation archive entry: $archive" }
+            files.forEach { (name, source) ->
+                val entry = checkNotNull(zip.getEntry(name)) { "Missing evaluation input: $archive!/$name" }
+                check(zip.getInputStream(entry).use { it.readAllBytes() }.contentEquals(Files.readAllBytes(source))) { "Substituted evaluation input: $archive!/$name" }
+            }
+        }
+    }
+
     fun inspectSpring(
         jar: Path,
         repository: Path,
@@ -160,7 +201,7 @@ internal object PitchExamplesAcceptance {
             val tasks = if (name == "koog-document-agent") {
                 listOf("test", "nativeTest", "installDist", "distZip", "sourceZip")
             } else {
-                listOf("test", "nativeTest", "bootJar", "evaluationZip", "sourceZip")
+                listOf("test", "nativeTest", "presentationTest", "bootJar", "evaluationZip", "sourceZip")
             }
             for ((label, flags) in listOf(
                 "locks" to listOf("--write-locks", "--no-configuration-cache"),
@@ -180,7 +221,40 @@ internal object PitchExamplesAcceptance {
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.DocumentAgentTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ScriptedModelTest.xml"), 5)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.PortalDocumentAgentTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentReportTest.xml"), 6)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentInvocationTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ObservedAgentTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.DocumentAgentNativeTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentAgentTest.xml"), 2)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentBoundaryTest.xml"), 1)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.OutlineFileNativeTest.xml"), 3)
+                val inputs = listOf("README.md") +
+                    listOf("pool-exhaustion", "wrong-endpoint").flatMap { bundle ->
+                    listOf("application.log", "deployment.md", "pool-settings.txt").map { "fixtures/incidents/$bundle/$it" }
+                }
+                requireArchiveFiles(copy.resolve("build/distributions/koog-document-agent-sources.zip"), inputs.associateWith(copy::resolve))
+                requireArchiveFiles(copy.resolve("build/distributions/koog-document-agent.zip"), inputs.associate { "koog-document-agent/$it" to copy.resolve(it) })
+                val launcher = copy.resolve("build/install/koog-document-agent/bin/koog-document-agent").toString()
+                val outline = ConsumerFixture.command(
+                    listOf(launcher, "outline", copy.resolve("build/install/koog-document-agent/fixtures/incidents/pool-exhaustion/deployment.md").toString()),
+                    copy,
+                    evidence,
+                    "koog-installed-file-outline",
+                    Duration.ofMinutes(1),
+                )
+                check(outline.exitCode == 0 && "# Document outline\nDeployment" in outline.stdout && outline.stdout.lineSequence().count { it.startsWith("OUTLINE_FILE_RETIRED ") } == 1) {
+                    "Installed actual-file command failed: ${outline.stdout}${outline.stderr}"
+                }
+                val noFallback = ConsumerFixture.command(
+                    listOf(launcher, "triage", "fixtures/incidents/pool-exhaustion", "fixture", "not-a-live-model"),
+                    copy,
+                    evidence,
+                    "koog-installed-no-fixture-fallback",
+                    Duration.ofMinutes(1),
+                )
+                check(noFallback.exitCode != 0 && "Explicit openai or ollama provider required" in noFallback.stderr && "MODEL: live" !in noFallback.stdout) {
+                    "Installed incident command accepted an implicit fixture provider"
+                }
                 val lib = copy.resolve("build/install/koog-document-agent/lib")
                 for (module in listOf("platform", "enforcer", "runtime", "koog")) {
                     check(Files.readAllBytes(lib.resolve("$module-$version.jar")).contentEquals(Files.readAllBytes(repository.resolve("io/mazewall/$module/$version/$module-$version.jar")))) {
@@ -191,13 +265,22 @@ internal object PitchExamplesAcceptance {
                 JarFile(lib.resolve("koog-document-agent.jar").toFile()).use { host ->
                     check(host.getInputStream(host.getJarEntry("META-INF/mazewall/portal/services.index")).bufferedReader().use { it.readText() } == "document-outline\n")
                     check(host.entries().asSequence().none { it.name.startsWith("demo/boundary/") || it.name == "demo/documents/MarkdownOutline.class" })
+                    check(listOf("IncidentApplication", "OutlineFileApplication").all { host.getJarEntry("demo/koog/$it.class") != null })
+                    check(listOf("IncidentFixtureExecutor", "IncidentFixtureProbe", "IncidentBoundaryProbe").none { host.getJarEntry("demo/koog/$it.class") != null })
                 }
             } else {
                 inspectSpring(copy.resolve("build/libs/application.jar"), repository, version)
-                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportServiceTest.xml"), 2)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportServiceTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportContextTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportListenerTest.xml"), 5)
-                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 8)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 9)
+                requireTestReport(copy.resolve("build/test-results/presentationTest/TEST-demo.report.ReportHttpTest.xml"), 1)
+                val inputs = listOf("README.md", "fixtures/templates/approved.txt", "fixtures/templates/forbidden.txt")
+                requireArchiveFiles(copy.resolve("build/distributions/spring-report-api-sources.zip"), inputs.associateWith(copy::resolve))
+                requireArchiveFiles(
+                    copy.resolve("build/distributions/spring-report-api.zip"),
+                    inputs.associate { it.removePrefix("fixtures/") to copy.resolve(it) } + ("application.jar" to copy.resolve("build/libs/application.jar")),
+                )
             }
             val measurement = ConsumerFixture.command(
                 listOf(

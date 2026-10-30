@@ -5,23 +5,43 @@
 Choose **one** independent story for the audience:
 
 1. **Koog document agent:** [guide](../../demos/koog-document-agent/README.md).
-   Run `demoThread` for an actual offline scripted AIAgent: permitted document,
-   actual denied sibling read, permitted recovery under the unchanged policy.
-   Run `runPortal` in a separate JVM for useful Markdown outlines in a generated
-   worker; `demoPortal` explicitly adds a separate test-only denied-read/crash
-   fixture. Never describe that controlled fault worker as an exploit in the parser.
+   Start with an incident bundle: a real AIAgent reads actual evidence and returns
+   a model-generated hypothesis, citations and next steps. `triageIncident` requires
+   an explicit provider/model; hosted OpenAI avoids local inference load, while
+   Ollama is optional and must already be prepared. Neither is started/downloaded
+   by the demo. Select only synthetic data approved for provider disclosure.
+   Without live inference, the named `IncidentAgentTest`/`IncidentBoundaryTest`
+   runs use an explicitly labelled fixture executor with the real graph and native
+   readers. Show ordinary synthetic-canary access, actual protected refusal, useful
+   work and physical retirement—not a model-injection-resistance claim.
+   Run `outlineFile` on an actual Markdown file in a separate JVM for useful output
+   from the opaque generated worker. Host file acquisition is outside parser
+   containment. Legacy `demoThread`/`runPortal` remain offline engineering examples;
+   `demoPortal` adds a separate test-only denied-read/crash fixture. Never describe
+   that controlled fault worker as an exploit in the parser.
 2. **Spring report API:** [guide](../../demos/spring-report-api/README.md).
-   Prepare the exact finished deployment and separate trusted review; `serve`
+   Start with its `presentationTest` tour and actual operational-report body,
+   request IDs, transaction outcomes and observed audit effects. For normal service,
+   prepare the exact finished deployment and separate trusted review; `serve`
    never approves itself. Show401 before body, approver200/commit, real denied
    read/rollback, reader403/post-authorization rollback, then approver recovery.
    Show request-correlated outcomes, readiness refusal on `drain` and actual close
    on `stop`. No filesystem report writes or Koog dependency are involved.
 
-The guides include ordinary distributions/source kits. Do not publish or replace an
+Change the Koog input bundle or the Spring template, then inspect the actual changed
+output. Keep them independent: no combined app or Koog/model dependency in Spring.
+For policy maintenance, use the Koog guide's measured reader → coverage gate →
+informational diff → independent review → fresh enforcement recipe. Its named file
+profile is not a trace of the whole agent; Spring's deployment candidate is not a
+syscall profile. Neither flow auto-updates grants/review or retries refused work.
+
+The guides include ordinary distributions/source kits and synthetic inputs. Do not publish or replace an
 operator installation as part of rehearsal. Complete remote-byte identification,
 the [bounded local measurements](../../benchmarks/integration-boundaries/pitch/README.md),
-and the actual-human rehearsal as separate gates. A scripted model proves adapter
-execution, not model resistance or safe remote-provider disclosure. The newer
+and the actual-human rehearsal as separate gates. A fixture model proves adapter
+execution, not live reasoning, citation truth, model resistance or safe provider
+disclosure. The unchanged ten-second deadline may reject slow inference; live
+quality/timing requires a separate operator-approved smoke test. The newer
 Spring record-result library extension is optional; the headline HTTP path stays String.
 
 ## Start with the runnable application paths

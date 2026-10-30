@@ -77,6 +77,14 @@ application {
     mainClass.set("demo.koog.DocumentAgent")
     applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED")
 }
+distributions {
+    main {
+        contents {
+            from("README.md")
+            from("fixtures") { into("fixtures") }
+        }
+    }
+}
 tasks.jar { archiveFileName.set("koog-document-agent.jar") }
 tasks.distZip { archiveFileName.set("koog-document-agent.zip") }
 tasks.register<Zip>("sourceZip") {
@@ -94,6 +102,7 @@ tasks.register<Zip>("sourceZip") {
             "gradle/verification-metadata.xml",
             "locks/**",
             "src/**",
+            "fixtures/**",
             "boundary-fixture/build.gradle.kts",
             "boundary-fixture/locks/**",
             "boundary-fixture/src/**",
