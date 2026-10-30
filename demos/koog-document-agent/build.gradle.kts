@@ -154,6 +154,17 @@ tasks.register<JavaExec>("demoThread") {
     mainClass.set("demo.koog.DocumentAgent")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
+tasks.register<JavaExec>("triageIncident") {
+    group = "application"
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = packagedClasspath
+    mainClass.set("demo.koog.IncidentApplication")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    val bundle = providers.gradleProperty("incidentBundle")
+    val provider = providers.gradleProperty("incidentProvider")
+    val model = providers.gradleProperty("incidentModel")
+    argumentProviders.add(CommandLineArgumentProvider { listOf(bundle.get(), provider.get(), model.get()) })
+}
 tasks.register<JavaExec>("demoPortal") {
     group = "application"
     javaLauncher.set(javaToolchains.launcherFor(java.toolchain))

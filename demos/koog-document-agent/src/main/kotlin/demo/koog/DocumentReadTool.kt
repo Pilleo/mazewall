@@ -38,6 +38,7 @@ internal fun documentReadTool(
     runtime: ManagedRuntime,
     domain: InProcessDomain,
     documents: Path,
+    onRead: (ReadDocumentArguments, String) -> Unit = { _, _ -> },
 ): ThreadToolAdapter<ReadDocumentArguments, String> =
     ThreadToolAdapter(
         runtime,
@@ -48,5 +49,9 @@ internal fun documentReadTool(
         "Read one bounded UTF-8 document",
         ::validateReadArguments,
         { require(it.toByteArray(Charsets.UTF_8).size <= 65_536) },
-        { DocumentReader.readBoundedDocument(documents.resolve(it.path)) },
+        { arguments ->
+            val text = DocumentReader.readBoundedDocument(documents.resolve(arguments.path))
+            onRead(arguments, text)
+            text
+        },
     )

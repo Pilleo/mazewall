@@ -20,6 +20,10 @@ import java.util.concurrent.TimeUnit
 
 object DocumentAgent {
     @JvmStatic fun main(args: Array<String>) {
+        if (args.firstOrNull() == "triage") {
+            IncidentApplication.main(args.drop(1).toTypedArray())
+            return
+        }
         require(args.isEmpty()) { "DocumentAgent uses an acquired synthetic fixture only" }
         check(!Thread.currentThread().isVirtual)
         println("MODEL: scripted (offline); no model account or prompt-injection-resistance claim")

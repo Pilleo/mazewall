@@ -1,14 +1,7 @@
 package demo.koog
 
-import ai.koog.agents.core.agent.AIAgent
-import ai.koog.agents.core.agent.config.AIAgentConfig
-import ai.koog.agents.core.agent.entity.createStorageKey
-import ai.koog.agents.core.feature.AIAgentGraphFeature
-import ai.koog.agents.core.feature.config.FeatureConfig
-import ai.koog.agents.core.feature.pipeline.AIAgentGraphPipeline
 import ai.koog.agents.core.tools.Tool
 import ai.koog.agents.core.tools.ToolDescriptor
-import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.Prompt
 import ai.koog.prompt.dsl.ModerationResult
 import ai.koog.prompt.executor.model.PromptExecutor
@@ -20,10 +13,7 @@ import ai.koog.prompt.message.MessagePart
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.prompt.streaming.StreamFrame
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 internal data class ScriptStep(
@@ -108,43 +98,15 @@ internal suspend fun runScriptedAgent(
     tools: List<Tool<*, *>>,
     steps: List<ScriptStep>,
 ): AgentObservation {
-    val failures = CopyOnWriteArrayList<Throwable?>()
-    val completed = AtomicInteger()
     val model = ScriptedModel(tools.map { it.name }.toSet(), steps)
-    val safeProvider = SafeToolFailures(model)
-    val events = object : AIAgentGraphFeature<FeatureConfig, Unit> {
-        override val key = createStorageKey<Unit>("document-agent-observations")
-
-        override fun createInitialConfig(agentConfig: AIAgentConfig): FeatureConfig = object : FeatureConfig() {}
-
-        override fun install(
-            config: FeatureConfig,
-            pipeline: AIAgentGraphPipeline,
-        ) {
-            pipeline.interceptToolCallFailed(this) {
-                failures.add(it.error)
-                safeProvider.record(it.toolCallId, it.error)
-            }
-            pipeline.interceptToolValidationFailed(this) {
-                failures.add(it.error)
-                safeProvider.record(it.toolCallId, it.error)
-            }
-            pipeline.interceptToolCallCompleted(this) { completed.incrementAndGet() }
-        }
-    }
-    safeProvider.use {
-        val agent = AIAgent(
-            promptExecutor = safeProvider,
-            llmModel = LLModel(OpenAILLMProvider, "offline-script", listOf(LLMCapability.Tools), 8192, 256),
-            toolRegistry = ToolRegistry { tools.forEach { tool(it) } },
-            maxIterations = 2 * (steps.size + 1) + 1,
-            installFeatures = { install(events) },
-        )
-        return AutoCloseable { runBlocking { agent.close() } }.use {
-            check(withTimeout(10_000) { agent.run("Execute the labelled offline document workflow") } == "script-complete")
-            check(model.requests.get() == steps.size + 1)
-            check(completed.get() == steps.count { it.expectedOutput != null } && failures.size == steps.count { it.expectedOutput == null })
-            AgentObservation(completed.get(), failures.toList(), model.requests.get())
-        }
-    }
+    val result = runObservedAgent(
+        tools,
+        model,
+        LLModel(OpenAILLMProvider, "offline-script", listOf(LLMCapability.Tools), 8192, 256),
+        "Execute the labelled offline document workflow",
+        2 * (steps.size + 1) + 1,
+    )
+    check(result.output == "script-complete" && model.requests.get() == steps.size + 1)
+    check(result.completions == steps.count { it.expectedOutput != null } && result.failures.size == steps.count { it.expectedOutput == null })
+    return AgentObservation(result.completions, result.failures, model.requests.get())
 }

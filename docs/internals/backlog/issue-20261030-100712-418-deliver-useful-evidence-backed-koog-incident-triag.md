@@ -24,7 +24,7 @@ Approved useful-application inline plan Tasks1-3: bounded real incident reports,
 
 Base: `5975c92ffb08d29c67579b42064e2d31241bbd1d`; approved inline useful-demo plan.
 - [x] Task1 report/citation/document validation, renderer and two input fixtures.
-- [ ] Task2 observed-agent reuse, real incident workflow and explicit live CLI.
+- [x] Task2 observed-agent reuse, real incident workflow and explicit live CLI.
 - [ ] Task3 synthetic ordinary/protected boundary control and retirement.
 - [ ] Final one independent review, exact copied acceptance and full build.
 
@@ -46,6 +46,22 @@ Reports reference only actual successful document/line snapshots; strict UTF8/ra
 hypotheses; citation existence is not semantic truth. Terminal controls reject.
 Two small synthetic input bundles differ in actual pool/endpoint evidence, not
 just an expected-answer marker. Log: `/tmp/opencode/useful-incident-report-{red,green}.log`.
+
+Task2: observed-runner tests first fail at the missing implementation, then pass
+with actual graph/tool-history execution, original provider-failure propagation,
+exact provider close and the unchanged10s stalled-provider deadline. Legacy scripted
+qualification delegates through the same safe observation helper; no second pool.
+
+Actual packaged incident fixtures observed RED before the workflow existed, then
+GREEN for two different real bundles and rejection of invented evidence. Successful
+reads are snapshotted on the actual restricted worker; the application allows at
+most8 attempts and24 graph iterations. New CLI requires explicit provider/model,
+closes resources and prints only a validated report after physical retirement.
+OpenAI/Ollama clients already exist in locked runtime closure; no dependency change.
+SDK default fallback is null; no model discovery/pull, server launch or live call
+was performed. No real credentials were inspected. Validation/CLI tests also
+observed RED before implementation. Final suite23host/5native, no skips, strict
+cache storage. `/tmp/opencode/useful-incident-agent-final.log`.
 
 ---
 <!-- id: issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag  file: issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag.md -->
