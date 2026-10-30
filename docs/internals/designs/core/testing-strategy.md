@@ -403,18 +403,23 @@ Always-scheduled ownership and diagnostics retain update/analysis logs and repor
 
 The source-bound optional gate stages the exact SDK publications once. It checks
 the two independent copied applications before the remaining legacy consumer
-matrix. Each application has three deliberately different phases:
+matrix. Each application has four fixed phases:
 
 1. `dependencies --write-locks` seeds the new coordinate without running tests or
    packaging; Koog also resolves its separate boundary-fixture dependencies.
 2. One strict configuration-cache build executes the actual host/native/presentation
    tasks and produces the ordinary distributions. Native results remain uncached.
-3. A `--dry-run` of that same task graph must restore the configuration cache without
-   executing any task actions. This proves graph reuse, not another native pass.
+3. A `--dry-run` of that same graph primes its post-build filesystem state without
+   task actions. This handles plugins such as Boot that observe class directories
+   which the real build has just created.
+4. A second identical `--dry-run` must restore that configuration cache, again
+   without task actions. These are fixed setup/proof phases, not retries or another
+   native pass.
 
 The host harness exercises the production phase runner with real Gradle tasks
-whose outputs are always forced fresh. Their counters must each contain exactly
-one execution, not three. Historical locks and dependency approvals are checked
+whose outputs are always forced fresh and whose real execution creates an observed
+configuration input. Their counters must each contain exactly one execution, not
+three, even across post-build graph priming. Historical locks and dependency approvals are checked
 after every phase, and the complete mandatory JUnit inventory comes from the real
 strict build. No skipped or failed test observation is accepted as a native pass.
 After all application and legacy correctness checks succeed, the unchanged fifteen

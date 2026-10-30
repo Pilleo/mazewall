@@ -41,7 +41,7 @@ freshness, artifact identity, security and process-ownership assertions stay fix
 - [ ] Commit/update PR562 and inspect the actual hosted result; never merge or publish packages.
 
 Pre-flight interfaces: buildConsumer(command, copy, evidence, tasks) owns the same
-three phases for both applications. ConsumerFixture.optionalIntegrationEvidence
+fixed phase protocol for both applications. ConsumerFixture.optionalIntegrationEvidence
 returns one unique durable run directory; retainTestReports exports only framework
 report trees. PitchExamplesAcceptance.run returns the acquired copied-project root;
 measure consumes it only after all correctness stages. The workflow and policy
@@ -117,6 +117,36 @@ release publication and cancellation delivery are not artificially triggered, an
 older application features are outside this CI-only review — preserves the operator
 approval/scope boundary — cost if wrong: unobserved external behavior remains
 unqualified rather than being inferred from local tests.
+
+## Completion-gate findings
+
+Full build's first invocation reached the tool's20-minute command cap during broad
+build-logic invalidation/recompilation, without a final gate result. Explicitly
+logged child identities were no longer present. The same unchanged command then
+completed on resume in7m25s (253tasks;52executed/1cached/200up-to-date). No test/task
+budget was raised; the timeout log is not recorded as a pass. Logs:
+`/tmp/opencode/ci-pipeline-full-build.log` and `ci-pipeline-full-build-resume.log`.
+
+First exact acceptance stopped in6m29s after both applications' real test suites
+passed: Boot observed `build/classes/java/main` absent during configuration, then
+compilation created it and invalidated the first snapshot. The task-free replay
+correctly calculated/stored a new graph instead of claiming reuse. Full logs and
+both nested XML/HTML trees survived in caller-owned durable evidence:
+`build/reports/optional-integrations/run-1657397919409398280/`.
+
+Ruling: use one fixed task-free cache-prime pass after the strict real build, then
+an identical task-free replay that MUST restore the post-build graph — handles
+legitimate plugin filesystem inputs without another native execution or a retry
+loop — cost if wrong: two lightweight dry-runs per consumer instead of one.
+The real Gradle counter regression now creates a configuration-observed file during
+execution; it reproduces the cold-output invalidation RED before this change.
+Cache replay failures now report the consumer, evidence directory and actual cache
+diagnostic instead of only `Check failed`.
+RED log `/tmp/opencode/ci-pipeline-cold-output-red.log`.
+The strengthened cold-output counter case and full consumerHarnessTest now pass
+with one action per forced-fresh task and a restored post-build graph; log
+`/tmp/opencode/ci-pipeline-cold-output-green.log`. The failed end-to-end run is
+retained as failure evidence, not counted as qualification.
 
 ---
 <!-- id: issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn  file: issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn.md -->

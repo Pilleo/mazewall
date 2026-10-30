@@ -28,13 +28,19 @@ class PitchExamplesAcceptanceTest {
         Files.writeString(
             copy.resolve("build.gradle"),
             """
+            def generatedAtConfiguration = providers.fileContents(layout.projectDirectory.file('generated-input.flag')).asText.orElse('absent').get()
             abstract class CountRuns extends DefaultTask {
                 @OutputFile abstract RegularFileProperty getCounter()
-                @TaskAction void count() { counter.get().asFile.append('executed\n') }
+                @OutputFile abstract RegularFileProperty getGenerated()
+                @TaskAction void count() {
+                    counter.get().asFile.append('executed\n')
+                    generated.get().asFile.text = 'created'
+                }
             }
             ['nativeTest', 'presentationTest'].each { taskName ->
                 tasks.register(taskName, CountRuns) {
                     counter.set(layout.projectDirectory.file(taskName + '.count'))
+                    generated.set(layout.projectDirectory.file('generated-input.flag'))
                     outputs.upToDateWhen { false }
                     outputs.cacheIf { false }
                 }
@@ -151,6 +157,7 @@ internal object PitchExamplesAcceptance {
         for ((label, flags) in listOf(
             "locks" to listOf("--write-locks", "--no-configuration-cache"),
             "strict" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
+            "cache-prime" to listOf("--configuration-cache", "--configuration-cache-problems=fail", "--dry-run"),
             "cache-reuse" to listOf("--configuration-cache", "--configuration-cache-problems=fail", "--dry-run"),
         )) {
             val selected = if (label == "locks") {
@@ -161,7 +168,11 @@ internal object PitchExamplesAcceptance {
             println("PITCH_CONSUMER_PHASE name=$name phase=$label evidence=$evidence")
             val result = ConsumerFixture.command(command + selected + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
             check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}; evidence=$evidence" }
-            if (label == "cache-reuse") check("Configuration cache entry reused" in result.stdout)
+            if (label == "cache-reuse") {
+                check("Configuration cache entry reused" in result.stdout) {
+                "Copied $name cache replay did not restore its post-build graph; evidence=$evidence\n${result.stdout.takeLast(3000)}${result.stderr.takeLast(1000)}"
+            }
+            }
             check(Files.readString(metadata) == pinned) { "Copied consumer changed dependency approvals" }
             check(historicalLocks.all { (path, bytes) -> Files.readAllBytes(path).contentEquals(bytes) }) { "New-coordinate build changed historical locks" }
         }
