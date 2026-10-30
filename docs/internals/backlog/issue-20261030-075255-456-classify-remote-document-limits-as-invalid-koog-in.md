@@ -21,5 +21,22 @@ Approved inline follow-up Task3. A516-byte129-heading document reaches worker an
 **Needed:**
 1. Write host classifier RED and actual generated-Portal invalid-then-valid regression, minimal remote-type mapping, marker/report-count/docs updates; verify11host/3native then final source-bound/full gates.
 
+## Execution
+
+- [x] Host classifier and actual generated-Portal limit regression RED->GREEN.
+- [x] Known-type mapping, safe marker/docs/report counts and11host/3native suite.
+- [ ] One final independent review and source/full gates.
+
+Task3 complete: the host test observed INVALID_INPUT expected/INTERNAL_FAILURE
+actual; the packaged native probe also observed RED after the actual worker rejected
+a516-byte129-heading document. Mapping only the known remote IllegalArgumentException
+type makes both GREEN. Original completed remote failure/evidence is retained, valid
+outline recovery uses the same fixed policy, and unknown/uncertain/access-denied
+classifications stay unchanged. No exception-message parsing or worker-limit changes.
+
+Final focused run:11host/3native cases, zero failures/errors/skips, against the
+approved local74c1493c963b SDK with strict configuration-cache reuse. Logs:
+`/tmp/opencode/review-followup-remote-validation-{red,native-red,final}.log`.
+
 ---
 <!-- id: issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in  file: issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in.md -->

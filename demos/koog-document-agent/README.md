@@ -49,6 +49,10 @@ tool-call ID. The original Throwable remains available to local agent failure
 handlers; it is not replaced by a success value or discarded. Unknown correlation
 refuses the provider request. Host tests inject a secret-bearing exception and
 require both a safe model observation and unchanged original failure identity.
+Known completed worker argument-validation failures become `INVALID_INPUT`, including
+the document heading/output limits; unknown remote errors remain `INTERNAL_FAILURE`
+and uncertain completion remains `OUTCOME_UNKNOWN`. No exception-message parsing or
+remote diagnostic text is used in that classification.
 This does not redact successful document contents, model arguments, previous
 user messages or unrelated callbacks. Choosing whether any such data may be sent
 to a real provider remains an application/operator decision; this offline model

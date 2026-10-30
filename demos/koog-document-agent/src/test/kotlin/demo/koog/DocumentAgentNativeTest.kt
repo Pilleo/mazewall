@@ -31,7 +31,7 @@ class DocumentAgentNativeTest {
         verifyProgram(
             "demo.koog.PortalBoundaryProbe",
             "example.boundary.classpath",
-            listOf("CONTROL:", "OUTLINE:", "DENIED:", "RECOVERED:", "SURVIVED:", "RETIRED:"),
+            listOf("CONTROL:", "OUTLINE:", "INVALID_INPUT:", "DENIED:", "RECOVERED:", "SURVIVED:", "RETIRED:"),
         )
     }
 

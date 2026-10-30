@@ -26,7 +26,10 @@ internal fun toolFailureKind(error: Throwable?): ToolFailureKind {
         val current = cause
         when (current) {
             is PortalStateLostException -> return ToolFailureKind.OUTCOME_UNKNOWN
-            is PortalRemoteCallException -> if (current.remoteType == "java.nio.file.AccessDeniedException") return ToolFailureKind.CONTAINMENT_REFUSED
+            is PortalRemoteCallException -> {
+                if (current.remoteType == "java.nio.file.AccessDeniedException") return ToolFailureKind.CONTAINMENT_REFUSED
+                if (current.remoteType == "java.lang.IllegalArgumentException") return ToolFailureKind.INVALID_INPUT
+            }
             is ContainmentViolationException, is AccessDeniedException -> return ToolFailureKind.CONTAINMENT_REFUSED
             is java.util.concurrent.CancellationException -> return ToolFailureKind.CANCELLED
             is java.util.concurrent.TimeoutException, is InterruptedException -> return ToolFailureKind.OUTCOME_UNKNOWN

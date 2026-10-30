@@ -10,12 +10,22 @@ import ai.koog.prompt.message.MessagePart
 import ai.koog.prompt.message.RequestMetaInfo
 import ai.koog.prompt.message.ResponseMetaInfo
 import ai.koog.serialization.typeToken
+import io.mazewall.portal.PortalCallException
+import io.mazewall.portal.PortalInvocationEvidence
+import io.mazewall.portal.PortalRemoteCallException
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class ScriptedModelTest {
+    @Test fun `remote validation remains invalid input without guessing unknown errors`() {
+        assertEquals(ToolFailureKind.INVALID_INPUT, toolFailureKind(PortalRemoteCallException("java.lang.IllegalArgumentException", "private diagnostic")))
+        assertEquals(ToolFailureKind.CONTAINMENT_REFUSED, toolFailureKind(PortalRemoteCallException("java.nio.file.AccessDeniedException", "private path")))
+        assertEquals(ToolFailureKind.OUTCOME_UNKNOWN, toolFailureKind(PortalCallException("private transport detail", PortalInvocationEvidence.UNKNOWN_COMPLETION)))
+        assertEquals(ToolFailureKind.INTERNAL_FAILURE, toolFailureKind(PortalRemoteCallException("java.lang.IllegalStateException", "private diagnostic")))
+    }
+
     private val tool = object : Tool<ReadDocumentArguments, String>(typeToken<ReadDocumentArguments>(), typeToken<String>(), "read_document", "descriptor only") {
         override suspend fun execute(args: ReadDocumentArguments): String = error("Provider self-check must not invoke a tool")
     }

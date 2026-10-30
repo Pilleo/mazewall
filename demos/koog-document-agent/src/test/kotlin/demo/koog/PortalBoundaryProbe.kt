@@ -79,6 +79,18 @@ object PortalBoundaryProbe {
                 runBlocking {
                     check(runScriptedAgent(listOf(outline), listOf(ScriptStep(MessagePart.Tool.Call("normal", outline.name, normal), "Launch\nPlan"))).completions == 1)
                     println("OUTLINE: Launch / Plan (actual generated service)")
+                    val oversized = Json.encodeToString(OutlineArguments("# h\n".repeat(129)))
+                    val limited = runScriptedAgent(
+                        listOf(outline),
+                        listOf(
+                        ScriptStep(MessagePart.Tool.Call("invalid-outline", outline.name, oversized), null),
+                        ScriptStep(MessagePart.Tool.Call("after-invalid-outline", outline.name, normal), "Launch\nPlan"),
+                    ),
+                    )
+                    val invalid = limited.failures.single()
+                    check(invalid is PortalRemoteCallException && invalid.remoteType == "java.lang.IllegalArgumentException" && invalid.evidence == PortalInvocationEvidence.COMPLETED)
+                    check(toolFailureKind(invalid) == ToolFailureKind.INVALID_INPUT && limited.completions == 1)
+                    println("INVALID_INPUT: actual document limit refused; valid outline recovered under unchanged policy")
                     val recovered = runScriptedAgent(
                         listOf(read, outline),
                         listOf(
