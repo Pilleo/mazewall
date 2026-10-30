@@ -93,5 +93,30 @@ changed local Markdown references, diff whitespace and backlog validation checke
 Formatting-only churn outside the changed CI-policy sections was removed; no
 security lifecycle, scanner or Go workload implementation is altered.
 
+## Independent review and one fix pass
+
+One read-only scoped review (`88367a12..ab1012a5`), session
+`ses_e72397f3dfferSFkxp8vkq2Yy8`: no Critical or Minor findings; one Important.
+Report walking rejected leaf aliases but could follow intermediate source or
+destination aliases before reaching the walked tree. New real-filesystem tests
+observed RED for leaked outside sentinel content and outside writes through those
+parents. The retention boundary now checks every path component before access and
+checks destination entries too. Existing `use` suppression keeps the command's
+original exception primary.
+
+The same path check distinguishes definite absence from unreadable metadata:
+only NoSuchFileException means no report yet. A protected-parent fixture first
+observed RED when AccessDenied was silently treated as absence; permission errors
+now remain suppressed retention failures, never warnings or fallback.
+Logs `/tmp/opencode/ci-pipeline-alias-review-red.log` and
+`/tmp/opencode/ci-pipeline-report-permission-red.log`. No second reviewer loop.
+
+Final: Ruling: the reviewer left full/source gates and hosted artifact/performance
+checks for execution after review; those remain completion requirements. Actual
+release publication and cancellation delivery are not artificially triggered, and
+older application features are outside this CI-only review — preserves the operator
+approval/scope boundary — cost if wrong: unobserved external behavior remains
+unqualified rather than being inferred from local tests.
+
 ---
 <!-- id: issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn  file: issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn.md -->

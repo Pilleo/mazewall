@@ -56,6 +56,75 @@ class ConsumerFixtureTest {
         assertFalse(Files.exists(evidence))
     }
 
+    @Test fun `intermediate source aliases cannot export outside files and preserve the primary failure`() {
+        for (name in listOf("build", "build/reports")) {
+            val case = Files.createDirectory(root.resolve(name.replace('/', '-')))
+            val project = Files.createDirectory(case.resolve("consumer"))
+            val outside = Files.createDirectory(case.resolve("outside"))
+            val sentinel = outside.resolve(if (name == "build") "test-results/nativeTest/private.txt" else "tests/nativeTest/private.txt")
+            Files.createDirectories(sentinel.parent)
+            Files.writeString(sentinel, "outside sentinel, not a report")
+            val alias = project.resolve(name)
+            Files.createDirectories(alias.parent)
+            Files.createSymbolicLink(alias, outside)
+            val evidence = case.resolve("retained")
+            val original = IllegalStateException("original command failure")
+            val caught = assertThrows(IllegalStateException::class.java) {
+                AutoCloseable { ConsumerFixture.retainTestReports(project, evidence) }.use { throw original }
+            }
+            assertFalse(Files.exists(evidence), "Intermediate source alias exported outside files")
+            assertSame(original, caught)
+            assertEquals(1, caught.suppressed.size)
+            assertTrue(caught.suppressed.single() is IllegalArgumentException)
+            assertEquals("outside sentinel, not a report", Files.readString(sentinel))
+        }
+    }
+
+    @Test fun `intermediate destination aliases cannot write outside the evidence directory`() {
+        for (name in listOf("root", "reports")) {
+            val case = Files.createDirectory(root.resolve(name))
+            val project = Files.createDirectory(case.resolve("consumer"))
+            val report = project.resolve("build/reports/tests/nativeTest/index.html")
+            Files.createDirectories(report.parent)
+            Files.writeString(report, "actual report")
+            val outside = Files.createDirectory(case.resolve("outside"))
+            val sentinel = Files.writeString(outside.resolve("sentinel"), "unchanged")
+            val evidence = case.resolve("retained")
+            val alias = if (name == "root") evidence else Files.createDirectory(evidence).resolve("reports")
+            Files.createSymbolicLink(alias, outside)
+            val original = IllegalStateException("original command failure")
+            val caught = assertThrows(IllegalStateException::class.java) {
+                AutoCloseable { ConsumerFixture.retainTestReports(project, evidence) }.use { throw original }
+            }
+            Files.list(outside).use { assertEquals(listOf(sentinel), it.toList(), "Report retention wrote through an intermediate alias") }
+            assertSame(original, caught)
+            assertEquals(1, caught.suppressed.size)
+            assertTrue(caught.suppressed.single() is IllegalArgumentException)
+        }
+    }
+
+    @Test fun `unreadable report parents are retained as errors rather than mistaken for missing reports`() {
+        val project = Files.createDirectory(root.resolve("consumer"))
+        val report = project.resolve("build/reports/tests/nativeTest/index.html")
+        Files.createDirectories(report.parent)
+        Files.writeString(report, "actual report")
+        val protectedParent = project.resolve("build/reports")
+        val permissions = Files.getPosixFilePermissions(protectedParent)
+        try {
+            Files.setPosixFilePermissions(protectedParent, emptySet())
+            assertFalse(Files.isReadable(protectedParent), "Permission fixture requires an unprivileged UID")
+            val original = IllegalStateException("original command failure")
+            val caught = assertThrows(IllegalStateException::class.java) {
+                AutoCloseable { ConsumerFixture.retainTestReports(project, root.resolve("retained")) }.use { throw original }
+            }
+            assertSame(original, caught)
+            assertEquals(1, caught.suppressed.size)
+            assertTrue(caught.suppressed.single() is java.nio.file.AccessDeniedException)
+        } finally {
+            Files.setPosixFilePermissions(protectedParent, permissions)
+        }
+    }
+
     @Test fun `failed consumer retains full JUnit and HTML reports without copying caches or masking failure`() {
         val project = Files.createDirectory(root.resolve("consumer"))
         val xml = project.resolve("build/test-results/nativeTest/TEST-failed.xml")

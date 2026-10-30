@@ -428,8 +428,9 @@ including when commands execute in a disposable clone. Full child command logs
 and ownership/exit receipts remain there. Copied applications retain their JUnit
 XML and HTML reports in `<application>-reports/` on success or failure. An early
 compile failure requires no invented report; retention failures are suppressed
-on the original command failure. Report aliases and aliased diagnostic parents
-are refused. CI always uploads these allowlisted logs, receipts and test reports,
+on the original command failure. Report aliases, including intermediate source and
+destination parents, are refused before traversal. Unreadable parents remain
+retention errors, not evidence that reports were never created. CI always uploads these allowlisted logs, receipts and test reports,
 not temporary source trees, Gradle caches, SDK archives or credential state. The
 container's writable checkout bind keeps this directory visible to host artifact
 collection. The workflow-policy regression rejects removal of failure-time uploads.

@@ -2,8 +2,10 @@ package io.mazewall.verification
 
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.time.Duration
 
@@ -25,11 +27,15 @@ internal object ConsumerFixture {
     ) {
         for (name in listOf("test-results", "reports/tests")) {
             val source = project.resolve("build/$name")
+            requireUnaliasedReportPath(source)
             if (!Files.exists(source, NOFOLLOW_LINKS)) continue
+            val destination = evidence.resolve(name)
+            requireUnaliasedReportPath(destination)
             Files.walk(source).use { paths ->
                 paths.forEach { path ->
                     require(!Files.isSymbolicLink(path)) { "Test report alias refused: $path" }
-                    val target = evidence.resolve(name).resolve(source.relativize(path))
+                    val target = destination.resolve(source.relativize(path))
+                    require(!Files.isSymbolicLink(target)) { "Test report destination alias refused: $target" }
                     if (Files.isDirectory(path, NOFOLLOW_LINKS)) {
                         Files.createDirectories(target)
                     } else {
@@ -38,6 +44,20 @@ internal object ConsumerFixture {
                     }
                 }
             }
+        }
+    }
+
+    private fun requireUnaliasedReportPath(path: Path) {
+        val absolute = path.toAbsolutePath()
+        var ancestor = absolute.root
+        for (component in absolute) {
+            ancestor = ancestor.resolve(component)
+            val attributes = try {
+                Files.readAttributes(ancestor, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
+            } catch (_: NoSuchFileException) {
+                return
+            }
+            require(!attributes.isSymbolicLink) { "Test report path alias refused: $ancestor" }
         }
     }
 
