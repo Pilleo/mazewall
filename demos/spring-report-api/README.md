@@ -84,6 +84,11 @@ curl -i -u approver http://127.0.0.1:8080/reports/approved
 ```
 
 The listener is loopback-only; port0 acquires an ephemeral port for tests.
+Before refresh, the application checks the effective Spring configuration, not just
+its defaults: the address must be exactly `127.0.0.1` and the configured port must
+match the CLI argument. Conflicting system/environment/config-file settings fail
+startup rather than silently changing the listener. A separate management port or
+nonmatching management address is rejected too; unrelated Boot settings remain active.
 Unauthenticated reports return401 before protected body entry. Approver success
 returns200 and COMMITTED; forbidden sibling reads return422 and ROLLED_BACK; reader
 post-authorization returns403 and ROLLED_BACK. Headers carry a server-generated

@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 188 | *Total Resolved Issues:* 717
+*Total Active Issues:* 191 | *Total Resolved Issues:* 717
 
-Active status detail: 187 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 190 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,9 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261030-075254-853](issue-20261030-075254-853-enforce-the-spring-evaluation-listener-before-refr.md) | Enforce the Spring evaluation listener before refresh | high | integrations |
+| [issue-20261030-075255-171](issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp.md) | Retire owned measurement groups after process inspection fails | high | integrations |
+| [issue-20261030-075255-456](issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in.md) | Classify remote document limits as invalid Koog input | medium | integrations |
 | [issue-20261029-112338-086](issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md) | Ship independently runnable pitch ready Koog document agents | high | integrations |
 | [issue-20261029-112338-072](issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o.md) | Demonstrate Spring report HTTP security JDBC and owned shutdown together | high | integrations |
 | [issue-20261029-112338-046](issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou.md) | Explain reviewed integration policy changes without automatic approval | medium | profiler |

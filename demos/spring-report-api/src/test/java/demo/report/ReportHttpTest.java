@@ -115,6 +115,36 @@ class ReportHttpTest {
         }
     }
 
+    @Test void listenerOverrideAddressIsRejectedBeforeReady() throws Exception {
+        assertListenerOverrideRejected("server.address", "127.0.0.2");
+    }
+
+    @Test void listenerOverridePortIsRejectedBeforeReady() throws Exception {
+        assertListenerOverrideRejected("server.port", "-1");
+    }
+
+    @Test void listenerOverrideManagementPortIsRejectedBeforeReady() throws Exception {
+        assertListenerOverrideRejected("management.server.port", "-1");
+    }
+
+    private void assertListenerOverrideRejected(String name, String value) throws Exception {
+        prepare();
+        Path stop = Files.writeString(root.resolve("stop.txt"), "stop\n");
+        Path log = root.resolve("listener-override.log");
+        var launch = launch("serve", "0").redirectInput(stop.toFile()).redirectOutput(log.toFile());
+        launch.command().add(1, "-D" + name + "=" + value);
+        Process process = launch.start();
+        try {
+            assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+            String output = Files.readString(log);
+            assertNotEquals(0, process.exitValue(), output);
+            assertFalse(output.contains("REPORT_READY"), output);
+        } finally {
+            if (process.isAlive()) process.destroyForcibly();
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS));
+        }
+    }
+
     private void prepare() throws Exception {
         fixture();
         Path candidate = root.resolve("candidate.json");

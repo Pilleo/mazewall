@@ -196,7 +196,8 @@ internal object PitchExamplesAcceptance {
                 inspectSpring(copy.resolve("build/libs/application.jar"), repository, version)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportServiceTest.xml"), 2)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportContextTest.xml"), 3)
-                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 4)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportListenerTest.xml"), 5)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 7)
             }
             val measurement = ConsumerFixture.command(
                 listOf(

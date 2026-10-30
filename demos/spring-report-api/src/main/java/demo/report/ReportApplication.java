@@ -1,5 +1,7 @@
 package demo.report;
 
+import org.springframework.core.env.ConfigurableEnvironment;
+
 public final class ReportApplication {
     public static void main(String[] args) throws Exception {
         if (args.length < 2 || args.length > 3 || Thread.currentThread().isVirtual()) throw new IllegalArgumentException("Usage: measure <deploymentDirectory> | serve <deploymentDirectory> <loopbackPort>");
@@ -16,8 +18,10 @@ public final class ReportApplication {
                     "management.endpoint.health.group.readiness.include", "readinessState,protectedReports",
                     "management.endpoints.web.exposure.include", "health", "server.shutdown", "graceful"));
             application.addInitializers(context -> {
-                try { bootstrap.register(context.getBeanFactory()); }
-                catch (Exception failure) { throw new IllegalStateException("Required protected singleton binding failed before refresh", failure); }
+                try {
+                    requireEvaluationListener(context.getEnvironment(), port);
+                    bootstrap.register(context.getBeanFactory());
+                } catch (Exception failure) { throw new IllegalStateException("Required listener/protected singleton setup failed before refresh", failure); }
             });
             try (var context = application.run()) {
                 var web = (org.springframework.boot.web.server.context.WebServerApplicationContext) context;
@@ -35,6 +39,18 @@ public final class ReportApplication {
                 failure.printStackTrace(System.err);
                 throw failure;
             }
+        }
+    }
+
+    static void requireEvaluationListener(ConfigurableEnvironment environment, int requestedPort) {
+        String address = environment.getRequiredProperty("server.address");
+        int port = environment.getRequiredProperty("server.port", Integer.class);
+        Integer managementPort = environment.getProperty("management.server.port", Integer.class);
+        String managementAddress = environment.getProperty("management.server.address");
+        if (!"127.0.0.1".equals(address) || port != requestedPort
+                || (managementPort != null && managementPort != requestedPort)
+                || (managementAddress != null && !"127.0.0.1".equals(managementAddress))) {
+            throw new IllegalStateException("Evaluation requires 127.0.0.1 and the CLI port, without a separate management listener");
         }
     }
 }
