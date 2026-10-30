@@ -137,7 +137,6 @@ class OptionalIntegrationAcceptanceTest {
                     "demos/spring-report-api",
                     "src/consumerVerification",
                     "tests/consumers/spring-jdbc",
-                    "benchmarks/integration-boundaries/pitch",
                     ".github/workflows/ci.yml",
                 )
                 run("committed-producer", listOf("git", "diff", "--exit-code", revision, "--") + producerScopes)
@@ -193,7 +192,7 @@ class OptionalIntegrationAcceptanceTest {
                     repository.resolve("io/mazewall/koog-contained-tool/$version/koog-contained-tool-$version.jar"),
                     KoogPackageKind.NATIVE_FIXTURE,
                 )
-                val pitchConsumers = PitchExamplesAcceptance.run(root, repository, version, evidence)
+                PitchExamplesAcceptance.run(root, repository, version, evidence)
                 val koog = gradle + listOf("-p", root.resolve("tests/consumers/koog-portal").toString()) + properties
                 val koogVerification = root.resolve("tests/consumers/koog-portal/gradle/verification-metadata.xml")
                 val koogPinned = withOptionalPublicationChecksums(
@@ -282,7 +281,6 @@ class OptionalIntegrationAcceptanceTest {
                         ),
                     Duration.ofMinutes(15),
                 )
-                PitchExamplesAcceptance.measure(root, pitchConsumers, evidence)
                 "OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence"
                 }
                 println(completed)

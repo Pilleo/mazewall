@@ -243,7 +243,7 @@ internal object PitchExamplesAcceptance {
         repository: Path,
         version: String,
         evidence: Path,
-    ): Path {
+    ) {
         val copies = Files.createTempDirectory("mazewall-pitch-consumers-")
         for (name in listOf("koog-document-agent", "spring-report-api")) {
             val source = root.resolve("demos/$name")
@@ -356,32 +356,6 @@ internal object PitchExamplesAcceptance {
             }
             println("PITCH_COPIED_CONSUMER_OK name=$name version=$version native=executed packaging=published-only cache=reused-without-execution")
             }
-        }
-        return copies
-    }
-
-    fun measure(
-        root: Path,
-        copies: Path,
-        evidence: Path,
-    ) {
-        for (name in listOf("koog-document-agent", "spring-report-api")) {
-            val copy = copies.resolve(name)
-            val measurement = ConsumerFixture.command(
-                listOf(
-                    "python3",
-                    root.resolve("benchmarks/integration-boundaries/pitch/measure.py").toString(),
-                if (name == "koog-document-agent") "koog" else "spring",
-                    copy.toString(),
-                ),
-                    copy,
-                evidence,
-                "$name-measurements",
-                Duration.ofMinutes(8),
-            )
-            check(measurement.exitCode == 0) { "Source-bound application measurements failed: ${measurement.stderr}${measurement.stdout.takeLast(6000)}" }
-            check(measurement.stdout.lineSequence().count { it.startsWith("{\"schema\":1,") } == if (name == "koog-document-agent") 12 else 3) { "Missing exact application measurement forks" }
-            println("PITCH_APPLICATION_MEASUREMENTS_OK name=$name forksPerMode=3 warmups=20 serialSamples=100 scope=local-only")
         }
     }
 }

@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 202 | *Total Resolved Issues:* 717
+*Total Active Issues:* 203 | *Total Resolved Issues:* 717
 
-Active status detail: 201 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 202 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261030-225329-595](issue-20261030-225329-595-replace-pitch-only-measurements-with-optional-glob.md) | Replace pitch-only measurements with optional global benchmark workflow | medium | core |
 | [issue-20261030-220307-069](issue-20261030-220307-069-keep-initial-integration-clone-diagnostics-in-dura.md) | Keep initial integration clone diagnostics in durable evidence | low | core |
 | [issue-20261030-203016-468](issue-20261030-203016-468-retain-producer-and-legacy-integration-failure-rep.md) | Retain producer and legacy integration failure reports | medium | core |
 | [issue-20261030-160604-049](issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn.md) | Make optional integration CI single pass and diagnosable | high | core |

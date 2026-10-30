@@ -162,7 +162,7 @@ for an actual-file outline. No Gradle or model account is needed for outline or 
 legacy offline path; live analysis is not silently substituted for either.
 `koog-document-agent-sources.zip` contains the independent wrapper, source, tests,
 locks, checksum approvals and the same six incident inputs, not a sibling producer tree. Test-only boundary and
-measurement/profile entries are source-kit development controls, not normal binary
+profiling entries are source-kit development controls, not normal binary
 runtime tools. An operator must separately approve any upload/publication or
 installation replacement and identify exact released bytes before distribution.
 

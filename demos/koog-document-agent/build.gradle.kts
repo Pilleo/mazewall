@@ -219,17 +219,6 @@ tasks.register<JavaExec>("enforceReviewedRead") {
     val review = providers.gradleProperty("trustedReview")
     argumentProviders.add(CommandLineArgumentProvider { listOf(document.get(), candidate.get(), review.get()) })
 }
-for (mode in listOf("reader-direct", "reader-thread", "outline-direct", "outline-portal")) {
-    tasks.register<JavaExec>("measure-" + mode) {
-        group = "application"
-        javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
-        classpath = packagedClasspath + files(nativeProbeJar)
-        if (mode == "outline-direct") classpath += workerSource.output
-        mainClass.set("demo.koog.ApplicationMeasurements")
-        jvmArgs("--enable-native-access=ALL-UNNAMED")
-        args(mode)
-    }
-}
 tasks.register("verifyPublishedClosure") {
     notCompatibleWithConfigurationCache("Fresh publication audit inspects the actual resolved dependency graph")
     val graph = configurations.runtimeClasspath

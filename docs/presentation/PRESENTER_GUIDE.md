@@ -36,9 +36,10 @@ profile is not a trace of the whole agent; Spring's deployment candidate is not 
 syscall profile. Neither flow auto-updates grants/review or retries refused work.
 
 The guides include ordinary distributions/source kits and synthetic inputs. Do not publish or replace an
-operator installation as part of rehearsal. Complete remote-byte identification,
-the [bounded local measurements](../../benchmarks/integration-boundaries/pitch/README.md),
-and the actual-human rehearsal as separate gates. A fixture model proves adapter
+operator installation as part of rehearsal. Remote-byte identification and the
+actual-human rehearsal remain separate gates. The [optional global benchmark job](../../benchmarks/integration-boundaries/README.md#optional-global-benchmark-job)
+provides boundary-harness observations, not application/inference timing or a required
+rehearsal gate. A fixture model proves adapter
 execution, not live reasoning, citation truth, model resistance or safe provider
 disclosure. The unchanged ten-second deadline may reject slow inference; live
 quality/timing requires a separate operator-approved smoke test. The newer

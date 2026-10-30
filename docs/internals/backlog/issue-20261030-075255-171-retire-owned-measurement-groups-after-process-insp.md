@@ -15,6 +15,11 @@ open_questions: false
 
 # 🟡 [Severity: HIGH]: Retire owned measurement groups after process inspection fails
 
+> Superseded by explicit operator direction to remove the pitch-only measurement
+> driver. Its ownership nuance and the evidence below are historical; the optional
+> global workflow reuses the existing Linux resource probe instead. See
+> [the removal/workflow scope](issue-20261030-225329-595-replace-pitch-only-measurements-with-optional-glob.md).
+
 **Context:**
 Approved inline follow-up Task2. Initial/later proc inspection failures currently abandon genuine owned groups before signal/reap. Preserve WNOWAIT ownership and2sTERM/5sKILL/5sreap bounds; fail measurement on unverifiable cleanup and preserve errors. No generic supervisor, guessed PID authority or permission-error swallowing.
 

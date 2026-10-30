@@ -422,10 +422,9 @@ configuration input. Their counters must each contain exactly one execution, not
 three, even across post-build graph priming. Historical locks and dependency approvals are checked
 after every phase, and the complete mandatory JUnit inventory comes from the real
 strict build. No skipped or failed test observation is accepted as a native pass.
-After all application and legacy correctness checks succeed, the unchanged fifteen
-measurement forks run last; they cannot delay discovery of a Spring correctness
-failure behind Koog measurements. These are still bounded local observations, not
-production throughput or provider-inference qualification.
+The gate runs no application benchmark forks. The pitch-only Python driver and
+its benchmark-only Kotlin entry/tasks have been removed; correctness, containment,
+cancellation, transaction and physical-retirement checks remain mandatory.
 
 Every invocation creates a unique owned
 `build/reports/optional-integrations/run-*/` directory in the caller's checkout,
@@ -563,6 +562,36 @@ effective compiler/header/linker/environment inputs. The native library is not s
 as portable cached protection evidence. `bash scripts/tests/cet_fixture_cache_test.sh`
 verifies unchanged reuse and source/header/compiler/missing-output invalidation in an
 independent Gradle fixture.
+
+## Optional global benchmarks
+
+`.github/workflows/benchmarks.yml` is a separate `workflow_dispatch`-only workflow,
+not a PR/push/scheduled trigger or a prerequisite of the six-lane required join or
+publication. It runs the existing integration-boundary harness unchanged on
+Linux/JDK25. No performance threshold, comparison bot or new benchmark framework
+is added. See the [operator recipe and evidence inventory](../../../../benchmarks/integration-boundaries/README.md#optional-global-benchmark-job).
+
+The workflow stages the selected commit's real publications into a local Maven
+repository, seeds a new coordinate-specific consumer lock, checks the published
+closure and host controls, then freezes source/installed/publication/lock hashes
+and verifies the embedded worker bundle before native execution. Historical locks,
+publication identities and retained results are not rewritten. This automatic
+source-bound freeze is not independent release authentication or review authority.
+The existing raw validator still requires actual effects, ownership/retirement and
+complete evidence; optional does not mean errors become warnings.
+
+The existing Linux resource probe owns the bounded build/native commands and
+retains argv, command status and memory/cleanup receipts. File-size-limited log
+sinks prevent unbounded capture storage. Always-uploaded artifacts contain only
+raw/build/validation logs, identity manifests, the generated lock, explicit
+noncredential environment metadata and JSON receipts—not caches, SDK archives or
+the temporary worker bundle. Hosted timing is descriptive, not a stable baseline,
+production capacity, model inference timing or equivalent-isolation proof.
+
+Host regressions execute the actual workflow freeze/check shell against temporary
+Git/publication/JAR fixtures: unchanged inputs pass, a substituted publication
+fails, and mismatched embedded worker bytes cannot mint a custody receipt. The
+workflow file is a declared `consumerHarnessTest` input so edits rerun these tests.
 
 ## Privileged kernel quality
 

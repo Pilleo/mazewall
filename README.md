@@ -48,8 +48,9 @@ The new applications are standalone published-artifact consumers with their own
 wrappers, locks/checksums and ordinary distributions. Artifact access and exact
 version selection remain explicit; a local stage is not a verified remote release.
 Their guides distinguish ordinary business code from trusted bootstrap/review and
-test-only fault controls. See the [bounded application measurements](benchmarks/integration-boundaries/pitch/README.md)
-for scope and limitations, not a negligible-overhead claim.
+test-only fault controls. The [optional global benchmark job](benchmarks/integration-boundaries/README.md#optional-global-benchmark-job)
+runs the existing boundary harness manually, separately from required PR checks;
+its observations are not a negligible-overhead claim.
 
 The [full feature tour](demos/README.md) retains the deeper profiling, lifecycle,
 supervision and negative controls. The public synchronous core entry accepts

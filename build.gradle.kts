@@ -292,6 +292,9 @@ tasks.register<Test>("consumerHarnessTest") {
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
     useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
+    inputs.file(layout.projectDirectory.file(".github/workflows/benchmarks.yml"))
+        .withPropertyName("manualBenchmarkWorkflow")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 tasks.register<Test>("consumerCheck") {
@@ -309,15 +312,6 @@ tasks.register<Test>("consumerCheck") {
 }
 
 tasks.matching { it.name == "unitCheck" }.configureEach { dependsOn("consumerHarnessTest") }
-
-val pitchMeasurementSelfTest =
-    tasks.register<Exec>("pitchMeasurementSelfTest") {
-        group = "verification"
-        description = "Checks bounded application measurement accounting and corruption controls without native setup."
-        commandLine("python3", "-m", "unittest", "discover", "-s", "benchmarks/integration-boundaries/pitch", "-p", "test_*.py")
-    }
-tasks.named("check") { dependsOn(pitchMeasurementSelfTest) }
-tasks.matching { it.name == "unitCheck" }.configureEach { dependsOn(pitchMeasurementSelfTest) }
 
 tasks.register<Test>("verifyIntegrationBoundaryEvidence") {
     group = "verification"
