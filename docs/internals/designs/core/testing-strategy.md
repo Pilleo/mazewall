@@ -430,7 +430,8 @@ production throughput or provider-inference qualification.
 Every invocation creates a unique owned
 `build/reports/optional-integrations/run-*/` directory in the caller's checkout,
 including when commands execute in a disposable clone. Full child command logs
-and ownership/exit receipts remain there. Copied applications retain their JUnit
+and ownership/exit receipts remain there, including the initial checkout clone's
+stdout/stderr and receipt if acquisition fails. Copied applications retain their JUnit
 XML and HTML reports in `<application>-reports/` on success or failure.
 The SDK producer and legacy module projects use the same collector in an outer
 exception-safe scope, exporting their reports from the disposable checkout into

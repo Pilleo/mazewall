@@ -1,5 +1,10 @@
 package io.mazewall.verification
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
@@ -14,6 +19,22 @@ import java.time.Duration
 class ConsumerFixtureTest {
     @TempDir
     private lateinit var root: Path
+
+    @Test fun `failed initial clone keeps its command receipt and diagnostics in caller evidence`() {
+        val workspace = Files.createDirectory(root.resolve("workspace"))
+        val evidence = ConsumerFixture.optionalIntegrationEvidence(workspace)
+        val notRepository = Files.createDirectory(root.resolve("not-a-repository"))
+        val failure = assertThrows(IllegalStateException::class.java) {
+            ConsumerFixture.checkout(notRepository, evidence)
+        }
+        assertTrue(Files.isRegularFile(evidence.resolve("clone.stdout.log")))
+        assertTrue(Files.readString(evidence.resolve("clone.stderr.log")).isNotBlank())
+        val receipt = Json.parseToJsonElement(Files.readString(evidence.resolve("clone.command.json"))).jsonObject
+        assertTrue(receipt.getValue("exitCode").jsonPrimitive.int != 0)
+        assertTrue(receipt.getValue("reaped").jsonPrimitive.boolean)
+        assertFalse(receipt.getValue("timedOut").jsonPrimitive.boolean)
+        assertTrue(failure.message!!.contains(evidence.toString()))
+    }
 
     @Test fun `failed JUnit module in a disposable producer clone retains its real failure reports`() {
         val repository = Files.createDirectory(root.resolve("original"))
@@ -250,7 +271,9 @@ class ConsumerFixtureTest {
         Files.createDirectory(repository.resolve("build"))
         Files.writeString(repository.resolve("build/unidentified-output"), "must not copy")
         val before = ConsumerFixture.snapshot(repository)
-        val clone = ConsumerFixture.checkout(repository)
+        val clone = ConsumerFixture.checkout(repository, evidence)
+        val receipt = Json.parseToJsonElement(Files.readString(evidence.resolve("clone.command.json"))).jsonObject
+        assertEquals(0, receipt.getValue("exitCode").jsonPrimitive.int)
         assertEquals("modified", Files.readString(clone.resolve("changed")))
         assertEquals("new actual source", Files.readString(clone.resolve("new")))
         assertTrue(Files.isExecutable(clone.resolve("new")))

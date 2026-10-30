@@ -105,7 +105,7 @@ class OptionalIntegrationAcceptanceTest {
             val evidence = ConsumerFixture.optionalIntegrationEvidence(original)
             println("OPTIONAL_INTEGRATION_EVIDENCE $evidence")
             try {
-                val root = ConsumerFixture.checkout(original)
+                val root = ConsumerFixture.checkout(original, evidence)
                 val completed = ConsumerFixture.producerReports(root, evidence).use {
                 var sequence = 0
 

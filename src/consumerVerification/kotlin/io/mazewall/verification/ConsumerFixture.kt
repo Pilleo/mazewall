@@ -109,11 +109,15 @@ internal object ConsumerFixture {
         }
     }
 
-    fun checkout(root: Path): Path {
+    fun checkout(
+        root: Path,
+        evidence: Path? = null,
+    ): Path {
         val parent = Files.createTempDirectory("mazewall-consumer-bootstrap-")
         val clone = parent.resolve("checkout")
-        val result = command(listOf("git", "clone", "--shared", "--no-hardlinks", root.toString(), clone.toString()), root, parent, "clone")
-        check(result.exitCode == 0) { "Cannot acquire isolated checkout: ${result.stderr}; evidence=$parent" }
+        val diagnostics = evidence ?: parent
+        val result = command(listOf("git", "clone", "--shared", "--no-hardlinks", root.toString(), clone.toString()), root, diagnostics, "clone")
+        check(result.exitCode == 0) { "Cannot acquire isolated checkout: ${result.stderr}; evidence=$diagnostics" }
         for (name in sourcePaths(root)) {
             val relative = Path.of(name)
             require(!relative.isAbsolute && relative.normalize() == relative && !relative.startsWith("..")) { "Invalid Git fixture source path: $name" }
