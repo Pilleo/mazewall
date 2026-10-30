@@ -224,11 +224,11 @@ internal object PitchExamplesAcceptance {
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentReportTest.xml"), 7)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentInvocationTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ObservedAgentTest.xml"), 3)
-                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.LiveClientClasspathTest.xml"), 1)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.LiveClientClasspathTest.xml"), 2)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.DocumentAgentNativeTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentAgentTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentBoundaryTest.xml"), 1)
-                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.OutlineFileNativeTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.OutlineFileNativeTest.xml"), 4)
                 val inputs = listOf("README.md") +
                     listOf("pool-exhaustion", "wrong-endpoint").flatMap { bundle ->
                     listOf("application.log", "deployment.md", "pool-settings.txt").map { "fixtures/incidents/$bundle/$it" }
@@ -274,7 +274,7 @@ internal object PitchExamplesAcceptance {
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportServiceTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportContextTest.xml"), 3)
                 requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportListenerTest.xml"), 5)
-                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 9)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 11)
                 requireTestReport(copy.resolve("build/test-results/presentationTest/TEST-demo.report.ReportHttpTest.xml"), 1)
                 val inputs = listOf("README.md", "fixtures/templates/approved.txt", "fixtures/templates/forbidden.txt")
                 requireArchiveFiles(copy.resolve("build/distributions/spring-report-api-sources.zip"), inputs.associateWith(copy::resolve))

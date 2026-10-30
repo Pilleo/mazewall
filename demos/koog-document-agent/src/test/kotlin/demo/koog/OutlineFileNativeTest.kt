@@ -33,6 +33,16 @@ class OutlineFileNativeTest {
         assertFalse(result.second.contains("OUTLINE_FILE_BOUNDARY") || result.second.contains("# Document outline"), result.second)
     }
 
+    @Test fun `a rejected heading count retires its child and removes the acquired worker cache`() {
+        val result = execute("headings.md", "# h\n".repeat(129))
+        assertTrue(result.first != 0)
+        assertTrue(result.second.contains("128 headings"), result.second)
+        assertFalse(result.second.contains("# Document outline"), result.second)
+        val worker = Regex("OUTLINE_FILE_BOUNDARY host=\\d+ worker=(\\d+)").find(result.second)!!.groupValues[1].toLong()
+        assertFalse(ProcessHandle.of(worker).map { it.isAlive }.orElse(false))
+        Files.list(root.resolve("temp-headings.md")).use { assertFalse(it.findAny().isPresent, "Retired parser cache was retained") }
+    }
+
     @Test fun `an untrusted heading cannot inject terminal control into the displayed artifact`() {
         val result = execute("control.md", "# heading\u001b[2Jhidden")
         assertTrue(result.first != 0, result.second)
@@ -44,10 +54,12 @@ class OutlineFileNativeTest {
         content: String,
     ): Pair<Int, String> {
         val input = Files.writeString(root.resolve(name), content)
+        val temporary = Files.createDirectory(root.resolve("temp-$name"))
         val log = root.resolve("$name.log")
         val process = ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin/java").toString(),
             "--enable-native-access=ALL-UNNAMED",
+            "-Djava.io.tmpdir=$temporary",
             "-cp",
             requireNotNull(System.getProperty("example.classpath")),
             "demo.koog.OutlineFileApplication",

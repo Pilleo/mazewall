@@ -1,6 +1,7 @@
 import unittest
 import measure
 import json
+import io
 import os
 from pathlib import Path
 import signal
@@ -8,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr
 from unittest.mock import patch
 
 TEMP_PARENT = '/tmp/opencode' if Path('/tmp/opencode').is_dir() else None
@@ -71,6 +72,22 @@ class MeasurementsTest(unittest.TestCase):
 
 
 class ProcessOwnershipTest(unittest.TestCase):
+    def test_owned_stdout_remains_json_and_stderr_is_retained_separately(self):
+        diagnostic = io.StringIO()
+        with redirect_stderr(diagnostic):
+            output = measure.owned([sys.executable, '-c',
+                                    'import sys; print("diagnostic from launcher", file=sys.stderr); print(\'{"measured":true}\')'])
+        self.assertEqual({'measured': True}, measure.decode(output))
+        self.assertEqual('diagnostic from launcher\n', diagnostic.getvalue())
+
+    def test_failed_owned_command_keeps_stderr_in_failure_report(self):
+        with self.assertRaisesRegex(ValueError, 'actual child failure'):
+            measure.owned([sys.executable, '-c', 'import sys; print("actual child failure", file=sys.stderr); sys.exit(9)'])
+
+    def test_separate_streams_still_share_the_existing_combined_log_bound(self):
+        with self.assertRaisesRegex(ValueError, 'exceeds2MiB'):
+            measure.owned([sys.executable, '-c', 'import sys; sys.stdout.write("x"*1048576); sys.stderr.write("y"*1048577)'])
+
     CHILD = """
 import json, os, signal, sys, time
 from pathlib import Path

@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -144,17 +145,22 @@ def retire(process):
 
 
 def owned(command):
-    with tempfile.TemporaryFile(dir='/tmp/opencode' if Path('/tmp/opencode').is_dir() else None) as log:
-        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    parent = '/tmp/opencode' if Path('/tmp/opencode').is_dir() else None
+    with tempfile.TemporaryFile(dir=parent) as log, tempfile.TemporaryFile(dir=parent) as errors:
+        process = subprocess.Popen(command, stdout=log, stderr=errors, start_new_session=True)
         try:
             code = await_exit(process, 60)
             log.seek(0)
             data = log.read(2_097_153)
-            if len(data) > 2_097_152:
+            errors.seek(0)
+            diagnostics = errors.read(2_097_153)
+            if len(data) + len(diagnostics) > 2_097_152:
                 raise ValueError('Owned application log exceeds2MiB')
             output = data.decode('utf-8')
+            diagnostic_text = diagnostics.decode('utf-8')
             if code != 0 or live_group(process.pid):
-                raise ValueError("Owned application failed or left a live child: " + output[-6000:])
+                raise ValueError("Owned application failed or left a live child: " + (output + diagnostic_text)[-6000:])
+            sys.stderr.write(diagnostic_text)
             return output
         finally:
             retire(process)

@@ -35,9 +35,6 @@ public final class ReportApplication {
                     bootstrap.lifecycle.stop();
                     System.out.println("REPORT_DRAIN " + bootstrap.lifecycle.diagnostics().getState());
                 }
-            } catch (RuntimeException failure) {
-                failure.printStackTrace(System.err);
-                throw failure;
             }
         }
     }

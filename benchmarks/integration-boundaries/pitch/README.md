@@ -37,6 +37,10 @@ An otherwise successful parent leaving a live child is a failed measurement, eve
 if cleanup later kills it. This handles these first-party launches, not arbitrary
 processes that deliberately escape their private session/group. Host self-tests
 include an exited parent and a TERM-exiting parent with TERM-resistant children.
+Owned command stdout and stderr are captured separately within the same combined
+2MiB log bound. JSON candidates use stdout only; launcher diagnostics remain on
+stderr or in the failure report. Inherited JVM options are not removed to silence
+diagnostics.
 If process inspection fails after ownership is confirmed, emergency group KILL is
 still attempted; successful signalling is followed by bounded leader reaping. The
 inspection failure remains a failed run; termination failures retain that original

@@ -25,8 +25,10 @@ printed or stored in this project. `ollama` is an alternative only when the oper
 already prepared a tool-capable model on 127.0.0.1:11434. Neither command starts a
 server, pulls a model, selects a fallback or silently becomes a fixture run. A slow
 provider fails at the existing 10-second agent deadline; Ollama is not required.
-Both use Koog's locked JDK HTTP transport adapter. A no-request packaged-classpath
-test constructs/closes the real clients; it does not qualify an actual provider call.
+Both use Koog's locked, cancellation-aware Ktor HTTP adapter. Packaged-classpath
+tests construct/close the real clients and hold an acquired loopback HTTP server
+until the unchanged ten-second agent deadline cancels the actual request. These
+checks never contact an inference server and do not qualify model quality or timing.
 CLI failures exit nonzero with a safe category, never raw provider/parser diagnostics
 that may contain untrusted terminal controls. The internal runner still propagates
 the original exception; this is terminal presentation, not success or fallback.
@@ -196,7 +198,8 @@ bin/koog-document-agent outline /absolute/path/to/document.md
 Input selection and bounded file acquisition happen in the trusted host; only
 parsing is process-backed. The guest class stays absent from the host classpath,
 the actual child handle must be dead after close, and only then is the returned
-outline displayed. Terminal controls in headings are rejected before display. If
+outline displayed. Confirmed retirement also permits cache cleanup when parsing
+fails; the original parser error remains the command failure. Terminal controls in headings are rejected before display. If
 retirement cannot be established, the command fails and retains its private cache
 instead of reporting success or removing live resources.
 

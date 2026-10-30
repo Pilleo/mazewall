@@ -66,6 +66,14 @@ Final: minor (deferred): an ordinary outline execution failure can retain its pr
 cache even if runtime close retired the child; no success or unknown retirement is
 claimed and no potentially-live cache is deleted.
 
+Subsequent PR562 review follow-up: the operator requested all four findings fixed.
+The cache-retention item above is addressed by issue-20261030-144908-235; the real
+HTTP deadline, CI diagnostic-stream handling and duplicate command diagnostics are
+tracked in the other issue-20261030-14490* contracts. The operator separately approved
+replacing the earlier JDK adapter with the official cancellation-aware Ktor adapter.
+The earlier verification/kit records below remain historical producer evidence;
+new final-gate evidence belongs to those follow-up items.
+
 Final: Ruling: reviewer set aside live reasoning/timing, human rehearsal, remote
 released-byte custody and intended-host/production capacity — these are explicit
 operator/evidence gates, not fixture-CI claims — cost if wrong: a live presentation

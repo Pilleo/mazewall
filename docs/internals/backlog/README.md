@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 195 | *Total Resolved Issues:* 717
+*Total Active Issues:* 199 | *Total Resolved Issues:* 717
 
-Active status detail: 194 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 198 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,10 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261030-144907-661](issue-20261030-144907-661-cancel-live-incident-http-requests-at-the-agent-de.md) | Cancel live incident HTTP requests at the agent deadline | high | integrations |
+| [issue-20261030-144907-939](issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro.md) | Keep measured Spring candidate stdout separate from diagnostics | high | integrations |
+| [issue-20261030-144908-235](issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o.md) | Remove outline caches after confirmed retirement on parser failure | medium | integrations |
+| [issue-20261030-144908-526](issue-20261030-144908-526-report-spring-command-failures-once-without-redund.md) | Report Spring command failures once without redundant catch | low | integrations |
 | [issue-20261030-100712-418](issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag.md) | Deliver useful evidence backed Koog incident triage | high | integrations |
 | [issue-20261030-100712-704](issue-20261030-100712-704-present-real-input-document-output-through-the-gen.md) | Present real input document output through the generated Portal worker | medium | integrations |
 | [issue-20261030-100713-002](issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe.md) | Make the Spring report tour show real request effects | medium | integrations |

@@ -22,6 +22,7 @@ class ReportHttpTest {
     private static final String PASSWORD = "local-evaluation-only";
     private static final String REPORT_TEXT = "Checkout deployment readiness\nService: checkout\nPool maximum: 20\nOwner: Ada é🙂\nSynthetic evaluation report, not production telemetry.";
     private String jarProperty = "example.bootJar";
+    private boolean launcherDiagnostic;
 
     @Test @Tag("presentation") void actualHttpSecurityJdbcDenialRecoveryAndShutdown() throws Exception {
         prepare();
@@ -121,6 +122,30 @@ class ReportHttpTest {
         }
     }
 
+    @Test void candidateJsonSurvivesLauncherDiagnosticsWithInheritedJavaOptions() throws Exception {
+        launcherDiagnostic = true;
+        prepare();
+        assertTrue(Files.readString(root.resolve("measure.stderr.log")).contains("Picked up JAVA_TOOL_OPTIONS:"));
+        assertTrue(Files.readString(root.resolve("candidate.json")).startsWith("{"));
+    }
+
+    @Test void invalidOwnedCommandReportsItsOriginalFailureOnceAndStillRetires() throws Exception {
+        prepare();
+        Path command = Files.writeString(root.resolve("invalid-command.txt"), "invalid-command\n");
+        Path log = root.resolve("invalid-command.log");
+        Process process = launch("serve", "0").redirectInput(command.toFile()).redirectOutput(log.toFile()).start();
+        try {
+            assertTrue(process.waitFor(30, TimeUnit.SECONDS));
+            String output = Files.readString(log);
+            assertNotEquals(0, process.exitValue(), output);
+            assertTrue(output.contains("REPORT_READY port=") && output.contains("REPORT_RETIRED actualWorker="), output);
+            assertEquals(1, output.lines().filter(line -> line.contains("java.lang.IllegalArgumentException: Send drain or stop on owned stdin")).count(), output);
+        } finally {
+            if (process.isAlive()) process.destroyForcibly();
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS));
+        }
+    }
+
     @Test void drainBetweenReadyCheckAndActualProxyDispatchIsBusyWithoutBodyEntry() throws Exception {
         jarProperty = "example.lifecycleJar";
         prepare();
@@ -175,10 +200,13 @@ class ReportHttpTest {
     private void prepare() throws Exception {
         fixture();
         Path candidate = root.resolve("candidate.json");
-        Process measure = launch("measure").redirectOutput(candidate.toFile()).start();
+        Path diagnostics = root.resolve("measure.stderr.log");
+        var measurement = launch("measure").redirectErrorStream(false).redirectError(diagnostics.toFile()).redirectOutput(candidate.toFile());
+        if (launcherDiagnostic) measurement.environment().merge("JAVA_TOOL_OPTIONS", "-Dmazewall.review.fixture=true", (before, added) -> before + " " + added);
+        Process measure = measurement.start();
         try {
             assertTrue(measure.waitFor(30, TimeUnit.SECONDS));
-            assertEquals(0, measure.exitValue(), Files.readString(candidate));
+            assertEquals(0, measure.exitValue(), Files.readString(candidate) + Files.readString(diagnostics));
         } finally {
             if (measure.isAlive()) measure.destroyForcibly();
             assertTrue(measure.waitFor(5, TimeUnit.SECONDS));

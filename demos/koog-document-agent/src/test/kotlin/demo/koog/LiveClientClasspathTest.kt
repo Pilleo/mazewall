@@ -13,19 +13,30 @@ import kotlin.test.assertTrue
 class LiveClientClasspathTest {
     @TempDir private lateinit var root: Path
 
+    @Test fun `the real HTTP client cancels at the agent deadline before the stalled server is released`() {
+        executeProbe("demo.koog.LiveClientDeadlineProbe", "LIVE_HTTP_CANCELLED before server release")
+    }
+
     @Test fun `both real provider clients construct on the packaged runtime without making a request`() {
+        executeProbe("demo.koog.LiveClientConstructionProbe", "LIVE_CLIENTS_CONSTRUCTED no requests or inference")
+    }
+
+    private fun executeProbe(
+        entry: String,
+        marker: String,
+    ) {
         val log = root.resolve("clients.log")
         val process = ProcessBuilder(
             Path.of(System.getProperty("java.home"), "bin/java").toString(),
             "-cp",
             requireNotNull(System.getProperty("example.boundary.classpath")),
-            "demo.koog.LiveClientConstructionProbe",
+            entry,
         ).redirectErrorStream(true).redirectOutput(log.toFile()).start()
         try {
             assertTrue(process.waitFor(30, TimeUnit.SECONDS))
             val output = Files.readString(log)
             assertEquals(0, process.exitValue(), output)
-            assertTrue(output.contains("LIVE_CLIENTS_CONSTRUCTED no requests or inference"), output)
+            assertTrue(output.contains(marker), output)
         } finally {
             if (process.isAlive) process.destroyForcibly()
             assertTrue(process.waitFor(5, TimeUnit.SECONDS))
