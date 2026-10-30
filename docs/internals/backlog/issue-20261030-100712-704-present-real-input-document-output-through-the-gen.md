@@ -20,5 +20,22 @@ Approved useful-application Task4: actual selected Markdown input -> actual proc
 **Needed:**
 1. Write actual file-mode native regression RED, implement outline CLI using existing runtime/tool/configuration, require changed output and actual child death, preserve limits/control fixture and update packaging.
 
+## Execution
+
+- [x] Task4 actual input/output/opacity/child-retirement native regression RED->GREEN.
+- [x] Existing limits, old commands and separate process launch preserved.
+- [ ] Final review/source/full gates and ZIP qualification.
+
+Two actual documents first observed RED at the missing file entry, then GREEN with
+different real outline output and captured child retirement. Oversized input rejects
+before worker startup. `outlineFile`/installed `outline` are additive; legacy real
+AIAgent/process checks remain selected. Host acquisition is explicitly not parser
+containment. Cache removal follows established physical retirement only.
+
+Ruling: reject terminal control characters in the displayed artifact, without
+changing the worker parser/wire limits. A real ESC-bearing heading observed RED
+before that host display check. Cost if wrong: such unusual input fails display
+rather than altering the terminal or presenting a false clean trace.
+
 ---
 <!-- id: issue-20261030-100712-704-present-real-input-document-output-through-the-gen  file: issue-20261030-100712-704-present-real-input-document-output-through-the-gen.md -->

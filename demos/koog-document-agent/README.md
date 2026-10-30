@@ -166,6 +166,22 @@ by weakening this example's no-exec baseline.
 
 ## Generated process outline
 
+To process an actual Markdown file and print the worker's actual result:
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
+  -PoutlineDocument=/absolute/path/to/document.md outlineFile
+# Installed launcher, in a separate fresh JVM from triage/thread mode:
+bin/koog-document-agent outline /absolute/path/to/document.md
+```
+
+Input selection and bounded file acquisition happen in the trusted host; only
+parsing is process-backed. The guest class stays absent from the host classpath,
+the actual child handle must be dead after close, and only then is the returned
+outline displayed. Terminal controls in headings are rejected before display. If
+retirement cannot be established, the command fails and retains its private cache
+instead of reporting success or removing live resources.
+
 ```bash
 ./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" runPortal
 ./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" demoPortal

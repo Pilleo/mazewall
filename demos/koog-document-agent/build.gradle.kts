@@ -179,6 +179,15 @@ tasks.register<JavaExec>("runPortal") {
     mainClass.set("demo.koog.PortalDocumentAgent")
     jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
+tasks.register<JavaExec>("outlineFile") {
+    group = "application"
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = packagedClasspath
+    mainClass.set("demo.koog.OutlineFileApplication")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    val input = providers.gradleProperty("outlineDocument")
+    argumentProviders.add(CommandLineArgumentProvider { listOf(input.get()) })
+}
 tasks.register<JavaExec>("profileRead") {
     group = "application"
     description = "Development-only measured named reader workload; incomplete coverage refuses policy conversion."

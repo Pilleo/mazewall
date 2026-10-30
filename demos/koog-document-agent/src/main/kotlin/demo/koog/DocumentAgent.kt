@@ -20,6 +20,10 @@ import java.util.concurrent.TimeUnit
 
 object DocumentAgent {
     @JvmStatic fun main(args: Array<String>) {
+        if (args.firstOrNull() == "outline") {
+            OutlineFileApplication.main(args.drop(1).toTypedArray())
+            return
+        }
         if (args.firstOrNull() == "triage") {
             IncidentApplication.main(args.drop(1).toTypedArray())
             return
