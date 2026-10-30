@@ -1,5 +1,56 @@
 # A document agent with a smaller OS permission surface
 
+## Start here: explain a failed deployment
+
+The incident application asks a real Koog agent to inspect a supplied synthetic
+support bundle and return a hypothesis, evidence locations and next steps. It prints
+the validated result—not a canned diagnosis or `script-complete`. Two bundles under
+`fixtures/incidents/` cover reduced pool capacity and an incorrect database endpoint.
+
+Choose a provider and model explicitly. A hosted model avoids local inference load:
+
+```bash
+: "${VERSION:?Select the approved artifact version}"
+: "${REPOSITORY:?Select its Maven repository}"
+: "${MODEL:?Select an available tool-capable model}"
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
+  -PincidentBundle=fixtures/incidents/pool-exhaustion \
+  -PincidentProvider=openai -PincidentModel="$MODEL" triageIncident
+```
+
+Configure `OPENAI_API_KEY` through existing operator secret management. Live hosted
+selection discloses the supplied document contents to that provider; use only
+synthetic evaluation data unless you have the appropriate approval. No API key is
+printed or stored in this project. `ollama` is an alternative only when the operator
+already prepared a tool-capable model on127.0.0.1:11434. Neither command starts a
+server, pulls a model, selects a fallback or silently becomes a fixture run. A slow
+provider fails at the existing10-second agent deadline; Ollama is not required.
+
+The installed launcher accepts `triage <bundle-directory> openai|ollama <model-id>`.
+The three supported document IDs are `application.log`, `deployment.md` and
+`pool-settings.txt`: each at most8192 strict UTF8 bytes/256lines. Successful reads
+are snapshotted, with at most8 attempts/24 graph iterations. Final raw JSON is at
+most16384 bytes, with1–8 evidence references and1–5 next steps. Only successfully
+read documents/existing lines are valid citations. This does not verify that the
+model's hypothesis is correct. The provider, prompts and report parsing are host
+work, not inside the reader's OS boundary.
+
+For deterministic engineering/rehearsal checks, run the explicitly labelled fixture
+executor through the same actual graph, tools and native boundary:
+
+```bash
+./gradlew -PconsumerVersion="$VERSION" -PconsumerRepository="$REPOSITORY" \
+  nativeTest --tests '*IncidentAgentTest' --tests '*IncidentBoundaryTest'
+```
+
+The boundary probe creates its own synthetic sibling canary: ordinary bounded-reader
+control opens it, the identical reader action on an owned worker receives actual
+permission refusal, and legitimate incident work still completes under the same
+fixed policy. It withholds canary contents and proves physical retirement. The
+ordinary control is test-only, not an unprotected mode for arbitrary user data.
+Fixture answers prove wiring/evidence handling, not actual model reasoning or
+injection resistance. The legacy small qualification commands below remain available.
+
 This is an independent Kotlin 2.4.20 / Koog 1.3.0 / JDK25 application. It has no
 Spring dependency, included mazewall source build or injected producer plugin
 classpath. Its model is explicitly **scripted and offline**; the upstream agent,

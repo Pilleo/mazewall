@@ -25,7 +25,7 @@ Approved useful-application inline plan Tasks1-3: bounded real incident reports,
 Base: `5975c92ffb08d29c67579b42064e2d31241bbd1d`; approved inline useful-demo plan.
 - [x] Task1 report/citation/document validation, renderer and two input fixtures.
 - [x] Task2 observed-agent reuse, real incident workflow and explicit live CLI.
-- [ ] Task3 synthetic ordinary/protected boundary control and retirement.
+- [x] Task3 synthetic ordinary/protected boundary control and retirement.
 - [ ] Final one independent review, exact copied acceptance and full build.
 
 Pre-flight: Task2 consumes Task1 decodeIncidentReport/renderIncidentReport; Task3
@@ -62,6 +62,16 @@ SDK default fallback is null; no model discovery/pull, server launch or live cal
 was performed. No real credentials were inspected. Validation/CLI tests also
 observed RED before implementation. Final suite23host/5native, no skips, strict
 cache storage. `/tmp/opencode/useful-incident-agent-final.log`.
+
+Task3: packaged control observed RED at missing comparison, then GREEN with the
+same actual bounded-reader action: host opens acquired synthetic canary, protected
+worker open gets real inferred permission denial, host bytes remain unchanged and
+the same fixed domain then completes incident evidence/report work. No model ever
+receives the canary. Explicit fixture label, actual worker join and safe outcome
+trace remain mandatory.23host/6native cases pass; no unprotected user-data CLI.
+README now leads with the useful incident job and provider/disclosure/hardware
+choices, keeping marker-based qualification behind it. Logs:
+`/tmp/opencode/useful-incident-boundary-{red,green}.log`.
 
 ---
 <!-- id: issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag  file: issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag.md -->
