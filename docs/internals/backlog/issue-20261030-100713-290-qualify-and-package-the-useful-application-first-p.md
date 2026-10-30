@@ -25,15 +25,15 @@ Approved useful-application Task6: new report/incident/outline/presentation case
 - [x] Task6 exact report inventory, packaged inputs and installed-launcher proofs.
 - [x] Useful-first independent guides and explicit bounded policy-maintenance recipe.
 - [x] One independent final review and one verified fix pass if needed.
-- [ ] Committed-source copied acceptance, full build, references/backlog checks.
-- [ ] Stage fresh source/binary kits without replacing older kits/installations.
+- [x] Committed-source copied acceptance, full build, references/backlog checks.
+- [x] Stage fresh source/binary kits without replacing older kits/installations.
 
 Archive input check observed RED: both Koog ZIPs lacked all six incident files.
 Additive distribution/source inputs now preserve those exact bytes and this guide.
 Archive corruption/missing-input host regression also observed RED before its
 inspection helper, then GREEN. Installed `outline` produces actual input output
 and child retirement; installed `triage` refuses a fixture provider before any
-live inference. Copied acceptance now requires23Koog host/9native and11Spring
+live inference. Copied acceptance now requires25Koog host/10native and11Spring
 host/9native/1presentation cases (zero mandatory skips), plus exact packaged input
 identity, normal runtime fault-fixture exclusion and the two installed CLI checks.
 Live inference remains absent from all automated qualification.
@@ -83,6 +83,39 @@ RED→GREEN, valid escaped emoji accepted unchanged. Suite25host/10native, no sk
 root consumerHarnessTest and10Python measurement self-tests also pass. No second
 review or automatic live-model fallback. Logs:
 `/tmp/opencode/useful-review-{live-transport-red,live-transport-green,output-safety-red,cli-safety-red,koog-green,harness-green}.log`.
+
+## Final verification and delivery
+
+Verified code producer: `8b4e2c414052271de6461fdd1a95f7ccaa85eecb`, artifact version
+`0.1.0-integration.8b4e2c414052`. Final backlog-only commit does not change executable
+inputs or the accepted artifacts.
+
+- `./gradlew build -PincludeSpringIntegration=true --console=plain`: PASS,5m07s,
+ 253tasks (34executed/219up-to-date), configured host/kernel/quality gates.
+- `./gradlew optionalIntegrationCheck --console=plain --no-configuration-cache`:
+ PASS,18m28s, exact committed-source publication/consumer/closure/cache/negative
+ controls. Koog25host/10native; Spring11host/9native/1presentation; no skipped,
+ aborted or failed mandatory cases. Both installed CLI checks passed. Legacy
+ ordinary/owned measurements retained15actual forks (3/mode,20warmups/100serial
+ samples), without expanding them into live-incident or production measurements.
+- Changed Markdown local-file references, `git diff --check` and
+ `./scripts/adkw check-backlog`: PASS.
+
+Logs: `/tmp/opencode/useful-final-full-build.log` and
+`/tmp/opencode/useful-final-exact-acceptance.log`.
+Exact source/publications/raw evidence:
+`/tmp/mazewall-consumer-bootstrap-1291658428249428280/checkout/optional-integration-evidence/`.
+Copied consumers/report XMLs:
+`/tmp/mazewall-pitch-consumers-4822037635127467190/`.
+
+Four byte-identical accepted ZIPs (two binary/two source) are newly staged under
+`build/pitch-evaluation-8b4e2c414052/`; old kits/installations remain untouched.
+The exact local SDK repository remains the acceptance checkout's
+`build/optional-integration-repository`; these are local producer bytes, not
+remotely downloaded released-byte custody. No model/server was started or pulled,
+no provider request or real credential inspection occurred. No push, merge, remote
+publication or installation replacement occurred. All four scoped items stay open
+pending separately approved landing; unrelated NVD/Go/human gates are unchanged.
 
 ---
 <!-- id: issue-20261030-100713-290-qualify-and-package-the-useful-application-first-p  file: issue-20261030-100713-290-qualify-and-package-the-useful-application-first-p.md -->

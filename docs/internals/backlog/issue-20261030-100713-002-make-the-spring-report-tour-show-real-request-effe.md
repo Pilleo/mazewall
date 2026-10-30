@@ -24,7 +24,7 @@ Approved useful-application Task5: reuse scenario-first presentation, useful rep
 
 - [x] Task5 changed actual template/SQL-ID and stale-review controls pass.
 - [x] Tagged finished-JAR presentation task and actual response/log trace.
-- [ ] Final review/copied acceptance/full gates/report inventory.
+- [x] Final review/copied acceptance/full gates/report inventory.
 
 Existing behavior already passes the new changed-input and stale-review refusal
 controls; no fabricated RED or unnecessary service change. Presentation entry first
@@ -37,6 +37,13 @@ unchanged. No Koog dependency/model/shared presentation module added.
 
 Current verification11host/9native/1presentation cases with strict cache storage,
 zero skips/failures. Logs: `/tmp/opencode/useful-spring-{data-controls,presentation-red,presentation-green}.log`.
+
+Final producer `8b4e2c414052271de6461fdd1a95f7ccaa85eecb`: single independent review,
+full build with Spring included and exact committed-source copied acceptance pass.
+11host/9native/1presentation cases ran without mandatory skips; byte-identical source
+and finished-JAR/template kits staged separately. Final evidence in
+issue-20261030-100713-290. No production, remote-release or human-rehearsal claim;
+item remains open pending separately approved landing.
 
 ---
 <!-- id: issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe  file: issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe.md -->

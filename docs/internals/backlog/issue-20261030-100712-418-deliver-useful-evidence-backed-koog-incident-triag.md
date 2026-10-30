@@ -26,7 +26,7 @@ Base: `5975c92ffb08d29c67579b42064e2d31241bbd1d`; approved inline useful-demo pl
 - [x] Task1 report/citation/document validation, renderer and two input fixtures.
 - [x] Task2 observed-agent reuse, real incident workflow and explicit live CLI.
 - [x] Task3 synthetic ordinary/protected boundary control and retirement.
-- [ ] Final one independent review, exact copied acceptance and full build.
+- [x] Final one independent review, exact copied acceptance and full build.
 
 Pre-flight: Task2 consumes Task1 decodeIncidentReport/renderIncidentReport; Task3
 uses that same incident workflow and the existing bounded reader. Task4 preserves
@@ -72,6 +72,14 @@ trace remain mandatory.23host/6native cases pass; no unprotected user-data CLI.
 README now leads with the useful incident job and provider/disclosure/hardware
 choices, keeping marker-based qualification behind it. Logs:
 `/tmp/opencode/useful-incident-boundary-{red,green}.log`.
+
+Final source producer `8b4e2c414052271de6461fdd1a95f7ccaa85eecb`: one independent
+review and verified fix pass,25host/10native Koog cases in exact copied consumers,
+full build and committed-source acceptance pass. Official JDK HTTP adapter was
+separately operator-approved after review exposed its absence; both real clients
+construct/close without requests. Live inference remains unqualified. Final evidence,
+two deferred minors and local kits are recorded in issue-20261030-100713-290.
+Item remains open pending separately approved landing; no push/merge performed.
 
 ---
 <!-- id: issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag  file: issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag.md -->
