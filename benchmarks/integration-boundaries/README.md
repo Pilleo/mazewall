@@ -69,8 +69,8 @@ limits. The job budget is30minutes. Build logs are capped at16MiB; native/valida
 logs at8MiB per file while writing, not after a noisy child exits. The resource
 probe and hosted-machine noise can influence observations.
 
-Download `global-benchmarks-<run-id>-<attempt>` (14-day retention). Its
-`build/reports/benchmarks/run-<run-id>-<attempt>/` directory contains `raw.log`,
+Download `global-benchmarks-<run-id>-<attempt>` (14-day retention). After the command
+above, `./benchmark-evidence/run-<run-id>-<attempt>/` contains `raw.log`,
 `validation.log`, `build.log`, `source-revision.txt`, `source-status.txt`, explicit
 kernel/CPU/JVM metadata in `environment.txt`, `source.sha256`, `artifacts.sha256`,
 `consumer.lockfile`, `custody.json`, and build/native resource receipts. Upload runs

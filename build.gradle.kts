@@ -292,7 +292,8 @@ tasks.register<Test>("consumerHarnessTest") {
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
     useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
-    inputs.file(layout.projectDirectory.file(".github/workflows/benchmarks.yml"))
+    inputs
+        .file(layout.projectDirectory.file(".github/workflows/benchmarks.yml"))
         .withPropertyName("manualBenchmarkWorkflow")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
