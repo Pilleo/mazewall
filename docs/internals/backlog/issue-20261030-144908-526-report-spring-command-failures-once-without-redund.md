@@ -24,13 +24,18 @@ PR562 review finding4: an invalid owned stdin command prints the same original e
 
 - [x] Finished-JAR invalid-command test observed2diagnostics RED, then1 GREEN.
 - [x] Redundant catch removed; normal exception propagation and resource close preserved.
-- [ ] Final copied/full gates.
+- [x] Final copied/full gates.
 
 The actual server must become ready, refuse the invalid stdin command, return
 nonzero, report actual worker retirement and emit its original diagnostic once.
 No exception text is parsed for application outcomes; the known test-only message
 counts duplicate rendering only. Spring11host/11native/1presentation cases pass;
 logs `/tmp/opencode/pitch-fix-spring-{red,green}.log`.
+
+Final producer `b741304b7b3974e811445304d6f6878c3928c99e` passes full build and
+committed-source copied acceptance, including the one-diagnostic/actual-retirement
+finished-JAR regression among11Spring native cases. Shared evidence/kit paths in
+issue-20261030-144907-661. Open pending existing orchestrator-managed landing.
 
 ---
 <!-- id: issue-20261030-144908-526-report-spring-command-failures-once-without-redund  file: issue-20261030-144908-526-report-spring-command-failures-once-without-redund.md -->

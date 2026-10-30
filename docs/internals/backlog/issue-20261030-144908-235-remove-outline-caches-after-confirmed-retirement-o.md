@@ -24,7 +24,7 @@ PR562 review finding3:129headings reject after worker launch and canonical close
 
 - [x] Real129-heading failure/cache regression RED→GREEN; original error and dead child checked.
 - [x] Resource cleanup uses standard use() suppression and confirmed canonical retirement on both paths.
-- [ ] Final copied/full gates.
+- [x] Final copied/full gates.
 
 The test owns a private java.io.tmpdir and requires its extracted cache removed
 after the actual child ends. The application checks captured child and CLOSED /
@@ -33,6 +33,12 @@ failure, before allowing cache removal. Unknown retirement keeps the cache; orig
 failures retain retirement/delete failures as suppressed exceptions. No success
 artifact is displayed after a parser error. All4outline-file cases pass within
 Koog26host/11native suite. Logs `/tmp/opencode/pitch-fix-koog-{red,green}.log`.
+
+Final producer `b741304b7b3974e811445304d6f6878c3928c99e` passes full build and
+committed-source copied acceptance, including all4file-mode native cases and the
+installed actual-file command. The former failed-parser cache minor is no longer
+deferred; truly uncertain retirement still retains resources and fails. Evidence
+and fresh kits in issue-20261030-144907-661; open pending managed landing.
 
 ---
 <!-- id: issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o  file: issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o.md -->

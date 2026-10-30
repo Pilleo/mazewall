@@ -24,7 +24,7 @@ PR562 review finding2 and CI41056914481: JAVA_TOOL_OPTIONS launcher stderr conta
 
 - [x] Real Java launcher and Python child stream regressions RED→GREEN.
 - [x] Both affected helpers fixed; process-group cleanup and combined2MiB log bound retained.
-- [ ] CI-style inherited-option check and final source/full gates.
+- [x] CI-style inherited-option check and final source/full gates.
 
 The native test appends a harmless property to existing JAVA_TOOL_OPTIONS only for
 its owned child; no inherited option or credential variable is removed/filtered.
@@ -35,6 +35,13 @@ inspection and retirement errors remain visible; no process fallback or replay.
 Spring11host/11native/1presentation and13Python tests pass, including retained
 failed-command stderr and the unchanged combined2MiB log bound. RED logs:
 `/tmp/opencode/pitch-fix-{spring,measure}-red.log`; corresponding green logs retained.
+
+Final producer `b741304b7b3974e811445304d6f6878c3928c99e` passes full build and the
+complete committed-source acceptance with inherited JAVA_TOOL_OPTIONS plus the
+harmless preference option that reproduces CI. Both candidate-producing helper
+paths, all11Spring native cases and3actual Spring measurement forks pass without
+filtering environment or lowering gates. Shared final evidence/kit paths are in
+issue-20261030-144907-661. Open pending orchestrator-managed landing.
 
 ---
 <!-- id: issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro  file: issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro.md -->
