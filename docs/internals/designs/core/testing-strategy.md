@@ -267,7 +267,7 @@ retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. They execute the extracted join shell command for
 all 625 core/mutation/security/build-logic combinations with Go fixed to success,
-then every Go result with the other prerequisites successful. Only five literal
+then every Go and optional-integration result with the other prerequisites successful. Only six literal
 successes pass. Existing security125/legacy25 projections fix the extra results
 explicitly to success. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
@@ -399,10 +399,45 @@ blank NVD credentials and docs-only changes retain the existing no-scan policy;
 an eligible-key flag or a green skipped job is not evidence of executed analysis.
 Always-scheduled ownership and diagnostics retain update/analysis logs and reports.
 
+### Optional integration feedback and diagnostics
+
+The source-bound optional gate stages the exact SDK publications once. It checks
+the two independent copied applications before the remaining legacy consumer
+matrix. Each application has three deliberately different phases:
+
+1. `dependencies --write-locks` seeds the new coordinate without running tests or
+   packaging; Koog also resolves its separate boundary-fixture dependencies.
+2. One strict configuration-cache build executes the actual host/native/presentation
+   tasks and produces the ordinary distributions. Native results remain uncached.
+3. A `--dry-run` of that same task graph must restore the configuration cache without
+   executing any task actions. This proves graph reuse, not another native pass.
+
+The host harness exercises the production phase runner with real Gradle tasks
+whose outputs are always forced fresh. Their counters must each contain exactly
+one execution, not three. Historical locks and dependency approvals are checked
+after every phase, and the complete mandatory JUnit inventory comes from the real
+strict build. No skipped or failed test observation is accepted as a native pass.
+After all application and legacy correctness checks succeed, the unchanged fifteen
+measurement forks run last; they cannot delay discovery of a Spring correctness
+failure behind Koog measurements. These are still bounded local observations, not
+production throughput or provider-inference qualification.
+
+Every invocation creates a unique owned
+`build/reports/optional-integrations/run-*/` directory in the caller's checkout,
+including when commands execute in a disposable clone. Full child command logs
+and ownership/exit receipts remain there. Copied applications retain their JUnit
+XML and HTML reports in `<application>-reports/` on success or failure. An early
+compile failure requires no invented report; retention failures are suppressed
+on the original command failure. Report aliases and aliased diagnostic parents
+are refused. CI always uploads these allowlisted logs, receipts and test reports,
+not temporary source trees, Gradle caches, SDK archives or credential state. The
+container's writable checkout bind keeps this directory visible to host artifact
+collection. The workflow-policy regression rejects removal of failure-time uploads.
+
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]`
-and `if: always()`; its shell requires all five results to equal `success`.
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]`
+and `if: always()`; its shell requires all six results to equal `success`.
 Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.

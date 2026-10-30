@@ -8,6 +8,39 @@ import java.security.MessageDigest
 import java.time.Duration
 
 internal object ConsumerFixture {
+    fun optionalIntegrationEvidence(workspace: Path): Path {
+        var parent = workspace.toRealPath()
+        for (name in listOf("build", "reports", "optional-integrations")) {
+            parent = parent.resolve(name)
+            require(!Files.isSymbolicLink(parent)) { "Diagnostic directory must not be an alias: $parent" }
+            if (!Files.exists(parent, NOFOLLOW_LINKS)) Files.createDirectory(parent)
+            require(Files.isDirectory(parent, NOFOLLOW_LINKS)) { "Diagnostic parent must be a directory: $parent" }
+        }
+        return Files.createTempDirectory(parent, "run-")
+    }
+
+    fun retainTestReports(
+        project: Path,
+        evidence: Path,
+    ) {
+        for (name in listOf("test-results", "reports/tests")) {
+            val source = project.resolve("build/$name")
+            if (!Files.exists(source, NOFOLLOW_LINKS)) continue
+            Files.walk(source).use { paths ->
+                paths.forEach { path ->
+                    require(!Files.isSymbolicLink(path)) { "Test report alias refused: $path" }
+                    val target = evidence.resolve(name).resolve(source.relativize(path))
+                    if (Files.isDirectory(path, NOFOLLOW_LINKS)) {
+                        Files.createDirectories(target)
+                    } else {
+                        require(Files.isRegularFile(path, NOFOLLOW_LINKS)) { "Unsupported report entry: $path" }
+                        Files.copy(path, target, COPY_ATTRIBUTES)
+                    }
+                }
+            }
+        }
+    }
+
     fun snapshot(root: Path): Map<String, String> =
         sourcePaths(root).associateWith { name ->
         val source = root.resolve(name)

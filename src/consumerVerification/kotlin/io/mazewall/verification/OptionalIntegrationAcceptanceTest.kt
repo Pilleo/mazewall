@@ -102,9 +102,10 @@ class OptionalIntegrationAcceptanceTest {
         val original = Path.of(System.getProperty("consumerWorkspace"))
         SharedVerificationLock.acquire(SharedVerificationLock.resolve(original, System.getProperty("verificationLock"))).use {
             val before = ConsumerFixture.snapshot(original)
+            val evidence = ConsumerFixture.optionalIntegrationEvidence(original)
+            println("OPTIONAL_INTEGRATION_EVIDENCE $evidence")
             try {
                 val root = ConsumerFixture.checkout(original)
-                val evidence = Files.createDirectory(root.resolve("optional-integration-evidence"))
                 var sequence = 0
 
                 fun run(
@@ -136,6 +137,7 @@ class OptionalIntegrationAcceptanceTest {
                     "src/consumerVerification",
                     "tests/consumers/spring-jdbc",
                     "benchmarks/integration-boundaries/pitch",
+                    ".github/workflows/ci.yml",
                 )
                 run("committed-producer", listOf("git", "diff", "--exit-code", revision, "--") + producerScopes)
                 val unknown = run("identified-producer", listOf("git", "ls-files", "--others", "--exclude-standard", "--") + producerScopes)
@@ -190,6 +192,7 @@ class OptionalIntegrationAcceptanceTest {
                     repository.resolve("io/mazewall/koog-contained-tool/$version/koog-contained-tool-$version.jar"),
                     KoogPackageKind.NATIVE_FIXTURE,
                 )
+                val pitchConsumers = PitchExamplesAcceptance.run(root, repository, version, evidence)
                 val koog = gradle + listOf("-p", root.resolve("tests/consumers/koog-portal").toString()) + properties
                 val koogVerification = root.resolve("tests/consumers/koog-portal/gradle/verification-metadata.xml")
                 val koogPinned = withOptionalPublicationChecksums(
@@ -278,7 +281,7 @@ class OptionalIntegrationAcceptanceTest {
                         ),
                     Duration.ofMinutes(15),
                 )
-                PitchExamplesAcceptance.run(root, repository, version, evidence)
+                PitchExamplesAcceptance.measure(root, pitchConsumers, evidence)
                 println("OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence")
             } finally {
                 val after = ConsumerFixture.snapshot(original)

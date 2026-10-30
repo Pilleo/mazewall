@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 199 | *Total Resolved Issues:* 717
+*Total Active Issues:* 200 | *Total Resolved Issues:* 717
 
-Active status detail: 198 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 199 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261030-160604-049](issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn.md) | Make optional integration CI single pass and diagnosable | high | core |
 | [issue-20261030-144907-661](issue-20261030-144907-661-cancel-live-incident-http-requests-at-the-agent-de.md) | Cancel live incident HTTP requests at the agent deadline | high | integrations |
 | [issue-20261030-144907-939](issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro.md) | Keep measured Spring candidate stdout separate from diagnostics | high | integrations |
 | [issue-20261030-144908-235](issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o.md) | Remove outline caches after confirmed retirement on parser failure | medium | integrations |

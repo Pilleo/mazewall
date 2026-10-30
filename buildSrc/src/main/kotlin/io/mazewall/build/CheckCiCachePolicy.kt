@@ -24,9 +24,10 @@ internal enum class CiCacheViolation(val explanation: String) {
     CODE_CHANGE_FILTER("Core and mutation need unconditional PR-readable code filters including the CI workflow"),
     MUTATION_EXECUTION("Run all three PIT tasks once, serially through the host resource probe with bounded workers and forks"),
     MUTATION_DIAGNOSTICS("Always upload the mutation resource receipt and all three PIT reports"),
+    OPTIONAL_DIAGNOSTICS("Always retain optional command logs and copied-consumer test reports, including failures"),
     BUILD_LOGIC_VALIDATION("Independent read-only build logic must run with strict configuration cache, bounded resources and always-uploaded diagnostics"),
     GO_VALIDATION("Path-gated Go tests and pinned vulnerability scanning must be required, bounded and fail closed for both modules"),
-    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic and Go success"),
+    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic, Go and optional-integration success"),
     PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
@@ -79,6 +80,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
                 workflowStep(security, "Check file changes").trim() != workflowStep(containerJobs[1], "Check file changes").trim()
             CiCacheViolation.MUTATION_EXECUTION -> !hasBoundedMutation(workflow, mutation)
             CiCacheViolation.MUTATION_DIAGNOSTICS -> !hasMutationDiagnostics(mutation)
+            CiCacheViolation.OPTIONAL_DIAGNOSTICS -> !hasOptionalDiagnostics(validationJobs[0])
             CiCacheViolation.BUILD_LOGIC_VALIDATION -> !hasBuildLogicValidation(workflow)
             CiCacheViolation.GO_VALIDATION -> !hasGoValidation(workflow)
             CiCacheViolation.REQUIRED_CHECK_JOIN -> !hasRequiredCheckJoin(join)
@@ -267,14 +269,29 @@ private fun hasGoValidation(workflow: String): Boolean {
     return workflowJobBlock(workflow, "go-validation").trimEnd().trimIndent() == expected
 }
 
+private fun hasOptionalDiagnostics(job: String): Boolean =
+    workflowStep(job, "Upload Optional JUnit Diagnostics").trimIndent().trim() == """
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+            name: optional-integration-junit
+            path: |
+                integrations/**/build/test-results/**/*.xml
+                build/test-results/optionalIntegrationCheck/*.xml
+                build/reports/optional-integrations/run-*/*.log
+                build/reports/optional-integrations/run-*/*.command.json
+                build/reports/optional-integrations/run-*/*-reports/**
+            if-no-files-found: ignore
+    """.trimIndent()
+
 private fun hasRequiredCheckJoin(join: String): Boolean {
     val headers = workflowHeaders(join)
     val step = """
         - name: Require Core and Mutation Success
-          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success && test "${'$'}{{ needs.go-validation.result }}" = success
+          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success && test "${'$'}{{ needs.go-validation.result }}" = success && test "${'$'}{{ needs.optional-integrations.result }}" = success
     """.trimIndent()
     return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
-        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]") &&
+        headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]") &&
         headers.filter { it.startsWith("if:") } == listOf("if: always()") &&
         headers.none { it.startsWith("continue-on-error:") } && join.substringAfter("        steps:\n", "").trim() == step
 }
@@ -327,7 +344,9 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                 cache-read-only: false
                 gradle-home-cache-excludes: dependency-check-data
         """.trimIndent()
-    ) return false
+    ) {
+        return false
+    }
     val expectedNames = listOf(
         "Checkout Code", "Set up JDK 25", "Check file changes", "Setup Gradle", "Compute Security Data Metadata",
         "Restore Security Data", "Prepare Security Snapshot Tools", "Select Retained Security Snapshot",
@@ -337,7 +356,14 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
         "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot",
         "Run Security Check", "Verify Final Security Ownership", "Upload Security Diagnostics",
     )
-    if (security.lines().map(String::trim).filter { it.startsWith("- name: ") }.map { it.removePrefix("- name: ") } != expectedNames) return false
+    if (security
+        .lines()
+        .map(String::trim)
+        .filter { it.startsWith("- name: ") }
+        .map { it.removePrefix("- name: ") } != expectedNames
+    ) {
+            return false
+        }
     val metadata = """
         id: security_metadata
         env:

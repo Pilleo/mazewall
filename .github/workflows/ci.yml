@@ -103,6 +103,9 @@ jobs:
                   path: |
                       integrations/**/build/test-results/**/*.xml
                       build/test-results/optionalIntegrationCheck/*.xml
+                      build/reports/optional-integrations/run-*/*.log
+                      build/reports/optional-integrations/run-*/*.command.json
+                      build/reports/optional-integrations/run-*/*-reports/**
                   if-no-files-found: ignore
     core-quality:
         name: Core Quality and Kernel Validation
@@ -845,7 +848,7 @@ jobs:
     build-test-publish:
         # Keep the required check stable and fail closed for every skipped/failed lane.
         name: Build, Test, Security Scan & Publish
-        needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]
+        needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]
         if: always()
         runs-on: ubuntu-26.04
         permissions:
@@ -854,7 +857,7 @@ jobs:
             container_cache_hash: ${{ needs.core-quality.outputs.container_cache_hash }}
         steps:
             - name: Require Core and Mutation Success
-              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && test "${{ needs.go-validation.result }}" = success
+              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && test "${{ needs.go-validation.result }}" = success && test "${{ needs.optional-integrations.result }}" = success
     publish:
         name: Publish Verified Packages
         needs: [optional-integrations, build-test-publish]

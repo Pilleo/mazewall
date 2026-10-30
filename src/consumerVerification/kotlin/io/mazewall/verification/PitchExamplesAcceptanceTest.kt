@@ -1,5 +1,6 @@
 package io.mazewall.verification
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -20,6 +21,47 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 class PitchExamplesAcceptanceTest {
     @TempDir private lateinit var root: Path
+
+    @Test fun `lock seeding and cache replay execute each forced fresh consumer task only once`() {
+        val copy = Files.createDirectory(root.resolve("spring-report-api"))
+        Files.writeString(copy.resolve("settings.gradle"), "rootProject.name = 'single-pass-fixture'\n")
+        Files.writeString(
+            copy.resolve("build.gradle"),
+            """
+            abstract class CountRuns extends DefaultTask {
+                @OutputFile abstract RegularFileProperty getCounter()
+                @TaskAction void count() { counter.get().asFile.append('executed\n') }
+            }
+            ['nativeTest', 'presentationTest'].each { taskName ->
+                tasks.register(taskName, CountRuns) {
+                    counter.set(layout.projectDirectory.file(taskName + '.count'))
+                    outputs.upToDateWhen { false }
+                    outputs.cacheIf { false }
+                }
+            }
+        """.trimIndent(),
+        )
+        Files.createDirectories(copy.resolve("gradle"))
+        Files.writeString(
+            copy.resolve("gradle/verification-metadata.xml"),
+            """
+            <verification-metadata xmlns="https://schema.gradle.org/dependency-verification">
+              <configuration><verify-metadata>true</verify-metadata><verify-signatures>false</verify-signatures></configuration>
+              <components/>
+            </verification-metadata>
+        """.trimIndent(),
+        )
+        val evidence = Files.createDirectory(root.resolve("evidence"))
+        PitchExamplesAcceptance.buildConsumer(
+            listOf(Path.of("gradlew").toAbsolutePath().toString(), "-p", copy.toString(), "--console=plain", "--max-workers=1"),
+            copy,
+            evidence,
+            listOf("nativeTest", "presentationTest"),
+        )
+        for (name in listOf("nativeTest", "presentationTest")) assertEquals("executed\n", Files.readString(copy.resolve("$name.count")))
+        val cached = Files.readString(evidence.resolve("spring-report-api-cache-reuse.stdout.log"))
+        check("Configuration cache entry reused" in cached)
+    }
 
     @Test fun `package inspection refuses absent or source substituted publication bytes`() {
         val repository = Files.createDirectory(root.resolve("repo"))
@@ -94,6 +136,37 @@ class PitchExamplesAcceptanceTest {
 }
 
 internal object PitchExamplesAcceptance {
+    fun buildConsumer(
+        command: List<String>,
+        copy: Path,
+        evidence: Path,
+        tasks: List<String>,
+    ) {
+        val name = copy.fileName.toString()
+        val metadata = copy.resolve("gradle/verification-metadata.xml")
+        val pinned = Files.readString(metadata)
+        val historicalLocks = Files.walk(copy).use { paths ->
+            paths.filter { Files.isRegularFile(it) && it.fileName.toString() == "gradle.lockfile" }.toList().associateWith(Files::readAllBytes)
+        }
+        for ((label, flags) in listOf(
+            "locks" to listOf("--write-locks", "--no-configuration-cache"),
+            "strict" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
+            "cache-reuse" to listOf("--configuration-cache", "--configuration-cache-problems=fail", "--dry-run"),
+        )) {
+            val selected = if (label == "locks") {
+                if (name == "koog-document-agent") listOf(":dependencies", ":boundary-fixture:dependencies") else listOf(":dependencies")
+            } else {
+                tasks
+            }
+            println("PITCH_CONSUMER_PHASE name=$name phase=$label evidence=$evidence")
+            val result = ConsumerFixture.command(command + selected + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
+            check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}; evidence=$evidence" }
+            if (label == "cache-reuse") check("Configuration cache entry reused" in result.stdout)
+            check(Files.readString(metadata) == pinned) { "Copied consumer changed dependency approvals" }
+            check(historicalLocks.all { (path, bytes) -> Files.readAllBytes(path).contentEquals(bytes) }) { "New-coordinate build changed historical locks" }
+        }
+    }
+
     fun requireArchiveFiles(
         archive: Path,
         files: Map<String, Path>,
@@ -159,7 +232,7 @@ internal object PitchExamplesAcceptance {
         repository: Path,
         version: String,
         evidence: Path,
-    ) {
+    ): Path {
         val copies = Files.createTempDirectory("mazewall-pitch-consumers-")
         for (name in listOf("koog-document-agent", "spring-report-api")) {
             val source = root.resolve("demos/$name")
@@ -171,6 +244,7 @@ internal object PitchExamplesAcceptance {
                     if (Files.isDirectory(path)) Files.createDirectories(target) else Files.copy(path, target, COPY_ATTRIBUTES)
                 }
             }
+            AutoCloseable { ConsumerFixture.retainTestReports(copy, evidence.resolve("$name-reports")) }.use {
             val metadata = copy.resolve("gradle/verification-metadata.xml")
             val modules = if (name == "koog-document-agent") {
                 listOf("platform", "enforcer", "runtime", "koog", "worker", "codegen", "profiler")
@@ -186,9 +260,6 @@ internal object PitchExamplesAcceptance {
                 pinned = pinned.replace("</components>", "$component</components>")
             }
             Files.writeString(metadata, pinned)
-            val historicalLocks = Files.walk(copy).use { paths ->
-                paths.filter { Files.isRegularFile(it) && it.fileName.toString() == "gradle.lockfile" }.toList().associateWith(Files::readAllBytes)
-            }
             val command = listOf(
                 copy.resolve("gradlew").toString(),
                 "-p",
@@ -203,18 +274,7 @@ internal object PitchExamplesAcceptance {
             } else {
                 listOf("test", "nativeTest", "presentationTest", "bootJar", "evaluationZip", "sourceZip")
             }
-            for ((label, flags) in listOf(
-                "locks" to listOf("--write-locks", "--no-configuration-cache"),
-                "strict" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
-                "cache-reuse" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
-            )) {
-                val seed = if (label == "locks" && name == "koog-document-agent") listOf(":dependencies", ":boundary-fixture:dependencies") else emptyList()
-                val result = ConsumerFixture.command(command + seed + tasks + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
-                check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}" }
-                if (label == "cache-reuse") check("Configuration cache entry reused" in result.stdout)
-                check(Files.readString(metadata) == pinned) { "Copied consumer changed dependency approvals" }
-                check(historicalLocks.all { (path, bytes) -> Files.readAllBytes(path).contentEquals(bytes) }) { "New-coordinate build changed historical locks" }
-            }
+            buildConsumer(command, copy, evidence, tasks)
             val audit = ConsumerFixture.command(command + listOf("verifyPublishedClosure", "--no-configuration-cache"), copy, evidence, "$name-closure", Duration.ofMinutes(8))
             check(audit.exitCode == 0 && "PUBLISHED io.mazewall:" in audit.stdout) { "Copied consumer closure audit failed: ${audit.stdout}${audit.stderr}" }
             if (name == "koog-document-agent") {
@@ -283,6 +343,19 @@ internal object PitchExamplesAcceptance {
                     inputs.associate { it.removePrefix("fixtures/") to copy.resolve(it) } + ("application.jar" to copy.resolve("build/libs/application.jar")),
                 )
             }
+            println("PITCH_COPIED_CONSUMER_OK name=$name version=$version native=executed packaging=published-only cache=reused-without-execution")
+            }
+        }
+        return copies
+    }
+
+    fun measure(
+        root: Path,
+        copies: Path,
+        evidence: Path,
+    ) {
+        for (name in listOf("koog-document-agent", "spring-report-api")) {
+            val copy = copies.resolve(name)
             val measurement = ConsumerFixture.command(
                 listOf(
                     "python3",
@@ -298,7 +371,6 @@ internal object PitchExamplesAcceptance {
             check(measurement.exitCode == 0) { "Source-bound application measurements failed: ${measurement.stderr}${measurement.stdout.takeLast(6000)}" }
             check(measurement.stdout.lineSequence().count { it.startsWith("{\"schema\":1,") } == if (name == "koog-document-agent") 12 else 3) { "Missing exact application measurement forks" }
             println("PITCH_APPLICATION_MEASUREMENTS_OK name=$name forksPerMode=3 warmups=20 serialSamples=100 scope=local-only")
-            println("PITCH_COPIED_CONSUMER_OK name=$name version=$version native=executed packaging=published-only cache=reused")
         }
     }
 }
