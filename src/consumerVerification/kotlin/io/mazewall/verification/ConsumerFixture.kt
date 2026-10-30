@@ -10,6 +10,40 @@ import java.security.MessageDigest
 import java.time.Duration
 
 internal object ConsumerFixture {
+    fun producerReports(
+        checkout: Path,
+        evidence: Path,
+    ): AutoCloseable =
+        AutoCloseable {
+        var retentionFailure: Exception? = null
+        for (project in listOf(
+                ".",
+                "platform",
+                "enforcer",
+                "profiler",
+                "portals/runtime",
+                "portals/worker",
+                "portals/codegen",
+                "integrations/koog",
+                "integrations/spring/mazewall-spring-boot",
+                "demos/koog-contained-tool",
+                "demos/cli-demo",
+                "tests/consumers/koog-portal",
+                "tests/consumers/spring-jdbc",
+                "tests/consumers/koog-spring",
+                "demos/spring-boot-sandbox",
+            )) {
+            val label = if (project == ".") "producer-root" else project.replace('/', '-')
+            try {
+                retainTestReports(checkout.resolve(project), evidence.resolve("$label-reports"))
+            } catch (failure: Exception) {
+                val previous = retentionFailure
+                if (previous == null) retentionFailure = failure else previous.addSuppressed(failure)
+            }
+        }
+        retentionFailure?.let { throw it }
+    }
+
     fun optionalIntegrationEvidence(workspace: Path): Path {
         var parent = workspace.toRealPath()
         for (name in listOf("build", "reports", "optional-integrations")) {

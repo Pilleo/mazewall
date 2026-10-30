@@ -9,10 +9,93 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.time.Duration
 
 class ConsumerFixtureTest {
     @TempDir
     private lateinit var root: Path
+
+    @Test fun `failed JUnit module in a disposable producer clone retains its real failure reports`() {
+        val repository = Files.createDirectory(root.resolve("original"))
+        val evidence = Files.createDirectory(root.resolve("evidence"))
+        Files.writeString(repository.resolve(".gitignore"), "/build/\n**/build/\n.gradle/\n")
+        Files.writeString(repository.resolve("settings.gradle"), "rootProject.name='failed-producer-fixture'\ninclude ':demos:cli-demo'\n")
+        val junit = listOf(
+            Test::class.java,
+            Class.forName("org.junit.jupiter.engine.JupiterTestEngine"),
+            Class.forName("org.junit.platform.engine.TestEngine"),
+            Class.forName("org.junit.platform.commons.JUnitException"),
+            Class.forName("org.junit.platform.launcher.Launcher"),
+            Class.forName("org.opentest4j.AssertionFailedError"),
+        ).map {
+            it.protectionDomain.codeSource.location
+            .toURI()
+            .toASCIIString()
+        }.distinct()
+        val files = junit.joinToString(",") { "uri('${it.replace("'", "\\'")}')" }
+        val module = Files.createDirectories(repository.resolve("demos/cli-demo"))
+        Files.writeString(module.resolve("build.gradle"), "plugins { id 'java' }\ndependencies { testImplementation files($files) }\ntest { useJUnitPlatform() }\n")
+        val source = module.resolve("src/test/java/LegacyFailureTest.java")
+        Files.createDirectories(source.parent)
+        Files.writeString(source, "public class LegacyFailureTest { @org.junit.jupiter.api.Test void fails() { org.junit.jupiter.api.Assertions.fail(\"DELIBERATE_MODULE_FAILURE\"); } }\n")
+        var sequence = 0
+
+        fun git(vararg args: String) {
+            assertEquals(0, ConsumerFixture.command(listOf("git") + args, repository, evidence, "git-${sequence++}").exitCode)
+        }
+        git("init", "--quiet")
+        git("add", ".")
+        git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "fixture")
+        val checkout = ConsumerFixture.checkout(repository)
+        val original = IllegalStateException("actual cloned module failed")
+        val caught = assertThrows(IllegalStateException::class.java) {
+            ConsumerFixture.producerReports(checkout, evidence).use {
+                val result = ConsumerFixture.command(
+                    listOf(Path.of("gradlew").toAbsolutePath().toString(), "-p", checkout.toString(), ":demos:cli-demo:test", "--no-configuration-cache", "--console=plain", "--max-workers=1"),
+                    checkout,
+                    evidence,
+                    "failed-module",
+                    Duration.ofMinutes(2),
+                )
+                assertTrue(result.exitCode != 0, result.stdout + result.stderr)
+                val failedReport = checkout.resolve("demos/cli-demo/build/test-results/test/TEST-LegacyFailureTest.xml")
+                assertTrue(Files.isRegularFile(failedReport), result.stdout + result.stderr)
+                assertTrue(Files.readString(failedReport).contains("DELIBERATE_MODULE_FAILURE"))
+                throw original
+            }
+        }
+        assertSame(original, caught)
+        val retained = evidence.resolve("demos-cli-demo-reports/test-results/test/TEST-LegacyFailureTest.xml")
+        assertTrue(Files.readString(retained).contains("DELIBERATE_MODULE_FAILURE"))
+        assertEquals(Files.readString(checkout.resolve("demos/cli-demo/build/test-results/test/TEST-LegacyFailureTest.xml")), Files.readString(retained))
+        assertTrue(Files.isRegularFile(evidence.resolve("demos-cli-demo-reports/reports/tests/test/index.html")))
+    }
+
+    @Test fun `producer retention collects other modules while preserving all retention failures`() {
+        val checkout = Files.createDirectory(root.resolve("checkout"))
+        val outside = Files.createDirectory(root.resolve("outside"))
+        for (name in listOf("integrations/koog", "demos/koog-contained-tool")) {
+            val alias = checkout.resolve("$name/build/test-results")
+            Files.createDirectories(alias.parent)
+            Files.createSymbolicLink(alias, outside)
+        }
+        val report = checkout.resolve("demos/cli-demo/build/test-results/test/TEST-good.xml")
+        Files.createDirectories(report.parent)
+        Files.writeString(report, "actual safe report")
+        val evidence = root.resolve("retained")
+        val original = IllegalStateException("original failed command")
+        val caught = assertThrows(IllegalStateException::class.java) {
+            ConsumerFixture.producerReports(checkout, evidence).use { throw original }
+        }
+        assertSame(original, caught)
+        assertEquals("actual safe report", Files.readString(evidence.resolve("demos-cli-demo-reports/test-results/test/TEST-good.xml")))
+        val retention = caught.suppressed.single()
+        assertTrue(retention is IllegalArgumentException && retention.suppressed.single() is IllegalArgumentException)
+        Files.list(outside).use { assertFalse(it.findAny().isPresent) }
+        assertThrows(IllegalArgumentException::class.java) {
+            ConsumerFixture.producerReports(checkout, root.resolve("otherwise-successful")).use { }
+        }
+    }
 
     @Test fun `optional integration evidence stays in unique checkout owned report directories`() {
         val first = ConsumerFixture.optionalIntegrationEvidence(root)

@@ -106,6 +106,7 @@ class OptionalIntegrationAcceptanceTest {
             println("OPTIONAL_INTEGRATION_EVIDENCE $evidence")
             try {
                 val root = ConsumerFixture.checkout(original)
+                val completed = ConsumerFixture.producerReports(root, evidence).use {
                 var sequence = 0
 
                 fun run(
@@ -282,7 +283,9 @@ class OptionalIntegrationAcceptanceTest {
                     Duration.ofMinutes(15),
                 )
                 PitchExamplesAcceptance.measure(root, pitchConsumers, evidence)
-                println("OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence")
+                "OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence"
+                }
+                println(completed)
             } finally {
                 val after = ConsumerFixture.snapshot(original)
                 check(before == after) {

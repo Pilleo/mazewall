@@ -431,7 +431,14 @@ Every invocation creates a unique owned
 `build/reports/optional-integrations/run-*/` directory in the caller's checkout,
 including when commands execute in a disposable clone. Full child command logs
 and ownership/exit receipts remain there. Copied applications retain their JUnit
-XML and HTML reports in `<application>-reports/` on success or failure. An early
+XML and HTML reports in `<application>-reports/` on success or failure.
+The SDK producer and legacy module projects use the same collector in an outer
+exception-safe scope, exporting their reports from the disposable checkout into
+`<project-path>-reports/` (and `producer-root-reports/` for root tasks). Collection
+continues for other modules when one report tree fails; every retention error
+remains a blocking failure or is suppressed on the original command failure. The
+final acceptance marker is printed only after this scope closes successfully.
+An early
 compile failure requires no invented report; retention failures are suppressed
 on the original command failure. Report aliases, including intermediate source and
 destination parents, are refused before traversal. Unreadable parents remain
