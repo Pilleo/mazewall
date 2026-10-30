@@ -105,19 +105,39 @@ def live_group(leader):
     return members
 
 
-def retire(process):
+def _require_owned_group(process):
     exit_status(process)  # A reaped/reused numeric PID is not authority to signal a group.
     if os.getpgid(process.pid) != process.pid or os.getsid(process.pid) != process.pid:
         raise ValueError('Acquired private process group/session required')
-    remaining = live_group(process.pid)
-    for sig, timeout in ((signal.SIGTERM, 2), (signal.SIGKILL, 5)):
-        if not remaining:
-            break
-        os.killpg(process.pid, sig)
-        deadline = time.monotonic() + timeout
-        while remaining and time.monotonic() < deadline:
-            time.sleep(.01)
-            remaining = live_group(process.pid)
+
+
+def retire(process):
+    _require_owned_group(process)
+    kill_deadline = None
+    try:
+        remaining = live_group(process.pid)
+        for sig, timeout in ((signal.SIGTERM, 2), (signal.SIGKILL, 5)):
+            if not remaining:
+                break
+            deadline = time.monotonic() + timeout
+            if sig == signal.SIGKILL:
+                kill_deadline = deadline
+            os.killpg(process.pid, sig)
+            while remaining and time.monotonic() < deadline:
+                time.sleep(.01)
+                remaining = live_group(process.pid)
+    except BaseException as failure:
+        try:
+            _require_owned_group(process)
+            # Unreadable process state must fail the run, not abandon its known owned group.
+            if kill_deadline is None:
+                kill_deadline = time.monotonic() + 5
+            os.killpg(process.pid, signal.SIGKILL)
+            await_exit(process, max(0, kill_deadline - time.monotonic()))
+            process.wait(timeout=5)
+        except BaseException as cleanup:
+            raise cleanup from failure
+        raise
     if remaining:
         raise ValueError('Owned group still has live processes: ' + str(remaining))
     process.wait(timeout=5)

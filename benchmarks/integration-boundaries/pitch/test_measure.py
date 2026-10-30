@@ -8,6 +8,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
+from unittest.mock import patch
 
 TEMP_PARENT = '/tmp/opencode' if Path('/tmp/opencode').is_dir() else None
 
@@ -97,8 +99,14 @@ if sys.argv[3] == 'held':
         try:
             fields = Path('/proc', str(child['pid']), 'stat').read_text().rsplit(')', 1)[1].split()
             return fields[19] == child['start'] and fields[0] not in {'Z', 'X'}
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             return False
+
+    def assert_child_ends(self, marker):
+        deadline = time.monotonic() + 5
+        while self.child_alive(marker) and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertFalse(self.child_alive(marker), 'Owned child did not physically end after group KILL')
 
     def release_child(self, marker):
         if not marker.exists() or not self.child_alive(marker):
@@ -109,12 +117,30 @@ if sys.argv[3] == 'held':
         except ProcessLookupError:
             return
         try:
-            fields = Path('/proc', str(child['pid']), 'stat').read_text().rsplit(')', 1)[1].split()
+            try:
+                fields = Path('/proc', str(child['pid']), 'stat').read_text().rsplit(')', 1)[1].split()
+            except (FileNotFoundError, ProcessLookupError):
+                return
             if fields[19] != child['start']:
                 raise AssertionError('Child identity changed; refusing unowned signal')
             signal.pidfd_send_signal(fd, signal.SIGKILL)
         finally:
             os.close(fd)
+
+    @contextmanager
+    def held_process(self, marker):
+        process = subprocess.Popen([sys.executable, '-c', self.PARENT, str(marker), self.CHILD, 'held'], start_new_session=True)
+        try:
+            deadline = time.monotonic() + 5
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(marker.exists())
+            yield process
+        finally:
+            self.release_child(marker)
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=5)
 
     def test_exited_parent_does_not_abandon_held_child(self):
         with tempfile.TemporaryDirectory(dir=TEMP_PARENT) as temporary:
@@ -131,19 +157,61 @@ if sys.argv[3] == 'held':
     def test_parent_exit_on_sigterm_does_not_skip_child_escalation(self):
         with tempfile.TemporaryDirectory(dir=TEMP_PARENT) as temporary:
             marker = Path(temporary, 'child.json')
-            process = subprocess.Popen([sys.executable, '-c', self.PARENT, str(marker), self.CHILD, 'held'], start_new_session=True)
-            try:
-                deadline = time.monotonic() + 5
-                while not marker.exists() and time.monotonic() < deadline:
-                    time.sleep(.01)
-                self.assertTrue(marker.exists())
+            with self.held_process(marker) as process:
                 measure.retire(process)
                 self.assertFalse(self.child_alive(marker), 'Child ignored SIGTERM after parent exited')
-            finally:
-                self.release_child(marker)
-                if process.poll() is None:
-                    process.kill()
-                process.wait(timeout=5)
+
+    def test_initial_inspection_failure_still_stops_owned_group(self):
+        with tempfile.TemporaryDirectory(dir=TEMP_PARENT) as temporary:
+            marker = Path(temporary, 'child.json')
+            with self.held_process(marker) as process:
+                failure = PermissionError(13, 'initial proc inspection denied')
+                with patch.object(measure, 'live_group', side_effect=failure):
+                    with self.assertRaises(PermissionError) as caught:
+                        measure.retire(process)
+                self.assertIs(caught.exception, failure)
+                self.assertIsNotNone(process.returncode, 'Owned leader was not reaped')
+                self.assert_child_ends(marker)
+
+    def test_later_inspection_failure_still_escalates_and_reaps(self):
+        with tempfile.TemporaryDirectory(dir=TEMP_PARENT) as temporary:
+            marker = Path(temporary, 'child.json')
+            with self.held_process(marker) as process:
+                failure = PermissionError(13, 'later proc inspection denied')
+                scan = measure.live_group
+                calls = 0
+                def inspect(leader):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        return scan(leader)
+                    raise failure
+                with patch.object(measure, 'live_group', side_effect=inspect):
+                    with self.assertRaises(PermissionError) as caught:
+                        measure.retire(process)
+                self.assertIs(caught.exception, failure)
+                self.assertIsNotNone(process.returncode, 'Owned leader was not reaped')
+                self.assert_child_ends(marker)
+
+    def test_reaped_anchor_never_authorizes_a_group_signal(self):
+        process = subprocess.Popen([sys.executable, '-c', 'pass'], start_new_session=True)
+        process.wait(timeout=5)
+        with patch.object(measure.os, 'killpg') as signal_group:
+            with self.assertRaises(ChildProcessError):
+                measure.retire(process)
+            signal_group.assert_not_called()
+
+    def test_emergency_signal_failure_preserves_inspection_cause(self):
+        with tempfile.TemporaryDirectory(dir=TEMP_PARENT) as temporary:
+            marker = Path(temporary, 'child.json')
+            with self.held_process(marker) as process:
+                inspection = PermissionError(13, 'proc inspection denied')
+                denied = PermissionError(1, 'group signal denied')
+                with patch.object(measure, 'live_group', side_effect=inspection), patch.object(measure.os, 'killpg', side_effect=denied):
+                    with self.assertRaises(PermissionError) as caught:
+                        measure.retire(process)
+                self.assertIs(caught.exception, denied)
+                self.assertIs(caught.exception.__cause__, inspection)
 
 
 if __name__ == "__main__":

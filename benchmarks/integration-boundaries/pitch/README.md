@@ -37,6 +37,11 @@ An otherwise successful parent leaving a live child is a failed measurement, eve
 if cleanup later kills it. This handles these first-party launches, not arbitrary
 processes that deliberately escape their private session/group. Host self-tests
 include an exited parent and a TERM-exiting parent with TERM-resistant children.
+If process inspection fails after ownership is confirmed, emergency group KILL and
+leader reaping are still attempted. The inspection failure remains a failed run;
+termination failures retain that original cause. The leader is revalidated before
+emergency signalling, and an already-started KILL deadline is never reset. Unreadable
+process state is not silently ignored or accepted as proof that every child retired.
 
 - **Reader direct vs thread:** same real offline AIAgent construction/run/close and
   actual bounded document read; the protected variant uses the ordinary fixed policy,
