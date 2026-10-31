@@ -34,7 +34,9 @@ public final class NativeTestDiscoveryFunctionalTest {
                 override fun asArguments() = emptyList<String>()
             }
             val portalWorkerCpArgProvider = EmptyWorkerClasspath()
-            """ + registration + "\nintegrationTest.configure { jvmArgs(\"-Xlog:os=info:file=" + forks + "/fork-%p.log\") }\n");
+            """ + registration + "\nintegrationTest.configure {\n"
+            + "    providers.gradleProperty(\"fixture.include\").orNull?.let { include(it) }\n"
+            + "    jvmArgs(\"-Xlog:os=info:file=" + forks + "/fork-%p.log\")\n}\n");
         write(root, "src/integrationTest/java/fixture/ConcreteTest.java", """
             package fixture;
             import org.junit.jupiter.api.*;
@@ -56,6 +58,9 @@ public final class NativeTestDiscoveryFunctionalTest {
         run(root);
         equal(8L, count(forks), "Changed compiled input must discover the added root");
         equal(5, cases(root), "Changed input inventory");
+        run(root, "-Pfixture.include=fixture/IndependentTest.class");
+        equal(9L, count(forks), "Explicit file selection must not be broadened");
+        equal(1, cases(root), "Explicit file filter inventory");
         System.out.println("NATIVE_DISCOVERY_OK no empty forks; inherited/nested/filtered/added tests execute with fresh JVMs");
     }
 

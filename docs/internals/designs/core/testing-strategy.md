@@ -292,7 +292,8 @@ Relocation reuse never supplies fresh native evidence.
 Portal runtime's per-class integration task filters compiled candidates to real
 JUnit root classes before forking, using the existing metadata reader without
 loading application classes. Inherited methods and nested containers remain
-discoverable; CLI test filters still apply. Empty discovery fails closed. Helpers
+discoverable; CLI filters and caller-owned file includes remain intact. Empty
+default discovery fails closed. Helpers
 do not consume empty JVM launches, but every selected real root still gets its
 own fresh JVM and native tasks remain uncached.
 

@@ -115,6 +115,8 @@ Runtime discovery emits9 empty forks among17; Compose builds one image three tim
 
 Ruling: reuse existing lanes and scope record, not new jobs/journals/worktrees;
 no dependencies, larger resource/deadline budgets, skipped assertions or release actions.
+Explicit file includes remain caller-owned; the helper-free optimization applies
+only to default discovery, preventing a selected native subset from being broadened.
 
 ---
 <!-- id: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c  file: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md -->
