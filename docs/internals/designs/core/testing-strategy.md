@@ -272,6 +272,11 @@ while removing friend authority or changing an internal API must reject stale ou
 The final root Boot check also retains the staging init/version context rather
 than rebuilding the same producer under SNAPSHOT JAR names.
 
+Generated invocation-state BTF normalizes compiler debug paths so disposable
+checkout names do not change the profiler JAR and downstream plugin classpath.
+Debug/type information remains present; a real two-checkout compiler regression
+requires identical BTF/JAR bytes and changed C types to invalidate the resource.
+
 Test-health destinations are supplied at execution time alongside invocation tokens,
 not as diagnostic-only cache-key inputs. Clearing fragments, rejecting stale tokens
 and classifying cached host results separately from fresh forks remain mandatory.

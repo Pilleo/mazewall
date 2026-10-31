@@ -24,8 +24,9 @@ public final class VerificationActionsTest {
         }
         try {
             FriendPathCacheFunctionalTest.verify(rootBuild.getParent());
+            BtfRelocationFunctionalTest.verify(rootBuild.getParent());
         } catch (Exception failure) {
-            throw new AssertionError("Relocatable Kotlin friend compilation failed", failure);
+            throw new AssertionError("Relocatable producer compilation failed", failure);
         }
         RootVerificationFunctionalTest.verifyEscapedClasspathLocation();
         PublicCompileClasspathFunctionalTest.verify(rootBuild.getParent());

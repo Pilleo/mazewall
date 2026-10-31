@@ -19,6 +19,7 @@ target_files:
   - "buildSrc/src/main/java/io/mazewall/build/TestHealthPlugin.java"
   - "buildSrc/src/test/java/io/mazewall/build/TestHealthPluginFunctionalTest.java"
   - "buildSrc/src/test/java/io/mazewall/build/FriendPathCacheFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/BtfRelocationFunctionalTest.java"
   - "buildSrc/src/test/java/io/mazewall/build/VerificationActionsTest.java"
   - "enforcer/build.gradle.kts"
   - "profiler/build.gradle.kts"
@@ -73,6 +74,9 @@ The operator requests a plan and fixes for all four review findings in PR563.
   compilation reuses outputs, absent authority and changed internal APIs reject.
 - [x] Diagnostic paths leave cache keys; cached tests do not attest fresh forks,
   while integration tasks execute each time.
+- [x] Warm qualification exposed absolute source paths in generated BTF, changing
+  profiler/plugin bytes across checkouts. Normalize debug paths only; real generated
+  BTF/JAR relocation equality and changed-C-type invalidation pass.
 - [ ] Focused/full gates, one independent review and Optional-only warm qualification.
 
 Impact index was unavailable; exact caller/configuration reads and real regressions

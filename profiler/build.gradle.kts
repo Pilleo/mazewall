@@ -32,7 +32,20 @@ abstract class GenerateInvocationStateBtf
                 .asFile.parentFile
                 .mkdirs()
             execOperations.exec {
-                commandLine("clang", "-target", "bpf", "-g", "-O2", "-c", source.get().asFile.absolutePath, "-o", objectFile.get().asFile.absolutePath)
+                // Disposable producer paths must not change the published BTF/plugin classpath.
+                commandLine(
+                    "clang",
+                    "-target",
+                    "bpf",
+                    "-g",
+                    "-O2",
+                    "-fdebug-prefix-map=${source.get().asFile.parentFile.absolutePath}=.",
+                    "-fdebug-compilation-dir=.",
+                    "-c",
+                    source.get().asFile.absolutePath,
+                    "-o",
+                    objectFile.get().asFile.absolutePath,
+                )
             }
             extractBtf(objectFile.get().asFile, resource.get().asFile)
         }
