@@ -277,6 +277,7 @@ private fun hasOptionalDiagnostics(job: String): Boolean =
             name: optional-integration-junit
             path: |
                 integrations/**/build/test-results/**/*.xml
+                build/reports/ci-resources/optional-adapters-cache.log
                 build/test-results/optionalIntegrationCheck/*.xml
                 build/reports/optional-integrations/run-*/*.log
                 build/reports/optional-integrations/run-*/*.command.json

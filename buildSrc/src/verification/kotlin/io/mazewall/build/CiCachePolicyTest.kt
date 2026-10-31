@@ -398,6 +398,7 @@ object CiCachePolicyTest {
         val upload = step(job(workflow, "optional-integrations"), "Upload Optional JUnit Diagnostics")
         for (required in listOf(
                 "if: always()",
+                "build/reports/ci-resources/optional-adapters-cache.log",
                 "build/reports/optional-integrations/run-*/*.log",
                 "build/reports/optional-integrations/run-*/*.command.json",
                 "build/reports/optional-integrations/run-*/*-reports/**",
