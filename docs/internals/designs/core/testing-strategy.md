@@ -239,6 +239,34 @@ The real two-checkout TestKit regression asserts the configured nested home and
 requires the second independent Java compilation to be `FROM-CACHE` with a real
 class output. Run it directly with `./gradlew -p buildSrc testKitCacheTest`.
 
+The workflow-input fixture calls the production CI-policy validator, not its full
+self-test suite. The complete policy/status matrices still run once in the outer
+build-logic gate. Its success marker is not a portable cached attestation.
+
+Optional adapter verification performs one real host build, then two task-free
+same-graph passes: prime post-build inputs and require literal configuration-cache
+reuse. This handles generated directories observed by PlantUML without rerunning
+tests or packaging merely to prove serialization. The proof log is always uploaded.
+
+The runner-image cache uses the shared `podman-runner-v2` Containerfile identity.
+An exact hit must contain a nonempty, loadable runner archive; export failures or
+empty archives cannot be saved. Only the test runner is archived, not obsolete
+vulnerable-demo image names. The launcher still verifies the Containerfile label.
+The versioned key avoids the old empty immutable entry without deleting caches.
+
+The ordinary enforcer unit task fingerprints its owned-child coverage agent by
+bytes, not the Gradle-home path. Identical host/container artifacts therefore reuse
+unit execution data; changing the bytes still invalidates it. Kernel/fresh-JVM
+execution remains uncached and retains its physical-retirement assertions.
+
+Dependency approvals must also be checked with isolated cold resolution: cached
+parsed BOM metadata can hide missing or changed `.module` approvals. Do not disable
+verification or rely on a warm configuration-only check. Cache restore logs also
+matter: GitHub's `Egress is over the account limit` is an account-side transport
+failure, not evidence that Gradle reexecuted warm inputs. Repository caching cannot
+override that limit; retain actual tests and report cold costs instead of claiming
+a warm-cache speedup. PR-ref caches cannot seed the trusted default branch.
+
 CI computes `scripts/ci_cache_key.sh` once immediately after checkout in each
 container-owning validation job (`optional-integrations` and `core-quality`).
 Container Gradle restore/save keys share that immutable job output, retaining their

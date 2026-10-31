@@ -13,8 +13,10 @@ public final class VerificationWorkflowInputFunctionalTest {
     private VerificationWorkflowInputFunctionalTest() {}
 
     public static void main(String[] args) throws Exception {
-        CiCachePolicyTest.run();
         Path marker = Path.of(args[0]);
+        Path repository = marker.getParent().getParent().getParent().getParent();
+        var violations = CheckCiCachePolicyKt.ciCachePolicyViolations(Files.readString(repository.resolve(".github/workflows/ci.yml")));
+        if (!violations.isEmpty()) throw new AssertionError("Actual workflow must satisfy the completed-data policy: " + violations);
         Files.createDirectories(marker.getParent());
         Files.writeString(marker, "verified\n");
     }
@@ -52,7 +54,11 @@ public final class VerificationWorkflowInputFunctionalTest {
             Files.createDirectories(helper.getParent());
             Files.copy(repository.resolve("scripts/ci_cache_key.sh"), helper);
             Path marker = project.resolve("build/verification/verification-actions.success");
-            outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
+            var primed = runner(project).build();
+            outcome(TaskOutcome.SUCCESS, primed.task(":verificationActionsTest").getOutcome());
+            if (primed.getOutput().contains("CI policy: cache/graph regressions")) {
+                throw new AssertionError("Workflow-input verification must call the policy validator, not rerun its complete self-test matrix");
+            }
             if (!Files.isRegularFile(marker)) throw new AssertionError("Prime verifier did not publish its marker");
             outcome(TaskOutcome.UP_TO_DATE, runner(project).build().task(":verificationActionsTest").getOutcome());
             Files.writeString(workflow, valid + "\n# Workflow-only input invalidation control\n");

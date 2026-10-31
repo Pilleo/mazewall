@@ -293,8 +293,14 @@ tasks.register<Test>("consumerHarnessTest") {
     classpath = consumerVerification.runtimeClasspath
     useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
     inputs
-        .file(layout.projectDirectory.file(".github/workflows/benchmarks.yml"))
-        .withPropertyName("manualBenchmarkWorkflow")
+        .files(
+            layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
+            layout.projectDirectory.file(".github/workflows/ci.yml"),
+            layout.projectDirectory.file("build.gradle.kts"),
+            layout.projectDirectory.file("gradlew"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.jar"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.properties"),
+        ).withPropertyName("ciVerificationInputs")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
@@ -572,7 +578,10 @@ subprojects {
         if (project.name == "enforcer") {
             val agent = files(configurations.named("jacocoAgent"))
             unitTest.configure {
-                inputs.files(agent).withPropertyName("ownedChildJacocoAgent")
+                inputs
+                    .files(agent)
+                    .withPropertyName("ownedChildJacocoAgent")
+                    .withPathSensitivity(PathSensitivity.NONE)
                 outputs.dir(childExecutionDirectory).withPropertyName("ownedChildExecutionData")
                 doFirst {
                     val directory = childExecutionDirectory.get().asFile
