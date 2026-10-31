@@ -14,15 +14,14 @@ kotlin {
 // These in-repository demonstration tests exercise raw attack primitives.  The
 // published CLI application still depends only on the enforcer/profiler facades.
 val cliDemoPlatformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
-extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
+extensions
+    .getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
     .target
     .compilations
     .named("test") {
         compileTaskProvider.configure {
             dependsOn(cliDemoPlatformJar)
-            compilerOptions.freeCompilerArgs.addAll(
-                cliDemoPlatformJar.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") },
-            )
+            (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(cliDemoPlatformJar)
         }
     }
 application {

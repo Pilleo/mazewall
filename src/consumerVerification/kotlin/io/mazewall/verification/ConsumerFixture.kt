@@ -10,6 +10,17 @@ import java.security.MessageDigest
 import java.time.Duration
 
 internal object ConsumerFixture {
+    fun stagedGradle(root: Path): List<String> =
+        listOf(
+            root.resolve("gradlew").toString(),
+            "--console=plain",
+            "--max-workers=1",
+            "--no-configuration-cache",
+            "--build-cache",
+            "-I",
+            root.resolve("tests/consumers/stage.init.gradle").toString(),
+        )
+
     fun producerReports(
         checkout: Path,
         evidence: Path,

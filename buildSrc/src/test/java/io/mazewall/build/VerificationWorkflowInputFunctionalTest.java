@@ -31,7 +31,7 @@ public final class VerificationWorkflowInputFunctionalTest {
             Files.createDirectories(fixture.resolve("gradle"));
             Files.copy(repository.resolve("gradle/libs.versions.toml"), fixture.resolve("gradle/libs.versions.toml"));
             String production = Files.readString(repository.resolve("buildSrc/build.gradle.kts"));
-            int start = production.indexOf("val verificationActionsTest = tasks.register<JavaExec>");
+            int start = production.indexOf("val verificationActionsTest =");
             int end = production.indexOf("\ntasks.withType<JavaExec>()", start);
             if (start < 0 || end < 0) throw new AssertionError("Cannot locate production verifier registration");
             String classpath = Arrays.stream(System.getProperty("java.class.path").split(File.pathSeparator))

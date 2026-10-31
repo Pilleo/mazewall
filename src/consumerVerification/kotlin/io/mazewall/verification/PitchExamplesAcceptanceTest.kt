@@ -166,7 +166,7 @@ internal object PitchExamplesAcceptance {
                 tasks
             }
             println("PITCH_CONSUMER_PHASE name=$name phase=$label evidence=$evidence")
-            val result = ConsumerFixture.command(command + selected + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
+            val result = ConsumerFixture.command(command + "--build-cache" + selected + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
             check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}; evidence=$evidence" }
             if (label == "cache-reuse") {
                 check("Configuration cache entry reused" in result.stdout) {

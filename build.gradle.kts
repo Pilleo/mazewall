@@ -231,14 +231,7 @@ configurations.named("sharedTestCompileClasspath") {
 rootKotlinCompilations.matching { it.name == "sharedTest" }.configureEach {
     compileTaskProvider.configure {
         dependsOn(":platform:jar", ":enforcer:jar")
-        compilerOptions.freeCompilerArgs.addAll(
-            rootPlatformJar.zip(rootEnforcerJar) { platform, enforcer ->
-                listOf(
-                    "-Xfriend-paths=${platform.asFile.absolutePath}",
-                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
-                )
-            },
-        )
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(rootPlatformJar, rootEnforcerJar)
     }
 }
 
@@ -297,6 +290,8 @@ tasks.register<Test>("consumerHarnessTest") {
             layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
             layout.projectDirectory.file(".github/workflows/ci.yml"),
             layout.projectDirectory.file("build.gradle.kts"),
+            layout.projectDirectory.file("demos/spring-report-api/build.gradle"),
+            layout.projectDirectory.file("tests/consumers/stage.init.gradle"),
             layout.projectDirectory.file("gradlew"),
             layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.jar"),
             layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.properties"),
@@ -811,9 +806,7 @@ subprojects {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         if (name.contains("Test", ignoreCase = true)) {
             dependsOn(":compileSharedTestKotlin")
-            compilerOptions.freeCompilerArgs.addAll(
-                sharedTestClasses.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") },
-            )
+            friendPaths.from(sharedTestClasses)
         }
     }
 }

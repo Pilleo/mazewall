@@ -26,7 +26,7 @@ val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.arch
 kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(platformJar)
-        compilerOptions.freeCompilerArgs.addAll(platformJar.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") })
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(platformJar)
     }
 }
 kotlinCompilations.named("integrationTest") {

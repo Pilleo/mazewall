@@ -22,6 +22,11 @@ public final class VerificationActionsTest {
             writeSuccessMarker(successMarker);
             return;
         }
+        try {
+            FriendPathCacheFunctionalTest.verify(rootBuild.getParent());
+        } catch (Exception failure) {
+            throw new AssertionError("Relocatable Kotlin friend compilation failed", failure);
+        }
         RootVerificationFunctionalTest.verifyEscapedClasspathLocation();
         PublicCompileClasspathFunctionalTest.verify(rootBuild.getParent());
         BuildLogicGateFunctionalTest.verify(rootBuild.getParent());

@@ -682,14 +682,7 @@ configurations.matching { it.name == "compileClasspath" || it.name.endsWith("Com
 kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(enforcerJar, platformJar)
-        compilerOptions.freeCompilerArgs.addAll(
-            enforcerJar.zip(platformJar) { enforcer, platform ->
-                listOf(
-                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
-                    "-Xfriend-paths=${platform.asFile.absolutePath}",
-                )
-            },
-        )
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(enforcerJar, platformJar)
     }
 }
 kotlinCompilations.named("integrationTest") {

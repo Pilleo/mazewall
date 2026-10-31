@@ -259,6 +259,24 @@ bytes, not the Gradle-home path. Identical host/container artifacts therefore re
 unit execution data; changing the bytes still invalidates it. Kernel/fresh-JVM
 execution remains uncached and retains its physical-retirement assertions.
 
+Independent copied/legacy consumers explicitly enable build-output caching; they
+do not inherit the producer root's `gradle.properties`. Configuration-cache graph
+reuse is not proof of compile/test-output reuse. Two-copy regressions require
+ordinary compilation and host tests FROM-CACHE, changed inputs to invalidate, and
+native/presentation tasks to execute on every real pass.
+
+Compiler friend grants use typed file collections, not absolute `-Xfriend-paths`
+strings. Producer dependencies and matching artifact classpaths remain explicit;
+visibility is not made public. Relocated Kotlin compilation must reuse outputs,
+while removing friend authority or changing an internal API must reject stale output.
+The final root Boot check also retains the staging init/version context rather
+than rebuilding the same producer under SNAPSHOT JAR names.
+
+Test-health destinations are supplied at execution time alongside invocation tokens,
+not as diagnostic-only cache-key inputs. Clearing fragments, rejecting stale tokens
+and classifying cached host results separately from fresh forks remain mandatory.
+Relocation reuse never supplies fresh native evidence.
+
 Dependency approvals must also be checked with isolated cold resolution: cached
 parsed BOM metadata can hide missing or changed `.module` approvals. Do not disable
 verification or rely on a warm configuration-only check. Cache restore logs also

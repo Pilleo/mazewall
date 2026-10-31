@@ -145,7 +145,7 @@ class OptionalIntegrationAcceptanceTest {
                 val version = "0.1.0-integration.${revision.take(12)}"
                 val repository = root.resolve("build/optional-integration-repository")
                 val properties = listOf("-PconsumerVersion=$version", "-PconsumerRepository=$repository")
-                val gradle = listOf(root.resolve("gradlew").toString(), "--console=plain", "--max-workers=1", "--no-configuration-cache")
+                val gradle = listOf(root.resolve("gradlew").toString(), "--console=plain", "--max-workers=1", "--no-configuration-cache", "--build-cache")
                 val stage = listOf(
                     "bash",
                     root.resolve("scripts/koog-build.sh").toString(),
@@ -272,7 +272,7 @@ class OptionalIntegrationAcceptanceTest {
                 println("OPTIONAL_INTEGRATION_CASE_OK ordinary-spring-report-host-tests")
                 run(
                     "finished-boot-ownership-and-negative-controls",
-                    gradle +
+                    ConsumerFixture.stagedGradle(root) +
                         listOf("consumerNativeCheck", "--tests", "*SpringBoot*", "-PconsumerRevision=$revision") +
                         properties +
                         listOf(
