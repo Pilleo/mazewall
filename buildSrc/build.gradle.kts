@@ -104,6 +104,14 @@ tasks.register<JavaExec>("btfRelocationTest") {
     mainClass.set("io.mazewall.build.BtfRelocationFunctionalTest")
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
 }
+tasks.register<JavaExec>("nativeDiscoveryTest") {
+    mainClass.set("io.mazewall.build.NativeTestDiscoveryFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
+tasks.register<JavaExec>("coreLaneTest") {
+    mainClass.set("io.mazewall.build.CoreLaneFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
 tasks.register<JavaExec>("spotbugsReportTest") {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
@@ -159,7 +167,7 @@ tasks.register<JavaExec>("failureTriageTest") {
     doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "btfRelocationTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "btfRelocationTest", "nativeDiscoveryTest", "coreLaneTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
     // Cache transport is not verification input: host/container homes intentionally differ.
@@ -210,6 +218,16 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
         layout.projectDirectory.file("../profiler/build.gradle.kts"),
         layout.projectDirectory.file("../profiler/src/main/c/btf/invocation_state.c"),
     ).withPropertyName("btfResourceProducer").withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "nativeDiscoveryTest") }.configureEach {
+    inputs.file(layout.projectDirectory.file("../portals/runtime/build.gradle.kts"))
+        .withPropertyName("nativeTestDiscoveryWiring").withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+tasks.named<JavaExec>("coreLaneTest") {
+    inputs.file(layout.projectDirectory.file("../.github/workflows/ci.yml"))
+        .withPropertyName("coreLaneWorkflow").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 tasks.test {

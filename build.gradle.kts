@@ -284,7 +284,7 @@ tasks.register<Test>("consumerHarnessTest") {
     description = "Checks portable consumer harness ownership without requiring published applications."
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
-    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
+    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration", "build-logic") }
     inputs
         .files(
             layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
@@ -298,6 +298,27 @@ tasks.register<Test>("consumerHarnessTest") {
         ).withPropertyName("ciVerificationInputs")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
+
+tasks.register<Test>("consumerBuildLogicTest") {
+    group = "verification"
+    description = "Runs Gradle-backed consumer regressions in the required build-logic lane."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("build-logic") }
+    inputs
+        .files(
+            layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
+            layout.projectDirectory.file(".github/workflows/ci.yml"),
+            layout.projectDirectory.file("build.gradle.kts"),
+            layout.projectDirectory.file("demos/spring-report-api/build.gradle"),
+            layout.projectDirectory.file("tests/consumers/stage.init.gradle"),
+            layout.projectDirectory.file("gradlew"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.jar"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.properties"),
+        ).withPropertyName("ciVerificationInputs")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+tasks.named("check") { dependsOn("consumerHarnessTest", "consumerBuildLogicTest") }
 
 tasks.register<Test>("consumerCheck") {
     group = "verification"

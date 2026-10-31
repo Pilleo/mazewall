@@ -97,6 +97,7 @@ val integrationTest =
         systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         forkEvery = 1
         maxParallelForks = 1
+        doFirst(io.mazewall.build.JUnitTestClassFilterAction())
         // Worker classpath resolution happens at EXECUTION time (Gradle 9 forbids eager
         // configuration-time resolution), so the producer must be built explicitly or the
         // resolved path is missing worker classes -> ClassNotFoundException in the worker JVM.

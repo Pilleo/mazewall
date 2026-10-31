@@ -227,7 +227,7 @@ public final class TestHealthPluginFunctionalTest {
             .build();
     }
 
-    private static List<java.io.File> pluginClasspath() {
+    static List<java.io.File> pluginClasspath() {
         var entries = new ArrayList<java.io.File>();
         for (String entry : System.getProperty("java.class.path").split(java.io.File.pathSeparator)) {
             if (entry.contains("buildSrc/build/classes/java/main") || entry.contains("buildSrc/build/resources/main")) {

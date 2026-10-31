@@ -239,6 +239,13 @@ The real two-checkout TestKit regression asserts the configured nested home and
 requires the second independent Java compilation to be `FROM-CACHE` with a real
 class output. Run it directly with `./gradlew -p buildSrc testKitCacheTest`.
 
+Portal codegen's test JVM uses the same cache-owned TestKit layout through an
+argument provider: the relative layout is input, the absolute Gradle home is
+transport. Its independent fixtures explicitly enable build caching, use relative
+local API-JAR paths and reproducible JAR entries. Real two-copy compilation and
+bundle reuse must survive relocation; changed guest bytes must rebuild the bundle.
+Cached host codegen tests are not fresh kernel attestations.
+
 The workflow-input fixture calls the production CI-policy validator, not its full
 self-test suite. The complete policy/status matrices still run once in the outer
 build-logic gate. Its success marker is not a portable cached attestation.
@@ -281,6 +288,13 @@ Test-health destinations are supplied at execution time alongside invocation tok
 not as diagnostic-only cache-key inputs. Clearing fragments, rejecting stale tokens
 and classifying cached host results separately from fresh forks remain mandatory.
 Relocation reuse never supplies fresh native evidence.
+
+Portal runtime's per-class integration task filters compiled candidates to real
+JUnit root classes before forking, using the existing metadata reader without
+loading application classes. Inherited methods and nested containers remain
+discoverable; CLI test filters still apply. Empty discovery fails closed. Helpers
+do not consume empty JVM launches, but every selected real root still gets its
+own fresh JVM and native tasks remain uncached.
 
 Dependency approvals must also be checked with isolated cold resolution: cached
 parsed BOM metadata can hide missing or changed `.module` approvals. Do not disable
@@ -342,13 +356,28 @@ or another container-cache archive. Core, mutation and security independently fi
 changes, including `.github/workflows/ci.yml`. A docs-only mutation step may skip
 while its job succeeds; the required join is never job-level skipped.
 
+Core invokes the root `:unitCheck` explicitly, avoiding Gradle's recursive bare
+task-name selection of demo gates. Slow Gradle-backed consumer regressions are
+tagged `build-logic`: `consumerHarnessTest` excludes them and
+`consumerBuildLogicTest` selects them in the existing Build Logic lane. Root
+`check` also requires the latter; no acceptance assertion is removed.
+
+The existing Security lane explicitly owns `:demos:vulnerable-web-app:unitCheck`
+and the shared-image script regression. This step runs unless cancelled, even
+without scanner eligibility or after a scanner failure; it cannot erase an
+earlier failure. Demo JUnit/HTML and triage output are always retained. The real
+profile-first exploit demonstration remains fresh in Core. Its owned run image
+is built once from the profile service's shared definition; all three service
+modes use that exact hash-checked image with `--no-build`, retaining identity,
+permission and physical-retirement checks.
+
 Build-logic validation is an independent unconditional Ubuntu26.04/JDK25 lane,
 with the existing setup-gradle policy, no extra heap/worker/fork allowance and
 always-uploaded diagnostics. It runs:
 
 ```bash
 python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- \
-  ./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail \
+  ./gradlew :buildLogicCheck :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail \
   --no-daemon --max-workers=1 --no-parallel
 ```
 
@@ -358,6 +387,8 @@ UP-TO-DATE/cached nested verifier can demonstrate reuse but is not full-workload
 memory evidence. Other CI lanes compile build logic as needed without implicitly
 repeating its complete regression suite. Intentional bounded fixture builds can
 reuse verifier task names; global task-name counts are not duplicate-suite proof.
+The resource probe covers both required build-tool tasks serially under the same
+worker/fork/heap budgets; diagnostics also retain the consumer regression JUnit/HTML.
 
 Go validation installs Go from the canonical module's directive and pins
 `govulncheck` v1.9.0. Race tests and vulnerability scans run serially for both

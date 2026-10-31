@@ -31,6 +31,16 @@ target_files:
   - "src/consumerVerification/kotlin/io/mazewall/verification/OptionalIntegrationAcceptanceTest.kt"
   - "src/consumerVerification/kotlin/io/mazewall/verification/PitchExamplesAcceptanceTest.kt"
   - "src/consumerVerification/kotlin/io/mazewall/verification/IndependentConsumerCacheTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/ConsumerFixtureTest.kt"
+  - "buildSrc/src/main/java/io/mazewall/build/FreshJvmClassSelector.java"
+  - "buildSrc/src/main/java/io/mazewall/build/JUnitTestClassFilterAction.java"
+  - "buildSrc/src/main/java/io/mazewall/build/TestKitCacheArguments.java"
+  - "buildSrc/src/test/java/io/mazewall/build/NativeTestDiscoveryFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/CoreLaneFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/AggregateVerificationFunctionalTest.java"
+  - "portals/codegen/src/test/kotlin/io/mazewall/portal/codegen/PortalCodegenFunctionalTest.kt"
+  - "scripts/run_vulnerable_app_demo.sh"
+  - "exploits/test_web_demo.py"
 target_symbols: []
 open_questions: false
 ---
@@ -77,11 +87,34 @@ The operator requests a plan and fixes for all four review findings in PR563.
 - [x] Warm qualification exposed absolute source paths in generated BTF, changing
   profiler/plugin bytes across checkouts. Normalize debug paths only; real generated
   BTF/JAR relocation equality and changed-C-type invalidation pass.
-- [ ] Focused/full gates, one independent review and Optional-only warm qualification.
+- [x] Full gates/review and Optional warm qualification at `13aefddb`:736s→416s;
+  both copied consumers restore ordinary compilation/tests; native checks stay fresh.
+  Final evidence: https://github.com/Pilleo/mazewall/pull/563.
 
 Impact index was unavailable; exact caller/configuration reads and real regressions
 supply evidence instead. No public SDK changes, new dependencies, broader friend
 grants, timeout increases, cached native passes or separate execution journals.
+
+## Approved Core critical-path follow-up
+
+Core run41244799711 takes891s despite cached compilation. Host consumer Gradle
+fixtures take235s, codegen156s and unintended demo tests82s (overlapping times).
+Runtime discovery emits9 empty forks among17; Compose builds one image three times.
+
+- [x] Keep heavy consumer Gradle regressions required in Build Logic; fast cases in
+  Core. Make `:unitCheck` explicit and retain demo host checks in Security, independent
+  of scanner eligibility/failure. Preserve the six-success join and diagnostics.
+- [x] Persist Portal TestKit state under the configured Gradle home; enable ordinary
+  fixture caching, normalize local paths, prove two-copy reuse/changed-input invalidation.
+- [x] Restrict runtime candidates to real JUnit roots with existing metadata logic;
+  preserve inherited/nested tests, explicit filters, all native assertions and fresh forks.
+- [x] Build the owned demo image once; preserve all three modes, artifact checks,
+  original failures, capability boundaries and physical retirement.
+- [ ] RED→GREEN focused checks, full gates, one independent review and measured
+  Core qualification; report all affected lane costs rather than moving the bottleneck.
+
+Ruling: reuse existing lanes and scope record, not new jobs/journals/worktrees;
+no dependencies, larger resource/deadline budgets, skipped assertions or release actions.
 
 ---
 <!-- id: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c  file: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md -->

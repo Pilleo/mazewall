@@ -186,7 +186,7 @@ private fun hasBuildLogicValidation(workflow: String): Boolean {
                   run: |
                       set -o pipefail
                       mkdir -p build/reports/ci-resources
-                      python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+                      python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew :buildLogicCheck :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
                 - name: Upload Build Logic Diagnostics
                   if: always()
                   uses: actions/upload-artifact@v4
@@ -199,6 +199,8 @@ private fun hasBuildLogicValidation(workflow: String): Boolean {
                           buildSrc/build/reports/
                           buildSrc/build/test-results/
                           buildSrc/build/verification/
+                          build/test-results/consumerBuildLogicTest/
+                          build/reports/tests/consumerBuildLogicTest/
                       if-no-files-found: ignore
     """.trimIndent()
     return workflowJobBlock(workflow, "build-logic-validation").trimEnd().trimIndent() == expected
@@ -355,7 +357,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
         "Verify Restored Security Ownership", "Update Security Data", "Verify Updated Security Ownership",
         "Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot",
         "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot",
-        "Run Security Check", "Verify Final Security Ownership", "Upload Security Diagnostics",
+        "Run Security Check", "Run Demo Host Quality Gate", "Verify Final Security Ownership", "Upload Security Diagnostics",
     )
     if (security
         .lines()
@@ -458,6 +460,12 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
             env:
                 $binding
         """.trimIndent() &&
+        matches("Run Demo Host Quality Gate", """
+            if: ${'$'}{{ !cancelled() }}
+            run: |
+                ./gradlew :demos:vulnerable-web-app:unitCheck --no-daemon
+                python3 -m unittest discover -s exploits -p test_web_demo.py -k test_shared_image_is_built_once_for_all_three_modes
+        """.trimIndent()) &&
         matches("Verify Final Security Ownership", "if: always()\n$ownership") &&
         matches("Upload Security Diagnostics", """
             if: always()
@@ -469,6 +477,9 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                     security-analysis.log
                     build/reports/dependency-verification/
                     **/build/reports/dependency-check*
+                    demos/vulnerable-web-app/build/test-results/
+                    demos/vulnerable-web-app/build/reports/tests/
+                    build/reports/triage/
                 if-no-files-found: ignore
         """.trimIndent())
 }

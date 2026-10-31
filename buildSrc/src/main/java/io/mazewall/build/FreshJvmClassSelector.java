@@ -14,6 +14,7 @@ import java.util.Set;
 
 /** Minimal class-file metadata reader used to select annotated tests without class loading. */
 final class FreshJvmClassSelector {
+    private enum Discovery { FRESH_JVM, ALL_JUNIT }
     private static final Set<String> FRESH_JVM_DESCRIPTORS = Set.of(
         "Lio/mazewall/NeedsFreshJvm;",
         "Lio/mazewall/enforcer/api/NeedsFreshJvm;"
@@ -32,6 +33,14 @@ final class FreshJvmClassSelector {
     private FreshJvmClassSelector() {}
 
     static List<String> select(Iterable<File> roots) {
+        return select(roots, Discovery.FRESH_JVM);
+    }
+
+    static List<String> selectTests(Iterable<File> roots) {
+        return select(roots, Discovery.ALL_JUNIT);
+    }
+
+    private static List<String> select(Iterable<File> roots, Discovery discovery) {
         Map<String, ClassMetadata> classes = new HashMap<>();
         for (File root : roots) {
             if (!root.isDirectory()) continue;
@@ -52,9 +61,9 @@ final class FreshJvmClassSelector {
         classes.values().stream().sorted(Comparator.comparing(ClassMetadata::className))
             .filter(FreshJvmClassSelector::concrete)
             .filter(metadata -> !metadata.nested())
-            .filter(metadata -> hasFreshTestTree(metadata, classes, false, new LinkedHashSet<>()))
+            .filter(metadata -> hasFreshTestTree(metadata, classes, discovery == Discovery.ALL_JUNIT, new LinkedHashSet<>()))
             .map(ClassMetadata::className).forEach(selected::add);
-        if (selected.isEmpty()) {
+        if (selected.isEmpty() && discovery == Discovery.FRESH_JVM) {
             List<String> declarations = classes.values().stream()
                 .filter(metadata -> metadata.classAnnotated() || metadata.methods().stream().anyMatch(MethodMetadata::freshJvmAnnotated))
                 .map(ClassMetadata::className).sorted().toList();

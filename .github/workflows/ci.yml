@@ -190,7 +190,7 @@ jobs:
               id: host_unit
               # This gate intentionally precedes Podman setup: ordinary CI
               # runners must be able to prove unit behavior and coverage.
-              run: ./gradlew unitCheck --no-daemon
+              run: ./gradlew :unitCheck --no-daemon
             - name: Verify reproducible dependency state
               run: ./gradlew verifyGradleReproducibility --no-daemon
             - name: Prove configuration-cache reuse
@@ -295,7 +295,7 @@ jobs:
               run: |
                   set -o pipefail
                   mkdir -p build/reports/ci-resources
-                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew :buildLogicCheck :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
             - name: Upload Build Logic Diagnostics
               if: always()
               uses: actions/upload-artifact@v4
@@ -308,6 +308,8 @@ jobs:
                       buildSrc/build/reports/
                       buildSrc/build/test-results/
                       buildSrc/build/verification/
+                      build/test-results/consumerBuildLogicTest/
+                      build/reports/tests/consumerBuildLogicTest/
                   if-no-files-found: ignore
     mutation-tests:
         name: Mutation Validation
@@ -765,6 +767,11 @@ jobs:
                   python3 "$RUNNER_TEMP/security-snapshot.py" check-records security-analysis.log
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+            - name: Run Demo Host Quality Gate
+              if: ${{ !cancelled() }}
+              run: |
+                  ./gradlew :demos:vulnerable-web-app:unitCheck --no-daemon
+                  python3 -m unittest discover -s exploits -p test_web_demo.py -k test_shared_image_is_built_once_for_all_three_modes
             - name: Verify Final Security Ownership
               if: always()
               run: |
@@ -787,6 +794,9 @@ jobs:
                       security-analysis.log
                       build/reports/dependency-verification/
                       **/build/reports/dependency-check*
+                      demos/vulnerable-web-app/build/test-results/
+                      demos/vulnerable-web-app/build/reports/tests/
+                      build/reports/triage/
                   if-no-files-found: ignore
     go-validation:
         name: Agentless Go Validation

@@ -55,6 +55,7 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.test {
     useJUnitPlatform()
+    jvmArgumentProviders.add(io.mazewall.build.TestKitCacheArguments(gradle.gradleUserHomeDir))
     dependsOn(":portals:runtime:jar", ":platform:jar", ":enforcer:jar")
     systemProperty(
         "portal.codegen.portalJar",

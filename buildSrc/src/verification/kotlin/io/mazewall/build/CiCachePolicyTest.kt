@@ -432,6 +432,7 @@ object CiCachePolicyTest {
             "python3 scripts/ci_resource_probe.py" to "python3 scripts/other.py",
             "--output build/reports/ci-resources/build-logic.json" to "--output other.json",
             "buildLogicCheck" to "check",
+            ":consumerBuildLogicTest" to ":help",
             "--configuration-cache " to "",
             "--configuration-cache-problems=fail" to "--configuration-cache-problems=warn",
             "--no-daemon" to "",
@@ -446,6 +447,7 @@ object CiCachePolicyTest {
             "buildSrc/build/reports/" to "",
             "buildSrc/build/test-results/" to "",
             "buildSrc/build/verification/" to "",
+            "build/test-results/consumerBuildLogicTest/" to "",
         )
         for ((from, to) in mutations) {
             check(from in lane && from != to) { "Ineffective build-logic mutation: $from" }
@@ -802,6 +804,8 @@ object CiCachePolicyTest {
             "Verify Updated Security Ownership" to "Omit Updated Security Ownership",
             "Verify Restored Security Ownership" to "Omit Restored Security Ownership",
             "Verify Final Security Ownership" to "Omit Final Security Ownership",
+            ":demos:vulnerable-web-app:unitCheck" to ":help",
+            "test_shared_image_is_built_once_for_all_three_modes" to "omitted_image_regression",
             "NVD_API_KEY: \${{ secrets.NVD_API_KEY }}" to "NVD_API_KEY: unused",
             "steps.security_update.outcome == 'success'" to "steps.security_update.outcome != 'cancelled'",
             "steps.updated_ownership.outcome == 'success'" to "steps.updated_ownership.outcome != 'failure'",
