@@ -17,6 +17,72 @@ boundary proof. The accepted Task6c raw matrix uses immutable library producer
 [committed local acceptance](../../docs/internals/reviews/2026-10-12-integration-contract-completion.md)
 for source/JAR identities, actual results and remaining release prerequisites.
 
+## Optional global benchmark job
+
+Use **Actions → Global Benchmarks → Run workflow** and choose the ref to observe.
+The workflow must exist on the default branch before GitHub exposes manual
+dispatch. With GitHub CLI, after that prerequisite:
+
+```bash
+gh workflow run benchmarks.yml --ref master
+gh run list --workflow benchmarks.yml
+gh run download RUN_ID --name global-benchmarks-RUN_ID-ATTEMPT --dir ./benchmark-evidence
+```
+
+This is manual-only: no PR/push/scheduled execution, required-check dependency or
+release-publication permission. It does not run the removed pitch-specific script,
+Koog/Spring application measurements, live models or the separate profiler
+performance matrices. There is no replacement benchmark framework or timing
+threshold. Correctness, containment, cancellation and retirement tests stay in
+normal required CI independently of this workflow.
+
+The first job runs this existing four-mode ASCII harness, not every workload in
+the repository. On a fresh Ubuntu26.04/JDK25 runner it:
+
+1. Builds the selected commit with the existing two-stage Portal plugin bootstrap
+   and stages real Maven publications **locally**, including the native-fixture
+   interface required by the harness's manifest-selection controls. It publishes
+   nothing to a registry. Native build tools (Clang/LLVM, CMake, pkg-config and SDT
+   headers) are installed; missing kernel/native support fails rather than falling
+   back to an unprotected mode.
+2. Creates `0.1.0-benchmark.<12-character-commit>` and a new coordinate lock with
+   `dependencies --write-locks`, then runs strict `check verifyPublishedClosure
+   installDist`. Existing P617/thread-task3 locks and historical evidence below are
+   unchanged. Host controls do not count as native measurement evidence.
+3. Freezes tracked source, staged publications, the installed runtime JAR closure
+   and lock SHA-256s. Before native execution it verifies the actual embedded
+   worker bytes against their installed metadata and writes `custody.json`.
+4. Runs one fresh JVM: `--samples 8 --size 1024 --pressure 4 --seconds 60
+   --concurrency 1`. Each mode has one first-measured and eight warm-labelled
+   ordinary samples; pressure observations stay separate. This is not JIT-cold,
+   a statistically qualified performance study or equivalent isolation across modes.
+5. Checks frozen inputs again and runs the existing
+   `verifyIntegrationBoundaryEvidence` validator, including corruption controls
+   and descriptive summaries. Wrong/missing effects, timeouts, uncertain retirement,
+   changed bytes or unsafe/unknown resource evidence fail the optional run. Slow
+   timings alone do not fail a threshold.
+
+The build/native commands use the existing Linux resource probe for owned-descendant
+retirement and argv/exit/memory receipts. Build execution is bounded to900seconds;
+native execution to240seconds, leaving room for the harness's existing setup/close
+limits. The job budget is30minutes. Build logs are capped at16MiB; native/validation
+logs at8MiB per file while writing, not after a noisy child exits. The resource
+probe and hosted-machine noise can influence observations.
+
+Download `global-benchmarks-<run-id>-<attempt>` (14-day retention). After the command
+above, `./benchmark-evidence/run-<run-id>-<attempt>/` contains `raw.log`,
+`validation.log`, `build.log`, `source-revision.txt`, `source-status.txt`, explicit
+kernel/CPU/JVM metadata in `environment.txt`, `source.sha256`, `artifacts.sha256`,
+`consumer.lockfile`, `custody.json`, and build/native resource receipts. Upload runs
+on success or failure, subject to GitHub allowing cleanup/upload after cancellation.
+Caches, local Maven repositories, runtime JARs and materialized worker caches are
+not uploaded. A failed run's partial log is diagnostics, never valid measurements.
+
+These automatically captured identities establish what this checkout ran, **not**
+authenticated released-byte provenance, independent policy approval, production
+capacity, application/model performance or a stable cross-run regression baseline.
+Keep the historical P617 acceptance and independent custody recipes below separate.
+
 ## Fast host-only checks from any checkout
 
 The standalone `check` task now runs the existing `--selfcheck` and

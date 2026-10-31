@@ -1,0 +1,5 @@
+Checkout deployment readiness
+Service: checkout
+Pool maximum: 20
+Owner: Ada
+This is synthetic evaluation data, not production telemetry.

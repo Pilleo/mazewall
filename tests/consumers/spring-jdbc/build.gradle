@@ -156,3 +156,37 @@ tasks.register('verifySecurityNative', JavaExec) {
     jvmArgs '--enable-native-access=ALL-UNNAMED'
     args 'verify-security', securityRoot.get().asFile.absolutePath
 }
+
+def recordRoot = objects.directoryProperty().convention(layout.buildDirectory.dir('record-native-proof'))
+tasks.register('measureRecordCandidate', JavaExec) {
+    dependsOn tasks.jar, tasks.named('otherJar')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = packagedClasspath
+    mainClass = 'consumer.spring.NativeRecordConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    doFirst {
+        def root = java.nio.file.Files.createTempDirectory(recordRoot.get().asFile.parentFile.toPath(), 'record-fixture-').toFile()
+        recordRoot.set(layout.projectDirectory.dir(root.absolutePath))
+        args 'measure', root.absolutePath
+    }
+}
+tasks.register('approveRecordFixture') {
+    dependsOn tasks.named('measureRecordCandidate')
+    doLast {
+        def root = recordRoot.get().asFile
+        def review = new Properties()
+        review.setProperty('reviewer', 'external-known-record-native-test-fixture')
+        review.setProperty('documentSha256', digest(new File(root, 'candidate.json')))
+        review.setProperty('jarSha256', digest(tasks.jar.archiveFile.get().asFile))
+        review.setProperty('resourceGeneration', new File(root, 'generation.txt').text)
+        new File(root, 'trusted-review.properties').withOutputStream { review.store(it, 'Explicit synthetic test approval only') }
+    }
+}
+tasks.register('verifyRecordNative', JavaExec) {
+    dependsOn tasks.named('approveRecordFixture')
+    javaLauncher = javaToolchains.launcherFor(java.toolchain)
+    classpath = packagedClasspath
+    mainClass = 'consumer.spring.NativeRecordConsumer'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    doFirst { args 'verify', recordRoot.get().asFile.absolutePath }
+}

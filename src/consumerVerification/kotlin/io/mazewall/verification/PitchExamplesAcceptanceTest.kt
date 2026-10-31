@@ -1,0 +1,361 @@
+package io.mazewall.verification
+
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
+import java.time.Duration
+import java.util.jar.Attributes
+import java.util.jar.JarEntry
+import java.util.jar.JarFile
+import java.util.jar.JarOutputStream
+import java.util.jar.Manifest
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
+import javax.xml.XMLConstants
+import javax.xml.parsers.DocumentBuilderFactory
+
+class PitchExamplesAcceptanceTest {
+    @TempDir private lateinit var root: Path
+
+    @Test fun `lock seeding and cache replay execute each forced fresh consumer task only once`() {
+        val copy = Files.createDirectory(root.resolve("spring-report-api"))
+        Files.writeString(copy.resolve("settings.gradle"), "rootProject.name = 'single-pass-fixture'\n")
+        Files.writeString(
+            copy.resolve("build.gradle"),
+            """
+            def generatedAtConfiguration = providers.fileContents(layout.projectDirectory.file('generated-input.flag')).asText.orElse('absent').get()
+            abstract class CountRuns extends DefaultTask {
+                @OutputFile abstract RegularFileProperty getCounter()
+                @OutputFile abstract RegularFileProperty getGenerated()
+                @TaskAction void count() {
+                    counter.get().asFile.append('executed\n')
+                    generated.get().asFile.text = 'created'
+                }
+            }
+            ['nativeTest', 'presentationTest'].each { taskName ->
+                tasks.register(taskName, CountRuns) {
+                    counter.set(layout.projectDirectory.file(taskName + '.count'))
+                    generated.set(layout.projectDirectory.file('generated-input.flag'))
+                    outputs.upToDateWhen { false }
+                    outputs.cacheIf { false }
+                }
+            }
+        """.trimIndent(),
+        )
+        Files.createDirectories(copy.resolve("gradle"))
+        Files.writeString(
+            copy.resolve("gradle/verification-metadata.xml"),
+            """
+            <verification-metadata xmlns="https://schema.gradle.org/dependency-verification">
+              <configuration><verify-metadata>true</verify-metadata><verify-signatures>false</verify-signatures></configuration>
+              <components/>
+            </verification-metadata>
+        """.trimIndent(),
+        )
+        val evidence = Files.createDirectory(root.resolve("evidence"))
+        PitchExamplesAcceptance.buildConsumer(
+            listOf(Path.of("gradlew").toAbsolutePath().toString(), "-p", copy.toString(), "--console=plain", "--max-workers=1"),
+            copy,
+            evidence,
+            listOf("nativeTest", "presentationTest"),
+        )
+        for (name in listOf("nativeTest", "presentationTest")) assertEquals("executed\n", Files.readString(copy.resolve("$name.count")))
+        val cached = Files.readString(evidence.resolve("spring-report-api-cache-reuse.stdout.log"))
+        check("Configuration cache entry reused" in cached)
+    }
+
+    @Test fun `package inspection refuses absent or source substituted publication bytes`() {
+        val repository = Files.createDirectory(root.resolve("repo"))
+        val version = "0.1.0-integration.123456789abc"
+        val modules = listOf("platform", "enforcer", "mazewall-spring-boot", "mazewall-spring-boot-starter")
+        for (module in modules) {
+            val file = repository.resolve("io/mazewall/$module/$version/$module-$version.jar")
+            Files.createDirectories(file.parent)
+            Files.writeString(file, "published-$module")
+        }
+
+        fun fixture(
+            name: String,
+            corrupt: Boolean,
+            missing: Boolean,
+        ): Path {
+            val jar = root.resolve("$name.jar")
+            val manifest = Manifest().apply {
+                mainAttributes[Attributes.Name.MANIFEST_VERSION] = "1.0"
+                mainAttributes.putValue("Main-Class", "org.springframework.boot.loader.launch.JarLauncher")
+                mainAttributes.putValue("Spring-Boot-Version", "4.1.1")
+            }
+            JarOutputStream(Files.newOutputStream(jar), manifest).use { out ->
+                for (module in modules.filterNot { missing && it == "enforcer" }) {
+                    out.putNextEntry(JarEntry("BOOT-INF/lib/$module-$version.jar"))
+                    out.write(if (corrupt && module == "enforcer") byteArrayOf(0) else Files.readAllBytes(repository.resolve("io/mazewall/$module/$version/$module-$version.jar")))
+                    out.closeEntry()
+                }
+            }
+            return jar
+        }
+        PitchExamplesAcceptance.inspectSpring(fixture("valid", false, false), repository, version)
+        assertThrows(IllegalStateException::class.java) { PitchExamplesAcceptance.inspectSpring(fixture("corrupt", true, false), repository, version) }
+        assertThrows(IllegalStateException::class.java) { PitchExamplesAcceptance.inspectSpring(fixture("missing", false, true), repository, version) }
+    }
+
+    @Test fun `test reports must show exact cases and never skipped failed or absent observations`() {
+        val file = root.resolve("tests.xml")
+
+        fun report(
+            tests: Int,
+            skipped: Int,
+            failures: Int,
+        ): String = "<testsuite tests=\"$tests\" errors=\"0\" failures=\"$failures\" skipped=\"$skipped\">" + "<testcase/>".repeat(tests) + "</testsuite>"
+        for (bad in listOf(report(0, 0, 0), report(2, 1, 0), report(2, 0, 1), "<testsuite/>")) {
+            Files.writeString(file, bad)
+            assertThrows(IllegalStateException::class.java) { PitchExamplesAcceptance.requireTestReport(file, 2) }
+        }
+        Files.writeString(file, report(2, 0, 0))
+        PitchExamplesAcceptance.requireTestReport(file, 2)
+    }
+
+    @Test fun `evaluation archives refuse absent or substituted input bytes`() {
+        val input = Files.writeString(root.resolve("application.log"), "actual synthetic input")
+        val expected = mapOf("fixtures/application.log" to input)
+        for ((label, contents) in listOf("valid" to "actual synthetic input", "substituted" to "different input", "missing" to null)) {
+            val archive = root.resolve("$label.zip")
+            ZipOutputStream(Files.newOutputStream(archive)).use { zip ->
+                if (contents != null) {
+                    zip.putNextEntry(ZipEntry("fixtures/application.log"))
+                    zip.write(contents.toByteArray())
+                    zip.closeEntry()
+                }
+            }
+            if (label == "valid") {
+                PitchExamplesAcceptance.requireArchiveFiles(archive, expected)
+            } else {
+                assertThrows(IllegalStateException::class.java) { PitchExamplesAcceptance.requireArchiveFiles(archive, expected) }
+            }
+        }
+    }
+}
+
+internal object PitchExamplesAcceptance {
+    fun buildConsumer(
+        command: List<String>,
+        copy: Path,
+        evidence: Path,
+        tasks: List<String>,
+    ) {
+        val name = copy.fileName.toString()
+        val metadata = copy.resolve("gradle/verification-metadata.xml")
+        val pinned = Files.readString(metadata)
+        val historicalLocks = Files.walk(copy).use { paths ->
+            paths.filter { Files.isRegularFile(it) && it.fileName.toString() == "gradle.lockfile" }.toList().associateWith(Files::readAllBytes)
+        }
+        for ((label, flags) in listOf(
+            "locks" to listOf("--write-locks", "--no-configuration-cache"),
+            "strict" to listOf("--configuration-cache", "--configuration-cache-problems=fail"),
+            "cache-prime" to listOf("--configuration-cache", "--configuration-cache-problems=fail", "--dry-run"),
+            "cache-reuse" to listOf("--configuration-cache", "--configuration-cache-problems=fail", "--dry-run"),
+        )) {
+            val selected = if (label == "locks") {
+                if (name == "koog-document-agent") listOf(":dependencies", ":boundary-fixture:dependencies") else listOf(":dependencies")
+            } else {
+                tasks
+            }
+            println("PITCH_CONSUMER_PHASE name=$name phase=$label evidence=$evidence")
+            val result = ConsumerFixture.command(command + selected + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
+            check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}; evidence=$evidence" }
+            if (label == "cache-reuse") {
+                check("Configuration cache entry reused" in result.stdout) {
+                "Copied $name cache replay did not restore its post-build graph; evidence=$evidence\n${result.stdout.takeLast(3000)}${result.stderr.takeLast(1000)}"
+            }
+            }
+            check(Files.readString(metadata) == pinned) { "Copied consumer changed dependency approvals" }
+            check(historicalLocks.all { (path, bytes) -> Files.readAllBytes(path).contentEquals(bytes) }) { "New-coordinate build changed historical locks" }
+        }
+    }
+
+    fun requireArchiveFiles(
+        archive: Path,
+        files: Map<String, Path>,
+    ) {
+        ZipFile(archive.toFile()).use { zip ->
+            val entries = zip
+                .entries()
+                .asSequence()
+                .map { it.name }
+                .toList()
+            check(entries.size == entries.distinct().size) { "Duplicate evaluation archive entry: $archive" }
+            files.forEach { (name, source) ->
+                val entry = checkNotNull(zip.getEntry(name)) { "Missing evaluation input: $archive!/$name" }
+                check(zip.getInputStream(entry).use { it.readAllBytes() }.contentEquals(Files.readAllBytes(source))) { "Substituted evaluation input: $archive!/$name" }
+            }
+        }
+    }
+
+    fun inspectSpring(
+        jar: Path,
+        repository: Path,
+        version: String,
+    ) {
+        JarFile(jar.toFile()).use { archive ->
+            check(archive.manifest.mainAttributes.getValue("Main-Class") == "org.springframework.boot.loader.launch.JarLauncher")
+            check(archive.manifest.mainAttributes.getValue("Spring-Boot-Version") == "4.1.1")
+            val names = archive
+                .entries()
+                .asSequence()
+                .map { it.name }
+                .toList()
+            check(names.size == names.distinct().size)
+            check(names.none { it.startsWith("BOOT-INF/classes/demo/report/HeldReport") }) { "Test-only held-cleanup fixture leaked into normal application" }
+            for (module in listOf("platform", "enforcer", "mazewall-spring-boot", "mazewall-spring-boot-starter")) {
+                val expected = "BOOT-INF/lib/$module-$version.jar"
+                val moduleJar = Regex("BOOT-INF/lib/${Regex.escape(module)}-[0-9].*\\.jar")
+                check(names.filter(moduleJar::matches) == listOf(expected)) { "Missing, duplicate or wrong-version publication: $module" }
+                val nested = archive.getInputStream(archive.getJarEntry(expected)).use { it.readAllBytes() }
+                check(nested.contentEquals(Files.readAllBytes(repository.resolve("io/mazewall/$module/$version/$module-$version.jar")))) { "Source-substituted nested publication: $module" }
+            }
+        }
+    }
+
+    fun requireTestReport(
+        path: Path,
+        expected: Int,
+    ) {
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+        val report = factory.newDocumentBuilder().parse(path.toFile()).documentElement
+        check(
+            report.tagName == "testsuite" &&
+            report.getAttribute("tests") == expected.toString() &&
+            report.getElementsByTagName("testcase").length == expected &&
+            listOf("failures", "errors", "skipped").all { report.getAttribute(it) == "0" },
+        ) { "Required actual test observations missing: $path" }
+    }
+
+    fun run(
+        root: Path,
+        repository: Path,
+        version: String,
+        evidence: Path,
+    ) {
+        val copies = Files.createTempDirectory("mazewall-pitch-consumers-")
+        for (name in listOf("koog-document-agent", "spring-report-api")) {
+            val source = root.resolve("demos/$name")
+            val copy = Files.createDirectory(copies.resolve(name))
+            Files.walk(source).use { paths ->
+                paths.filter { path -> source.relativize(path).none { it.toString() in setOf("build", ".gradle", ".kotlin") } }.forEach { path ->
+                    val target = copy.resolve(source.relativize(path))
+                    check(!Files.isSymbolicLink(path)) { "Consumer source alias: $path" }
+                    if (Files.isDirectory(path)) Files.createDirectories(target) else Files.copy(path, target, COPY_ATTRIBUTES)
+                }
+            }
+            AutoCloseable { ConsumerFixture.retainTestReports(copy, evidence.resolve("$name-reports")) }.use {
+            val metadata = copy.resolve("gradle/verification-metadata.xml")
+            val modules = if (name == "koog-document-agent") {
+                listOf("platform", "enforcer", "runtime", "koog", "worker", "codegen", "profiler")
+            } else {
+                listOf("platform", "enforcer", "mazewall-spring-boot", "mazewall-spring-boot-starter")
+            }
+            var pinned = withOptionalPublicationChecksums(Files.readString(metadata), repository, version, modules)
+            if (name == "koog-document-agent") {
+                val artifact = "io.mazewall.portal.codegen.gradle.plugin-$version.pom"
+                val marker = repository.resolve("io/mazewall/portal/codegen/io.mazewall.portal.codegen.gradle.plugin/$version/$artifact")
+                val component = "<component group=\"io.mazewall.portal.codegen\" name=\"io.mazewall.portal.codegen.gradle.plugin\" version=\"$version\">" +
+                    "<artifact name=\"$artifact\"><sha256 value=\"${BootFixture.hash(marker)}\" origin=\"Exact committed producer plugin marker\"/></artifact></component>"
+                pinned = pinned.replace("</components>", "$component</components>")
+            }
+            Files.writeString(metadata, pinned)
+            val command = listOf(
+                copy.resolve("gradlew").toString(),
+                "-p",
+                copy.toString(),
+                "--console=plain",
+                "--max-workers=1",
+                "-PconsumerVersion=$version",
+                "-PconsumerRepository=$repository",
+            )
+            val tasks = if (name == "koog-document-agent") {
+                listOf("test", "nativeTest", "installDist", "distZip", "sourceZip")
+            } else {
+                listOf("test", "nativeTest", "presentationTest", "bootJar", "evaluationZip", "sourceZip")
+            }
+            buildConsumer(command, copy, evidence, tasks)
+            val audit = ConsumerFixture.command(command + listOf("verifyPublishedClosure", "--no-configuration-cache"), copy, evidence, "$name-closure", Duration.ofMinutes(8))
+            check(audit.exitCode == 0 && "PUBLISHED io.mazewall:" in audit.stdout) { "Copied consumer closure audit failed: ${audit.stdout}${audit.stderr}" }
+            if (name == "koog-document-agent") {
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.DocumentAgentTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ScriptedModelTest.xml"), 5)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.PortalDocumentAgentTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentReportTest.xml"), 7)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.IncidentInvocationTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.ObservedAgentTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.koog.LiveClientClasspathTest.xml"), 2)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.DocumentAgentNativeTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentAgentTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.IncidentBoundaryTest.xml"), 1)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.koog.OutlineFileNativeTest.xml"), 4)
+                val inputs = listOf("README.md") +
+                    listOf("pool-exhaustion", "wrong-endpoint").flatMap { bundle ->
+                    listOf("application.log", "deployment.md", "pool-settings.txt").map { "fixtures/incidents/$bundle/$it" }
+                }
+                requireArchiveFiles(copy.resolve("build/distributions/koog-document-agent-sources.zip"), inputs.associateWith(copy::resolve))
+                requireArchiveFiles(copy.resolve("build/distributions/koog-document-agent.zip"), inputs.associate { "koog-document-agent/$it" to copy.resolve(it) })
+                val launcher = copy.resolve("build/install/koog-document-agent/bin/koog-document-agent").toString()
+                val outline = ConsumerFixture.command(
+                    listOf(launcher, "outline", copy.resolve("build/install/koog-document-agent/fixtures/incidents/pool-exhaustion/deployment.md").toString()),
+                    copy,
+                    evidence,
+                    "koog-installed-file-outline",
+                    Duration.ofMinutes(1),
+                )
+                check(outline.exitCode == 0 && "# Document outline\nDeployment" in outline.stdout && outline.stdout.lineSequence().count { it.startsWith("OUTLINE_FILE_RETIRED ") } == 1) {
+                    "Installed actual-file command failed: ${outline.stdout}${outline.stderr}"
+                }
+                val noFallback = ConsumerFixture.command(
+                    listOf(launcher, "triage", "fixtures/incidents/pool-exhaustion", "fixture", "not-a-live-model"),
+                    copy,
+                    evidence,
+                    "koog-installed-no-fixture-fallback",
+                    Duration.ofMinutes(1),
+                )
+                check(noFallback.exitCode != 0 && "INCIDENT_FAILED INVALID_INPUT" in noFallback.stderr && "MODEL: live" !in noFallback.stdout) {
+                    "Installed incident command accepted an implicit fixture provider"
+                }
+                val lib = copy.resolve("build/install/koog-document-agent/lib")
+                for (module in listOf("platform", "enforcer", "runtime", "koog")) {
+                    check(Files.readAllBytes(lib.resolve("$module-$version.jar")).contentEquals(Files.readAllBytes(repository.resolve("io/mazewall/$module/$version/$module-$version.jar")))) {
+                        "Substituted Koog publication: $module"
+                    }
+                }
+                Files.list(lib).use { files -> check(files.noneMatch { "boundary" in it.fileName.toString() || "profiler" in it.fileName.toString() || "native-probe" in it.fileName.toString() }) }
+                JarFile(lib.resolve("koog-document-agent.jar").toFile()).use { host ->
+                    check(host.getInputStream(host.getJarEntry("META-INF/mazewall/portal/services.index")).bufferedReader().use { it.readText() } == "document-outline\n")
+                    check(host.entries().asSequence().none { it.name.startsWith("demo/boundary/") || it.name == "demo/documents/MarkdownOutline.class" })
+                    check(listOf("IncidentApplication", "OutlineFileApplication").all { host.getJarEntry("demo/koog/$it.class") != null })
+                    check(listOf("IncidentFixtureExecutor", "IncidentFixtureProbe", "IncidentBoundaryProbe").none { host.getJarEntry("demo/koog/$it.class") != null })
+                }
+            } else {
+                inspectSpring(copy.resolve("build/libs/application.jar"), repository, version)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportServiceTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportContextTest.xml"), 3)
+                requireTestReport(copy.resolve("build/test-results/test/TEST-demo.report.ReportListenerTest.xml"), 5)
+                requireTestReport(copy.resolve("build/test-results/nativeTest/TEST-demo.report.ReportHttpTest.xml"), 11)
+                requireTestReport(copy.resolve("build/test-results/presentationTest/TEST-demo.report.ReportHttpTest.xml"), 1)
+                val inputs = listOf("README.md", "fixtures/templates/approved.txt", "fixtures/templates/forbidden.txt")
+                requireArchiveFiles(copy.resolve("build/distributions/spring-report-api-sources.zip"), inputs.associateWith(copy::resolve))
+                requireArchiveFiles(
+                    copy.resolve("build/distributions/spring-report-api.zip"),
+                    inputs.associate { it.removePrefix("fixtures/") to copy.resolve(it) } + ("application.jar" to copy.resolve("build/libs/application.jar")),
+                )
+            }
+            println("PITCH_COPIED_CONSUMER_OK name=$name version=$version native=executed packaging=published-only cache=reused-without-execution")
+            }
+        }
+    }
+}

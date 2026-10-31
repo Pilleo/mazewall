@@ -248,6 +248,20 @@ configurations.named("toolingImplementation") {
     extendsFrom(configurations.implementation.get())
 }
 
+tasks.register<JavaExec>("policyDiff") {
+    group = "verification"
+    description = "Compare two reviewed operation-document candidates without granting approval."
+    classpath = toolingSourceSet.runtimeClasspath
+    mainClass.set("io.mazewall.profiler.tools.PolicyDiff")
+    val oldDocument = providers.gradleProperty("oldOperationDocument")
+    val newDocument = providers.gradleProperty("newOperationDocument")
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf(oldDocument.get(), newDocument.get())
+        },
+    )
+}
+
 tasks.register<JavaExec>("tierEVerifyArtifacts") {
     group = "verification"
     description = "Verify one retained 15-fork Tier E artifact directory using Kotlin, without a container endpoint"

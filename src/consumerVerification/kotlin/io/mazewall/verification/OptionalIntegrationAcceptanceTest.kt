@@ -102,9 +102,11 @@ class OptionalIntegrationAcceptanceTest {
         val original = Path.of(System.getProperty("consumerWorkspace"))
         SharedVerificationLock.acquire(SharedVerificationLock.resolve(original, System.getProperty("verificationLock"))).use {
             val before = ConsumerFixture.snapshot(original)
+            val evidence = ConsumerFixture.optionalIntegrationEvidence(original)
+            println("OPTIONAL_INTEGRATION_EVIDENCE $evidence")
             try {
-                val root = ConsumerFixture.checkout(original)
-                val evidence = Files.createDirectory(root.resolve("optional-integration-evidence"))
+                val root = ConsumerFixture.checkout(original, evidence)
+                val completed = ConsumerFixture.producerReports(root, evidence).use {
                 var sequence = 0
 
                 fun run(
@@ -120,7 +122,23 @@ class OptionalIntegrationAcceptanceTest {
                 }
 
                 val revision = run("producer-revision", listOf("git", "rev-parse", "HEAD")).trim()
-                val producerScopes = listOf("platform", "enforcer", "profiler", "portals", "integrations", "buildSrc", "gradle", "build.gradle.kts", "settings.gradle.kts", "gradle.properties")
+                val producerScopes = listOf(
+                    "platform",
+                    "enforcer",
+                    "profiler",
+                    "portals",
+                    "integrations",
+                    "buildSrc",
+                    "gradle",
+                    "build.gradle.kts",
+                    "settings.gradle.kts",
+                    "gradle.properties",
+                    "demos/koog-document-agent",
+                    "demos/spring-report-api",
+                    "src/consumerVerification",
+                    "tests/consumers/spring-jdbc",
+                    ".github/workflows/ci.yml",
+                )
                 run("committed-producer", listOf("git", "diff", "--exit-code", revision, "--") + producerScopes)
                 val unknown = run("identified-producer", listOf("git", "ls-files", "--others", "--exclude-standard", "--") + producerScopes)
                 check(unknown.isBlank()) { "Commit the actual producer inputs before exact-publication acceptance: $unknown" }
@@ -157,8 +175,11 @@ class OptionalIntegrationAcceptanceTest {
                 ) +
                     listOf(
                     ":platform",
-                        ":enforcer",
-                        ":portals:runtime",
+                         ":enforcer",
+                         ":profiler",
+                         ":portals:runtime",
+                         ":portals:worker",
+                         ":portals:codegen",
                         ":integrations:koog",
                     ":integrations:spring:mazewall-spring-boot",
                         ":integrations:spring:mazewall-spring-boot-starter",
@@ -171,6 +192,7 @@ class OptionalIntegrationAcceptanceTest {
                     repository.resolve("io/mazewall/koog-contained-tool/$version/koog-contained-tool-$version.jar"),
                     KoogPackageKind.NATIVE_FIXTURE,
                 )
+                PitchExamplesAcceptance.run(root, repository, version, evidence)
                 val koog = gradle + listOf("-p", root.resolve("tests/consumers/koog-portal").toString()) + properties
                 val koogVerification = root.resolve("tests/consumers/koog-portal/gradle/verification-metadata.xml")
                 val koogPinned = withOptionalPublicationChecksums(
@@ -208,7 +230,7 @@ class OptionalIntegrationAcceptanceTest {
                     gradle +
                         listOf("-p", root.resolve("tests/consumers/spring-jdbc").toString(), "-PuseStarter=true") +
                         properties +
-                        listOf("verifyNative", "verifySecurityNative", "presentationTest"),
+                        listOf("verifyNative", "verifySecurityNative", "verifyRecordNative", "presentationTest"),
                 )
                 val springConsumer = root.resolve("tests/consumers/koog-spring")
                 val spring = gradle + listOf("-p", springConsumer.toString()) + properties
@@ -259,7 +281,9 @@ class OptionalIntegrationAcceptanceTest {
                         ),
                     Duration.ofMinutes(15),
                 )
-                println("OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence")
+                "OPTIONAL_INTEGRATION_ACCEPTANCE_PASS producer=$revision version=$version evidence=$evidence"
+                }
+                println(completed)
             } finally {
                 val after = ConsumerFixture.snapshot(original)
                 check(before == after) {

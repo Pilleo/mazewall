@@ -267,7 +267,7 @@ retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
 unsafe required-check joins. They execute the extracted join shell command for
 all 625 core/mutation/security/build-logic combinations with Go fixed to success,
-then every Go result with the other prerequisites successful. Only five literal
+then every Go and optional-integration result with the other prerequisites successful. Only six literal
 successes pass. Existing security125/legacy25 projections fix the extra results
 explicitly to success. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
@@ -399,10 +399,58 @@ blank NVD credentials and docs-only changes retain the existing no-scan policy;
 an eligible-key flag or a green skipped job is not evidence of executed analysis.
 Always-scheduled ownership and diagnostics retain update/analysis logs and reports.
 
+### Optional integration feedback and diagnostics
+
+The source-bound optional gate stages the exact SDK publications once. It checks
+the two independent copied applications before the remaining legacy consumer
+matrix. Each application has four fixed phases:
+
+1. `dependencies --write-locks` seeds the new coordinate without running tests or
+   packaging; Koog also resolves its separate boundary-fixture dependencies.
+2. One strict configuration-cache build executes the actual host/native/presentation
+   tasks and produces the ordinary distributions. Native results remain uncached.
+3. A `--dry-run` of that same graph primes its post-build filesystem state without
+   task actions. This handles plugins such as Boot that observe class directories
+   which the real build has just created.
+4. A second identical `--dry-run` must restore that configuration cache, again
+   without task actions. These are fixed setup/proof phases, not retries or another
+   native pass.
+
+The host harness exercises the production phase runner with real Gradle tasks
+whose outputs are always forced fresh and whose real execution creates an observed
+configuration input. Their counters must each contain exactly one execution, not
+three, even across post-build graph priming. Historical locks and dependency approvals are checked
+after every phase, and the complete mandatory JUnit inventory comes from the real
+strict build. No skipped or failed test observation is accepted as a native pass.
+The gate runs no application benchmark forks. The pitch-only Python driver and
+its benchmark-only Kotlin entry/tasks have been removed; correctness, containment,
+cancellation, transaction and physical-retirement checks remain mandatory.
+
+Every invocation creates a unique owned
+`build/reports/optional-integrations/run-*/` directory in the caller's checkout,
+including when commands execute in a disposable clone. Full child command logs
+and ownership/exit receipts remain there, including the initial checkout clone's
+stdout/stderr and receipt if acquisition fails. Copied applications retain their JUnit
+XML and HTML reports in `<application>-reports/` on success or failure.
+The SDK producer and legacy module projects use the same collector in an outer
+exception-safe scope, exporting their reports from the disposable checkout into
+`<project-path>-reports/` (and `producer-root-reports/` for root tasks). Collection
+continues for other modules when one report tree fails; every retention error
+remains a blocking failure or is suppressed on the original command failure. The
+final acceptance marker is printed only after this scope closes successfully.
+An early
+compile failure requires no invented report; retention failures are suppressed
+on the original command failure. Report aliases, including intermediate source and
+destination parents, are refused before traversal. Unreadable parents remain
+retention errors, not evidence that reports were never created. CI always uploads these allowlisted logs, receipts and test reports,
+not temporary source trees, Gradle caches, SDK archives or credential state. The
+container's writable checkout bind keeps this directory visible to host artifact
+collection. The workflow-policy regression rejects removal of failure-time uploads.
+
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation]`
-and `if: always()`; its shell requires all five results to equal `success`.
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]`
+and `if: always()`; its shell requires all six results to equal `success`.
 Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
@@ -514,6 +562,36 @@ effective compiler/header/linker/environment inputs. The native library is not s
 as portable cached protection evidence. `bash scripts/tests/cet_fixture_cache_test.sh`
 verifies unchanged reuse and source/header/compiler/missing-output invalidation in an
 independent Gradle fixture.
+
+## Optional global benchmarks
+
+`.github/workflows/benchmarks.yml` is a separate `workflow_dispatch`-only workflow,
+not a PR/push/scheduled trigger or a prerequisite of the six-lane required join or
+publication. It runs the existing integration-boundary harness unchanged on
+Linux/JDK25. No performance threshold, comparison bot or new benchmark framework
+is added. See the [operator recipe and evidence inventory](../../../../benchmarks/integration-boundaries/README.md#optional-global-benchmark-job).
+
+The workflow stages the selected commit's real publications into a local Maven
+repository, seeds a new coordinate-specific consumer lock, checks the published
+closure and host controls, then freezes source/installed/publication/lock hashes
+and verifies the embedded worker bundle before native execution. Historical locks,
+publication identities and retained results are not rewritten. This automatic
+source-bound freeze is not independent release authentication or review authority.
+The existing raw validator still requires actual effects, ownership/retirement and
+complete evidence; optional does not mean errors become warnings.
+
+The existing Linux resource probe owns the bounded build/native commands and
+retains argv, command status and memory/cleanup receipts. File-size-limited log
+sinks prevent unbounded capture storage. Always-uploaded artifacts contain only
+raw/build/validation logs, identity manifests, the generated lock, explicit
+noncredential environment metadata and JSON receipts—not caches, SDK archives or
+the temporary worker bundle. Hosted timing is descriptive, not a stable baseline,
+production capacity, model inference timing or equivalent-isolation proof.
+
+Host regressions execute the actual workflow freeze/check shell against temporary
+Git/publication/JAR fixtures: unchanged inputs pass, a substituted publication
+fails, and mismatched embedded worker bytes cannot mint a custody receipt. The
+workflow file is a declared `consumerHarnessTest` input so edits rerun these tests.
 
 ## Privileged kernel quality
 

@@ -75,7 +75,8 @@ business failure and a post-authorization denial using a real Spring transaction
 interceptor and an instrumented host transaction manager.
 
 Only explicitly listed interface methods whose actual bridged implementations return primitives/void, primitive
-wrappers, `String`, or `byte[]` are admitted. Unknown methods, suspend signatures,
+wrappers, `String`, or `byte[]` are admitted by S0. Qualified JDBC additionally admits
+the bounded conventional records described below. Unknown methods, suspend signatures,
 lazy/reactive/opaque shapes, CGLIB, nested proxy topology, dynamic pointcuts,
 additional advice, and mutable/unproved chains are rejected. Advisor/advice,
 pointcut, transaction manager/source/definition, and target-source drift are
@@ -143,6 +144,27 @@ Direct references/self-invocation, shared heap, preopened descriptors, independe
 executors, construction/init and late work are outside the proxy body boundary.
 In-process containment is not an arbitrary-code isolation boundary. Closing a
 runtime or receipt does not uninstall permanent restrictions from live threads.
+
+## Bounded Java record results (qualified JDBC only)
+
+A public, nongeneric record in the reviewed target's exact defining loader and
+code-source URI may have1–16 components of primitive, boxed primitive or `String`.
+Arrays (including byte arrays), collections, nested records, entities, lazy graphs,
+Kotlin data classes and arbitrary DTOs remain rejected. Binding inspects actual
+record bytecode and accepts only ordinary own-field getters; custom executable
+accessors and serialization hooks reject without invoking them. This reuses Spring
+ASM and adds no parser/serialization dependency or public API.
+
+Aggregate nonnull strings must be valid Unicode and at most65536 UTF-8 bytes. Null
+reference components and a null whole record are allowed. Validation runs on the
+protected worker **inside diagnosis and before physical JDBC commit**. Invalid
+results cause rollback and retained failure evidence, even when an outer approved
+call catches a nested invalid-result exception. The local failure is an ordinary
+invalid-result cause, not invented kernel-denial evidence. Conflicting rollback rules
+and nontransactional propagation modes reject at binding. Existing scalar/String/
+byte-array behavior is unchanged; S0 without the JDBC guard does not admit records.
+This is a closed materialized-result contract, not a serializer or arbitrary-code/
+shared-heap isolation. Immutable reviewed deployment/no-redefinition assumptions apply.
 
 ## Calling an approved service from Koog
 

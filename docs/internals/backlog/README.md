@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 183 | *Total Resolved Issues:* 717
+*Total Active Issues:* 203 | *Total Resolved Issues:* 717
 
-Active status detail: 182 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 202 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,26 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261030-225329-595](issue-20261030-225329-595-replace-pitch-only-measurements-with-optional-glob.md) | Replace pitch-only measurements with optional global benchmark workflow | medium | core |
+| [issue-20261030-220307-069](issue-20261030-220307-069-keep-initial-integration-clone-diagnostics-in-dura.md) | Keep initial integration clone diagnostics in durable evidence | low | core |
+| [issue-20261030-203016-468](issue-20261030-203016-468-retain-producer-and-legacy-integration-failure-rep.md) | Retain producer and legacy integration failure reports | medium | core |
+| [issue-20261030-160604-049](issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn.md) | Make optional integration CI single pass and diagnosable | high | core |
+| [issue-20261030-144907-661](issue-20261030-144907-661-cancel-live-incident-http-requests-at-the-agent-de.md) | Cancel live incident HTTP requests at the agent deadline | high | integrations |
+| [issue-20261030-144907-939](issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro.md) | Keep measured Spring candidate stdout separate from diagnostics | high | integrations |
+| [issue-20261030-144908-235](issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o.md) | Remove outline caches after confirmed retirement on parser failure | medium | integrations |
+| [issue-20261030-144908-526](issue-20261030-144908-526-report-spring-command-failures-once-without-redund.md) | Report Spring command failures once without redundant catch | low | integrations |
+| [issue-20261030-100712-418](issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag.md) | Deliver useful evidence backed Koog incident triage | high | integrations |
+| [issue-20261030-100712-704](issue-20261030-100712-704-present-real-input-document-output-through-the-gen.md) | Present real input document output through the generated Portal worker | medium | integrations |
+| [issue-20261030-100713-002](issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe.md) | Make the Spring report tour show real request effects | medium | integrations |
+| [issue-20261030-100713-290](issue-20261030-100713-290-qualify-and-package-the-useful-application-first-p.md) | Qualify and package the useful application first pitch | high | integrations |
+| [issue-20261030-075254-853](issue-20261030-075254-853-enforce-the-spring-evaluation-listener-before-refr.md) | Enforce the Spring evaluation listener before refresh | high | integrations |
+| [issue-20261030-075255-171](issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp.md) | Retire owned measurement groups after process inspection fails | high | integrations |
+| [issue-20261030-075255-456](issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in.md) | Classify remote document limits as invalid Koog input | medium | integrations |
+| [issue-20261029-112338-086](issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md) | Ship independently runnable pitch ready Koog document agents | high | integrations |
+| [issue-20261029-112338-072](issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o.md) | Demonstrate Spring report HTTP security JDBC and owned shutdown together | high | integrations |
+| [issue-20261029-112338-046](issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou.md) | Explain reviewed integration policy changes without automatic approval | medium | profiler |
+| [issue-20261029-112338-058](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md) | Qualify copied pitch consumers measurements and honest rehearsal handoff | high | integrations |
+| [issue-20261029-112338-060](issue-20261029-112338-060-support-bounded-conventional-java-record-results-b.md) | Support bounded conventional Java record results before Spring transaction commit | medium | integrations |
 | [issue-20261026-085810-974](issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio.md) | Qualify multi step and queued Koog agent invocations | high | integrations |
 | [issue-20261026-011129-611](issue-20261026-011129-611-use-application-visible-loader-for-explicit-spring.md) | Use application visible loader for explicit Spring proxy assembly | high | integrations |
 | [issue-20261025-223935-632](issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin.md) | Simplify explicit approved Spring JDBC proxy wiring | high | integrations |
