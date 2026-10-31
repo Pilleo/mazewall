@@ -98,9 +98,8 @@ class IndependentConsumerCacheTest {
                 .lineSequence()
                 .filter { it.trimStart().startsWith("outputs.") }
                 .joinToString("\n")
-        var second: Path? = null
-        var secondEvidence: Path? = null
-        for (copy in listOf("first", "second")) {
+
+        fun fixture(copy: String): Path {
             val project = Files.createDirectories(root.resolve("$copy/spring-report-api"))
             Files.writeString(project.resolve("settings.gradle"), "rootProject.name='consumer-cache-fixture'\nbuildCache { local { directory = file('${root.resolve("cache")}') } }\n")
             Files.writeString(project.resolve("gradle.properties"), "org.gradle.caching=false\norg.gradle.workers.max=1\n")
@@ -153,32 +152,32 @@ class IndependentConsumerCacheTest {
                 }
             """.trimIndent(),
             )
-            val evidence = Files.createDirectory(root.resolve("$copy-evidence"))
-            PitchExamplesAcceptance.buildConsumer(
-                listOf(Path.of("gradlew").toAbsolutePath().toString(), "-p", project.toString(), "--console=plain", "--max-workers=1"),
-                project,
-                evidence,
-                listOf("test", "nativeTest", "presentationTest"),
-            )
-            if (copy == "second") {
-                second = project
-                secondEvidence = evidence
-                val output = Files.readString(evidence.resolve("spring-report-api-strict.stdout.log"))
-                assertTrue(":compileJava FROM-CACHE" in output, output)
-                assertTrue(":test FROM-CACHE" in output, output)
-            }
+            return project
         }
-        assertEquals(listOf("1"), Files.readAllLines(effects.resolve("test.txt")))
-        for (name in listOf("nativeTest", "presentationTest")) assertEquals(listOf("1", "1"), Files.readAllLines(effects.resolve("$name.txt")))
-        val project = requireNotNull(second)
-        val evidence = requireNotNull(secondEvidence)
-        Files.writeString(project.resolve("src/main/java/Business.java"), "public class Business { public static int value() { return 2; } }\n")
+        val first = fixture("first")
+        val firstEvidence = Files.createDirectory(root.resolve("first-evidence"))
+        PitchExamplesAcceptance.buildConsumer(
+            listOf(Path.of("gradlew").toAbsolutePath().toString(), "-p", first.toString(), "--console=plain", "--max-workers=1"),
+            first,
+            firstEvidence,
+            listOf("test", "nativeTest", "presentationTest"),
+        )
+        val project = fixture("second")
+        val evidence = Files.createDirectory(root.resolve("second-evidence"))
         val arguments = Json
-            .parseToJsonElement(Files.readString(evidence.resolve("spring-report-api-strict.command.json")))
+            .parseToJsonElement(Files.readString(firstEvidence.resolve("spring-report-api-strict.command.json")))
             .jsonObject
             .getValue("argv")
             .jsonArray
             .map { it.jsonPrimitive.content }
+            .map { if (it == first.toString()) project.toString() else it }
+        val second = ConsumerFixture.command(arguments, project, evidence, "copied-strict", Duration.ofMinutes(2))
+        assertEquals(0, second.exitCode, second.stdout + second.stderr)
+        assertTrue(":compileJava FROM-CACHE" in second.stdout, second.stdout)
+        assertTrue(":test FROM-CACHE" in second.stdout, second.stdout)
+        assertEquals(listOf("1"), Files.readAllLines(effects.resolve("test.txt")))
+        for (name in listOf("nativeTest", "presentationTest")) assertEquals(listOf("1", "1"), Files.readAllLines(effects.resolve("$name.txt")))
+        Files.writeString(project.resolve("src/main/java/Business.java"), "public class Business { public static int value() { return 2; } }\n")
         val changed = ConsumerFixture.command(arguments, project, evidence, "changed-input", Duration.ofMinutes(2))
         assertEquals(0, changed.exitCode, changed.stdout + changed.stderr)
         assertFalse(":compileJava FROM-CACHE" in changed.stdout, changed.stdout)
