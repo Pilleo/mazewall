@@ -20,28 +20,16 @@ PR562 review finding2 and CI41056914481: JAVA_TOOL_OPTIONS launcher stderr conta
 **Needed:**
 1. RED regressions with actual child stderr/JAVA_TOOL_OPTIONS; isolate stdout and retain stderr in both helper paths; run real Spring native/presentation suites and Python tests, then copied acceptance.
 
-## Execution
+## Outcome
 
-- [x] Real Java launcher and Python child stream regressions RED→GREEN.
-- [x] Both affected helpers fixed; process-group cleanup and combined2MiB log bound retained.
-- [x] CI-style inherited-option check and final source/full gates.
+Candidate JSON uses stdout only; launcher diagnostics remain on stderr and in
+failed-command evidence. Actual Java-launcher regressions preserve inherited
+JAVA_TOOL_OPTIONS and verify valid candidates, original failures and retirement.
+[Current qualification](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md) includes Spring11host/11native/1presentation.
 
-The native test appends a harmless property to existing JAVA_TOOL_OPTIONS only for
-its owned child; no inherited option or credential variable is removed/filtered.
-Measurement stdout goes to candidate JSON, stderr to measure.stderr.log. Python
-owned() captures separate files, returns stdout, forwards successful diagnostics
-to stderr, and retains both streams in failed-command reports. Existing ownership,
-inspection and retirement errors remain visible; no process fallback or replay.
-Spring11host/11native/1presentation and13Python tests pass, including retained
-failed-command stderr and the unchanged combined2MiB log bound. RED logs:
-`/tmp/opencode/pitch-fix-{spring,measure}-red.log`; corresponding green logs retained.
-
-Final producer `b741304b7b3974e811445304d6f6878c3928c99e` passes full build and the
-complete committed-source acceptance with inherited JAVA_TOOL_OPTIONS plus the
-harmless preference option that reproduces CI. Both candidate-producing helper
-paths, all11Spring native cases and3actual Spring measurement forks pass without
-filtering environment or lowering gates. Shared final evidence/kit paths are in
-issue-20261030-144907-661. Open pending orchestrator-managed landing.
+The separate Python pitch helper and its tests were subsequently removed by
+[operator direction](issue-20261030-225329-595-replace-pitch-only-measurements-with-optional-glob.md), not retained as another benchmark path.
+Open pending managed landing; no environment filtering or relaxed gates.
 
 ---
 <!-- id: issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro  file: issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro.md -->

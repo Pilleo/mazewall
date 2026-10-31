@@ -20,22 +20,15 @@ PR562 review finding4: an invalid owned stdin command prints the same original e
 **Needed:**
 1. Add finished-JAR invalid-command regression RED requiring one diagnostic and actual retirement; remove redundant catch; run native/presentation suites.
 
-## Execution
+## Outcome
 
-- [x] Finished-JAR invalid-command test observed2diagnostics RED, then1 GREEN.
-- [x] Redundant catch removed; normal exception propagation and resource close preserved.
-- [x] Final copied/full gates.
+Removed the redundant print-and-rethrow catch; normal propagation and automatic
+resource/context close remain. The finished-JAR regression observes readiness,
+invalid-command refusal, nonzero exit, actual retirement and one diagnostic.
+Exception text is not used for application outcome classification.
 
-The actual server must become ready, refuse the invalid stdin command, return
-nonzero, report actual worker retirement and emit its original diagnostic once.
-No exception text is parsed for application outcomes; the known test-only message
-counts duplicate rendering only. Spring11host/11native/1presentation cases pass;
-logs `/tmp/opencode/pitch-fix-spring-{red,green}.log`.
-
-Final producer `b741304b7b3974e811445304d6f6878c3928c99e` passes full build and
-committed-source copied acceptance, including the one-diagnostic/actual-retirement
-finished-JAR regression among11Spring native cases. Shared evidence/kit paths in
-issue-20261030-144907-661. Open pending existing orchestrator-managed landing.
+[Current qualification](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md) includes the native regression and presentation suite.
+Open pending managed landing; failures were not swallowed or downgraded.
 
 ---
 <!-- id: issue-20261030-144908-526-report-spring-command-failures-once-without-redund  file: issue-20261030-144908-526-report-spring-command-failures-once-without-redund.md -->

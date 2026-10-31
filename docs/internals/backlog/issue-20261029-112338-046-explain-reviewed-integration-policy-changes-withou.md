@@ -20,50 +20,20 @@ Approved pitch Task6: bounded2MiB operation-document comparison using existing c
 **Needed:**
 1. Read profiler instructions/designs, add literal diff/input-bound tests RED->GREEN, implement standard-library CLI and development example using existing profiler, preserve host/body/review boundaries; verify profiler tests and full gates.
 
-## Inline progress
+## Outcome
 
-- [x] Task6 bounded typed operation-document comparison and negative controls.
-- [x] Development-only named reader profile, coverage refusal and reviewed enforcement.
-- [x] Profiler/static checks and final whole-change review/gates.
+- PolicyDiff compares existing canonical types, rejects malformed/oversized input,
+  and reports changes without approval or universal safety/equivalence claims.
+- Development profiling selects the exact reader member as CALLABLE, not KOOG_TOOL;
+  incomplete coverage refuses conversion. Separate review precedes enforcement.
+- Tooling stays outside the published profiler API; no dependency was added.
+- Host/CLI, reviewed-enforcement, retirement and full-build checks passed. See
+  [shared qualification](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md).
+- Additional opt-in `detektTooling` reported86 preexisting unrelated findings;
+  those were not suppressed or represented as a passing opt-in check.
 
-Pre-flight: consume existing OperationPolicyDocument/CanonicalPolicyArtifact and
-coverage fields, not a new policy algebra. Comparison reports changes only.
-Profiling starts in its own development JVM before any baseline forbids helpers;
-no observation, hash or candidate grants its own approval.
-
-PolicyDiff tests observed RED for missing logic, then GREEN for canonical identity,
-runtime, arguments, syscall maps, filesystem resources and coverage/exception
-changes, exact2MiB input, malformed UTF8, invalid versions and duplicate-key refusal.
-Output explicitly denies approval and universal ordering/equivalence claims.
-New tooling remains outside the published profiler JAR/API; no dependency added.
-
-Named reader profile observed RED for missing entry then ran the actual profiler
-successfully in a fresh development JVM. Existing measured completeness gate
-produced the candidate; independent external synthetic-test approval then exercised
-actual reviewed enforcement/content checks and physical owned-worker retirement.
-Wrong document digest refused before enforcement. This was a local synthetic test,
-not operator approval for real data, remote release provenance or human rehearsal.
-
-Ruling: bind this in-process development reader as CALLABLE with its exact actual
-JVM member, not KOOG_TOOL (which the existing core correctly reserves for the process
-adapter). Move the existing reader body into an application-local object so the
-same business member can be selected directly; do not relax core checks or wrap an
-invented member identity. Cost if wrong: sample binding/startup failure, not wider
-permissions. Normal agent factory/API and profiler library behavior stay unchanged.
-
-Additional opt-in detektTooling invocation exposed86 preexisting tooling findings
-in unrelated sources; no new PolicyDiff finding was reported and no suppression or
-baseline change was made. Normal/full completion gates and final review remain.
-
-## Final qualification
-
-PolicyDiff host/CLI checks, the full profiler/root quality gate and the independent
-whole-change review/fix pass pass. Final exact producer is
-`35e45a7507ceb7764529e00f6b6cb2700765bf59`; the complete copied-app acceptance is
-GREEN in12m26s and `build -PincludeSpringIntegration=true` in7m06s. The additional
-unrelated opt-in detektTooling findings above were not suppressed or relabeled as
-passing. Keep this item open for separately approved landing; no automatic policy
-approval, remotely authenticated release or future-path coverage is inferred.
+Open pending managed landing. Local profiling does not qualify real-data approval,
+remote release provenance or future-path coverage.
 
 ---
 <!-- id: issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou  file: issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou.md -->

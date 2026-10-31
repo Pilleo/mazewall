@@ -20,30 +20,17 @@ Approved useful-application Task5: reuse scenario-first presentation, useful rep
 **Needed:**
 1. Pin changed-template actual output and stale-review refusal; add tagged presentation task derived from real verified HTTP responses; meaningful synthetic operational template, docs and exact report counts.
 
-## Execution
+## Outcome
 
-- [x] Task5 changed actual template/SQL-ID and stale-review controls pass.
-- [x] Tagged finished-JAR presentation task and actual response/log trace.
-- [x] Final review/copied acceptance/full gates/report inventory.
+The finished-JAR presentation task prints verified response bodies, request IDs,
+HTTP/transaction outcomes and observed audit/retirement data, not expected markers.
+Changed-template output/SQL identity and stale-review refusal are covered by real
+HTTP tests. The useful operational template preserves Reports, schema, protected
+singleton and authorization/rollback/listener/drain controls; no Koog dependency.
 
-Existing behavior already passes the new changed-input and stale-review refusal
-controls; no fabricated RED or unnecessary service change. Presentation entry first
-observed RED at missing task, then GREEN with actual report body/request IDs/status/
-transaction headers and captured audit/worker-end lines. No expected outcome is
-printed instead of its observed value. Normal native selection retains the tour.
-The sample template now has a recognizable operational-report purpose; Reports,
-SQL schema, protected singleton, auth, loopback enforcement and service body stay
-unchanged. No Koog dependency/model/shared presentation module added.
-
-Current verification11host/9native/1presentation cases with strict cache storage,
-zero skips/failures. Logs: `/tmp/opencode/useful-spring-{data-controls,presentation-red,presentation-green}.log`.
-
-Final producer `8b4e2c414052271de6461fdd1a95f7ccaa85eecb`: single independent review,
-full build with Spring included and exact committed-source copied acceptance pass.
-11host/9native/1presentation cases ran without mandatory skips; byte-identical source
-and finished-JAR/template kits staged separately. Final evidence in
-issue-20261030-100713-290. No production, remote-release or human-rehearsal claim;
-item remains open pending separately approved landing.
+[Current qualification](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md) includes the separate presentation
+case and ordinary native selection. Open pending managed landing; this tour does
+not establish production capacity, released-byte custody or human rehearsal.
 
 ---
 <!-- id: issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe  file: issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe.md -->

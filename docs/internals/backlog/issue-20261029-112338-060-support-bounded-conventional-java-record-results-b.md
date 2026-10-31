@@ -20,55 +20,20 @@ Approved later pitch Task10 additive library extension: concrete reviewed same-d
 **Needed:**
 1. Inspect callers/design/impact, write shape/bounds/custom-accessor and real JDBC rollback tests RED->GREEN, implement minimal closed result contract inside diagnosis before commit, reject incompatible rollback rules, add published record consumer and verify focused/static/native/full gates.
 
-## Inline progress
+## Outcome
 
-- [x] Task10 bind-time shape/accessor/deployment checks and negative tests.
-- [x] Worker inside-transaction bounded value validation and actual JDBC rollback.
-- [x] Published record consumer, docs, focused/static/native/full checks and review.
+- Bind-time checks require reviewed same-deployment records, conventional accessor
+  bytecode and no Kotlin metadata; accessors are not executed during validation.
+- Admission requires the qualified JDBC guard and physical-transaction propagation.
+  Value validation precedes commit, including caught nested invalid-output failures.
+- Null records/reference components and existing scalar/String/byte[] behavior stay
+  compatible. The JDK22 floor and existing Spring ASM dependency are unchanged.
+- Host shape/bounds tests and the published `verifyRecordNative` consumer prove
+  real SQL rollback, recovery and physical retirement; see
+  [shared qualification](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md).
 
-Pre-flight: existing scalar/String/byte[] results remain compatible. Records are
-strict data shapes from the reviewed deployment; reject custom accessors/hooks.
-The guard must validate before transaction commit, not after dispatcher delivery.
-JDK22 floor and existing Spring ASM dependency are preserved. This later milestone
-is separate from the primary String-returning pitch application path.
-
-Host shape/value/JDBC tests observed3 RED failures, then GREEN. A separate SUPPORTS
-propagation regression observed RED, then GREEN with physical-transaction-only
-record binding. Actual H2 rollback covers oversized aggregate output and caught
-nested invalid output; scalar/String/byte[] suites remain unchanged. Accessors are
-checked without executing them; existing Spring ASM is reused, no new dependency,
-serializer or public symbol added. Both Spring library/starter builds pass.
-Java-only shape coverage also observed RED then GREEN for Kotlin metadata: a
-Kotlin @JvmRecord must not slip through merely because it has record components.
-The bytecode check rejects Kotlin metadata without forcing Kotlin linkage into
-the library's runtime path.
-
-An independent ordinary-JAR published consumer has observed RED against the prior
-library at actual record binding. GREEN exact committed producer
-`64687002cee23e370244a407b0ceb2e62f6b0f6a` / coordinate
-`0.1.0-integration.64687002cee2` then proves actual owned-worker UTF8 bounds,
-pre-commit SQL rollback, recovery and physical retirement through published JARs.
-Whole-branch exact acceptance/full gate/final review remain outstanding. Normal
-HTTP report still returns String.
-
-Ruling: admit records only with the qualified JDBC guard and a physical-transaction
-propagation, because value checks must precede commit. S0/no-guard semantics and
-existing scalar results are unchanged. Null whole-record/reference components stay
-compatible with ordinary materialized-reference semantics. Cost if wrong: a narrow
-record operation fails binding, not silent commit of an unvalidated result.
-
-Core-symbol blast-radius lookup returned PARTIAL/INDEX_MISSING; exact source/caller
-reads and the complete Spring suite were used instead of treating that hint as proof.
-
-## Final qualification
-
-The final exact consumer gate also executes verifyRecordNative against producer
-`35e45a7507ceb7764529e00f6b6cb2700765bf59`, with actual bounded record success,
-pre-commit SQL rollback/recovery and physical retirement. Focused Spring builds,
-full `build -PincludeSpringIntegration=true`, and the one independent whole-branch
-review/fix pass pass. Existing scalar/String/byte[] and interface/advisor rejection
-cases remain selected. Keep this item open for separately approved landing; this
-extension is not broader DTO/JPA/reactive/Kotlin support or a hostile-code boundary.
+Open pending managed landing. This is not general DTO/JPA/reactive/Kotlin support
+or a hostile-code boundary; the headline HTTP report remains String-returning.
 
 ---
 <!-- id: issue-20261029-112338-060-support-bounded-conventional-java-record-results-b  file: issue-20261029-112338-060-support-bounded-conventional-java-record-results-b.md -->

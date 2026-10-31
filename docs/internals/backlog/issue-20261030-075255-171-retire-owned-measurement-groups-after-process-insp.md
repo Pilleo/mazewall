@@ -26,55 +26,17 @@ Approved inline follow-up Task2. Initial/later proc inspection failures currentl
 **Needed:**
 1. Add real-process RED regressions for initial/later inspection failure, reaped anchor and denied emergency signal; fix shared retire only, run10host cases, then final source-bound/full gates.
 
-## Execution
+## Disposition
 
-- [x] Initial/later inspection and emergency-signal regressions RED->GREEN.
-- [x] Reaped-anchor no-signal control and all10 Python host cases pass.
-- [x] Final independent review and source/full gates.
+Historical producer `73ec49e83e4bc8bd5d95d99995215e1d7f50a834` passed the10-case
+real-process suite and full/source gates. Cleanup retained the unreaped acquired
+leader, bounded signals/reaping and original failures; failed inspection never
+qualified measurements. Denied emergency signalling could delay leader reaping.
 
-Task2 complete: the original suite produced3 expected failures (abandoned/reapless
-groups and lost signal-failure context). Shared cleanup now revalidates the acquired
-unreaped group before emergency KILL, reaps the leader and propagates the original
-inspection failure; denied cleanup retains that cause. The normal2sTERM/5sKILL/5sreap
-bounds remain; a KILL deadline already in progress is not restarted. No permission
-error is ignored and no failed run becomes accepted data.
-
-Ruling: failed inspection cannot attest group quiescence, and a successful KILL
-request is asynchronous. After the already-exited-parent path, the real child took
-about1-3ms to become observably dead. Tests independently poll that genuine child's
-physical end within the existing5s bound rather than require instantaneous signal
-delivery; the production run still fails. Cost if wrong: unknown cleanup remains
-an error, never claimed retirement or a silently increased application timeout.
-
-The test observer also handles legitimate ENOENT/ESRCH races while reading an exited
-child, matching the existing production inspector without swallowing permission
-failures. Logs: `/tmp/opencode/review-followup-cleanup-{red,green}.log`.
-
-## Independent review disposition
-
-Final: minor (deferred): if emergency group signalling itself is denied after an
-already-exited leader, best-effort leader reaping is skipped until outer cleanup/
-interpreter exit. Both errors remain visible and no measurement is accepted; the
-normal local CLI exits on that failure. It is not a successful-retirement claim.
-
-Final: Ruling: deliberately escaped groups, external reapers or mutable custom
-listener setup remain outside these first-party launches; unverified ownership
-still refuses group signals. Cost if wrong: such extensions require their own
-ownership/lifecycle design rather than a guessed numeric PID or generic supervisor.
-
-The reviewer performed no tests; the actual10-case host suite is independently
-GREEN. No second review is used; final exact-source/full gates remain.
-
-## Final qualification
-
-Frozen code `73ec49e83e4bc8bd5d95d99995215e1d7f50a834` passes all10 Python host
-cases, the full root build with Spring (5m26s), and complete exact-source acceptance
-(17m49s), including all15 fresh application measurement JVM forks and actual child
-retirement on successful runs. Permission-inspection and signal-failure tests retain
-their original causes and never accept failed data. No timeout, dependency, namespace
-authority or containment-policy widening was introduced. Final raw/log locations are
-recorded in the sibling listener issue853. The denied-signal leader-reaping minor
-above stays deferred; keep this item open for landing/follow-up, not false retirement.
+The driver and its tests are now removed, so that deferred nuance is not active
+benchmark code or a claimed fix to the global harness. The replacement uses the
+existing resource probe rather than inventing PID authority or a new supervisor.
+This historical item stays open for managed landing; no new work is implied here.
 
 ---
 <!-- id: issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp  file: issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp.md -->

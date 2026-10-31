@@ -20,25 +20,16 @@ PR562 review finding3:129headings reject after worker launch and canonical close
 **Needed:**
 1. Add packaged invalid-input native test proving child retirement and cache cleanup RED; establish retirement on success and failure, retain uncertain resources and original/suppressed errors; full native suite.
 
-## Execution
+## Outcome
 
-- [x] Real129-heading failure/cache regression RED→GREEN; original error and dead child checked.
-- [x] Resource cleanup uses standard use() suppression and confirmed canonical retirement on both paths.
-- [x] Final copied/full gates.
+After canonical close, both success and failure paths check the captured child,
+CLOSED/retirementComplete diagnostics and zero live workers before removing cache.
+Uncertain retirement retains resources and fails; the original parser failure
+keeps retirement/deletion failures suppressed. No success artifact is displayed.
 
-The test owns a private java.io.tmpdir and requires its extracted cache removed
-after the actual child ends. The application checks captured child and CLOSED /
-retirementComplete / zero-live-workers diagnostics after runtime close even on
-failure, before allowing cache removal. Unknown retirement keeps the cache; original
-failures retain retirement/delete failures as suppressed exceptions. No success
-artifact is displayed after a parser error. All4outline-file cases pass within
-Koog26host/11native suite. Logs `/tmp/opencode/pitch-fix-koog-{red,green}.log`.
-
-Final producer `b741304b7b3974e811445304d6f6878c3928c99e` passes full build and
-committed-source copied acceptance, including all4file-mode native cases and the
-installed actual-file command. The former failed-parser cache minor is no longer
-deferred; truly uncertain retirement still retains resources and fails. Evidence
-and fresh kits in issue-20261030-144907-661; open pending managed landing.
+The real129-heading failure/cleanup case and all four file-mode native tests pass;
+[current qualification](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md).
+The former confirmed-dead cache-retention minor is fixed. Open pending managed landing.
 
 ---
 <!-- id: issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o  file: issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o.md -->
