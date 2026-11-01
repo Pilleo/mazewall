@@ -26,7 +26,7 @@ val platformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.arch
 kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(platformJar)
-        compilerOptions.freeCompilerArgs.addAll(platformJar.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") })
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(platformJar)
     }
 }
 kotlinCompilations.named("integrationTest") {
@@ -97,6 +97,7 @@ val integrationTest =
         systemProperty("kotest.framework.classpath.scanning.config.disable", "true")
         forkEvery = 1
         maxParallelForks = 1
+        doFirst(io.mazewall.build.JUnitTestClassFilterAction())
         // Worker classpath resolution happens at EXECUTION time (Gradle 9 forbids eager
         // configuration-time resolution), so the producer must be built explicitly or the
         // resolved path is missing worker classes -> ClassNotFoundException in the worker JVM.

@@ -644,18 +644,28 @@ public class ProcessBroker internal constructor(
             socketPath: String,
             deadline: Deadline,
             active: () -> Boolean,
-        ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> =
-            Executors.newVirtualThreadPerTaskExecutor().use { executor ->
-                val handoff = AcceptedSocketHandoff(sockets::close)
-                acceptedHandoffs.add(handoff)
-                val accepted = executor.submit { publishAcceptedSocket(listener, handoff) }
-                try {
-                    awaitClaim(handoff, accepted, process, deadline, active).also { acceptedHandoffs.remove(handoff) }
-                } catch (failure: Throwable) {
-                    abandon(handoff, accepted, process, socketPath)
-                    throw failure
+        ): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
+            val executor = Executors.newVirtualThreadPerTaskExecutor()
+            val handoff = AcceptedSocketHandoff(sockets::close)
+            acceptedHandoffs.add(handoff)
+            return try {
+                executor.use {
+                    val accepted = executor.submit { publishAcceptedSocket(listener, handoff) }
+                    try {
+                        awaitClaim(handoff, accepted, process, deadline, active).also { acceptedHandoffs.remove(handoff) }
+                    } catch (failure: Throwable) {
+                        abandon(handoff, accepted, process, socketPath)
+                        throw failure
+                    }
+                }
+            } finally {
+                // A task cancelled before dispatch never runs the producer's finally.
+                if (executor.isTerminated) {
+                    handoff.completeProducer()
+                    if (handoff.fullyRetired) acceptedHandoffs.remove(handoff)
                 }
             }
+        }
 
         private fun publishAcceptedSocket(
             listener: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,

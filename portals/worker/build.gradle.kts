@@ -20,14 +20,7 @@ val portalJar = project(":portals:runtime").tasks.named<Jar>("jar").flatMap { it
 kotlinCompilations.matching { it.name in setOf("main", "test") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(platformJar, portalJar)
-        compilerOptions.freeCompilerArgs.addAll(
-            platformJar.zip(portalJar) { platform, portal ->
-                listOf(
-                    "-Xfriend-paths=${platform.asFile.absolutePath}",
-                    "-Xfriend-paths=${portal.asFile.absolutePath}",
-                )
-            },
-        )
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(platformJar, portalJar)
     }
 }
 

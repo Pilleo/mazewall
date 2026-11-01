@@ -19,7 +19,7 @@ class SpringBootMeasurementOwnershipTest {
 
     @Test
     @Timeout(value = 15, unit = TimeUnit.MINUTES, threadMode = Timeout.ThreadMode.SAME_THREAD)
-    fun `actual executable refuses all fourteen measurement collisions without changing unknown files`() {
+    fun `actual executable refuses all twenty one measurement collisions without changing unknown files`() {
         val workspace = Path.of(BootFixture.required("consumerWorkspace"))
         SharedVerificationLock.acquire(SharedVerificationLock.resolve(workspace, System.getProperty("verificationLock"))).use {
             val evidence = BootFixture.evidence("measurement-ownership")
@@ -30,6 +30,7 @@ class SpringBootMeasurementOwnershipTest {
             var cases = 0
             for ((mode, names) in listOf(
                     "measure" to listOf("candidate.json", "candidate-generation.txt"),
+                    "measure-report" to listOf("candidate.json", "candidate-generation.txt"),
                     "measure-unsupported" to listOf("unsupported-candidate.json", "unsupported-generation.txt"),
                 )) {
                 for (name in names) {
@@ -69,7 +70,7 @@ class SpringBootMeasurementOwnershipTest {
                 assertTrue(names.none { Files.exists(root.resolve(it), NOFOLLOW_LINKS) })
                 cases++
             }
-            assertEquals(14, cases)
+            assertEquals(21, cases)
             println("MEASUREMENT_OWNERSHIP_PASS $cases existing/symlink/hardlink/directory-alias cases; evidence=$evidence")
         }
     }

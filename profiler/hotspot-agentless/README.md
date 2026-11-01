@@ -2,7 +2,7 @@
 
 This is the single canonical Go collector source tree. Kotlin evidence and local
 asset admission/readiness decisions are internal integration components behind the
-explicit public strategy. The approved [integration plan](../../docs/superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md)
+explicit public strategy. The approved [integration plan](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-03-mazewall-hotspot-profiler-integration.md)
 is complete; whole-session coverage remains incomplete.
 
 For versioned offline distribution, license/corresponding-source inventory,
@@ -22,7 +22,7 @@ targets or the Go/Docker toolchains.
 ## Explicit build, verification and installation
 
 ```bash
-# Go 1.26 and an explicitly configured rootful Docker builder are needed at build time.
+# Go 1.26.10 and an explicitly configured rootful Docker builder are needed at build time.
 DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:buildHotSpotAssets
 ./gradlew :profiler:verifyHotSpotAssets
 ./gradlew :profiler:installHotSpotAssets -PhotSpotAssetsDirectory=/absolute/new/assets-directory
@@ -55,7 +55,14 @@ stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
 The current accepted source overlay is
-`89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50`.
+`b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3`.
+
+The containerd overlay migrates Gadget's actual client and test utilities to
+patched `github.com/containerd/containerd/v2 v2.3.7`. Discovery retains `k8s.io`
+as its default namespace and preserves explicit overrides and permission failures.
+Both modules' prepared graphs must pass their race suites and `govulncheck`;
+there are no vulnerability suppressions. Older bundles are not admitted by this
+fingerprint and must be rebuilt into a new destination, not overwritten in place.
 
 The [owned-drain repair](../../docs/plans/2026-10-19-hotspot-observed-drain-evidence.md)
 wires actual auxiliary ownership for both HotSpot modes without fabricating an
@@ -63,7 +70,7 @@ epoch lease. It preserves strict admission and native budgets; ordinary-JVM
 candidate qualification is completed by the separate
 [coupled JVM exec evidence](../../docs/plans/2026-10-19-hotspot-coupled-exec-evidence.md),
 followed by operator-approved [scoped admission](../../docs/plans/2026-10-19-hotspot-observed-admission.md).
-SDK publication remains closed. The historical allocator/helper evidence
+SDKv0.2.0 is published; host distribution qualification remains open. The historical allocator/helper evidence
 below is not a release/admission receipt for the new source graph. Existing asset
 bundles must be rebuilt and fully verified for the current fingerprint.
 
@@ -71,10 +78,11 @@ Task3 adds a separately negotiated schema3 observation profile, described in
 the [profile contract](../../docs/plans/2026-10-18-hotspot-observed-profile-contract.md).
 The rebuilt CLI and `RunObserved*` now use the qualified owned implementation after
 explicit operator approval. Strict2 and false policy eligibility are unchanged.
-`RunObservedCandidate` is only a tagged compatibility alias. Native modules pin actual SDKv0.1.0; its immutable
-bundle verifier does not implement the local candidate's format3 behavior. Candidate
-packing/tests require the explicit per-owner Go workspace until a separately
-approved new SDK release exists. Strict2 and the Kotlin facade retain their scope.
+`RunObservedCandidate` is only a tagged compatibility alias. Native modules pin released SDKv0.2.0.
+Use `GOWORK=off` with the owner's prepared `build/experiment.go.mod`; the SDK must
+resolve to that released module, not a local workspace replacement. Existing helper
+bundles do not qualify the new graph; rebuild and verify their embedded module
+provenance before distribution. Strict2 and the Kotlin facade retain their scope.
 It adds the bounded shared native correlation allocator. Both architecture BPF
 objects and layouts are generated; actual-C and isolated kernel checks pass.
 Task2 built two byte-identical locked Go1.26.0 helpers/full local OCI bundles and
@@ -215,6 +223,9 @@ USER_NOTIF and recorded-EBPF behavior remain unchanged.
 ## Verification
 
 `make unit` runs canonical race tests and local graph packaging/install controls.
+`make vuln` scans the prepared module graph with `govulncheck`; install the pinned
+tool with `go install golang.org/x/vuln/cmd/govulncheck@v1.9.0`. Findings or scanner
+errors fail the command. CI runs both commands when either Go module changes.
 The [experiment harness](../../experiments/hotspot-agentless/README.md) runs the
 upstream race/native finalization/live attribution controls against this engine.
 Promotion does not broaden runtime, syscall, virtual-thread or loss guarantees.

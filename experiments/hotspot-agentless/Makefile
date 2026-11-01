@@ -8,7 +8,7 @@ GO_IMAGE := $(shell $(GO) run ./cmd/mw-collector-tools image --key go)
 GADGET_BUILDER := $(shell $(GO) run ./cmd/mw-collector-tools image --key gadget_builder)
 JDK_IMAGE := $(shell $(GO) run ./cmd/mw-collector-tools image --key jdk)
 
-.PHONY: deps unit upstream-test quality-fuzz kernel-cache-test build gadget demo container-build preflight preflight-test graph verify
+.PHONY: deps unit vuln upstream-test quality-fuzz kernel-cache-test build gadget demo container-build preflight preflight-test graph verify
 .PHONY: benchmark-fixture benchmark-report experiment-tools benchmark loss-gadget event-loss-control
 .PHONY: event-read-kernel-test
 .PHONY: queued-tail-kernel-test
@@ -68,6 +68,9 @@ deps:
 
 unit: deps
 	$(GO) test -race -modfile build/experiment.go.mod ./...
+
+vuln: deps
+	GOFLAGS='$(GOFLAGS) "-modfile=$(CURDIR)/build/experiment.go.mod" -mod=readonly' govulncheck ./...
 
 upstream-test: deps
 	$(GO) test -race -modfile build/experiment.go.mod github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer/otel github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer github.com/inspektor-gadget/inspektor-gadget/pkg/datasource

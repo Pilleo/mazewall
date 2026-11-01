@@ -1,0 +1,3 @@
+maximumPoolSize=20
+connectionTimeoutMs=1000
+jdbcPort=6543

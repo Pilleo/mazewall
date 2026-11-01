@@ -20,7 +20,7 @@ class DomainLifecycleTest {
                 timeout -> drains.incrementAndGet() == 1 ? new DrainReport.Incomplete(1, 1, null) : DrainReport.Complete.INSTANCE,
                 Duration.ofMillis(50));
         assertFalse(lifecycle.isAutoStartup());
-        assertThrows(IllegalStateException.class, lifecycle::dispatcher);
+        assertInstanceOf(DomainLifecycle.InactiveDomainException.class, assertThrows(IllegalStateException.class, lifecycle::dispatcher));
         lifecycle.start();
         assertTrue(lifecycle.isRunning());
         assertEquals(ExecutionDiagnosticState.UNKNOWN, lifecycle.diagnostics().getState(),
@@ -33,7 +33,7 @@ class DomainLifecycleTest {
         assertEquals(1, pending.getLiveWorkers());
         assertEquals(1, pending.getUnfinishedInvocations());
         assertFalse(pending.getRetirementComplete());
-        assertThrows(IllegalStateException.class, lifecycle::dispatcher);
+        assertInstanceOf(DomainLifecycle.InactiveDomainException.class, assertThrows(IllegalStateException.class, lifecycle::dispatcher));
         assertThrows(IllegalStateException.class, lifecycle::start);
         lifecycle.stop();
         assertSame(DrainReport.Complete.INSTANCE, lifecycle.lastDrain());

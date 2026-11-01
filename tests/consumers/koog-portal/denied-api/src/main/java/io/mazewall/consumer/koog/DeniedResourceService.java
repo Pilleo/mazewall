@@ -3,6 +3,9 @@ package io.mazewall.consumer.koog;
 /** Native test-only service; never added to the advertised Koog registry. */
 public interface DeniedResourceService {
     String read(String path);
+    String write(String path);
+    String connectLoopback(int port);
+    String spawnJavaVersion();
     String crash();
     String waitForever();
     String oversizedText();

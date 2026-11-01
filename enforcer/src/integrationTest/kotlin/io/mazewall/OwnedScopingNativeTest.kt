@@ -27,9 +27,54 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OwnedScopingNativeTest : BaseIntegrationTest() {
+    @Test
+    fun `quality first scoping phase awaits execution end before denial`() {
+        val type = OwnedScopingNativeTest::class.java
+        val resource = "/" + type.name.replace('.', '/') + ".class"
+        val bytes = requireNotNull(type.getResourceAsStream(resource)).use { it.readAllBytes() }
+        val model = java.lang.classfile.ClassFile
+            .of()
+            .parse(bytes)
+        val captured = model.methods().filter {
+            it.methodName().stringValue() == "verifyCapturedScoping" && it.methodType().stringValue() == "()V"
+        }
+        assertEquals(1, captured.size, "The actual captured-scoping entry must be inspected")
+        val calls = captured
+            .single()
+            .code()
+            .orElseThrow()
+            .elementList()
+            .filterIsInstance<java.lang.classfile.instruction.InvokeInstruction>()
+        val handleOwner = "io/mazewall/enforcer/api/execution/InvocationHandle"
+        val stageType = "()Ljava/util/concurrent/CompletionStage;"
+        val resultCall = calls.indexOfFirst {
+            it.owner().asInternalName() == handleOwner && it.name().stringValue() == "result" && it.type().stringValue() == stageType
+        }
+        val endCalls = calls.withIndex().filter { (_, call) ->
+            call.owner().asInternalName() == handleOwner && call.name().stringValue() == "executionEnd" && call.type().stringValue() == stageType
+        }
+        assertEquals(1, endCalls.size, "The first invocation must observe execution end before denial submission")
+        val endCall = endCalls.single().index
+        val timedEndGet = calls
+            .withIndex()
+            .firstOrNull { (index, call) ->
+                index > endCall &&
+                    call.owner().asInternalName() == "java/util/concurrent/CompletableFuture" &&
+                    call.name().stringValue() == "get" &&
+                    call.type().stringValue() == "(JLjava/util/concurrent/TimeUnit;)Ljava/lang/Object;"
+            }?.index ?: -1
+        val denialPhase = calls.indexOfFirst {
+            it.owner().asInternalName() == "io/mazewall/enforcer/api/execution/OwnedScopingNativeTest" &&
+                it.name().stringValue() == "verifyDenialAndFatal"
+        }
+        assertTrue(resultCall >= 0 && resultCall < endCall, "Result delivery must precede the original invocation's end wait")
+        assertTrue(endCall < timedEndGet && timedEndGet < denialPhase, "The bounded end wait must precede denial submission")
+    }
+
     @Test
     @EnabledIfLinuxAndSupported
     fun `captured custom authority permits exact stack and denies lookalike on real owned worker`() {
@@ -66,19 +111,19 @@ class OwnedScopingNativeTest : BaseIntegrationTest() {
             assertEquals(1, reads.get())
             ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
                 server.soTimeout = 2000
-                val worker = runtime
-                    .submit(
+                val first = runtime.submit(
                     domain,
                     Callable {
-                    connectAuthorized(server.localPort)
-                    Thread.currentThread()
-                },
-                ).result()
-                    .toCompletableFuture()
-                    .get(5, TimeUnit.SECONDS)
+                        connectAuthorized(server.localPort)
+                        Thread.currentThread()
+                    },
+                )
+                val worker = first.result().toCompletableFuture().get(5, TimeUnit.SECONDS)
                 assertTrue(worker !== caller && !worker.isVirtual)
                 server.accept().use { assertEquals(42, it.getInputStream().read()) }
                 assertEquals(1, allowed.get())
+                // Result delivery alone does not release this domain's single admission.
+                assertNull(assertIs<ExecutionEnd.Finished>(first.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure)
                 verifyDenialAndFatal(runtime, domain, server.localPort, denied)
                 assertEquals(DrainReport.Complete, runtime.drain(timeout))
                 assertFalse(worker.isAlive)

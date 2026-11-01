@@ -2,6 +2,12 @@
   "sourceRevision": "96789e513136948338870ce7255fdec14e22c162",
   "sourceRoot": "profiler/hotspot-agentless",
   "snapshotKind": "original materialization baseline; local native tooling updates are recorded below",
+  "containerdClientMigration": {
+    "canonicalParentRevision": "c43a199c37b77789a781f61c2c9d7b4c2e32a478",
+    "client": "github.com/containerd/containerd/v2@v2.3.7",
+    "patchSha256": "dd5ddaee0eac515da029f38dafa7457aefd3c4b38692ffbc635dcf81daf4a943",
+    "sourceOverlaySha256": "b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3"
+  },
   "materializedLinks": 13,
   "materializedFiles": 145,
   "materializedBytes": 452652,
@@ -38,15 +44,15 @@
     }
   },
   "localToolingFiles": {
-    "internal/tooling/assets.go": "e41708aab0347fd52850b1bb334d16c49c68c02e00453a98d551aeac86286edf",
+    "internal/tooling/assets.go": "3d4e49b97c403bce820af0e7124d8029adbd327b3379df33cff64d694d76f797",
     "internal/tooling/assets_test.go": "265e9ff1d5a0ea55f0eaba5f66fecfb67161443789283f09ad3e9beb1260597b",
     "internal/tooling/cli.go": "6a091e23002432c1a4c9ed8cc982385e0249cd30ccb99e9193c93f9589742492",
     "internal/tooling/distribution.go": "c58a92186b349cd9d11c39b29e6b0638f93f99b842ead7222d34dcf86f053e22",
     "internal/tooling/distribution_test.go": "c7fa308a144432dc49f0624543fbda6388fa0248b148244975442f7c2df380fe",
     "internal/tooling/footprint.go": "ff4c8d28d543009b15602a3fe8215ef991a64d580cee9f44350cd6df0a3dd4a7",
     "internal/tooling/footprint_test.go": "f9d9452164f3293957e0640194182484d31ed3d40baf4553d283e620393b33e7",
-    "internal/tooling/prepare.go": "9ebd939a14c252010e75a65db2db797aa546d80b62f849a04c34ca477a390a25",
-    "internal/tooling/prepare_test.go": "46b764f7632521d71c7d53f0d17e5ae3c12e4c6633ed67eb56da59e937ff4cd2",
+    "internal/tooling/prepare.go": "694407b5991a09ffad3a1e51bd9ecc4832645673dbdf824d93fe3d62e6fbf9ef",
+    "internal/tooling/prepare_test.go": "db2d19cf06ff09646122c05c6c5464715bf588618c2afe191eec49060867f67f",
     "scripts/rebuild-profiler-ebpf.sh": "573ebce7d1bc4bff97ff62845b67a3ca3c2ffccf838f2849e506dbf1de260a90",
     "cmd/mw-collector-tools/main.go": "4d8759f41e97be9babb99e414612309abf9c57a6c617695d05eaefc8b5922f26"
   }

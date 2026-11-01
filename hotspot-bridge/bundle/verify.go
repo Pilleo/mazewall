@@ -193,8 +193,12 @@ func DigestName(digest string) (string, error) {
 
 // OCIGraph verifies the complete selected graph for native packing and Verify.
 func OCIGraph(store, digest string) (map[string]string, error) {
-	pending := []ociDescriptor{{Digest: digest}}
+	return ociGraph(store, []ociDescriptor{{Digest: digest}})
+}
+
+func ociGraph(store string, pending []ociDescriptor) (map[string]string, error) {
 	found := map[string]string{}
+	mediaByDigest := map[string]string{}
 	var total int64
 	for len(pending) > 0 {
 		descriptor := pending[len(pending)-1]
@@ -214,6 +218,13 @@ func OCIGraph(store, digest string) (map[string]string, error) {
 		if descriptor.Size != nil && *descriptor.Size != info.Size() {
 			return nil, fmt.Errorf("OCI descriptor size mismatch: %s", name)
 		}
+		media := "application/vnd.oci.image.index.v1+json"
+		if descriptor.MediaType != nil {
+			media = *descriptor.MediaType
+		}
+		if prior, ok := mediaByDigest[name]; ok && prior != media {
+			return nil, fmt.Errorf("conflicting OCI media type: %s", name)
+		}
 		if _, ok := found[name]; ok {
 			continue
 		}
@@ -229,10 +240,7 @@ func OCIGraph(store, digest string) (map[string]string, error) {
 			return nil, fmt.Errorf("OCI blob checksum mismatch: %s", name)
 		}
 		found[name] = path
-		media := "application/vnd.oci.image.index.v1+json"
-		if descriptor.MediaType != nil {
-			media = *descriptor.MediaType
-		}
+		mediaByDigest[name] = media
 		if media == "application/vnd.oci.image.index.v1+json" || media == "application/vnd.oci.image.manifest.v1+json" {
 			var data ociDocument
 			if err := BoundedJSON(path, &data); err != nil {
@@ -336,15 +344,6 @@ func Verify(root, expectedManifestSHA string, profile wire.Profile) (Verified, e
 		return invalid, fmt.Errorf("collector has no executable mode: %w", os.ErrPermission)
 	}
 	store := filepath.Join(root, "oci")
-	blobs, err := OCIGraph(store, manifest.GadgetDigest)
-	if err != nil {
-		return invalid, err
-	}
-	for name := range blobs {
-		if _, ok := manifest.Files["oci/blobs/sha256/"+name]; !ok {
-			return invalid, fmt.Errorf("unlisted reachable OCI blob: %s", name)
-		}
-	}
 	var index ociDocument
 	indexPath, err := OwnedAsset(store, "index.json")
 	if err != nil {
@@ -353,14 +352,26 @@ func Verify(root, expectedManifestSHA string, profile wire.Profile) (Verified, e
 	if err := BoundedJSON(indexPath, &index); err != nil {
 		return invalid, err
 	}
-	found := false
+	var roots []ociDescriptor
 	for _, entry := range index.Manifests {
 		if entry.Digest == manifest.GadgetDigest {
-			found = true
+			if entry.MediaType != nil && *entry.MediaType != "application/vnd.oci.image.index.v1+json" && *entry.MediaType != "application/vnd.oci.image.manifest.v1+json" {
+				return invalid, fmt.Errorf("unsupported selected OCI root media type")
+			}
+			roots = append(roots, entry)
 		}
 	}
-	if index.SchemaVersion != 2 || !found {
+	if index.SchemaVersion != 2 || len(roots) == 0 {
 		return invalid, fmt.Errorf("gadget digest absent from OCI index")
+	}
+	blobs, err := ociGraph(store, roots)
+	if err != nil {
+		return invalid, err
+	}
+	for name := range blobs {
+		if _, ok := manifest.Files["oci/blobs/sha256/"+name]; !ok {
+			return invalid, fmt.Errorf("unlisted reachable OCI blob: %s", name)
+		}
 	}
 	return Verified{root: root, collector: collector, store: store, image: gadgetImagePrefix + manifest.GadgetDigest, manifest: manifest, profile: profile, valid: true}, nil
 }

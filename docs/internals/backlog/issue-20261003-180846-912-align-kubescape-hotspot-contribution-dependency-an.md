@@ -11,8 +11,10 @@ target_files:
   - "docs/superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md"
   - "docs/superpowers/plans/2026-10-18-kubescape-agentless-hotspot.md"
   - "docs/superpowers/plans/2026-10-18-kubescape-stack-evidence-schema.md"
-  - "docs/plans/2026-10-19-hotspot-integration-gate-checkpoint.md"
   - "docs/superpowers/plans/2026-10-18-node-agent-hotspot-companion.md"
+  - "docs/plans/2026-10-18-hotspot-observed-profile-contract.md"
+  - "docs/plans/2026-10-19-hotspot-bridge-release.md"
+  - "docs/plans/2026-10-19-hotspot-integration-gate-checkpoint.md"
   - "docs/plans/2026-10-19-hotspot-companion-local-evidence.md"
   - "docs/plans/2026-10-19-hotspot-storage-live-api.md"
 target_symbols: []
@@ -38,8 +40,8 @@ Keep open until the actual dependency/event/storage contracts are selected and
 the standalone acceptance corpus passes on that graph. No remote issue/PR exists.
 
 **Forward planning (2026-10-18, not implementation evidence):**
-The [governing agentless design](../../superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md)
-and [four-stage implementation entrypoint](../../superpowers/plans/2026-10-18-kubescape-agentless-hotspot.md)
+The archived [governing agentless design](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md)
+and [four-stage implementation entrypoint](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-18-kubescape-agentless-hotspot.md)
 describe a node-agent-owned existing-collector companion, shared Go verification/
 wire boundary, additive typed storage evidence, bounded ownership and actual
 Kubernetes saved-profile acceptance. The current strict profile and Tier E
@@ -49,6 +51,13 @@ reference, including the public SDK, schema3 observation semantics, storage API
 and companion placement. Task0 records this approval; native qualification/
 admission, SDK publication, writable storage provisioning, the dirty node-agent
 baseline and cluster operations retain their separate gates.
+
+The original [storage](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-18-kubescape-stack-evidence-schema.md)
+and [companion](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-18-node-agent-hotspot-companion.md)
+execution targets are likewise retained as immutable approval history. Current
+guidance uses the [shared ownership contract](../../plans/2026-10-18-hotspot-observed-profile-contract.md#shared-contract-and-ownership)
+and [release gates](../../plans/2026-10-19-hotspot-bridge-release.md#ordered-gates),
+not local execution plans.
 
 Source inspection additionally confirms storage's current callstack aggregation
 reconstructs frames from FileID/Lineno strings and drops FrameType; new Symbol/
@@ -95,6 +104,15 @@ v0.2.0 publication, storage release/image identity, hermetic consumer pins, ordi
 node image and final D acceptance remain uncompleted. Host units and Ready
 environments do not close this issue. See the updated companion evidence for exact
 commits, retained failures and disposable-resource custody/retirement.
+
+The [subsequent shared-review checkpoint](../../plans/2026-10-19-hotspot-bridge-release.md#current-shared-review-checkpoint)
+supersedes PR540 routing above: the delegated existing-Apache check is recorded,
+shared provider guards and the three local node integration remedies are addressed,
+and the prior configured source gate passed at its recorded revision. That pass
+does not qualify the subsequent selected-root fixes before their final source gate.
+This issue and all six review issues remain open; exact-source SDK release review,
+actual SDK/storage publication and consumer pins, released-graph/native qualification
+and default-branch merge gates remain blocked.
 
 ---
 <!-- id: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an  file: issue-20261003-180846-912-align-kubescape-hotspot-contribution-dependency-an.md -->

@@ -10,7 +10,6 @@ import java.util.UUID;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.h2.jdbcx.JdbcDataSource;
 import org.junit.jupiter.api.Test;
-import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -55,14 +54,9 @@ class ReviewedJdbcBindingTest {
         return ReviewedOperationArtifact.load(document.toJson(), new TrustedPolicyReview("application review", document.sha256(), Set.of()), binding);
     }
     static Object register(DefaultListableBeanFactory beans, String name, Object target,
-                           SpringOperationBinder binder, SpringTransactionGuard guard) {
-        var factory = new ProxyFactory(target);
-        factory.addAdvisor(binder.dispatchAdvisor());
-        factory.addAdvisor(guard.transactionAdvisor());
-        factory.addAdvisor(guard.diagnosisAdvisor());
-        factory.addAdvisor(new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()));
-        factory.setFrozen(true);
-        Object proxy = factory.getProxy();
+                           SpringOperationBinder binder) throws Exception {
+        Object proxy = binder.createJdbcProxy(Operation.class, (Operation) target,
+                new DefaultPointcutAdvisor((MethodInterceptor) invocation -> invocation.proceed()));
         beans.registerSingleton(name, proxy);
         return proxy;
     }
@@ -89,8 +83,8 @@ class ReviewedJdbcBindingTest {
             var outerBinder = SpringOperationBinder.forTrustedHostCharacterization(beans, dispatch, outerReview, guard);
             var innerBinder = SpringOperationBinder.forTrustedHostCharacterizationInCommonDomain(beans, dispatch,
                     outerReview, innerReview, guard);
-            var outerProxy = (Operation) register(beans, "outer", outer, outerBinder, guard);
-            var innerProxy = (Operation) register(beans, "inner", inner, innerBinder, guard);
+            var outerProxy = (Operation) register(beans, "outer", outer, outerBinder);
+            var innerProxy = (Operation) register(beans, "inner", inner, innerBinder);
             outerBinder.bind(approval(outerReview, outerProxy));
             innerBinder.bind(approval(innerReview, innerProxy));
             outerBinder.validateRequiredBindings(java.util.List.of("outer"));

@@ -65,8 +65,8 @@ Docker endpoint, not changed host configuration. No existing cluster was touched
 
 No bridgev0.2.0 tag, published storage module/image, ready provider release handoff,
 packaged native node-agent runtime qualification or final Kubernetes acceptance is
-claimed. [PR540](https://github.com/Pilleo/mazewall/pull/540) still requires the
-prescribed review before SDK publication.
+claimed. SDK publication requires [PR542](https://github.com/Pilleo/mazewall/pull/542)
+review under the current [split-review routing](2026-10-19-hotspot-bridge-release.md#split-review-routing-2026-10-19).
 
 The first root checkpoint hook's backlog-index rejection was corrected by marking
 the resolved row Archived. Its next unchanged full build rejected a Tier E delayed

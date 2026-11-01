@@ -17,6 +17,161 @@ boundary proof. The accepted Task6c raw matrix uses immutable library producer
 [committed local acceptance](../../docs/internals/reviews/2026-10-12-integration-contract-completion.md)
 for source/JAR identities, actual results and remaining release prerequisites.
 
+## Optional global benchmark job
+
+Use **Actions → Global Benchmarks → Run workflow** and choose the ref to observe.
+The workflow must exist on the default branch before GitHub exposes manual
+dispatch. With GitHub CLI, after that prerequisite:
+
+```bash
+gh workflow run benchmarks.yml --ref master
+gh run list --workflow benchmarks.yml
+gh run download RUN_ID --name global-benchmarks-RUN_ID-ATTEMPT --dir ./benchmark-evidence
+```
+
+This is manual-only: no PR/push/scheduled execution, required-check dependency or
+release-publication permission. It does not run the removed pitch-specific script,
+Koog/Spring application measurements, live models or the separate profiler
+performance matrices. There is no replacement benchmark framework or timing
+threshold. Correctness, containment, cancellation and retirement tests stay in
+normal required CI independently of this workflow.
+
+The first job runs this existing four-mode ASCII harness, not every workload in
+the repository. On a fresh Ubuntu26.04/JDK25 runner it:
+
+1. Builds the selected commit with the existing two-stage Portal plugin bootstrap
+   and stages real Maven publications **locally**, including the native-fixture
+   interface required by the harness's manifest-selection controls. It publishes
+   nothing to a registry. Native build tools (Clang/LLVM, CMake, pkg-config and SDT
+   headers) are installed; missing kernel/native support fails rather than falling
+   back to an unprotected mode.
+2. Creates `0.1.0-benchmark.<12-character-commit>` and a new coordinate lock with
+   `dependencies --write-locks`, then runs strict `check verifyPublishedClosure
+   installDist`. Existing P617/thread-task3 locks and historical evidence below are
+   unchanged. Host controls do not count as native measurement evidence.
+3. Freezes tracked source, staged publications, the installed runtime JAR closure
+   and lock SHA-256s. Before native execution it verifies the actual embedded
+   worker bytes against their installed metadata and writes `custody.json`.
+4. Runs one fresh JVM: `--samples 8 --size 1024 --pressure 4 --seconds 60
+   --concurrency 1`. Each mode has one first-measured and eight warm-labelled
+   ordinary samples; pressure observations stay separate. This is not JIT-cold,
+   a statistically qualified performance study or equivalent isolation across modes.
+5. Checks frozen inputs again and runs the existing
+   `verifyIntegrationBoundaryEvidence` validator, including corruption controls
+   and descriptive summaries. Wrong/missing effects, timeouts, uncertain retirement,
+   changed bytes or unsafe/unknown resource evidence fail the optional run. Slow
+   timings alone do not fail a threshold.
+
+The build/native commands use the existing Linux resource probe for owned-descendant
+retirement and argv/exit/memory receipts. Build execution is bounded to900seconds;
+native execution to240seconds, leaving room for the harness's existing setup/close
+limits. The job budget is30minutes. Build logs are capped at16MiB; native/validation
+logs at8MiB per file while writing, not after a noisy child exits. The resource
+probe and hosted-machine noise can influence observations.
+
+Download `global-benchmarks-<run-id>-<attempt>` (14-day retention). After the command
+above, `./benchmark-evidence/run-<run-id>-<attempt>/` contains `raw.log`,
+`validation.log`, `build.log`, `source-revision.txt`, `source-status.txt`, explicit
+kernel/CPU/JVM metadata in `environment.txt`, `source.sha256`, `artifacts.sha256`,
+`consumer.lockfile`, `custody.json`, and build/native resource receipts. Upload runs
+on success or failure, subject to GitHub allowing cleanup/upload after cancellation.
+Caches, local Maven repositories, runtime JARs and materialized worker caches are
+not uploaded. A failed run's partial log is diagnostics, never valid measurements.
+
+These automatically captured identities establish what this checkout ran, **not**
+authenticated released-byte provenance, independent policy approval, production
+capacity, application/model performance or a stable cross-run regression baseline.
+Keep the historical P617 acceptance and independent custody recipes below separate.
+
+## Fast host-only checks from any checkout
+
+The standalone `check` task now runs the existing `--selfcheck` and
+`--selectioncheck` entry points. They exercise bounded local work, overload/wait
+controls and manifest/health/timing selection. They do not install containment,
+launch Portal workers or collect benchmark measurements.
+
+Run from the repository root with JDK25 and the exact Maven repository for the
+selected publication. A separate strict lock is retained for the already-existing
+local thread-tool test publication below; it is **not** P617 or a released version.
+No lock generation is needed during checking:
+
+```bash
+: "${BOUNDARY_REPOSITORY:?Set the absolute Maven repository containing this publication}"
+version=0.1.0-thread-task3.c1bfd8a12b61.288b844cceb6
+
+# Existing publication verifier requires configuration cache to be disabled.
+./gradlew -p benchmarks/integration-boundaries \
+  -PconsumerVersion="$version" -PconsumerRepository="$BOUNDARY_REPOSITORY" \
+  verifyPublishedClosure --no-configuration-cache
+
+# Both controls execute on each check, including configuration-cache reuse.
+./gradlew -p benchmarks/integration-boundaries \
+  -PconsumerVersion="$version" -PconsumerRepository="$BOUNDARY_REPOSITORY" \
+  check --configuration-cache --configuration-cache-problems=fail
+```
+
+Require both `selfcheck PASS` (tab-separated in the log) and
+`selectioncontrols PASS`. This checks the selected published closure and host
+controls, not fresh registry installation, publication authenticity, kernel
+enforcement or historical P617 measurement custody. The P617 lock and accepted
+raw identities below are unchanged.
+
+## Fresh native checking with separate custody
+
+For a new checking run, first run `verifyPublishedClosure installDist` with the
+same version/repository properties and `--no-configuration-cache`. Independently
+freeze and verify the selected publication metadata/JARs, installed consumer
+source/classes/JAR, strict lock and embedded worker bundle hash **before** native
+execution. The raw validator's custody JSON requires `workerBundleSha256`; that
+field alone authenticates neither the repository nor the rest of the freeze.
+
+The following Linux/JDK25 recipe uses that separately verified freeze and a new
+absolute output directory. It preserves the harness's existing policies, finite
+limits and actual physical-end assertions; it does not run Koog/Spring adapter
+calls or establish comparable isolation/performance across modes.
+
+```bash
+set -eu
+: "${BOUNDARY_CUSTODY:?Set the independently verified publication/source freeze JSON}"
+: "${BOUNDARY_EVIDENCE:?Set a fresh absolute output directory}"
+: "${BOUNDARY_TMP:?Set an existing short absolute writable temporary directory}"
+case "$BOUNDARY_EVIDENCE" in /*) ;; *) exit 1 ;; esac
+case "$BOUNDARY_TMP" in /*) ;; *) exit 1 ;; esac
+test -d "$BOUNDARY_TMP"
+test -w "$BOUNDARY_TMP"
+test -f "$BOUNDARY_CUSTODY"
+root="$(pwd -P)"
+lock="$(git rev-parse --path-format=absolute --git-common-dir)/mazewall/verification.lock"
+mkdir -p "$(dirname "$lock")"
+test ! -e "$BOUNDARY_EVIDENCE"
+mkdir "$BOUNDARY_EVIDENCE"
+
+native_status=0
+(
+  cd "$BOUNDARY_EVIDENCE" || exit 1
+  LC_ALL=C TMPDIR="$BOUNDARY_TMP" flock -w 600 "$lock" \
+    timeout --kill-after=30s 240s java -Xmx256m --enable-native-access=ALL-UNNAMED \
+    -Djava.io.tmpdir="$BOUNDARY_TMP" -Dbenchmark.cache="$BOUNDARY_EVIDENCE/worker-cache" \
+    -cp "$root/benchmarks/integration-boundaries/build/install/integration-boundaries/lib/*" \
+    io.mazewall.benchmark.BoundariesKt \
+    --samples 2 --size 22 --pressure 3 --seconds 60 --concurrency 1
+) > "$BOUNDARY_EVIDENCE/raw.log" 2>&1 || native_status=$?
+printf '%s\n' "$native_status" > "$BOUNDARY_EVIDENCE/native.exit"
+test "$native_status" -eq 0
+
+./gradlew verifyIntegrationBoundaryEvidence --console=plain \
+  -PboundaryRaw="$BOUNDARY_EVIDENCE/raw.log" -PboundaryCustody="$BOUNDARY_CUSTODY"
+```
+
+A nonzero/timed-out command is a failed run, never accepted partial data. Retain
+the exact argv, source/JAR/lock hashes, log, exit and acquired-owner end receipts;
+do not reuse a previous output directory/cache. Fresh local checks at1/22/1024/65536
+bytes used the separate thread-task3 publication, not P617. They do not replace
+historical measurements or prove current registry installation/authenticity.
+The operator owns `BOUNDARY_TMP`; for example, create a private short directory
+with `mktemp -d /tmp/mwb.XXXXXXXX` and remove it only after all owned processes end.
+No pre-existing harness-specific temporary directory is assumed.
+
 ## Current P617 repository, strict resolution and accepted raw evidence
 
 Use the existing publication, not a new publication or a label derived from the

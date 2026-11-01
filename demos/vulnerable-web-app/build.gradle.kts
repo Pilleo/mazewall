@@ -70,6 +70,8 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Fresh JVM permission-evidence fixtures require deterministic native diagnostics.
+    environment("LC_ALL", "C")
     dependsOn(tasks.named("bootJar"))
 }
 

@@ -11,13 +11,34 @@ public final class VerificationActionsTest {
     public static void main(String[] args) {
         Path successMarker = requireSuccessMarker(args);
         Path rootBuild = successMarker.getParent().getParent().getParent().getParent().resolve("build.gradle.kts");
+        try {
+            TestKitCacheFunctionalTest.verify();
+        } catch (Exception failure) {
+            throw new AssertionError("Persistent nested Gradle cache contract failed", failure);
+        }
         if (args.length == 2) {
             verifiesFailureTriageWaits();
             RootVerificationFunctionalTest.verifyFailureTriage(rootBuild);
             writeSuccessMarker(successMarker);
             return;
         }
+        try {
+            FriendPathCacheFunctionalTest.verify(rootBuild.getParent());
+            BtfRelocationFunctionalTest.verify(rootBuild.getParent());
+            NativeTestDiscoveryFunctionalTest.verify(rootBuild.getParent());
+            CoreLaneFunctionalTest.verify(rootBuild.getParent());
+        } catch (Exception failure) {
+            throw new AssertionError("Relocatable producer compilation failed", failure);
+        }
+        RootVerificationFunctionalTest.verifyEscapedClasspathLocation();
         PublicCompileClasspathFunctionalTest.verify(rootBuild.getParent());
+        BuildLogicGateFunctionalTest.verify(rootBuild.getParent());
+        try {
+            SpotBugsReportTest.main(new String[0]);
+            SpotBugsSourcePatchTest.main(new String[0]);
+        } catch (Exception failure) {
+            throw new AssertionError("SpotBugs report contract failed", failure);
+        }
         String xml = "<file name=\"module/Example.kt\">\n"
             + "<error line=\"12\" column=\"4\" severity=\"warning\" message=\"first\nsecond\" source=\"detekt.Example\" />\n</file>";
         List<String> normalized = DetektWarningRatchetAction.normalize(xml.lines().toList());
@@ -36,6 +57,9 @@ public final class VerificationActionsTest {
         equal(true, malformedRejected);
         verifiesFreshJvmClassMetadata();
         CiCachePolicyTest.run();
+        VerificationWorkflowInputFunctionalTest.verify(rootBuild.getParent());
+        CiCacheKeyFunctionalTest.verify(rootBuild.getParent());
+        PitestLimitsFunctionalTest.verify(rootBuild.getParent());
         GradleSourceGuardTest.run();
         GradleSourceInventoryTest.run();
         verifiesBacklogContracts();

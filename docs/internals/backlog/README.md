@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 146 | *Total Resolved Issues:* 714
+*Total Active Issues:* 207 | *Total Resolved Issues:* 717
 
-Active status detail: 145 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 206 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,70 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261101-211554-659](issue-20261101-211554-659-enable-gradle-build-and-configuration-caching-in-t.md) | Enable Gradle build and configuration caching in the pre-commit hook | high | core |
+| [issue-20261101-164416-960](issue-20261101-164416-960-upgrade-gradle-9-8-2-and-qualify-build-compatibili.md) | Upgrade Gradle 9.8.2 and qualify build compatibility | high | build |
+| [issue-20261101-142339-773](issue-20261101-142339-773-qualify-kernel-uapi-watcher-input.md) | Qualify kernel UAPI watcher input | high | ci |
+| [issue-20261031-143810-764](issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md) | Fix cold Spring verification and reduce CI cache churn | high | core |
+| [issue-20261030-225329-595](issue-20261030-225329-595-replace-pitch-only-measurements-with-optional-glob.md) | Replace pitch-only measurements with optional global benchmark workflow | medium | core |
+| [issue-20261030-220307-069](issue-20261030-220307-069-keep-initial-integration-clone-diagnostics-in-dura.md) | Keep initial integration clone diagnostics in durable evidence | low | core |
+| [issue-20261030-203016-468](issue-20261030-203016-468-retain-producer-and-legacy-integration-failure-rep.md) | Retain producer and legacy integration failure reports | medium | core |
+| [issue-20261030-160604-049](issue-20261030-160604-049-make-optional-integration-ci-single-pass-and-diagn.md) | Make optional integration CI single pass and diagnosable | high | core |
+| [issue-20261030-144907-661](issue-20261030-144907-661-cancel-live-incident-http-requests-at-the-agent-de.md) | Cancel live incident HTTP requests at the agent deadline | high | integrations |
+| [issue-20261030-144907-939](issue-20261030-144907-939-keep-measured-spring-candidate-stdout-separate-fro.md) | Keep measured Spring candidate stdout separate from diagnostics | high | integrations |
+| [issue-20261030-144908-235](issue-20261030-144908-235-remove-outline-caches-after-confirmed-retirement-o.md) | Remove outline caches after confirmed retirement on parser failure | medium | integrations |
+| [issue-20261030-144908-526](issue-20261030-144908-526-report-spring-command-failures-once-without-redund.md) | Report Spring command failures once without redundant catch | low | integrations |
+| [issue-20261030-100712-418](issue-20261030-100712-418-deliver-useful-evidence-backed-koog-incident-triag.md) | Deliver useful evidence backed Koog incident triage | high | integrations |
+| [issue-20261030-100712-704](issue-20261030-100712-704-present-real-input-document-output-through-the-gen.md) | Present real input document output through the generated Portal worker | medium | integrations |
+| [issue-20261030-100713-002](issue-20261030-100713-002-make-the-spring-report-tour-show-real-request-effe.md) | Make the Spring report tour show real request effects | medium | integrations |
+| [issue-20261030-100713-290](issue-20261030-100713-290-qualify-and-package-the-useful-application-first-p.md) | Qualify and package the useful application first pitch | high | integrations |
+| [issue-20261030-075254-853](issue-20261030-075254-853-enforce-the-spring-evaluation-listener-before-refr.md) | Enforce the Spring evaluation listener before refresh | high | integrations |
+| [issue-20261030-075255-171](issue-20261030-075255-171-retire-owned-measurement-groups-after-process-insp.md) | Retire owned measurement groups after process inspection fails | high | integrations |
+| [issue-20261030-075255-456](issue-20261030-075255-456-classify-remote-document-limits-as-invalid-koog-in.md) | Classify remote document limits as invalid Koog input | medium | integrations |
+| [issue-20261029-112338-086](issue-20261029-112338-086-ship-independently-runnable-pitch-ready-koog-docum.md) | Ship independently runnable pitch ready Koog document agents | high | integrations |
+| [issue-20261029-112338-072](issue-20261029-112338-072-demonstrate-spring-report-http-security-jdbc-and-o.md) | Demonstrate Spring report HTTP security JDBC and owned shutdown together | high | integrations |
+| [issue-20261029-112338-046](issue-20261029-112338-046-explain-reviewed-integration-policy-changes-withou.md) | Explain reviewed integration policy changes without automatic approval | medium | profiler |
+| [issue-20261029-112338-058](issue-20261029-112338-058-qualify-copied-pitch-consumers-measurements-and-ho.md) | Qualify copied pitch consumers measurements and honest rehearsal handoff | high | integrations |
+| [issue-20261029-112338-060](issue-20261029-112338-060-support-bounded-conventional-java-record-results-b.md) | Support bounded conventional Java record results before Spring transaction commit | medium | integrations |
+| [issue-20261026-085810-974](issue-20261026-085810-974-qualify-multi-step-and-queued-koog-agent-invocatio.md) | Qualify multi step and queued Koog agent invocations | high | integrations |
+| [issue-20261026-011129-611](issue-20261026-011129-611-use-application-visible-loader-for-explicit-spring.md) | Use application visible loader for explicit Spring proxy assembly | high | integrations |
+| [issue-20261025-223935-632](issue-20261025-223935-632-simplify-explicit-approved-spring-jdbc-proxy-wirin.md) | Simplify explicit approved Spring JDBC proxy wiring | high | integrations |
+| [issue-20261025-223944-611](issue-20261025-223944-611-qualify-owned-koog-tools-inside-deterministic-real.md) | Qualify owned Koog tools inside deterministic real agent loops | high | integrations |
+| [issue-20261025-121925-834](issue-20261025-121925-834-await-execution-end-before-reusing-single-admissio.md) | Await execution end before reusing single admission demo domain | high | demos |
+| [issue-20261025-111413-642](issue-20261025-111413-642-publish-final-report-lifecycle-state-only-after-ac.md) | Publish final report lifecycle state only after actual owner close | high | demos |
+| [issue-20261025-111426-953](issue-20261025-111426-953-declare-clang-bpf-prerequisites-for-source-built-c.md) | Declare Clang BPF prerequisites for source built core quickstart | high | docs |
+| [issue-20261025-010324-590](issue-20261025-010324-590-make-core-koog-and-spring-examples-independently-r.md) | Make core Koog and Spring examples independently runnable and copyable | high | demos |
+| Archived [issue-20261024-153357-714](resolved/issue-20261024-153357-714-qualify-published-koog-to-spring-security-and-jdbc.md) | Qualify published Koog to Spring Security and JDBC invocation | high | integrations |
+| [issue-20261021-115502-293](issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab.md) | Require path-gated agentless Go tests and vulnerability checks in CI | high | ci |
+| [issue-20261020-213826-813](issue-20261020-213826-813-assess-and-patch-high-severity-compress-advisories.md) | Assess and patch high-severity compress advisories in agentless Go modules | high | profiler |
+| [issue-20261020-202040-181](issue-20261020-202040-181-run-build-tool-regression-checks-once-while-preser.md) | Run build-tool regression checks once while preserving required security validation | high | ci |
+| [issue-20261020-145645-363](issue-20261020-145645-363-persist-completed-security-data-before-analysis-in.md) | Persist completed security data before analysis in an independent required lane | high | ci |
+| [issue-20261020-090040-415](issue-20261020-090040-415-retain-prelaunch-failure-evidence-and-cleanup-in-l.md) | Retain prelaunch failure evidence and cleanup in late-publication portal fixture | high | portal |
+| [issue-20261020-083727-843](issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md) | Drain consumer command evidence before normal process cleanup closes streams | high | testing |
+| [issue-20261019-220939-759](issue-20261019-220939-759-bound-mutation-worker-memory-before-isolating-ci-m.md) | Bound mutation worker memory before isolating CI mutation validation | high | ci |
+| [issue-20261019-203415-734](issue-20261019-203415-734-reuse-nested-gradle-testkit-caches-across-disposab.md) | Reuse nested Gradle TestKit caches across disposable CI checkouts | high | ci |
+| [issue-20261019-182206-556](issue-20261019-182206-556-remove-serialized-ci-validation-delay-while-preser.md) | Remove serialized CI validation delay while preserving complete gates | high | ci |
+| [issue-20261019-094851-103](issue-20261019-094851-103-compare-spring-implementation-origins-without-url-.md) | Compare Spring implementation origins without URL-handler or DNS effects | high | spring |
+| [issue-20261019-093313-349](issue-20261019-093313-349-recognize-boxed-boolean-is-accessors-in-portal-poj.md) | Recognize boxed Boolean is-accessors in Portal POJO boundaries | high | codegen |
+| [issue-20261019-075429-286](issue-20261019-075429-286-qualify-portable-fresh-cache-native-boundary-check.md) | Qualify portable fresh-cache native boundary checking with explicit artifact custody | low | benchmarks |
+| [issue-20261019-073259-804](issue-20261019-073259-804-run-integration-boundary-host-controls-from-the-st.md) | Run integration-boundary host controls from the standard check task | low | benchmarks |
+| [issue-20261019-070717-313](issue-20261019-070717-313-verify-spring-thread-dispatch-with-real-owned-runt.md) | Verify Spring thread dispatch with real owned-runtime host contracts | low | testing |
+| [issue-20261019-064750-154](issue-20261019-064750-154-add-host-contract-coverage-for-koog-thread-backed-.md) | Add host contract coverage for Koog thread-backed tools | low | testing |
+| [issue-20261019-013721-472](issue-20261019-013721-472-restore-recursive-project-package-coverage-in-spot.md) | Restore recursive project-package coverage in SpotBugs gates | high | testing |
+| [issue-20261018-200356-681](issue-20261018-200356-681-await-first-execution-end-before-sequential-owned-.md) | Await first execution end before sequential owned scoping submissions | high | enforcer |
+| [issue-20261018-173748-642](issue-20261018-173748-642-prevent-cold-mmap-linkage-from-aborting-strict-pro.md) | Prevent cold mmap linkage from aborting strict protection tests | high | enforcer |
+| [issue-20261018-132635](testing/issue-20261018-132635-keep-ci-container-cache-restore-and-save-keys-stable-across.md) | Keep CI container cache restore and save keys stable across generated build files | medium | ci |
+| [issue-20261018-132632](code_health/issue-20261018-132632-qualify-spotbugs-analysis-of-generated-koog-coroutine-classe.md) | Qualify SpotBugs analysis of generated Koog coroutine classes | low | testing |
+| [issue-20261018-125543](code_health/issue-20261018-125543-distinguish-delta-filter-fragments-from-effective-unsafe-prc.md) | Distinguish delta filter fragments from effective unsafe prctl authority in diagnostics | low | enforcer |
+| [issue-20261018-115032](implementation/issue-20261018-115032-add-explicit-owned-thread-enforcement-for-synchronous-koog-t.md) | Add explicit owned thread enforcement for synchronous Koog tools | medium | enforcer |
+| [issue-20261018-004800](testing/issue-20261018-004800-make-vulnerable-web-network-ceiling-evidence-locale-independ.md) | Make vulnerable web network ceiling evidence locale independent | medium | testing |
+| [issue-20261017-230729](testing/issue-20261017-230729-add-sandboxescapebench-inspired-koog-containment-contracts.md) | Add SandboxEscapeBench-inspired Koog containment contracts | medium | testing |
+| [issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl](issue-20261019-210638-043-copy-read-only-released-module-source-into-writabl.md) | Copy read-only released SDK source into writable staging; host RED/GREEN, distribution qualification remains open | high | profiler |
+| [issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w](issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w.md) | Deliver late HotSpot watcher lifecycle events and real unregister | high | profiler |
+| [issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti](issue-20261019-170845-352-retain-late-hotspot-admission-failures-in-the-acti.md) | Retain later original HotSpot admission errors in the active owner | high | profiler |
+| [issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi](issue-20261019-170845-693-reject-unsaveable-hotspot-publication-after-the-fi.md) | Reject unsaveable HotSpot stacks after a final profile save | high | profiler |
+| [issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d](issue-20261019-163139-343-reject-contradictory-oci-descriptor-media-before-d.md) | Reject OCI digest/media contradictions; shared SDK and Kotlin regression follow-up | high | profiler |
+| [issue-20261019-163139-601-reject-provider-key-aliases-that-override-canonica](issue-20261019-163139-601-reject-provider-key-aliases-that-override-canonica.md) | Reject provider aliases overriding canonical HotSpot pins | high | profiler |
+| [issue-20261019-163139-921-include-approved-bridge-license-material-in-select](issue-20261019-163139-921-include-approved-bridge-license-material-in-select.md) | Package actual selected SDK license material; delegated existing-Apache check recorded, release approval pending | high | profiler |
 | [issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau](issue-20261019-125515-091-preserve-compound-hotspot-collector-permission-cau.md) | Preserve compound HotSpot collector permission causes across schema3 wire; PR540 Task2 review pending | high | profiler |
 | [issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col](issue-20261019-123201-317-suppress-failed-owned-hotspot-summaries-before-col.md) | Suppress failed owned HotSpot summaries before collector error publication; PR540 Task1 review pending | high | profiler |
 | [issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th](issue-20261019-114426-737-preserve-hotspot-terminal-status-write-failures-th.md) | Preserve HotSpot terminal status write failures through pending cleanup; verified in companion72034696, review pending | high | core |
@@ -73,7 +137,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | Archived [issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o](resolved/issue-20261016-225418-065-retain-ambiguous-benchmark-container-acquisition-o.md) | Retain ambiguous benchmark container acquisition ownership | high | profiler |
 | Archived [issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-](resolved/issue-20261016-164046-780-keep-container-jvm-preference-outputs-outside-the-.md) | Keep container JVM preference outputs outside the source checkout | high | core |
 | Archived [issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only](resolved/issue-20261016-101505-976-qualify-optional-integrations-and-expose-read-only.md) | Qualify optional integrations and expose read-only execution diagnostics | high | core |
-| [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |
+| Archived [issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re](resolved/issue-20261016-091758-463-separate-launch-cancellation-control-from-final-re.md) | Separate launch cancellation control from final retirement budget | high | core |
 | Archived [issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi](resolved/issue-20261016-082036-036-recover-broker-cleanup-regression-controls-from-hi.md) | Recover broker cleanup regression controls from historical worktrees | high | core |
 | [issue-20261016-015032-003-repair-first-time-library-installation-guidance](issue-20261016-015032-003-repair-first-time-library-installation-guidance.md) | Repair first-time library installation guidance | high | core |
 | Archived [issue-20261016-010021-700-allow-bounded-result-and-execution-end-overlap-in-](resolved/issue-20261016-010021-700-allow-bounded-result-and-execution-end-overlap-in-.md) | Allow bounded result and execution-end overlap in Java metadata fixture | high | core |
@@ -100,7 +164,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 | [issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-](issue-20261014-010000-140-keep-executable-buildsrc-testkit-storage-checkout-.md) | Keep executable buildSrc TestKit storage checkout-owned | high | testing |
 | [issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing](issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md) | Investigate Dependency-Check NVD record processing failure | high | ci |
 | [issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe](issue-20261013-024900-258-preserve-canonical-backlog-totals-and-active-membe.md) | Preserve canonical backlog totals and active membership after evidence closure | medium | core |
-| [issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt](issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt.md) | Add negative controls for benchmark prepared health guards | low | benchmarks |
+| Archived [issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt](resolved/issue-20261013-005143-547-add-negative-controls-for-benchmark-prepared-healt.md) | Add negative controls for benchmark prepared health guards | low | benchmarks |
 | [issue-20261013-005316-083-record-independent-production-operation-and-launch](issue-20261013-005316-083-record-independent-production-operation-and-launch.md) | Record independent production operation and launch authority | medium | integrations |
 | [issue-20261013-005316-364-verify-candidate617-through-authorized-remote-arti](issue-20261013-005316-364-verify-candidate617-through-authorized-remote-arti.md) | Verify candidate617 through authorized remote artifact retrieval | medium | integrations |
 | [issue-20261013-005316-772-provide-a-prepared-offline-presentation-demo-launc](issue-20261013-005316-772-provide-a-prepared-offline-presentation-demo-launc.md) | Provide a readable JUnit feature showcase for presentation | high | demos |

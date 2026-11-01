@@ -186,7 +186,7 @@ GRADLE
   else
     grep -q 'GATE DEGRADED' "$case_dir/hook.log" || fail 'excluded portal gate was silent'
   fi
-  printf '%s\n' --no-configuration-cache --no-parallel >> "$case_dir/expected-args"
+  printf '%s\n' --build-cache --configuration-cache --no-parallel >> "$case_dir/expected-args"
   diff -u "$case_dir/expected-args" "$case_dir/gradle-args" || fail 'gate argument selection changed'
   if (( gradle_status == 0 )); then
     [[ $status == 0 && $(cat "$case_dir/hook-status") == 0 ]] || fail 'successful gate aborted commit'

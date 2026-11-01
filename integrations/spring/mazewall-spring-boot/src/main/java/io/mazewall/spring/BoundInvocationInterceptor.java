@@ -152,11 +152,13 @@ public final class BoundInvocationInterceptor implements MethodInterceptor {
             Method implementation = BridgeMethodResolver.findBridgedMethod(AopUtils.getMostSpecificMethod(method, target.getClass()));
             if (!method.getDeclaringClass().isInterface()
                     || !advised.isInterfaceProxied(method.getDeclaringClass())
-                    || !materialized(implementation.getReturnType()) || (method.isSynthetic() && !method.isBridge())
+                    || (!materialized(implementation.getReturnType()) && (jdbcGuard == null || !implementation.getReturnType().isRecord()))
+                    || (method.isSynthetic() && !method.isBridge())
                     || Arrays.stream(method.getParameterTypes()).anyMatch(
                             type -> type.getName().equals("kotlin.coroutines.Continuation"))) {
                 throw rejected("Unproved method or result shape: " + method);
             }
+            if (implementation.getReturnType().isRecord()) SpringRecordResults.validateShape(implementation.getReturnType(), target.getClass());
         }
         TransactionInterceptor tx = (TransactionInterceptor) transaction.getAdvice();
         TransactionManager manager = tx.getTransactionManager();

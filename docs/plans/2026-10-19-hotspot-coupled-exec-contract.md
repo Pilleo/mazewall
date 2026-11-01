@@ -1,7 +1,7 @@
 # Coupled JVM exec qualification contract
 
 Scope: complete the existing A4 target-exec/exit controls from
-[the approved A3 specification](../superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a3-native-qualification-exit),
+[the historically approved A3 specification](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/specs/2026-10-18-kubescape-agentless-hotspot-design.md#a3-native-qualification-exit),
 after drain/custody commit1728e661. No runtime admission, SDK publication, new native
 wire/layout, dependency, privilege change, worktree or external repository is added.
 

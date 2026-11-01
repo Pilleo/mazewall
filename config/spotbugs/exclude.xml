@@ -7,7 +7,7 @@
     <!-- SpotBugs incorrectly flags the static engine field modification as a bug.
          This is intentional for testability (fault injection). -->
     <Match>
-        <Class name="io.mazewall.LinuxNative" />
+        <Class name="io.mazewall.platform.native.LinuxNative" />
         <Or>
             <Method name="setEngine" />
             <Method name="resetToDefault" />
@@ -17,11 +17,11 @@
         <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
     </Match>
     <Match>
-        <Class name="io.mazewall.Platform" />
+        <Class name="io.mazewall.enforcer.api.Platform" />
         <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
     </Match>
     <Match>
-        <Class name="io.mazewall.RealPlatformProvider" />
+        <Class name="io.mazewall.enforcer.internal.ffi.RealPlatformProvider" />
         <Or>
             <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
             <Bug pattern="MS_CANNOT_BE_FINAL" />
@@ -47,11 +47,34 @@
          (access-order eviction, issue-20260823-171953). get/remove are invoked via
          Map interface call sites, which the analyzer cannot see for anonymous classes. -->
     <Match>
-        <Class name="~io\.mazewall\.PolicyCompilationCache.*" />
+        <Class name="~io\.mazewall\.enforcer\.api\.PolicyCompilationCache.*" />
         <Or>
             <Bug pattern="UMAC_UNCALLABLE_METHOD_OF_ANONYMOUS_CLASS" />
             <Bug pattern="UMAC" />
         </Or>
+    </Match>
+    <!-- This exact bridge preserves legacy catch compatibility; renaming or removing
+         its superclass relationship would break the supported API. -->
+    <Match>
+        <Class name="io.mazewall.enforcer.api.ContainmentViolationException" />
+        <Bug pattern="NM_SAME_SIMPLE_NAME_AS_SUPERCLASS" />
+    </Match>
+    <!-- Kotlin object accessors intentionally configure these singleton seams.
+         Keep every other field and bug category analyzed. -->
+    <Match>
+        <Class name="io.mazewall.enforcer.diagnostics.MazewallEvents" />
+        <Field name="failOnListenerError" />
+        <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
+    </Match>
+    <Match>
+        <Class name="io.mazewall.profiler.internal.engine.ProfilerDaemon" />
+        <Field name="runner" />
+        <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
+    </Match>
+    <Match>
+        <Class name="io.mazewall.profiler.iterative.IterativeProfiler" />
+        <Field name="taskExecutor" />
+        <Bug pattern="ST_WRITE_TO_STATIC_FROM_INSTANCE_METHOD" />
     </Match>
     <Match>
         <Class name="~io\.mazewall\.testing\.TestSuiteHealthListener.*" />

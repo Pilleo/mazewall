@@ -40,15 +40,7 @@ class BootPresentationTest {
     void approvedReportAndTransactions() throws Exception {
         deploy();
         launch("measure", true);
-        var review = new Properties();
-        review.setProperty("reviewer", "external-known-presentation-fixture-reviewer");
-        review.setProperty("jarSha256", sha(root.resolve("application.jar")));
-        review.setProperty("documentSha256", sha(root.resolve("candidate.json")));
-        review.setProperty("resourceGeneration", Files.readString(root.resolve("candidate-generation.txt")));
-        // JUnit is the external reviewer of this fixed private fixture; the application only measures.
-        try (var out = Files.newOutputStream(root.resolve("trusted-review.properties"))) {
-            review.store(out, "Known fixture only, not production approval");
-        }
+        var review = approve();
         String output = launch("verify", true);
         assertEquals("Reviewed quarterly template", Files.readString(root.resolve("template.txt")));
         assertEquals("Reviewed quarterly template: approved report", Files.readString(root.resolve("reports/quarterly.txt")));
@@ -63,6 +55,48 @@ class BootPresentationTest {
         System.out.println("RESULT: finished java-jar singleton + exact report file; real H2 commit/rollback; virtual caller/platform body");
         System.out.println("LIMIT: SQL rollback does not undo file effects; permission evidence is inferred; Security is absent in this Boot fixture");
         System.out.println("CLEANUP: captured worker and genuine resource owner physically retired");
+    }
+
+    @Test @Order(3)
+    @DisplayName("06.3 — Normal report code accepts a business label, commits once and retires its domain")
+    void normalReportUsesApprovedService() throws Exception {
+        deploy();
+        launch("measure-report", true);
+        assertTrue(Files.readString(root.resolve("candidate.json")).contains("demo.boot.ReportService"));
+        var review = approve();
+        String output = launch("generate", true);
+        assertTrue(output.contains("REPORT_GENERATED quarterly:Reviewed quarterly template: quarterly report"), output);
+        assertTrue(output.contains("JDBC_COMMITTED actualRow=quarterly"), output);
+        assertTrue(output.contains("REPORT_OWNER_RETIRED"), output);
+        assertFalse(output.contains("BOOT_NATIVE_PASS"), "Normal generation must not run the verification scenarios");
+        assertEquals("Reviewed quarterly template: quarterly report", Files.readString(root.resolve("reports/quarterly.txt")));
+        assertEquals("Reviewed quarterly template", Files.readString(root.resolve("template.txt")));
+        assertEquals(review.getProperty("jarSha256"), sha(root.resolve("application.jar")));
+    }
+
+    @Test @Order(4)
+    @DisplayName("06.4 — Approval for normal report code cannot authorize the verification implementation")
+    void normalReviewCannotAuthorizeVerification() throws Exception {
+        deploy();
+        launch("measure-report", true);
+        approve();
+        String output = launch("verify", false);
+        assertTrue(output.contains("does not match configuration"), output);
+        assertFalse(output.contains("BOOT_ACTUAL_ORIGIN"), "Wrong-target review must reject before native owner preparation");
+        assertEquals("", Files.readString(root.resolve("reports/quarterly.txt")));
+    }
+
+    private Properties approve() throws Exception {
+        var review = new Properties();
+        review.setProperty("reviewer", "external-known-presentation-fixture-reviewer");
+        review.setProperty("jarSha256", sha(root.resolve("application.jar")));
+        review.setProperty("documentSha256", sha(root.resolve("candidate.json")));
+        review.setProperty("resourceGeneration", Files.readString(root.resolve("candidate-generation.txt")));
+        // JUnit is the external reviewer of this fixed private fixture; the application only measures.
+        try (var out = Files.newOutputStream(root.resolve("trusted-review.properties"))) {
+            review.store(out, "Known fixture only, not production approval");
+        }
+        return review;
     }
 
     private void deploy() throws Exception {
@@ -95,7 +129,7 @@ class BootPresentationTest {
             assertTrue(process.waitFor(60, TimeUnit.SECONDS), "Owned finished Boot process exceeded its deadline");
             String output = Files.readString(log);
             if (success) assertEquals(0, process.exitValue(), output); else assertNotEquals(0, process.exitValue(), output);
-            output.lines().filter(line -> line.contains("JDBC_") || line.contains("DENIED_") || line.contains("PHYSICAL_") || line.contains("BODY") || line.startsWith("DIAGNOSTICS_"))
+            output.lines().filter(line -> line.contains("JDBC_") || line.contains("DENIED_") || line.contains("PHYSICAL_") || line.contains("BODY") || line.startsWith("DIAGNOSTICS_") || line.startsWith("REPORT_"))
                     .forEach(System.out::println);
             return output;
         } finally {

@@ -6,7 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 /** Explicit negative fixture: final required methods are unsupported, never silently unprotected. */
-public final class UnsupportedReportService extends ReportService {
+public final class UnsupportedReportService extends ReportScenarioService {
     UnsupportedReportService(JdbcTemplate jdbc, Path root, ReportState state) { super(jdbc, root, state); }
 
     @Override @MazewallOperation("quarterly-report")

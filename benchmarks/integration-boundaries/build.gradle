@@ -16,6 +16,17 @@ application {
     mainClass = 'io.mazewall.benchmark.BoundariesKt'
     applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED']
 }
+['selfCheck': '--selfcheck', 'selectionCheck': '--selectioncheck'].each { taskName, argument ->
+    tasks.register(taskName, JavaExec) {
+        group = 'verification'
+        timeout = java.time.Duration.ofMinutes(1)
+        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+        classpath = sourceSets.main.runtimeClasspath
+        mainClass = application.mainClass
+        args argument
+    }
+}
+tasks.named('check') { dependsOn('selfCheck', 'selectionCheck') }
 tasks.register('verifyPublishedClosure') {
     doLast {
         def graph = configurations.runtimeClasspath

@@ -18,8 +18,6 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.nio.file.AccessDeniedException
-import java.nio.file.Files
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
@@ -118,29 +116,7 @@ class EnforcementPresentationTest {
 
     @Suppress("unused")
     fun filesystemBody() {
-        DemoFixture.create("presentation-files").use { fixture ->
-            val workspace = Files.createDirectory(fixture.root.resolve("workspace"))
-            val allowed = Files.writeString(workspace.resolve("input.txt"), "approved input")
-            val sibling = Files.writeString(fixture.root.resolve("sibling.txt"), "private sibling")
-            assertEquals("private sibling", Files.readString(sibling))
-            OwnedDemoRuntime.run(Policy.NO_EXEC_HOTSPOT) { runtime ->
-                val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT)
-                    .allowJvmClasspath().allowFsRead(workspace.toString()).build()
-                val domain = runtime.prepare(policy, DomainLimits(1, 1))
-                assertEquals("approved input", OwnedDemoRuntime.await(runtime.submit(domain, Callable { Files.readString(allowed) })))
-                val denied = runtime.submit(domain, Callable { Files.readString(sibling) })
-                val failure = assertFailsWith<ExecutionException> {
-                    denied.result().toCompletableFuture().get(5, TimeUnit.SECONDS)
-                }
-                val violation = assertIs<ContainmentViolationException>(failure.cause)
-                assertIs<AccessDeniedException>(violation.cause)
-                assertIs<ExecutionEnd.Finished>(denied.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
-                println("RESULT: workspace input read; readable sibling rejected on the restricted worker")
-                println("EVIDENCE: INFERRED_PERMISSION_FAILURE, not authenticated syscall provenance")
-            }
-            assertEquals("private sibling", Files.readString(sibling))
-        }
-        assertTrue(OwnedDemoRuntime.drainRetained().isEmpty())
-        println("CLEANUP: workers drained and owned files removed\nNEXT: discover required behavior by profiling the actual workload.")
+        WorkspaceExample.main(emptyArray())
+        println("NEXT: discover required behavior by profiling the actual workload.")
     }
 }

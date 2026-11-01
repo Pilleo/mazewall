@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const acceptedPatch = "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"
+const acceptedPatch = "b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3"
 const gadgetRevision = "7097db144ccd8dab15373f27ec98d2c3d22e4588"
 const profilerRevision = "ef6cf29492c8a980f889052903fa2dd0c0765cc0"
 const gadgetImagePrefix = "ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@"

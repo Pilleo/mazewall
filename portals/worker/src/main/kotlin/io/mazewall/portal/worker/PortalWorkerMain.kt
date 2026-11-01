@@ -146,20 +146,28 @@ public object PortalWorkerMain {
         receiptLifetime: PortalWorkerReceiptLifetime = PortalWorkerReceiptLifetime.Execution,
     ) {
         var receipt: InstallationReceipt? = null
+        val installed: InstallationReceipt
         val driver = try {
             authorizeParent()
-            receipt = installContainment()
-            receiptLifetime.retain(receipt)
-            receipt.requireInstalled()
-            receipt.failure?.let { throw it }
-            check(receipt.fallback == io.mazewall.enforcer.api.Platform.FallbackBehavior.FAIL) { "worker receipt forbids fallback" }
-            check(receipt.processWide && receipt.landlockApplied && receipt.progress?.processWide == true && receipt.progress?.seccompApplied == true && receipt.progress?.landlockApplied == true) {
+            installed = installContainment()
+            receipt = installed
+            receiptLifetime.retain(installed)
+            installed.requireInstalled()
+            installed.failure?.let { throw it }
+            check(installed.fallback == io.mazewall.enforcer.api.Platform.FallbackBehavior.FAIL) { "worker receipt forbids fallback" }
+            check(
+                installed.processWide &&
+                    installed.landlockApplied &&
+                    installed.progress?.processWide == true &&
+                    installed.progress?.seccompApplied == true &&
+                    installed.progress?.landlockApplied == true,
+            ) {
                 "worker requires newly installed process-wide Seccomp and filesystem containment"
             }
             val expectedPolicy = requiredPolicy()
-            check(expectedPolicy == null || receipt.requestedPolicy == expectedPolicy) { "installed worker policy does not match static baseline" }
+            check(expectedPolicy == null || installed.requestedPolicy == expectedPolicy) { "installed worker policy does not match static baseline" }
             val initialized = PortalWorkerDriver(transport, createDispatcher())
-            publishReady(receipt)
+            publishReady(installed)
             initialized
         } catch (failure: Throwable) {
             var terminal = failure
@@ -182,7 +190,7 @@ public object PortalWorkerMain {
             throw terminal
         }
         // Main return need not end a JVM containing guest-created non-daemon threads.
-        finishWorkerExecution(driver, requireNotNull(receipt), receiptLifetime)
+        finishWorkerExecution(driver, installed, receiptLifetime)
     }
 
     private fun finishWorkerExecution(

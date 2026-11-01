@@ -9,6 +9,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -24,18 +25,19 @@ public object TierELongMatchedEstimator {
 
     public fun summarize(input: Path): JsonObject {
         val incomplete = mutableListOf<JsonObject>()
-        val rows = try {
-            Files.readAllLines(input).filter { it.isNotBlank() }.mapIndexedNotNull { index, raw ->
-                try {
-                    json.parseToJsonElement(raw) as? JsonObject ?: error("expected object")
-                } catch (failure: Exception) {
-                    incomplete += issue("bad_row", field = index.toString())
-                    null
-                }
-            }
-        } catch (failure: Exception) {
+        val lines = try {
+            Files.readAllLines(input)
+        } catch (failure: IOException) {
             incomplete += issue("jsonl_unreadable")
             emptyList()
+        }
+        val rows = lines.filter { it.isNotBlank() }.mapIndexedNotNull { index, raw ->
+            try {
+                json.parseToJsonElement(raw) as? JsonObject ?: error("expected object")
+            } catch (failure: Exception) {
+                incomplete += issue("bad_row", field = index.toString())
+                null
+            }
         }
         for (field in identityFields) {
             val identities = rows.map { it.text(field) }.toSet()

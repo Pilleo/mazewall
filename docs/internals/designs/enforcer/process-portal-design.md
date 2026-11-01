@@ -69,6 +69,12 @@ or interruption cannot orphan a late child. Cleanup drains independent resources
 fatal failures, publishes `Failed`, and releases concurrent close waiters before rethrowing the
 fatal-first aggregate. `Closed` therefore never precedes acquisition completion and child reaping.
 
+Accept-producer ownership also covers a task cancelled before dispatch. Such a
+task never enters the producer's `finally`; executor termination must establish
+its producer-completion boundary instead. Only then may a fully retired handoff
+leave the registry. A pre-native accepted-descriptor close failure remains owned for retry;
+executor termination does not substitute for descriptor retirement.
+
 Broker-launched workers now require a bounded parent startup control frame on the
 owned RPC channel before containment or guest construction. A fresh session and the
 actual child PID must match the command-line expectation; the parent sends authorization
@@ -379,6 +385,10 @@ KotlinPoet is a **plugin** dependency. Ask before adding it; do not put it on `:
 ## Codegen (later)
 
 Marker interface + factory, fail closed if the stub class is missing. Host stub: serialize args, attach FDs, wait for result. Worker dispatcher: deserialize, call impl, serialize result. Boundary types validated at generate time (primitives, `String`, records/POJOs, `byte[]`, `Capability.ReadFd` only).
+
+Constructor-backed POJOs may expose Boolean components through `isX()` readers
+for both primitive `boolean` and boxed `java.lang.Boolean`; both retain the same
+Boolean wire encoding. This does not admit `isX()` readers for non-Boolean types.
 
 The generator compiles each requested service into one immutable schema before emitting either
 side. The schema contains the effective inherited method set, resolves overrides, validates every

@@ -97,7 +97,7 @@ if ! (
     unset "$name" || exit $?
   done
   flock -w 900 "$PRECOMMIT_TEST_LOCK" \
-    ./gradlew "${BUILD_TASKS[@]}" --no-configuration-cache --no-parallel
+    ./gradlew "${BUILD_TASKS[@]}" --build-cache --configuration-cache --no-parallel
 ) > /tmp/mazewall-precommit-test.log 2>&1; then
   echo "--- Failing tests ---"
   grep -E "FAILED$|FAILED |e: " /tmp/mazewall-precommit-test.log | head -20 || true

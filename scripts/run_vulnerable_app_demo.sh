@@ -279,7 +279,7 @@ export APP_JAR="${jar_rel}"
 jar_sha=$(sha256sum "${demo_dir}/${jar_rel}" | awk '{print $1}')
 export APP_JAR_SHA256="${jar_sha}"
 
-run_bounded "${compose[@]}" build profile unprotected protected
+run_bounded "${compose[@]}" build profile
 image_json=$(run_bounded "${engine[@]}" image inspect "${image}")
 image_id=$(printf '%s' "${image_json}" | json_get Id)
 label=$(printf '%s' "${image_json}" | python3 -c 'import json,sys; doc=json.load(sys.stdin); doc=doc[0] if isinstance(doc, list) else doc; print(doc["Config"]["Labels"]["io.mazewall.demo.jar-sha256"])')

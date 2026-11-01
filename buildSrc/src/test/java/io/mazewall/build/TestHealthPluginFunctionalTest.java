@@ -10,8 +10,12 @@ import org.gradle.testkit.runner.GradleRunner;
 import org.gradle.testkit.runner.TaskOutcome;
 
 /** TestKit contract for the real test-health convention used by the root build. */
-final class TestHealthPluginFunctionalTest {
+public final class TestHealthPluginFunctionalTest {
     private TestHealthPluginFunctionalTest() {}
+
+    public static void main(String[] args) throws Exception {
+        verifyRelocatedCache();
+    }
 
     static void verify() {
         try {
@@ -166,9 +170,52 @@ final class TestHealthPluginFunctionalTest {
                 .withPluginClasspath(pluginClasspath()).withArguments("freshTest", "--tests", "fixture.MissingTest")
                 .buildAndFail();
             equal(true, unmatched.getOutput().contains("No tests found"));
+            verifyRelocatedCache();
         } catch (Exception failure) {
             throw new AssertionError("Test-health Gradle wiring contract failed", failure);
         }
+    }
+
+    private static void verifyRelocatedCache() throws Exception {
+        Path fixtures = Files.createTempDirectory("test-health-relocation-");
+        Path sharedCache = fixtures.resolve("cache");
+        Path second = null;
+        for (String checkout : List.of("first", "second")) {
+            Path project = Files.createDirectory(fixtures.resolve(checkout));
+            Files.writeString(project.resolve("settings.gradle"), "rootProject.name='relocated-health'\nbuildCache { local { directory = file('" + sharedCache + "') } }\n");
+            Files.writeString(project.resolve("build.gradle"), """
+                plugins { id 'java'; id 'io.mazewall.test-health' }
+                repositories { mavenCentral() }
+                dependencies {
+                    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+                    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.2'
+                }
+                tasks.withType(Test).configureEach { useJUnitPlatform() }
+                tasks.register('integrationTest', Test) {
+                    testClassesDirs = sourceSets.test.output.classesDirs
+                    classpath = sourceSets.test.runtimeClasspath
+                }
+                """);
+            write(project, "src/test/java/fixture/FirstTest.java", testSource("FirstTest"));
+            BuildResult result = run(project, "test", "aggregateTestHealth", "--build-cache", "--max-workers=1");
+            equal(checkout.equals("first") ? TaskOutcome.SUCCESS : TaskOutcome.FROM_CACHE, result.task(":test").getOutcome());
+            if (checkout.equals("second")) second = project;
+        }
+        Path project = java.util.Objects.requireNonNull(second);
+        Path report = project.resolve("build/reports/test-health/test-tier-health.json");
+        String cached = Files.readString(report);
+        equal(true, cached.matches("(?s).*\\\"freshForks\\\"\\s*:\\s*\\[\\s*].*"));
+        equal(true, cached.matches("(?s).*\\\"currentTasks\\\"\\s*:\\s*\\[\\s*].*"));
+        equal(true, cached.contains("\":test\""));
+        BuildResult nativeFirst = run(project, "test", "integrationTest", "aggregateTestHealth", "--build-cache", "--max-workers=1");
+        equal(TaskOutcome.UP_TO_DATE, nativeFirst.task(":test").getOutcome());
+        equal(TaskOutcome.SUCCESS, nativeFirst.task(":integrationTest").getOutcome());
+        BuildResult nativeAgain = run(project, "integrationTest", "aggregateTestHealth", "--build-cache", "--max-workers=1");
+        equal(TaskOutcome.SUCCESS, nativeAgain.task(":integrationTest").getOutcome());
+        String fresh = Files.readString(report);
+        equal(true, fresh.contains("\"currentTasks\": [\":integrationTest\"]"));
+        equal(true, fresh.contains("\"executionStatus\":\"completed\""));
+        System.out.println("TEST_HEALTH_RELOCATION_OK cached host results are not fresh forks; integration tasks execute each time");
     }
 
     private static BuildResult run(Path root, String... arguments) {
@@ -180,7 +227,7 @@ final class TestHealthPluginFunctionalTest {
             .build();
     }
 
-    private static List<java.io.File> pluginClasspath() {
+    static List<java.io.File> pluginClasspath() {
         var entries = new ArrayList<java.io.File>();
         for (String entry : System.getProperty("java.class.path").split(java.io.File.pathSeparator)) {
             if (entry.contains("buildSrc/build/classes/java/main") || entry.contains("buildSrc/build/resources/main")) {

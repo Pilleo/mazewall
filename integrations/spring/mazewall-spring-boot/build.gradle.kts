@@ -14,7 +14,15 @@ dependencyLocking {
     lockMode.set(LockMode.STRICT)
 }
 
+// Spring's optional reactive signatures must be resolvable by the analyzer, not published as runtime requirements.
+val spotbugsOptionalApi =
+    configurations.create("spotbugsOptionalApi") {
+        isCanBeConsumed = false
+    }
+
 dependencies {
+    add(spotbugsOptionalApi.name, platform("org.springframework.boot:spring-boot-dependencies:4.1.1"))
+    add(spotbugsOptionalApi.name, "io.projectreactor:reactor-core")
     api(project(":enforcer"))
     api(platform("org.springframework.boot:spring-boot-dependencies:4.1.1"))
     api("org.springframework:spring-aop")
@@ -38,6 +46,10 @@ dependencies {
     testImplementation("com.h2database:h2")
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.withType<com.github.spotbugs.snom.SpotBugsTask>().configureEach {
+    auxClassPaths.from(spotbugsOptionalApi)
 }
 
 tasks.test {

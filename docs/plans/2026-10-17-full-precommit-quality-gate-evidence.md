@@ -8,7 +8,7 @@ hook previously invoked `test :portals:runtime:integrationTest :portals:runtime:
 with `-x check`, excluding the complete verification lifecycle. It did not enforce
 the repository's documented full build gate.
 
-Gradle9.6.1 documentation was retrieved for this project's exact wrapper version.
+Gradle9.6.1 documentation was retrieved for the wrapper version at that checkpoint.
 It documents check as the verification aggregate and -x as excluding a task and
 otherwise-unneeded dependencies. Repository build/check wiring and prior actual
 full-build execution establish that build is the complete included-module gate.
@@ -18,7 +18,7 @@ full-build execution establish that build is the complete included-module gate.
 The hook now runs:
 
 ```bash
-./gradlew build :portals:runtime:integrationTest :portals:runtime:test --no-configuration-cache --no-parallel
+./gradlew build :portals:runtime:integrationTest :portals:runtime:test --build-cache --configuration-cache --no-parallel
 ```
 
 The explicit portal tasks are retained only when that module is included, with
@@ -32,6 +32,11 @@ names. Credential/environment handling is unchanged.
 The existing audit wrapper delegates to this same tracked hook. No new dependency,
 build task, opt-out, approval flow or operator Git configuration is introduced.
 The already-active hook path picks up the change on local integration.
+
+The 2026-11-01 update explicitly enables both Gradle caches instead of disabling
+the configuration cache. Unchanged task graphs and outputs can be reused; changed
+inputs still invalidate the affected checks. The existing lock and serial task
+execution remain in place. No cached-success marker replaces Gradle verification.
 
 ## Behavioral regression
 

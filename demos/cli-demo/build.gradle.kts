@@ -14,15 +14,14 @@ kotlin {
 // These in-repository demonstration tests exercise raw attack primitives.  The
 // published CLI application still depends only on the enforcer/profiler facades.
 val cliDemoPlatformJar = project(":platform").tasks.named<Jar>("jar").flatMap { it.archiveFile }
-extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
+extensions
+    .getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
     .target
     .compilations
     .named("test") {
         compileTaskProvider.configure {
             dependsOn(cliDemoPlatformJar)
-            compilerOptions.freeCompilerArgs.addAll(
-                cliDemoPlatformJar.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") },
-            )
+            (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(cliDemoPlatformJar)
         }
     }
 application {
@@ -38,4 +37,14 @@ dependencies {
     testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(kotlin("test"))
     testImplementation(rootProject.sourceSets["sharedTest"].output)
+}
+
+tasks.register<JavaExec>("runWorkspaceExample") {
+    group = "application"
+    description = "Read an approved workspace file and demonstrate a real denied sibling open in a fresh JVM."
+    dependsOn(tasks.jar)
+    javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+    classpath = files(tasks.named<Jar>("jar").flatMap { it.archiveFile }, configurations.named("runtimeClasspath"))
+    mainClass.set("demo.WorkspaceExample")
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }

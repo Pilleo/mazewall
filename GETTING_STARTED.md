@@ -114,6 +114,24 @@ dependencies {
 
 ---
 
+## Choose your application
+
+| Application | What you can adapt | Run guide |
+|---|---|---|
+| Koog, no Spring | Bounded document reader, real offline scripted AIAgent and generated process-backed Markdown outline | [Document agent](demos/koog-document-agent/README.md) |
+| Spring, no agent | HTTP report, Security, same-datasource audit/rollback, readiness and owned shutdown | [Report API](demos/spring-report-api/README.md) |
+
+Both are independent JDK25 projects consuming published libraries, not included
+mazewall source builds. Start with the ordinary business files; each guide shows the
+explicit bootstrap, exact binding and separate test-only controls. A dependency or
+annotation alone never installs protection. Keep the minimal non-web
+[Spring example](demos/spring-boot-sandbox/README.md) when you do not need HTTP/Security.
+
+Use a selected immutable version plus actual downloaded checksums for a released
+evaluation kit. Generated local distributions and green publication CI are not
+remote-download provenance. Repository credentials remain operator configuration.
+Do not weaken verification or substitute sibling sources when access is unavailable.
+
 ## Before You Evaluate
 
 - Linux only. Record the exact kernel, Landlock ABI, JDK, container runtime, and outer Seccomp profile used for testing.

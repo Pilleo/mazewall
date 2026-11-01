@@ -22,9 +22,13 @@ import (
 func TestObservedReaderPendingReadoutReturn(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	modfile, err := filepath.Abs("../../build/experiment.go.mod")
+	if err != nil {
+		t.Fatal(err)
+	}
 	moduleDir := func(module string) string {
 		t.Helper()
-		out, err := exec.CommandContext(ctx, "go", "list", "-m", "-f", "{{.Dir}}", module).CombinedOutput()
+		out, err := exec.CommandContext(ctx, "go", "list", "-modfile="+modfile, "-m", "-f", "{{.Dir}}", module).CombinedOutput()
 		if err != nil {
 			t.Fatalf("selected module %s: %v\n%s", module, err, out)
 		}
@@ -104,7 +108,7 @@ func TestObservedReaderPendingReadoutReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(temp, "pending-readout.test")
-	cmd := exec.CommandContext(ctx, "go", "test", "-race", "-buildvcs=false", "-overlay="+overlayPath, "-c", "-o", binary, ".")
+	cmd := exec.CommandContext(ctx, "go", "test", "-modfile="+modfile, "-race", "-buildvcs=false", "-overlay="+overlayPath, "-c", "-o", binary, ".")
 	t.Log("compile", cmd.Args)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("compile boundary: %v\n%s", err, out)

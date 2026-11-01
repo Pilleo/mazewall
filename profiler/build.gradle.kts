@@ -32,7 +32,20 @@ abstract class GenerateInvocationStateBtf
                 .asFile.parentFile
                 .mkdirs()
             execOperations.exec {
-                commandLine("clang", "-target", "bpf", "-g", "-O2", "-c", source.get().asFile.absolutePath, "-o", objectFile.get().asFile.absolutePath)
+                // Disposable producer paths must not change the published BTF/plugin classpath.
+                commandLine(
+                    "clang",
+                    "-target",
+                    "bpf",
+                    "-g",
+                    "-O2",
+                    "-fdebug-prefix-map=${source.get().asFile.parentFile.absolutePath}=.",
+                    "-fdebug-compilation-dir=.",
+                    "-c",
+                    source.get().asFile.absolutePath,
+                    "-o",
+                    objectFile.get().asFile.absolutePath,
+                )
             }
             extractBtf(objectFile.get().asFile, resource.get().asFile)
         }
@@ -246,6 +259,20 @@ sourceSets.named("integrationTest") {
 }
 configurations.named("toolingImplementation") {
     extendsFrom(configurations.implementation.get())
+}
+
+tasks.register<JavaExec>("policyDiff") {
+    group = "verification"
+    description = "Compare two reviewed operation-document candidates without granting approval."
+    classpath = toolingSourceSet.runtimeClasspath
+    mainClass.set("io.mazewall.profiler.tools.PolicyDiff")
+    val oldDocument = providers.gradleProperty("oldOperationDocument")
+    val newDocument = providers.gradleProperty("newOperationDocument")
+    argumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf(oldDocument.get(), newDocument.get())
+        },
+    )
 }
 
 tasks.register<JavaExec>("tierEVerifyArtifacts") {
@@ -668,14 +695,7 @@ configurations.matching { it.name == "compileClasspath" || it.name.endsWith("Com
 kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(enforcerJar, platformJar)
-        compilerOptions.freeCompilerArgs.addAll(
-            enforcerJar.zip(platformJar) { enforcer, platform ->
-                listOf(
-                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
-                    "-Xfriend-paths=${platform.asFile.absolutePath}",
-                )
-            },
-        )
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(enforcerJar, platformJar)
     }
 }
 kotlinCompilations.named("integrationTest") {
@@ -845,16 +865,16 @@ pitest {
         ),
     )
 
-    jvmArgs.set(listOf("--enable-native-access=ALL-UNNAMED"))
     timeoutConstInMillis.set(2000)
     timeoutFactor.set(BigDecimal.valueOf(1.25))
-    threads.set(providers.gradleProperty("mazewall.pitest.threads").orElse("2").map(String::toInt))
 
     // Host-unit floor for profile-evidence and policy-compilation behavior.
     coverageThreshold.set(93)
     mutationThreshold.set(65)
     testStrengthThreshold.set(75)
 }
+
+apply(from = rootProject.file("gradle/pitest-limits.gradle"))
 
 classDiagrams {
     plantumlServer = null

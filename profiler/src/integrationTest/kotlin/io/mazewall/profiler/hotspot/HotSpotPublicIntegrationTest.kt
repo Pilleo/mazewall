@@ -35,6 +35,22 @@ import kotlin.test.assertTrue
 @Suppress("FunctionNaming", "MagicNumber") // Descriptive backtick test names and small deterministic fixture token/operation counts.
 class HotSpotPublicIntegrationTest {
     @Test
+    fun `collector command retirement is independent of fixture container teardown`(
+        endpoint: ContainerEndpoint,
+        @TempDir directory: Path,
+    ) {
+        HotSpotAcceptanceHarness(endpoint, directory).use { fixture ->
+            HotSpotAcceptanceHarness.command(fixture.options().collectorArgvPrefix + "true")
+            val state = HotSpotAcceptanceHarness.runCommand(
+                endpoint.command("inspect", "--format", "{{.State.Running}}", "hs-collector-${fixture.run}-0"),
+            )
+            assertEquals(0, state.first, state.second)
+            assertEquals("true", state.second.trim())
+            fixture.assertCollectorsGone()
+        }
+    }
+
+    @Test
     fun `installed public strategy attributes unique operations in exact application order`(
         endpoint: ContainerEndpoint,
         @TempDir directory: Path,
@@ -412,7 +428,7 @@ class HotSpotPublicIntegrationTest {
     private fun standalone(fixture: HotSpotAcceptanceHarness) {
         val manifest = Json.parseToJsonElement(Files.readString(fixture.assets.resolve("manifest.json"))).jsonObject
         val image = "ghcr.io/inspektor-gadget/gadget/mw-hotspot-openat@${manifest.getValue("gadget_digest").jsonPrimitive.content}"
-        val argv = fixture.options().collectorArgvPrefix +
+        val argv = fixture.options(standalone = true).collectorArgvPrefix +
             listOf(
                 fixture.assets.resolve("mw-hotspot-collector").toString(),
                 "--capture",

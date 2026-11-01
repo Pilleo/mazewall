@@ -49,6 +49,7 @@ internal object ConsumerProcessEvidence {
         label: String,
         timeout: Duration = Duration.ofSeconds(90),
         evidence: Path = directory,
+        startPump: (Runnable) -> CompletableFuture<Void> = { CompletableFuture.runAsync(it) },
     ): ConsumerCommandResult {
         require(arguments.isNotEmpty() && Regex("[A-Za-z0-9_.-]+").matches(label)) { "Invalid consumer command/evidence label" }
         require(!timeout.isNegative && !timeout.isZero) { "Consumer command requires a positive timeout" }
@@ -87,7 +88,7 @@ internal object ConsumerProcessEvidence {
                             val acquired = builder.start()
                             child = acquired
                             IsolatedProcessTester.awaitOwnedProcess(acquired, timeout, beforeWait = {
-                                pumps = listOf(stdout.copy(acquired.inputStream), stderr.copy(acquired.errorStream))
+                                pumps = listOf(stdout.copy(acquired.inputStream, startPump), stderr.copy(acquired.errorStream, startPump))
                                 acquired.outputStream.close()
                                 persist(Phase.RUNNING)
                             }, waitCompleted = { completed ->
@@ -96,14 +97,19 @@ internal object ConsumerProcessEvidence {
                                     persist(Phase.TIMED_OUT)
                                     throw ConsumerCommandTimeout(arguments)
                                 }
+                                // Normal-exit cleanup closes process streams, so drain evidence first.
+                                pumps.forEach { it.get(5, TimeUnit.SECONDS) }
                             })
                         } catch (caught: Throwable) {
                             failure = caught
                         } finally {
+                            var interrupted = Thread.interrupted()
+
                             fun attempt(action: () -> Unit) {
                                 try {
                                     action()
                                 } catch (cleanup: Throwable) {
+                                    if (cleanup is InterruptedException) interrupted = true
                                     if (failure == null) {
                                         failure = cleanup
                                     } else if (failure !== cleanup) {
@@ -111,10 +117,14 @@ internal object ConsumerProcessEvidence {
                                     }
                                 }
                             }
-                            pumps.forEach { pump -> attempt { pump.get(5, TimeUnit.SECONDS) } }
-                            reaped = child?.let { !it.isAlive } == true
-                            attempt { combined.replace(stdout.bytes() + stderr.bytes()) }
-                            attempt { persist(if (reaped) Phase.REAPED else Phase.LAUNCH_FAILED) }
+                            try {
+                                pumps.forEach { pump -> attempt { pump.get(5, TimeUnit.SECONDS) } }
+                                reaped = child?.let { !it.isAlive } == true
+                                attempt { combined.replace(stdout.bytes() + stderr.bytes()) }
+                                attempt { persist(if (reaped) Phase.REAPED else Phase.LAUNCH_FAILED) }
+                            } finally {
+                                if (interrupted) Thread.currentThread().interrupt()
+                            }
                         }
                         failure?.let { throw it }
                         return ConsumerCommandResult(child!!.exitValue(), String(stdout.bytes(), Charsets.UTF_8), String(stderr.bytes(), Charsets.UTF_8))
@@ -149,19 +159,24 @@ internal object ConsumerProcessEvidence {
             check(named.isRegularFile && named.fileKey() == key && Files.getAttribute(path, "unix:nlink", NOFOLLOW_LINKS) == 1) { "Replaced/aliased evidence: $path" }
         }
 
-        fun copy(input: InputStream): CompletableFuture<Void> =
-            CompletableFuture.runAsync {
-            input.use {
-                val bytes = ByteArray(65536)
-                while (true) {
-                    val count = it.read(bytes)
-                    if (count < 0) break
-                    validate()
-                    val buffer = ByteBuffer.wrap(bytes, 0, count)
-                    while (buffer.hasRemaining()) channel.write(buffer)
-                }
-            }
-        }
+        fun copy(
+            input: InputStream,
+            startPump: (Runnable) -> CompletableFuture<Void>,
+        ): CompletableFuture<Void> =
+            startPump(
+                Runnable {
+                    input.use {
+                        val bytes = ByteArray(65536)
+                        while (true) {
+                            val count = it.read(bytes)
+                            if (count < 0) break
+                            validate()
+                            val buffer = ByteBuffer.wrap(bytes, 0, count)
+                            while (buffer.hasRemaining()) channel.write(buffer)
+                        }
+                    }
+                },
+            )
 
         fun replace(bytes: ByteArray) {
             validate()

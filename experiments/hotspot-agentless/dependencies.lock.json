@@ -14,7 +14,7 @@
     "sum": "h1:uAAxfhFJY2k26LvrHwdZdy7gTRo3ZFSTeSrWSPKjirk="
   },
   "images": {
-    "go": "golang@sha256:fb612b7831d53a89cbc0aaa7855b69ad7b0caf603715860cf538df854d047b84",
+    "go": "golang@sha256:672c944cfd07599b5f1bb179869270cdc94c6254e41db4d431259693cb286b82",
     "gadget_builder": "ghcr.io/inspektor-gadget/gadget-builder@sha256:dba339d2a2f189ae5fcdc08730e6cac128d4ed30c3af42e5fb93a5c8cf4c77aa",
     "jdk": "eclipse-temurin@sha256:119a3d18f160a3e7655a66034d0f43beee31cd7b3b9142d57a5de29772011de6"
   },

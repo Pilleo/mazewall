@@ -136,10 +136,61 @@ and daemon-reactor specifications raised the observed host-unit platform report
 to about 69% without adding synthetic tests. The host floor is 65%, retaining
 more than four percentage points of change tolerance below that result.
 
-`./gradlew :enforcer:pitest :platform:pitest :profiler:pitest` adds an
-assertion-quality gate for the deterministic policy, protocol, and profiling
-slices. It runs only named host unit tests and enforces line reach, mutation
-score, and test strength independently. The current floors are:
+The host-only mutation gate adds an assertion-quality check for the deterministic
+policy, protocol, and profiling slices. Run the three modules serially, with two
+PIT workers and one ordinary test fork:
+
+```bash
+./gradlew :enforcer:pitest :platform:pitest :profiler:pitest \
+  --max-workers=1 --no-parallel \
+  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+```
+
+`gradle/pitest-limits.gradle` supplies the shared default of two PIT workers.
+`-Pmazewall.pitest.threads` takes precedence over compatible `-Dpitest.threads`;
+selected values must be positive integers. Each PIT parent uses
+`-Xms128m -Xmx512m -XX:MaxMetaspaceSize=256m`, and each minion uses
+`-Xms128m -Xmx256m -XX:MaxMetaspaceSize=256m`. Both retain
+`--enable-native-access=ALL-UNNAMED`. These limits do not change Gradle's JVM
+budget or the native suites' fresh-process requirements.
+
+CI runs that command through the host wrapper (not the container runner):
+
+```bash
+python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/mutation.json -- \
+  ./gradlew :enforcer:pitest :platform:pitest :profiler:pitest \
+  --no-daemon --max-workers=1 --no-parallel \
+  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+```
+
+The schema-1 receipt records `command_exit_code`, `oom_kill_delta` and
+`qualification` (`pass`, `unsafe` or `unknown`), with raw memory observations.
+A qualified pass requires at least 2147483648 bytes of observed headroom and zero
+additional OOM kills; unknown evidence is not a pass. The wrapper preserves a
+failing command's exit status and rejects unsafe or unknown memory evidence even
+when PIT succeeds. CI always uploads the receipt and all three PIT report paths,
+including after failure or cancellation when artifact upload can still execute.
+On Linux, the wrapper acquires a child-subreaper lifetime before launch and uses
+pidfds to retire its descendants, including detached single-use Gradle daemons
+and workers. Retirement also drains descendants after a normal launcher exit,
+before final observations/publication; cancellation preserves the actual launcher
+status separately from the wrapper's signal status. Cleanup allows three seconds
+before SIGKILL and one further second to reap; a cleanup failure is not success.
+Unavailable ownership primitives prevent launch. This is a single-threaded CLI,
+not a general-purpose in-process supervisor: it refuses pre-existing children or
+custom SIGCHLD handling and restores the prior subreaper setting afterward.
+Run the wrapper regression separately with
+`python3 -m unittest discover -s scripts/tests -p 'test_ci_resource_probe.py' -v`.
+
+`./gradlew -p buildSrc pitestLimitsTest --console=plain --max-workers=1` resolves
+the actual shared script, root properties, and PIT plugin in an independent
+three-project fixture. It checks precedence, invalid values, JVM budgets,
+unrelated extension settings, and changed properties with configuration-cache
+reuse. The regression also runs in mandatory `verificationActionsTest`; both
+tasks declare the shared script and root properties as inputs.
+
+PIT runs only named host unit tests and enforces line reach, mutation score, and
+test strength independently. The current floors are:
 
 | Module | Line reach | Mutation score | Test strength |
 | --- | ---: | ---: | ---: |
@@ -158,6 +209,397 @@ the simulator would need an explicit, configurable instruction-step bound with a
 distinct exhaustion result; do not add a test-only production bypass.
 
 ## Fast iteration and cache reuse
+
+Root `buildLogicCheck` is the explicit complete build-tool regression gate. It uses
+public GradleBuild APIs, a distinct nested build name `build-logic-verification`,
+the existing buildSrc `verificationActionsTest`, one nested worker and no project
+parallelism. Root `check` requires it, preserving existing root build/mergeCheck
+coverage; buildSrc's own test/check dependencies also remain mandatory. The bridge
+has no outer cached-success output or skip predicate: actual nested inputs and
+marker invalidation remain authoritative.
+
+JAR bootstrap/help/compile/assemble do not implicitly select the verifier, though
+ordinary buildSrc compilation can still run. Lazy `mustRunAfter` edges put other
+root/child tasks after the gate only when it is selected, without adding it to fast
+paths. Workflow and buildSrc settings remain declared verifier inputs.
+
+Build-tool regression fixtures use `$GRADLE_USER_HOME/caches/mazewall-test-kit`
+as their TestKit home rather than `buildSrc/build/test-kit`. The current Gradle
+User Home owns this path, including explicit `-g` overrides; the existing host and
+dedicated container homes remain separate. Its location under `caches` lets the
+existing Gradle cache archives retain nested-build dependencies, compiled scripts
+and compilation outputs across disposable producer checkouts. It does not reuse
+old native acceptance outcomes or remove the mandatory build-tool regression suite.
+The JVM argument provider declares the relative cache layout as input and the
+absolute Gradle home as internal transport. This prevents host/container cache-home
+switches from invalidating the same verification task and rerunning its suite
+inside the demo's bounded startup. Verification sources and classpaths remain
+declared inputs; only cache-location plumbing is excluded.
+The real two-checkout TestKit regression asserts the configured nested home and
+requires the second independent Java compilation to be `FROM-CACHE` with a real
+class output. Run it directly with `./gradlew -p buildSrc testKitCacheTest`.
+
+Portal codegen's test JVM uses the same cache-owned TestKit layout through an
+argument provider: the relative layout is input, the absolute Gradle home is
+transport. Its independent fixtures explicitly enable build caching, use relative
+local API-JAR paths and reproducible JAR entries. Real two-copy compilation and
+bundle reuse must survive relocation; changed guest bytes must rebuild the bundle.
+Cached host codegen tests are not fresh kernel attestations.
+
+The workflow-input fixture calls the production CI-policy validator, not its full
+self-test suite. The complete policy/status matrices still run once in the outer
+build-logic gate. Its success marker is not a portable cached attestation.
+
+Optional adapter verification performs one real host build, then two task-free
+same-graph passes: prime post-build inputs and require literal configuration-cache
+reuse. This handles generated directories observed by PlantUML without rerunning
+tests or packaging merely to prove serialization. The proof log is always uploaded.
+
+The runner-image cache uses the shared `podman-runner-v2` Containerfile identity.
+An exact hit must contain a nonempty, loadable runner archive; export failures or
+empty archives cannot be saved. Only the test runner is archived, not obsolete
+vulnerable-demo image names. The launcher still verifies the Containerfile label.
+The versioned key avoids the old empty immutable entry without deleting caches.
+
+The ordinary enforcer unit task fingerprints its owned-child coverage agent by
+bytes, not the Gradle-home path. Identical host/container artifacts therefore reuse
+unit execution data; changing the bytes still invalidates it. Kernel/fresh-JVM
+execution remains uncached and retains its physical-retirement assertions.
+
+Independent copied/legacy consumers explicitly enable build-output caching; they
+do not inherit the producer root's `gradle.properties`. Configuration-cache graph
+reuse is not proof of compile/test-output reuse. Two-copy regressions require
+ordinary compilation and host tests FROM-CACHE, changed inputs to invalidate, and
+native/presentation tasks to execute on every real pass.
+
+Compiler friend grants use typed file collections, not absolute `-Xfriend-paths`
+strings. Producer dependencies and matching artifact classpaths remain explicit;
+visibility is not made public. Relocated Kotlin compilation must reuse outputs,
+while removing friend authority or changing an internal API must reject stale output.
+The final root Boot check also retains the staging init/version context rather
+than rebuilding the same producer under SNAPSHOT JAR names.
+
+Generated invocation-state BTF normalizes compiler debug paths so disposable
+checkout names do not change the profiler JAR and downstream plugin classpath.
+Debug/type information remains present; a real two-checkout compiler regression
+requires identical BTF/JAR bytes and changed C types to invalidate the resource.
+
+Test-health destinations are supplied at execution time alongside invocation tokens,
+not as diagnostic-only cache-key inputs. Clearing fragments, rejecting stale tokens
+and classifying cached host results separately from fresh forks remain mandatory.
+Relocation reuse never supplies fresh native evidence.
+
+Portal runtime's per-class integration task filters compiled candidates to real
+JUnit root classes before forking, using the existing metadata reader without
+loading application classes. Inherited methods and nested containers remain
+discoverable; CLI filters and caller-owned file includes remain intact. Empty
+default discovery fails closed. Unresolved runtime annotations or external class
+ancestry remain candidates for Jupiter rather than being silently excluded;
+interface metadata can be inspected on the runtime classpath without class loading.
+Provably helper-only classes
+do not consume empty JVM launches, but every selected real root still gets its
+own fresh JVM and native tasks remain uncached.
+
+Dependency approvals must also be checked with isolated cold resolution: cached
+parsed BOM metadata can hide missing or changed `.module` approvals. Do not disable
+verification or rely on a warm configuration-only check. Cache restore logs also
+matter: GitHub's `Egress is over the account limit` is an account-side transport
+failure, not evidence that Gradle reexecuted warm inputs. Repository caching cannot
+override that limit; retain actual tests and report cold costs instead of claiming
+a warm-cache speedup. PR-ref caches cannot seed the trusted default branch.
+
+CI computes `scripts/ci_cache_key.sh` once immediately after checkout in each
+container-owning validation job (`optional-integrations` and `core-quality`).
+Container Gradle restore/save keys share that immutable job output, retaining their
+OS prefixes, SHA suffixes and dedicated cache layout. Saves
+require successful key computation as well as their existing conditions.
+
+The main container restore first tries its matching build identity, then matching
+and broad optional-container entries before its older broad main fallback. This
+reuses the compatible PR container home already saved by optional acceptance,
+without adding another per-PR archive or mixing host/container cache directories.
+
+Core PR reruns additionally restore and save only the selected container Gradle
+local task-output subtree, `caches/build-cache-1`, after Podman selects the
+actual engine. `run_containerized_tests.sh --print-cache-home` is a read-only,
+sole-argument query with an absolute cache base; it never creates cache state or
+launches a container. The narrow cache remains PR-scoped and does not include
+dependency metadata, transforms, NVD data, native executions, or the trusted
+default-branch container-home archive.
+
+The host Core gate executes `:unitCheck` and `:verifyGradleReproducibility` in
+one bounded Gradle invocation. Its configuration-cache proof primes and replays
+that same graph with `--dry-run`; no task action is re-executed by the proof, and
+the replay must report literal cache reuse in retained diagnostics.
+
+The helper hashes current bytes and NUL-delimited relative names of Git-tracked
+Gradle/Groovy/Kotlin build scripts, root/nested `gradle.properties` and
+`gradle.lockfile`, the versions catalog, verification metadata, wrapper JAR/properties,
+Containerfiles, CI workflow and cache-key/container-runner scripts. Untracked or
+generated scripts/markers and unrelated source do not affect it. Repository-local
+Git overrides are cleared only in the child, with optional index writes disabled.
+Contained readable regular-file aliases are supported; external, dangling, cyclic,
+special, unreadable or missing inputs and Git/hash errors fail without publishing
+a digest. Computation assumes an immutable checkout, not race-proof containment.
+
+`./gradlew -p buildSrc ciCachePolicyTest --console=plain --max-workers=1` runs real
+owned-Git fixtures and workflow-policy mutations. These checks also run in mandatory
+`verificationActionsTest`, whose inputs include the helper. The policy fixtures
+retain cache-identity/save/host-container regressions and reject serialized,
+skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
+unsafe required-check joins. They execute the extracted join shell command for
+all 625 core/mutation/security/build-logic combinations with Go fixed to success,
+then every Go and optional-integration result with the other prerequisites successful. Only six literal
+successes pass. Existing security125/legacy25 projections fix the extra results
+explicitly to success. Actual security metadata/eligibility/ownership/task shells,
+snapshot assertion and lifecycle conditions are exercised without scanner/network
+calls; simulated outcomes do not establish actual cache persistence. Cache identities are
+compatibility keys, not native protection attestations: cache isolation, ownership,
+required native freshness and publication gates are unchanged.
+
+The marker-producing build-tool verifier declares the actual CI workflow as a
+named relative-path-sensitive input. An applied-registration fixture checks that
+a workflow-only edit reruns executable policy checks and an invalid edit removes
+the old success marker. Ownership fixtures verify a different numeric UID rather
+than assuming a system file is foreign; production ownership checks are unchanged.
+
+The `optional-integrations`, `core-quality`, `mutation-tests`, `security-check`,
+`build-logic-validation` and `go-validation` jobs run
+independently on separate `ubuntu-26.04` runners with JDK 25; heavy commands are
+never backgrounded together in one checkout. Core retains host quality,
+kernel/fresh-JVM and exploitation gates; independent security retains the real
+vulnerability scan. Mutation uses host Gradle without Podman
+or another container-cache archive. Core, mutation and security independently filter code
+changes, including `.github/workflows/ci.yml`. A docs-only mutation step may skip
+while its job succeeds; the required join is never job-level skipped.
+
+Core invokes the root `:unitCheck` explicitly, avoiding Gradle's recursive bare
+task-name selection of demo gates. Slow Gradle-backed consumer regressions are
+tagged `build-logic`: `consumerHarnessTest` excludes them and
+`consumerBuildLogicTest` selects them in the existing Build Logic lane. Root
+`check` also requires the latter; no acceptance assertion is removed.
+The consumer source set uses shared process-fixture support and the existing
+locked JUnit artifacts, not the architecture suite's aggregate SDK runtime.
+Its compile/test graph must not build unrelated profiler/Portal producers;
+ordinary architecture tests retain their full module runtime. This avoids moving
+unnecessary SDK compilation into the Build Logic lane without adding dependencies.
+
+The existing Security lane explicitly owns `:demos:vulnerable-web-app:unitCheck`
+and the shared-image script regression. This step runs unless cancelled, even
+without scanner eligibility or after a scanner failure; it cannot erase an
+earlier failure. Demo JUnit/HTML and triage output are always retained. The real
+profile-first exploit demonstration remains fresh in Core. Its owned run image
+is built once from the profile service's shared definition; all three service
+modes use that exact hash-checked image with `--no-build`, retaining identity,
+permission and physical-retirement checks.
+
+Build-logic validation is an independent unconditional Ubuntu26.04/JDK25 lane,
+with the existing setup-gradle policy, no extra heap/worker/fork allowance and
+always-uploaded diagnostics. It runs:
+
+```bash
+python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- \
+  ./gradlew :buildLogicCheck --configuration-cache --configuration-cache-problems=fail \
+  --no-daemon --max-workers=1 --no-parallel
+```
+
+The actual executed-suite receipt must qualify with known >=2147483648-byte
+headroom and zero additional OOM kills. Unknown evidence is not a pass. An unchanged
+UP-TO-DATE/cached nested verifier can demonstrate reuse but is not full-workload
+memory evidence. Other CI lanes compile build logic as needed without implicitly
+repeating its complete regression suite. Intentional bounded fixture builds can
+reuse verifier task names; global task-name counts are not duplicate-suite proof.
+The consumer regressions run in a required subsequent step with the same strict
+configuration-cache and one-worker/no-parallel limits. They own and verify their
+child lifetimes, so they must not run beneath the resource probe's outer subreaper:
+it can otherwise adopt killed descendants but defer reaping them until Gradle exits,
+preventing the inner fixture from confirming retirement. The original build-logic
+resource gate and reserve remain intact; consumer tests retain their former Core
+budgets. Diagnostics also retain their JUnit/HTML.
+
+Go validation installs Go from the canonical module's directive and pins
+`govulncheck` v1.9.0. Race tests and vulnerability scans run serially for both
+agentless modules when either tree, the CI workflow or resource wrapper changes.
+Unrelated changes skip those steps, not the required job. Both modules are checked
+even if one fails; any test, scanner, vulnerability or resource failure blocks the
+publication join. The job bounds Go concurrency/memory and uses the existing
+resource probe. `make unit` propagates the prepared modfile to capture-test child
+commands; `make vuln` scans that same graph. No vulnerability suppressions or
+report-only success fallback are configured.
+
+Explicit HotSpot native acceptance starts a fixture-owned idle container, then
+supervises the actual collector with `docker exec -i`. Collector exit and joined
+streams must still satisfy the existing two-second finish budget. Container-runtime
+teardown is separate fixture ownership: the fixture first verifies that only its
+idle process remains, then stops/removes the container and checks that it is gone.
+This avoids charging Docker's post-exit runtime teardown to collector retirement;
+it neither substitutes container termination for a collector join nor extends any
+native or JVM deadline. The standalone comparison retains `docker run --rm` and
+signals its container by identity; it does not signal a saved numeric host PID.
+
+Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
+container's separate data mount. The security lane alone owns its data-only cache
+and retained snapshot artifacts; setup-gradle excludes that directory. Compatibility keys include OS, architecture
+and the actual catalog scanner version, with unique run-ID/attempt snapshots and
+only the compatible restore prefix. No previous matched key is overwritten, no
+cross-version/container fallback is allowed, and a cache hit never skips analysis.
+Dependency-Check 13.0.0's task data-directory property is explicitly bound to the
+configured extension directory, so update and analysis cannot silently use its
+separate default `11.0` directory. Old scanner/database versions are not migrated
+by copying their databases across compatibility prefixes.
+
+On a genuine cache miss (empty matched key, not the exact-hit boolean), the lane
+looks for the newest compatible, non-expired completed snapshot artifact. Artifacts
+are retained for 14 days outside the evictable build-cache quota. Default-branch
+consumers accept only same-repository default-branch push artifacts from this CI
+workflow; PRs may additionally consume their own PR's artifacts, never another PR's.
+Source run/repository/commit/attempt metadata and the exact compatibility prefix
+are checked. Overall workflow success is not required: a completed database remains
+usable when a later analysis or another job failed. Deleted-fork metadata is rejected.
+API/download errors are failures, not evidence that no snapshot exists.
+
+Snapshots contain a versioned compatibility manifest and SHA-256/size inventory of
+all database files, including hidden cache files. Preparation and restoration reject
+links, foreign ownership, non-regular files, missing/empty `odc.mv.db`, more than
+10,000 entries, more than 2 GiB of data or a manifest larger than 2 MiB. Restoration
+first requires the downloaded ZIP's SHA-256 to match GitHub's recorded artifact
+digest, before extraction; an internally consistent replacement manifest is not
+sufficient. Downloads are streamed and bounded by their recorded archive size,
+with missing/mismatched digests, truncation, unsafe ZIP paths and non-regular entries
+remaining blocking failures. Restoration checks the inventory before admitting data through an owned temporary directory;
+existing nonempty data is never overwritten. Snapshot age is not a freshness waiver:
+the normal updater must still succeed before real analysis. With neither a compatible
+cache nor retained artifact, the cold path seeds from Dependency-Check's
+[maintainer-published NVD feed](https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/cache.properties),
+then requires a separate live NVD API update with `nvd.api.check.validforhours=0`.
+The seed alone is never accepted as fresh security data. Warm updates retain the
+normal validity window. API requests use 500 records per page to bound response
+size; every page is still consumed, with no CVE filtering or retry-count increase.
+
+The independent security job has a bounded 180-minute cold budget, including a
+150-minute `dependencyCheckUpdate` step covering both seed and forced live refresh
+when cold. This separates bootstrap from already successful native work; it is not
+a latency guarantee, and seed/API errors remain blocking.
+After a successful update, caller ownership is checked before explicit snapshot
+save and a separate retained-artifact upload. Artifact preparation/publication has
+its own success guard and nonempty artifact-ID assertion before analysis; persistence
+failures leave the lane red. Failed/cancelled updates and foreign ownership never publish a snapshot;
+there is no permission repair or partial-database resume assumption.
+An updater or analyzer that logs `Failed to process CVE-` is rejected even if
+Gradle exits successfully, including an implicit refresh at the validity-window
+boundary. Omitted records are not a completed database. This guards the known
+[NVD record-processing failure](../../backlog/issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md)
+without suppressing CVEs or modifying upstream data.
+
+Because cache/save may warn and exit successfully after upload failure, a supported
+lookup-only restore checks the identical new primary key/path without fallback,
+with fail-on-cache-miss. An explicit assertion also requires literal `cache-hit ==
+true`, rejecting false/unset/nonexact results even when unavailable cache features
+return without an action error. This proves membership only, not archive integrity,
+retention or successful future restoration. Missing/evicted/not-yet-visible data
+fails closed rather than invoking a retry or accepting warning-only upload success.
+
+After successful update and ownership, `dependencyCheckAnalyze` runs even if save,
+lookup or assertion failed, unless cancelled. Persistence failures keep the job
+red; successful analysis cannot erase them. Failed update/ownership prevents data
+use/save/analysis. Existing CVSS 7 threshold, suppression/configuration/demo/OSSIndex
+selection, normal freshness checks and scanner errors remain unchanged. Missing or
+blank NVD credentials and docs-only changes retain the existing no-scan policy;
+an eligible-key flag or a green skipped job is not evidence of executed analysis.
+Always-scheduled ownership and diagnostics retain update/analysis logs and reports.
+
+### Optional integration feedback and diagnostics
+
+The source-bound optional gate stages the exact SDK publications once. It checks
+the two independent copied applications before the remaining legacy consumer
+matrix. Each application has four fixed phases:
+
+1. `dependencies --write-locks` seeds the new coordinate without running tests or
+   packaging; Koog also resolves its separate boundary-fixture dependencies.
+2. One strict configuration-cache build executes the actual host/native/presentation
+   tasks and produces the ordinary distributions. Native results remain uncached.
+3. A `--dry-run` of that same graph primes its post-build filesystem state without
+   task actions. This handles plugins such as Boot that observe class directories
+   which the real build has just created.
+4. A second identical `--dry-run` must restore that configuration cache, again
+   without task actions. These are fixed setup/proof phases, not retries or another
+   native pass.
+
+The host harness exercises the production phase runner with real Gradle tasks
+whose outputs are always forced fresh and whose real execution creates an observed
+configuration input. Their counters must each contain exactly one execution, not
+three, even across post-build graph priming. Historical locks and dependency approvals are checked
+after every phase, and the complete mandatory JUnit inventory comes from the real
+strict build. No skipped or failed test observation is accepted as a native pass.
+The gate runs no application benchmark forks. The pitch-only Python driver and
+its benchmark-only Kotlin entry/tasks have been removed; correctness, containment,
+cancellation, transaction and physical-retirement checks remain mandatory.
+
+Every invocation creates a unique owned
+`build/reports/optional-integrations/run-*/` directory in the caller's checkout,
+including when commands execute in a disposable clone. Full child command logs
+and ownership/exit receipts remain there, including the initial checkout clone's
+stdout/stderr and receipt if acquisition fails. Copied applications retain their JUnit
+XML and HTML reports in `<application>-reports/` on success or failure.
+The SDK producer and legacy module projects use the same collector in an outer
+exception-safe scope, exporting their reports from the disposable checkout into
+`<project-path>-reports/` (and `producer-root-reports/` for root tasks). Collection
+continues for other modules when one report tree fails; every retention error
+remains a blocking failure or is suppressed on the original command failure. The
+final acceptance marker is printed only after this scope closes successfully.
+An early
+compile failure requires no invented report; retention failures are suppressed
+on the original command failure. Report aliases, including intermediate source and
+destination parents, are refused before traversal. Unreadable parents remain
+retention errors, not evidence that reports were never created. CI always uploads these allowlisted logs, receipts and test reports,
+not temporary source trees, Gradle caches, SDK archives or credential state. The
+container's writable checkout bind keeps this directory visible to host artifact
+collection. The workflow-policy regression rejects removal of failure-time uploads.
+
+Both existing required check names remain: `Koog and Spring Integration Acceptance`
+and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]`
+and `if: always()`; its shell requires all six results to equal `success`.
+Failure, cancellation, skipping or a
+missing result cannot turn the join green. It forwards
+`core-quality.outputs.container_cache_hash` unchanged.
+
+Publication remains a separate default-branch-push-only job with `needs` edges to
+optional acceptance and that required join. Its normal success condition prevents
+publication after a failed, skipped or cancelled prerequisite; PRs cannot publish.
+Only publication has package-write permission. It consumes the forwarded core
+cache identity and retains the same container runner, publication command and
+credential bindings; it does not rerun host quality checks as another gate.
+
+Superseded PR runs cancel within their PR-specific concurrency group. Push events
+use unique run-ID groups and do not cancel or replace separate release runs.
+Serial merge handling remains with the existing operator/orchestrator control
+plane. Fresh native tests remain uncached; parallel scheduling and cached build
+inputs must not be described as reuse of old native pass results. Measure actual
+hosted job overlap and durations before claiming an end-to-end speed improvement.
+Hosted acceptance needs a cold and an unchanged-head warm run with independent
+lane starts, qualified mutation receipts, all three real PIT reports and the same
+native/adapter assertions. Compare wall time, queue/setup/cache/execute time and
+total runner minutes against run `39327392885`; unknown evidence or unsafe budgets
+stop rollout rather than automatically raising limits or dropping targets. Local
+focused checks do not qualify the GitHub runner budget or release publication;
+the latter needs a later approved default-branch run.
+
+The completed-data repair additionally requires actual trusted-default cold
+update/ownership/save/exact-membership/analysis evidence and compatible warm
+restoration followed by real analysis. A later update-due observation must show a
+new completed snapshot; a run inside the scanner's normal validity window does
+not prove refreshed NVD data. PR-only caches cannot seed default-branch bootstrap.
+Record cache size/ref/version, durations and task outcomes; eviction and external
+API latency remain possible. A failed security lane and its dependent gates are
+the bounded recovery unit, not a reason to replay successful native pipelines.
+Retained recovery additionally needs a real cache-miss/artifact-download/validated
+restore followed by update and analysis. Offline fixture round trips do not establish
+GitHub artifact availability, retention or an executed vulnerability scan. Qualify
+this by rerunning the security job, not successful native lanes; do not delete shared
+caches to manufacture the miss. Artifacts can also expire or be deleted, and their
+storage usage is separate from the build-cache quota. The historical cache-removal
+cause remains unproven; recovery does not depend on assuming eviction.
 
 Root verification follows source plugins rather than optional module paths.
 Non-demo grouping projects retain lazy child `build` and `check` dependencies
@@ -229,6 +671,36 @@ effective compiler/header/linker/environment inputs. The native library is not s
 as portable cached protection evidence. `bash scripts/tests/cet_fixture_cache_test.sh`
 verifies unchanged reuse and source/header/compiler/missing-output invalidation in an
 independent Gradle fixture.
+
+## Optional global benchmarks
+
+`.github/workflows/benchmarks.yml` is a separate `workflow_dispatch`-only workflow,
+not a PR/push/scheduled trigger or a prerequisite of the six-lane required join or
+publication. It runs the existing integration-boundary harness unchanged on
+Linux/JDK25. No performance threshold, comparison bot or new benchmark framework
+is added. See the [operator recipe and evidence inventory](../../../../benchmarks/integration-boundaries/README.md#optional-global-benchmark-job).
+
+The workflow stages the selected commit's real publications into a local Maven
+repository, seeds a new coordinate-specific consumer lock, checks the published
+closure and host controls, then freezes source/installed/publication/lock hashes
+and verifies the embedded worker bundle before native execution. Historical locks,
+publication identities and retained results are not rewritten. This automatic
+source-bound freeze is not independent release authentication or review authority.
+The existing raw validator still requires actual effects, ownership/retirement and
+complete evidence; optional does not mean errors become warnings.
+
+The existing Linux resource probe owns the bounded build/native commands and
+retains argv, command status and memory/cleanup receipts. File-size-limited log
+sinks prevent unbounded capture storage. Always-uploaded artifacts contain only
+raw/build/validation logs, identity manifests, the generated lock, explicit
+noncredential environment metadata and JSON receipts—not caches, SDK archives or
+the temporary worker bundle. Hosted timing is descriptive, not a stable baseline,
+production capacity, model inference timing or equivalent-isolation proof.
+
+Host regressions execute the actual workflow freeze/check shell against temporary
+Git/publication/JAR fixtures: unchanged inputs pass, a substituted publication
+fails, and mismatched embedded worker bytes cannot mint a custody receipt. The
+workflow file is a declared `consumerHarnessTest` input so edits rerun these tests.
 
 ## Privileged kernel quality
 

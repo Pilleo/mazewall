@@ -19,6 +19,7 @@ import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
@@ -930,6 +931,62 @@ class OwnedRuntimeTest {
                 assertEquals(0, foreignCalls.get())
             } finally {
                 release.countDown()
+            }
+        }
+    }
+
+    @Test
+    fun `successful result delivery can retain admission until execution end`() {
+        val releaseBody = CountDownLatch(1)
+        val callbackEntered = CountDownLatch(1)
+        val releaseCallback = CountDownLatch(1)
+        val worker = AtomicReference<Thread>()
+        val secondEntries = AtomicInteger()
+        open().use { runtime ->
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            try {
+                val first = runtime.submit(
+                    domain,
+                    Callable {
+                        worker.set(Thread.currentThread())
+                        check(releaseBody.await(5, TimeUnit.SECONDS))
+                        42
+                    },
+                )
+                val callback = first.result().whenComplete { value, failure ->
+                    assertSame(worker.get(), Thread.currentThread())
+                    assertNull(failure)
+                    assertEquals(42, value)
+                    callbackEntered.countDown()
+                    check(releaseCallback.await(5, TimeUnit.SECONDS))
+                }
+                releaseBody.countDown()
+                assertTrue(callbackEntered.await(5, TimeUnit.SECONDS))
+                assertEquals(42, first.result().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                assertFalse(first.executionEnd().toCompletableFuture().isDone)
+                assertFailsWith<RejectedExecutionException> {
+                    runtime.submit(domain, Callable { secondEntries.incrementAndGet() })
+                }
+                assertEquals(0, secondEntries.get())
+
+                releaseCallback.countDown()
+                assertEquals(42, callback.toCompletableFuture().get(5, TimeUnit.SECONDS))
+                assertNull(assertIs<ExecutionEnd.Finished>(first.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure)
+                val second = runtime.submit(
+                    domain,
+                    Callable {
+                        secondEntries.incrementAndGet()
+                        43
+                    },
+                )
+                assertEquals(43, second.result().toCompletableFuture().get(5, TimeUnit.SECONDS))
+                assertNull(assertIs<ExecutionEnd.Finished>(second.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)).failure)
+                assertEquals(1, secondEntries.get())
+                assertEquals(DrainReport.Complete, runtime.drain(timeout))
+                assertFalse(checkNotNull(worker.get()).isAlive)
+            } finally {
+                releaseBody.countDown()
+                releaseCallback.countDown()
             }
         }
     }

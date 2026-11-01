@@ -17,8 +17,6 @@ target_files:
   - "docs/plans/2026-10-19-hotspot-observed-admission.md"
   - "docs/plans/2026-10-18-hotspot-observed-profile-contract.md"
   - "docs/plans/2026-10-19-hotspot-integration-gate-checkpoint.md"
-  - "docs/superpowers/plans/2026-10-18-hotspot-observed-provider.md"
-  - "docs/superpowers/plans/2026-10-18-kubescape-agentless-hotspot.md"
   - "profiler/hotspot-agentless/README.md"
 target_symbols:
   - "RunObserved"
@@ -45,6 +43,11 @@ preserve failed captures and original causes. Both complete locked-Go bundles
 reproduce byte/path/mode exactly. Strict public-native acceptance executes8tests
 without skips/failures; the full root gate passes in6m58s. Strict2 and false policy
 eligibility are unchanged. No SDK publication, external mutation or cluster action.
+
+Historical execution targets remain available in the immutable original
+[provider plan](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-18-hotspot-observed-provider.md)
+and [implementation entrypoint](https://github.com/Pilleo/mazewall/blob/a28cbe293289f2549858aa232d9e6ebd7c4756dd/docs/superpowers/plans/2026-10-18-kubescape-agentless-hotspot.md).
+Their removal from the shipping tree does not alter this resolution or its receipts.
 
 ---
 <!-- id: issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a  file: issue-20261019-064719-782-admit-qualified-observed-hotspot-profile-through-a.md -->

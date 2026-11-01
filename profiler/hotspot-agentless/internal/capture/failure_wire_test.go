@@ -17,7 +17,7 @@ import (
 
 func TestObservedFailureProducerRoundTripRetainsCompoundCauses(t *testing.T) {
 	previousPatch := GadgetPatchSHA
-	GadgetPatchSHA = "89b3599935df5206ff710292574e4480a09da535f8529b4b0462b8c29a7e0f50"
+	GadgetPatchSHA = "b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3"
 	t.Cleanup(func() { GadgetPatchSHA = previousPatch })
 	for _, tc := range []struct {
 		name    string

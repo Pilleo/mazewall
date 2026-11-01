@@ -6,9 +6,298 @@ on:
     pull_request:
         branches: [main, master]
 
+# Replace obsolete PR work, without grouping/cancelling separate default-branch pushes.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
     optional-integrations:
         name: Koog and Spring Integration Acceptance
+        runs-on: ubuntu-26.04
+        timeout-minutes: 90
+        permissions:
+            contents: read
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Compute Container Gradle Cache Key
+              id: container_cache_key
+              run: |
+                  hash=$(./scripts/ci_cache_key.sh)
+                  echo "hash=$hash" >> "$GITHUB_OUTPUT"
+            - name: Set up JDK 25
+              uses: actions/setup-java@v5
+              with:
+                  java-version: "25"
+                  distribution: "temurin"
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v6
+              with:
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+                  cache-read-only: false
+            - name: Build Optional Adapters With Strict Dependency and Configuration Cache Checks
+              run: >-
+                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true
+                  :integrations:koog:build :integrations:spring:mazewall-spring-boot:build
+                  :integrations:spring:mazewall-spring-boot-starter:build
+                  --configuration-cache-problems=fail --no-daemon --max-workers=1
+            - name: Prime Optional Adapter Post-Build Configuration Cache
+              run: |
+                  mkdir -p build/reports/ci-resources
+                  : > build/reports/ci-resources/optional-adapters-cache.log
+                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true \
+                      :integrations:koog:build :integrations:spring:mazewall-spring-boot:build \
+                      :integrations:spring:mazewall-spring-boot-starter:build \
+                      --configuration-cache-problems=fail --no-daemon --max-workers=1 --dry-run
+            - name: Prove Optional Adapter Configuration Cache Reuse
+              run: |
+                  set -o pipefail
+                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true \
+                      :integrations:koog:build :integrations:spring:mazewall-spring-boot:build \
+                      :integrations:spring:mazewall-spring-boot-starter:build \
+                      --configuration-cache-problems=fail --no-daemon --max-workers=1 --dry-run \
+                      2>&1 | tee build/reports/ci-resources/optional-adapters-cache.log
+                  grep -Fq 'Configuration cache entry reused' build/reports/ci-resources/optional-adapters-cache.log
+            - name: Setup Podman Socket
+              run: |
+                  mkdir -p ~/.config/containers
+                  echo -e '[engine]\nruntime = "runc"' > ~/.config/containers/containers.conf
+                  systemctl --user enable --now podman.socket
+                  echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
+                  echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
+            - name: Restore Optional Container Gradle Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ~/.cache/mazewall/container-gradle
+                  key: optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+                  restore-keys: |
+                      optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+                      optional-container-gradle-${{ runner.os }}-
+                      container-gradle-${{ runner.os }}-
+            - name: Restore Existing Test Runner Image
+              id: runner_image_restore
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ github.workspace }}/.cache/podman-image
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
+            - name: Load Existing Test Runner Image
+              if: steps.runner_image_restore.outputs.cache-hit == 'true'
+              run: |
+                  test -s .cache/podman-image/mazewall-test-runner.tar
+                  podman load -i .cache/podman-image/mazewall-test-runner.tar
+            - name: Verify Real Optional Publications and Native Showcases
+              run: ./scripts/run_containerized_tests.sh :optionalIntegrationCheck --no-configuration-cache --max-workers=1
+            - name: Verify Optional Workspace and Cache Ownership
+              id: optional_ownership
+              if: always()
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
+                      if [ -d "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned integration output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
+            - name: Save Optional Container Gradle Cache
+              if: always() && steps.optional_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success'
+              uses: actions/cache/save@v4
+              with:
+                  path: ~/.cache/mazewall/container-gradle
+                  key: optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+            - name: Upload Optional JUnit Diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: optional-integration-junit
+                  path: |
+                      integrations/**/build/test-results/**/*.xml
+                      build/reports/ci-resources/optional-adapters-cache.log
+                      build/test-results/optionalIntegrationCheck/*.xml
+                      build/reports/optional-integrations/run-*/*.log
+                      build/reports/optional-integrations/run-*/*.command.json
+                      build/reports/optional-integrations/run-*/*-reports/**
+                  if-no-files-found: ignore
+    core-quality:
+        name: Core Quality and Kernel Validation
+        # Dedicated-process worker correctness requires Landlock TSYNC (ABI 8+).
+        runs-on: ubuntu-26.04
+        timeout-minutes: 90
+        permissions:
+            contents: read
+            pull-requests: write
+        outputs:
+            container_cache_hash: ${{ steps.container_cache_key.outputs.hash }}
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Compute Container Gradle Cache Key
+              id: container_cache_key
+              run: |
+                  hash=$(./scripts/ci_cache_key.sh)
+                  echo "hash=$hash" >> "$GITHUB_OUTPUT"
+            - name: Set up JDK 25
+              uses: actions/setup-java@v5
+              with:
+                  java-version: "25"
+                  distribution: "temurin"
+            - name: Check file changes
+              id: filter
+              uses: dorny/paths-filter@v3
+              with:
+                  filters: |
+                      code:
+                          - '**/*.kt'
+                          - '**/*.java'
+                          - '**/*.kts'
+                          - '**/*.gradle'
+                          - 'gradle/libs.versions.toml'
+                          - '**/gradle.lockfile'
+                          - 'gradle/verification-metadata.xml'
+                          - 'config/spotbugs/**'
+                          - '**/gradle.properties'
+                          - '**/Containerfile'
+                          - 'scripts/**'
+                          - '.github/workflows/ci.yml'
+
+            - name: Restore Container Gradle Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: |
+                      ~/.cache/mazewall/container-gradle
+                  key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+                  restore-keys: |
+                      container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+                      optional-container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+                      optional-container-gradle-${{ runner.os }}-
+                      container-gradle-${{ runner.os }}-
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v6
+              with:
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+                  # GitHub scopes PR caches to the PR merge ref. Allowing writes
+                  # lets reruns restore the first attempt without exposing the
+                  # entry to the default branch.
+                  cache-read-only: false
+                  gradle-home-cache-includes: |
+                      caches
+                      notifications
+            - name: Grant Execute Permission for Gradlew
+              run: chmod +x gradlew
+            - name: Run Host-Safe Unit and Reproducibility Gates
+              id: host_verification
+              # This gate intentionally precedes Podman setup: ordinary CI
+              # runners must be able to prove unit behavior and coverage.
+              run: ./gradlew :unitCheck :verifyGradleReproducibility --no-daemon
+            - name: Prove configuration-cache reuse
+              run: |
+                  set -o pipefail
+                  mkdir -p build/reports/ci-resources
+                  ./gradlew :unitCheck :verifyGradleReproducibility --dry-run --configuration-cache --configuration-cache-problems=fail --no-daemon 2>&1 | tee build/reports/ci-resources/core-configuration-cache-prime.log
+                  ./gradlew :unitCheck :verifyGradleReproducibility --dry-run --configuration-cache --configuration-cache-problems=fail --no-daemon 2>&1 | tee build/reports/ci-resources/core-configuration-cache-replay.log
+                  grep -Fq 'Configuration cache entry reused' build/reports/ci-resources/core-configuration-cache-replay.log
+            - name: Triage failed host verification
+              if: steps.host_verification.outcome == 'failure'
+              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck-or-verifyGradleReproducibility --no-daemon
+            - name: Setup Podman Socket
+              run: |
+                  mkdir -p ~/.config/containers
+                  echo -e '[engine]\nruntime = "runc"' > ~/.config/containers/containers.conf
+                  systemctl --user enable --now podman.socket
+                  echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
+                  echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
+            - name: Resolve Core Integration Compilation Cache
+              id: core_compile_cache
+              run: |
+                  cache_home=$(./scripts/run_containerized_tests.sh --print-cache-home)
+                  test -n "$cache_home"
+                  printf 'path=%s/caches/build-cache-1\n' "$cache_home" >> "$GITHUB_OUTPUT"
+            - name: Restore Core Integration Compilation Cache
+              if: github.event_name == 'pull_request' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ steps.core_compile_cache.outputs.path }}
+                  key: core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+                  restore-keys: |
+                      core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
+            - name: Restore Podman Cache
+              id: cache-podman
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ github.workspace }}/.cache/podman-image
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
+            - name: Load Cached Podman Images
+              if: steps.cache-podman.outputs.cache-hit == 'true'
+              run: |
+                  test -s .cache/podman-image/mazewall-test-runner.tar
+                  podman load -i .cache/podman-image/mazewall-test-runner.tar
+            - name: Run Privileged Kernel Gate and Assemble
+              run: |
+                  set -o pipefail
+                  # unitCheck already ran on the host for this exact checkout.
+                  ./scripts/run_containerized_tests.sh :kernelCheck assemble 2>&1 | tee build.log
+            - name: Run Vulnerability Exploitation Demo
+              if: steps.filter.outputs.code == 'true'
+              run: ./scripts/run_vulnerable_app_demo.sh
+            - name: Save All Podman Images to Cache Folder
+              id: runner_image_export
+              if: always() && steps.cache-podman.outputs.cache-hit != 'true'
+              run: |
+                  podman image exists mazewall-test-runner
+                  mkdir -p "$GITHUB_WORKSPACE/.cache/podman-image"
+                  podman save -o "$GITHUB_WORKSPACE/.cache/podman-image/mazewall-test-runner.tar" mazewall-test-runner:latest
+                  test -s "$GITHUB_WORKSPACE/.cache/podman-image/mazewall-test-runner.tar"
+            - name: Upload Podman Image Cache
+              uses: actions/cache/save@v4
+              if: always() && steps.cache-podman.outputs.cache-hit != 'true' && steps.runner_image_export.outcome == 'success'
+              with:
+                  path: ${{ github.workspace }}/.cache/podman-image
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
+            - name: Verify Workspace and Cache Ownership
+              id: core_ownership
+              if: always()
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
+                      if [ -d "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned build output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
+            - name: Save Core Integration Compilation Cache
+              if: always() && github.event_name == 'pull_request' && steps.core_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{ steps.core_compile_cache.outputs.path }}
+                  key: core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+            - name: Upload Gradle diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: gradle-diagnostics
+                  path: |
+                      build/reports/problems/
+                      build/reports/triage/
+                      build/reports/gradle-baseline/
+                      build/reports/test-health/
+                      build/reports/ci-resources/core-configuration-cache-prime.log
+                      build/reports/ci-resources/core-configuration-cache-replay.log
+                      **/build/test-results/**/*.xml
+                      **/hs_err_pid*.log
+                  if-no-files-found: ignore
+            - name: Save Container Gradle Cache (Master Only)
+              uses: actions/cache/save@v4
+              if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && steps.container_cache_key.outcome == 'success'
+              with:
+                  path: |
+                      ~/.cache/mazewall/container-gradle
+                  key: container-gradle-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+    build-logic-validation:
+        name: Build Logic Validation
         runs-on: ubuntu-26.04
         timeout-minutes: 90
         permissions:
@@ -26,88 +315,36 @@ jobs:
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
                   cache-read-only: false
-            - name: Build Optional Adapters With Strict Dependency and Configuration Cache Checks
-              run: >-
-                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true
-                  :integrations:koog:build :integrations:spring:mazewall-spring-boot:build
-                  :integrations:spring:mazewall-spring-boot-starter:build
-                  --configuration-cache-problems=fail --no-daemon --max-workers=1
-            - name: Prove Optional Adapter Configuration Cache Reuse
-              run: >-
-                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true
-                  :integrations:koog:build :integrations:spring:mazewall-spring-boot:build
-                  :integrations:spring:mazewall-spring-boot-starter:build
-                  --configuration-cache-problems=fail --no-daemon --max-workers=1
-            - name: Setup Podman Socket
+            - name: Run Build Logic Verification
               run: |
-                  mkdir -p ~/.config/containers
-                  echo -e '[engine]\nruntime = "runc"' > ~/.config/containers/containers.conf
-                  systemctl --user enable --now podman.socket
-                  echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
-                  echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
-            - name: Restore Optional Container Gradle Cache
-              uses: actions/cache/restore@v4
-              with:
-                  path: ~/.cache/mazewall/container-gradle
-                  key: optional-container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
-                  restore-keys: |
-                      optional-container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-
-                      optional-container-gradle-${{ runner.os }}-
-                      container-gradle-${{ runner.os }}-
-            - name: Restore Existing Test Runner Image
-              uses: actions/cache/restore@v4
-              with:
-                  path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
-            - name: Load Existing Test Runner Image
-              run: |
-                  if [ -f .cache/podman-image/mazewall-test-runner.tar ]; then
-                      podman load -i .cache/podman-image/mazewall-test-runner.tar
-                  fi
-            - name: Verify Real Optional Publications and Native Showcases
-              run: ./scripts/run_containerized_tests.sh :optionalIntegrationCheck --no-configuration-cache --max-workers=1
-            - name: Verify Optional Workspace and Cache Ownership
-              id: optional_ownership
-              if: always()
-              run: |
-                  for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
-                      if [ -d "$path" ]; then
-                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
-                          if [ -n "$foreign" ]; then
-                              echo "Unexpected non-caller-owned integration output: $foreign" >&2
-                              exit 1
-                          fi
-                      fi
-                  done
-            - name: Save Optional Container Gradle Cache
-              if: always() && steps.optional_ownership.outcome == 'success'
-              uses: actions/cache/save@v4
-              with:
-                  path: ~/.cache/mazewall/container-gradle
-                  key: optional-container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
-            - name: Upload Optional JUnit Diagnostics
+                  set -o pipefail
+                  mkdir -p build/reports/ci-resources
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew :buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+            - name: Run Consumer Build Logic Regressions
+              run: ./gradlew :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel
+            - name: Upload Build Logic Diagnostics
               if: always()
               uses: actions/upload-artifact@v4
               with:
-                  name: optional-integration-junit
+                  name: build-logic-diagnostics
                   path: |
-                      integrations/**/build/test-results/**/*.xml
-                      build/test-results/optionalIntegrationCheck/*.xml
+                      build/reports/ci-resources/build-logic.json
+                      build/reports/ci-resources/build-logic.log
+                      build/reports/problems/
+                      buildSrc/build/reports/
+                      buildSrc/build/test-results/
+                      buildSrc/build/verification/
+                      build/test-results/consumerBuildLogicTest/
+                      build/reports/tests/consumerBuildLogicTest/
                   if-no-files-found: ignore
-    build-test-publish:
-        name: Build, Test, Security Scan & Publish
-        needs: [optional-integrations]
-        if: always()
-        # Dedicated-process worker correctness requires Landlock TSYNC (ABI 8+).
+    mutation-tests:
+        name: Mutation Validation
         runs-on: ubuntu-26.04
         timeout-minutes: 90
         permissions:
             contents: read
-            packages: write
-            pull-requests: write
+            pull-requests: read
         steps:
-            - name: Require Optional Integration Acceptance
-              run: test "${{ needs.optional-integrations.result }}" = success
             - name: Checkout Code
               uses: actions/checkout@v6
             - name: Set up JDK 25
@@ -128,47 +365,557 @@ jobs:
                           - 'gradle/libs.versions.toml'
                           - '**/gradle.lockfile'
                           - 'gradle/verification-metadata.xml'
+                          - 'config/spotbugs/**'
                           - '**/gradle.properties'
                           - '**/Containerfile'
                           - 'scripts/**'
-
-            - name: Restore Container Gradle Cache
-              uses: actions/cache/restore@v4
-              with:
-                  path: |
-                      ~/.cache/mazewall/container-gradle
-                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
-                  restore-keys: |
-                      container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-
-                      container-gradle-${{ runner.os }}-
+                          - '.github/workflows/ci.yml'
             - name: Setup Gradle
               uses: gradle/actions/setup-gradle@v6
               with:
                   cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-                  # GitHub scopes PR caches to the PR merge ref. Allowing writes
-                  # lets reruns restore the first attempt without exposing the
-                  # entry to the default branch.
                   cache-read-only: false
-                  gradle-home-cache-includes: |
-                      caches
-                      notifications
-                      dependency-check-data
-            - name: Grant Execute Permission for Gradlew
-              run: chmod +x gradlew
-            - name: Run Host-Safe Unit Quality Gate
-              id: host_unit
-              # This gate intentionally precedes Podman setup: ordinary CI
-              # runners must be able to prove unit behavior and coverage.
-              run: ./gradlew unitCheck --no-daemon
-            - name: Verify reproducible dependency state
-              run: ./gradlew verifyGradleReproducibility --no-daemon
-            - name: Prove configuration-cache reuse
+            - name: Run PITest (Host Unit Tests Only)
+              if: steps.filter.outputs.code == 'true'
+              run: >-
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/mutation.json --
+                  ./gradlew :enforcer:pitest :platform:pitest :profiler:pitest
+                  --no-daemon --max-workers=1 --no-parallel
+                  -Pmazewall.pitest.threads=2 -Pmazewall.test.maxParallelForks=1
+            - name: Upload Mutation Diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: mutation-diagnostics
+                  path: |
+                      build/reports/ci-resources/mutation.json
+                      enforcer/build/reports/pitest/
+                      platform/build/reports/pitest/
+                      profiler/build/reports/pitest/
+                  if-no-files-found: ignore
+    security-check:
+        name: Security Validation
+        runs-on: ubuntu-26.04
+        timeout-minutes: 180
+        permissions:
+            contents: read
+            pull-requests: read
+            actions: read
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Set up JDK 25
+              uses: actions/setup-java@v5
+              with:
+                  java-version: "25"
+                  distribution: "temurin"
+            - name: Check file changes
+              id: filter
+              uses: dorny/paths-filter@v3
+              with:
+                  filters: |
+                      code:
+                          - '**/*.kt'
+                          - '**/*.java'
+                          - '**/*.kts'
+                          - '**/*.gradle'
+                          - 'gradle/libs.versions.toml'
+                          - '**/gradle.lockfile'
+                          - 'gradle/verification-metadata.xml'
+                          - 'config/spotbugs/**'
+                          - '**/gradle.properties'
+                          - '**/Containerfile'
+                          - 'scripts/**'
+                          - '.github/workflows/ci.yml'
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v6
+              with:
+                  cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+                  cache-read-only: false
+                  gradle-home-cache-excludes: dependency-check-data
+            - name: Compute Security Data Metadata
+              id: security_metadata
+              env:
+                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
               run: |
-                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
-                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
-            - name: Triage failed host verification
-              if: steps.host_unit.outcome == 'failure'
-              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon
+                  python3 - <<'PY'
+                  import os
+                  import re
+                  import tomllib
+                  import unicodedata
+                  from pathlib import Path
+
+                  with open('gradle/libs.versions.toml', 'rb') as catalog:
+                      version = tomllib.load(catalog)['versions']['dependencyCheck']
+                  if not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)+(?:-[A-Za-z0-9.]+)?', version):
+                      raise SystemExit('Unsafe Dependency-Check version')
+                  home = os.environ['GRADLE_USER_HOME']
+                  if not Path(home).is_absolute() or any(char in home for char in '\r\n'):
+                      raise SystemExit('Expected absolute GRADLE_USER_HOME')
+                  prefix = f"dc-data-v1-{os.environ['RUNNER_OS']}-{os.environ['RUNNER_ARCH']}-dc{version}_"
+                  key = f"{prefix}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+                  value = os.environ.get('NVD_API_KEY', '')
+                  blank = all(unicodedata.category(char) in ('Zs', 'Zl', 'Zp') or char in '\t\n\v\f\r\x1c\x1d\x1e\x1f' for char in value)
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                      print(f'data_dir={Path(home) / "dependency-check-data"}', file=output)
+                      print(f'prefix={prefix}', file=output)
+                      print(f'key={key}', file=output)
+                      print(f'eligible={str(not blank).lower()}', file=output)
+                  PY
+            - name: Restore Security Data
+              id: security_restore
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true'
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ steps.security_metadata.outputs.data_dir }}
+                  key: ${{ steps.security_metadata.outputs.key }}
+                  restore-keys: ${{ steps.security_metadata.outputs.prefix }}
+            - name: Prepare Security Snapshot Tools
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true'
+              run: |
+                  cat > "$RUNNER_TEMP/security-snapshot.py" <<'PY'
+                  import hashlib
+                  import json
+                  import os
+                  import re
+                  import shutil
+                  import stat
+                  import sys
+                  import tempfile
+                  import zipfile
+                  from datetime import datetime, timezone
+                  from pathlib import Path, PurePosixPath
+
+                  def files(directory):
+                      if directory.is_symlink() or not directory.is_dir() or directory.stat().st_uid != os.getuid():
+                          raise SystemExit('Snapshot data must be a caller-owned directory')
+                      result = {}
+                      total = 0
+                      for index, path in enumerate(directory.rglob('*'), 1):
+                          entry = path.lstat()
+                          if index > 10000 or path.is_symlink() or entry.st_uid != os.getuid():
+                              raise SystemExit('Unsafe snapshot entry or too many entries')
+                          if stat.S_ISDIR(entry.st_mode):
+                              continue
+                          if not stat.S_ISREG(entry.st_mode):
+                              raise SystemExit('Snapshot entries must be regular files')
+                          total += entry.st_size
+                          if total > 2147483648:
+                              raise SystemExit('Snapshot exceeds 2 GiB')
+                          with path.open('rb') as stream:
+                              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                          result[path.relative_to(directory).as_posix()] = {'size': entry.st_size, 'sha256': digest}
+                      if result.get('odc.mv.db', {}).get('size', 0) <= 0:
+                          raise SystemExit('Snapshot has no Dependency-Check database')
+                      return result
+
+                  def unpack(archive, destination, digest):
+                      entry = archive.lstat()
+                      if not stat.S_ISREG(entry.st_mode) or entry.st_uid != os.getuid() or entry.st_size > 2147483648:
+                          raise SystemExit('Snapshot archive must be caller-owned, regular and at most 2 GiB')
+                      if not isinstance(digest, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
+                          raise SystemExit('Missing or unsupported GitHub artifact digest')
+                      with archive.open('rb') as stream:
+                          if 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+                              raise SystemExit('GitHub artifact archive digest mismatch')
+                          stream.seek(0)
+                          with zipfile.ZipFile(stream) as zipped:
+                              members = zipped.infolist()
+                              if len(members) > 10002 or sum(item.file_size for item in members) > 2149580800:
+                                  raise SystemExit('Snapshot ZIP exceeds entry or expanded-size limits')
+                              seen = set()
+                              for member in members:
+                                  path = PurePosixPath(member.filename)
+                                  kind = stat.S_IFMT(member.external_attr >> 16)
+                                  if not path.parts or path.is_absolute() or '..' in path.parts or '\\' in member.filename or '\x00' in member.orig_filename or path in seen:
+                                      raise SystemExit('Unsafe or duplicate ZIP path')
+                                  if kind not in (0, stat.S_IFREG, stat.S_IFDIR) or member.flag_bits & 1 or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                                      raise SystemExit('Unsupported ZIP entry type or encoding')
+                                  directory = member.is_dir() or kind == stat.S_IFDIR
+                                  if directory and member.file_size:
+                                      raise SystemExit('Invalid ZIP directory entry')
+                                  seen.add(path)
+                                  output = destination.joinpath(*path.parts)
+                                  if directory:
+                                      output.mkdir(parents=True, exist_ok=True)
+                                  else:
+                                      output.parent.mkdir(parents=True, exist_ok=True)
+                                      with zipped.open(member) as incoming, output.open('xb') as outgoing:
+                                          shutil.copyfileobj(incoming, outgoing, length=1048576)
+
+                  mode = sys.argv[1]
+                  if mode == 'check-records':
+                      with Path(sys.argv[2]).open(encoding='utf-8', errors='replace') as log:
+                          if any('Failed to process CVE-' in line for line in log):
+                              raise SystemExit('NVD omitted CVE records; refusing incomplete security data')
+                      raise SystemExit(0)
+                  if mode == 'select':
+                      def timestamp(value):
+                          try:
+                              parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                              return parsed.timestamp() if parsed.tzinfo else 0
+                          except (AttributeError, TypeError, ValueError, OverflowError):
+                              return 0
+                      payload = json.loads(Path(sys.argv[2]).read_text())
+                      current = payload['current']
+                      repository_id = payload['repository_id']
+                      prefix = 'security-snapshot-' + os.environ['SNAPSHOT_PREFIX']
+                      candidates = []
+                      for candidate in payload['candidates']:
+                          artifact, run = candidate['artifact'], candidate['run']
+                          origin = artifact.get('workflow_run') or {}
+                          head = run.get('head_repository') or {}
+                          if type(artifact.get('id')) is not int or artifact['id'] <= 0 or type(head.get('id')) is not int:
+                              continue
+                          if artifact.get('expired') is not False or type(artifact.get('size_in_bytes')) is not int or not 0 < artifact['size_in_bytes'] <= 2147483648:
+                              continue
+                          created = timestamp(artifact.get('created_at'))
+                          if not created or timestamp(artifact.get('expires_at')) <= datetime.now(timezone.utc).timestamp():
+                              continue
+                          if run.get('workflow_id') != current['workflow_id'] or (run.get('repository') or {}).get('id') != repository_id:
+                              continue
+                          if origin.get('id') != run['id'] or origin.get('repository_id') != repository_id or origin.get('head_sha') != run['head_sha'] or origin.get('head_repository_id') != head['id'] or origin.get('head_branch') != run['head_branch']:
+                              continue
+                          name_base = prefix + str(run['id']) + '-'
+                          name = artifact['name']
+                          attempt = name.removeprefix(name_base)
+                          if not name.startswith(name_base) or not re.fullmatch(r'[1-9][0-9]*', attempt) or type(run.get('run_attempt')) is not int or int(attempt) > run['run_attempt']:
+                              continue
+                          trusted_default = run['event'] == 'push' and run['head_branch'] == payload['default_branch'] and head['id'] == repository_id
+                          same_pr = current['event'] == 'pull_request' and run['event'] == 'pull_request' and head['id'] == (current.get('head_repository') or {}).get('id') and run['head_branch'] == current['head_branch'] and any(pr['number'] == payload.get('pr_number') for pr in (run.get('pull_requests') or []))
+                          if trusted_default or same_pr:
+                              candidates.append((created, artifact['id'], name, run['id'], artifact.get('digest'), artifact['size_in_bytes']))
+                      if candidates:
+                          _, artifact_id, name, run_id, digest, size = max(candidates, key=lambda candidate: candidate[:2])
+                          if not isinstance(digest, str) or not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
+                              raise SystemExit('Selected snapshot has no verifiable GitHub SHA-256 digest')
+                          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                              print(f'artifact_id={artifact_id}\nrun_id={run_id}\nkey={name.removeprefix("security-snapshot-")}\ndigest={digest}\nsize={size}', file=output)
+                          print(f'Recovering completed security data from run {run_id}, artifact {artifact_id}')
+                      else:
+                          print('No compatible retained security snapshot; a cold bootstrap is required.')
+                      raise SystemExit(0)
+
+                  source, destination = sys.argv[2:]
+                  source, destination = Path(source), Path(destination)
+                  key = os.environ['SNAPSHOT_KEY']
+                  if mode == 'pack':
+                      expected = files(source)
+                      destination.mkdir()
+                      shutil.copytree(source, destination / 'data')
+                      if files(destination / 'data') != expected:
+                          raise SystemExit('Database changed during snapshot preparation')
+                      manifest = json.dumps({'schema': 1, 'key': key, 'files': expected}, sort_keys=True)
+                      if len(manifest.encode()) > 2097152:
+                          raise SystemExit('Snapshot manifest exceeds 2 MiB')
+                      (destination / 'manifest.json').write_text(manifest)
+                  elif mode == 'restore':
+                      with tempfile.TemporaryDirectory(prefix='security-unpack-', dir=source.parent) as extracted:
+                          unpack(source, Path(extracted), os.environ.get('SNAPSHOT_DIGEST'))
+                          source = Path(extracted)
+                          if {p.name for p in source.iterdir()} != {'manifest.json', 'data'}:
+                              raise SystemExit('Incomplete snapshot artifact')
+                          manifest_file = source / 'manifest.json'
+                          if manifest_file.is_symlink() or not manifest_file.is_file() or manifest_file.stat().st_size > 2097152:
+                              raise SystemExit('Invalid snapshot manifest')
+                          manifest = json.loads(manifest_file.read_text())
+                          expected = files(source / 'data')
+                          if not isinstance(manifest, dict) or type(manifest.get('schema')) is not int or manifest != {'schema': 1, 'key': key, 'files': expected}:
+                              raise SystemExit('Incompatible, incomplete or damaged snapshot')
+                          if destination.is_symlink() or (destination.exists() and (not destination.is_dir() or destination.stat().st_uid != os.getuid() or any(destination.iterdir()))):
+                              raise SystemExit('Refusing to overwrite existing security data')
+                          destination.parent.mkdir(parents=True, exist_ok=True)
+                          staging = Path(tempfile.mkdtemp(prefix='.security-snapshot-', dir=destination.parent))
+                          try:
+                              shutil.copytree(source / 'data', staging, dirs_exist_ok=True)
+                              if files(staging) != expected:
+                                  raise SystemExit('Snapshot changed during restoration')
+                              if destination.exists():
+                                  destination.rmdir()
+                              staging.rename(destination)
+                          finally:
+                              if staging.exists():
+                                  shutil.rmtree(staging)
+                  else:
+                      raise SystemExit('Expected pack or restore')
+                  PY
+            - name: Select Retained Security Snapshot
+              id: security_artifact
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' && steps.security_restore.outputs.cache-matched-key == ''
+              uses: actions/github-script@v8
+              env:
+                  SNAPSHOT_PREFIX: ${{ steps.security_metadata.outputs.prefix }}
+              with:
+                  script: |
+                      const fs = require('node:fs');
+                      const path = require('node:path');
+                      const {owner, repo} = context.repo;
+                      const current = (await github.rest.actions.getWorkflowRun({owner, repo, run_id: context.runId})).data;
+                      const prefix = 'security-snapshot-' + process.env.SNAPSHOT_PREFIX;
+                      const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {owner, repo, per_page: 100});
+                      const runs = new Map([[context.runId, current]]);
+                      const candidates = [];
+                      for (const artifact of artifacts) {
+                        if (!artifact.name.startsWith(prefix) || artifact.expired || !Number.isSafeInteger(artifact.workflow_run?.id)) continue;
+                        const runId = artifact.workflow_run.id;
+                        if (!runs.has(runId)) runs.set(runId, (await github.rest.actions.getWorkflowRun({owner, repo, run_id: runId})).data);
+                        candidates.push({artifact, run: runs.get(runId)});
+                      }
+                      const input = path.join(process.env.RUNNER_TEMP, 'security-snapshot-candidates.json');
+                      fs.writeFileSync(input, JSON.stringify({repository_id: context.payload.repository.id,
+                        default_branch: context.payload.repository.default_branch, pr_number: context.payload.number,
+                        current, candidates}));
+                      await exec.exec('python3', [path.join(process.env.RUNNER_TEMP, 'security-snapshot.py'), 'select', input]);
+            - name: Download Retained Security Snapshot
+              id: security_artifact_download
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' && steps.security_artifact.outputs.artifact_id != ''
+              uses: actions/github-script@v8
+              env:
+                  SNAPSHOT_ARTIFACT_ID: ${{ steps.security_artifact.outputs.artifact_id }}
+                  SNAPSHOT_SIZE: ${{ steps.security_artifact.outputs.size }}
+              with:
+                  script: |
+                      const fs = require('node:fs');
+                      const path = require('node:path');
+                      const {Transform} = require('node:stream');
+                      const {pipeline} = require('node:stream/promises');
+                      const artifactId = Number(process.env.SNAPSHOT_ARTIFACT_ID);
+                      const archiveSize = Number(process.env.SNAPSHOT_SIZE);
+                      if (!Number.isSafeInteger(artifactId) || artifactId <= 0) throw new Error('Invalid snapshot artifact ID');
+                      if (!Number.isSafeInteger(archiveSize) || archiveSize <= 0 || archiveSize > 2147483648) throw new Error('Invalid snapshot archive size');
+                      const response = await github.rest.actions.downloadArtifact({...context.repo,
+                        artifact_id: artifactId, archive_format: 'zip', request: {parseSuccessResponseBody: false}});
+                      let bytes = 0;
+                      const limit = new Transform({transform(chunk, encoding, callback) {
+                        bytes += chunk.length;
+                        if (bytes > archiveSize) return callback(new Error('Snapshot archive exceeds its recorded size'));
+                        callback(null, chunk);
+                      }});
+                      await pipeline(response.data, limit,
+                        fs.createWriteStream(path.join(process.env.RUNNER_TEMP, 'security-snapshot.zip'), {flags: 'wx', mode: 0o600}));
+                      if (bytes !== archiveSize) throw new Error('Snapshot archive is incomplete');
+            - name: Restore Retained Security Snapshot
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' && steps.security_artifact_download.outcome == 'success'
+              env:
+                  SNAPSHOT_KEY: ${{ steps.security_artifact.outputs.key }}
+                  SNAPSHOT_DIGEST: ${{ steps.security_artifact.outputs.digest }}
+              run: python3 "$RUNNER_TEMP/security-snapshot.py" restore "$RUNNER_TEMP/security-snapshot.zip" "$GRADLE_USER_HOME/dependency-check-data"
+            - name: Verify Restored Security Ownership
+              id: restored_ownership
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true'
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "${GRADLE_USER_HOME:?}" "${GRADLE_USER_HOME:?}/dependency-check-data"; do
+                      if [ -e "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned security output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
+            - name: Update Security Data
+              id: security_update
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' && steps.restored_ownership.outcome == 'success'
+              timeout-minutes: 150
+              env:
+                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+              run: |
+                  set -o pipefail
+                  : > security-update.log
+                  api_options=(-Dnvd.api.results.per.page=500)
+                  if [[ ! -s "$GRADLE_USER_HOME/dependency-check-data/odc.mv.db" ]]; then
+                      ./gradlew dependencyCheckUpdate --info --no-configuration-cache --no-daemon '-Dnvd.api.datafeed.url=https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/nvdcve-{0}.json.gz' 2>&1 | tee -a security-update.log
+                      python3 "$RUNNER_TEMP/security-snapshot.py" check-records security-update.log
+                      api_options+=(-Dnvd.api.check.validforhours=0)
+                  fi
+                  ./gradlew dependencyCheckUpdate --info --no-configuration-cache --no-daemon "${api_options[@]}" 2>&1 | tee -a security-update.log
+                  python3 "$RUNNER_TEMP/security-snapshot.py" check-records security-update.log
+            - name: Verify Updated Security Ownership
+              id: updated_ownership
+              if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' && steps.security_update.outcome == 'success'
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "${GRADLE_USER_HOME:?}" "${GRADLE_USER_HOME:?}/dependency-check-data"; do
+                      if [ -e "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned security output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
+            - name: Prepare Completed Security Artifact
+              id: security_artifact_prepare
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' }}
+              env:
+                  SNAPSHOT_KEY: ${{ steps.security_metadata.outputs.key }}
+              run: python3 "$RUNNER_TEMP/security-snapshot.py" pack "$GRADLE_USER_HOME/dependency-check-data" "$RUNNER_TEMP/security-snapshot-upload"
+            - name: Upload Completed Security Artifact
+              id: security_artifact_upload
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' && steps.security_artifact_prepare.outcome == 'success' }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: security-snapshot-${{ steps.security_metadata.outputs.key }}
+                  path: ${{ runner.temp }}/security-snapshot-upload
+                  retention-days: 14
+                  include-hidden-files: true
+                  if-no-files-found: error
+            - name: Require Retained Security Snapshot
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' }}
+              env:
+                  ARTIFACT_ID: ${{ steps.security_artifact_upload.outputs.artifact-id }}
+              run: |
+                  [[ "${ARTIFACT_ID:-}" =~ ^[1-9][0-9]*$ ]]
+            - name: Save Completed Security Data
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' }}
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{ steps.security_metadata.outputs.data_dir }}
+                  key: ${{ steps.security_restore.outputs.cache-primary-key }}
+            - name: Look Up Completed Security Snapshot
+              id: security_snapshot_lookup
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' }}
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ steps.security_metadata.outputs.data_dir }}
+                  key: ${{ steps.security_restore.outputs.cache-primary-key }}
+                  lookup-only: true
+                  fail-on-cache-miss: true
+            - name: Require Completed Security Snapshot
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' }}
+              env:
+                  CACHE_HIT: ${{ steps.security_snapshot_lookup.outputs.cache-hit }}
+              run: test "${CACHE_HIT:-}" = true
+            - name: Run Security Check
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true' }}
+              run: |
+                  set -o pipefail
+                  ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon -Dnvd.api.results.per.page=500 2>&1 | tee security-analysis.log
+                  python3 "$RUNNER_TEMP/security-snapshot.py" check-records security-analysis.log
+              env:
+                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+            - name: Run Demo Host Quality Gate
+              if: ${{ !cancelled() }}
+              run: |
+                  ./gradlew :demos:vulnerable-web-app:unitCheck --no-daemon
+                  python3 -m unittest discover -s exploits -p test_web_demo.py -k test_shared_image_is_built_once_for_all_three_modes
+            - name: Verify Final Security Ownership
+              if: always()
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "${GRADLE_USER_HOME:?}" "${GRADLE_USER_HOME:?}/dependency-check-data"; do
+                      if [ -e "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned security output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done
+            - name: Upload Security Diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: security-diagnostics
+                  path: |
+                      security-update.log
+                      security-analysis.log
+                      build/reports/dependency-verification/
+                      **/build/reports/dependency-check*
+                      demos/vulnerable-web-app/build/test-results/
+                      demos/vulnerable-web-app/build/reports/tests/
+                      build/reports/triage/
+                  if-no-files-found: ignore
+    go-validation:
+        name: Agentless Go Validation
+        runs-on: ubuntu-26.04
+        timeout-minutes: 45
+        permissions:
+            contents: read
+            pull-requests: read
+        env:
+            GOWORK: "off"
+            GOTOOLCHAIN: local
+            GOMAXPROCS: "2"
+            GOMEMLIMIT: 4GiB
+            DOCKER_HOST: unix:///var/run/docker.sock
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Check Go Changes
+              id: go_changes
+              uses: dorny/paths-filter@v3
+              with:
+                  filters: |
+                      go:
+                          - 'profiler/hotspot-agentless/**'
+                          - 'experiments/hotspot-agentless/**'
+                          - '.github/workflows/ci.yml'
+                          - 'scripts/ci_resource_probe.py'
+            - name: Set up Go
+              if: steps.go_changes.outputs.go == 'true'
+              uses: actions/setup-go@v6
+              with:
+                  go-version-file: profiler/hotspot-agentless/go.mod
+                  cache-dependency-path: |
+                      profiler/hotspot-agentless/go.sum
+                      experiments/hotspot-agentless/go.sum
+            - name: Install Pinned Vulnerability Scanner
+              if: steps.go_changes.outputs.go == 'true'
+              run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+            - name: Run Go Checks
+              if: steps.go_changes.outputs.go == 'true'
+              run: |
+                  set -o pipefail
+                  mkdir -p build/reports/ci-resources
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/go.json -- bash -euo pipefail -c '
+                      result=0
+                      for module in profiler/hotspot-agentless experiments/hotspot-agentless; do
+                          if ! make -C "$module" unit; then result=1; fi
+                          if ! make -C "$module" vuln; then result=1; fi
+                      done
+                      exit "$result"
+                  ' 2>&1 | tee build/reports/ci-resources/go.log
+            - name: Upload Go Diagnostics
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: go-diagnostics
+                  path: |
+                      build/reports/ci-resources/go.json
+                      build/reports/ci-resources/go.log
+                  if-no-files-found: ignore
+    build-test-publish:
+        # Keep the required check stable and fail closed for every skipped/failed lane.
+        name: Build, Test, Security Scan & Publish
+        needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]
+        if: always()
+        runs-on: ubuntu-26.04
+        permissions:
+            contents: read
+        outputs:
+            container_cache_hash: ${{ needs.core-quality.outputs.container_cache_hash }}
+        steps:
+            - name: Require Core and Mutation Success
+              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && test "${{ needs.go-validation.result }}" = success && test "${{ needs.optional-integrations.result }}" = success
+    publish:
+        name: Publish Verified Packages
+        needs: [optional-integrations, build-test-publish]
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        runs-on: ubuntu-26.04
+        timeout-minutes: 30
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Restore Container Gradle Cache
+              uses: actions/cache/restore@v4
+              with:
+                  path: ~/.cache/mazewall/container-gradle
+                  key: container-gradle-${{ runner.os }}-${{ needs.build-test-publish.outputs.container_cache_hash }}-${{ github.sha }}
+                  restore-keys: |
+                      container-gradle-${{ runner.os }}-${{ needs.build-test-publish.outputs.container_cache_hash }}-
+                      container-gradle-${{ runner.os }}-
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -176,95 +923,33 @@ jobs:
                   systemctl --user enable --now podman.socket
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
-            - name: Restore Podman Cache
-              id: cache-podman
+            - name: Restore Existing Test Runner Image
+              id: runner_image_restore
               uses: actions/cache/restore@v4
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
-            - name: Load Cached Podman Images
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
+            - name: Load Existing Test Runner Image
+              if: steps.runner_image_restore.outputs.cache-hit == 'true'
               run: |
-                  if [ -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
-                      podman load -i ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar
-                  fi
-                  if [ -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar ]; then
-                      podman load -i ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar
-                  fi
-                  if [ -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar ]; then
-                      podman load -i ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar
-                  fi
-            - name: Run Privileged Kernel Gate and Assemble
-              run: |
-                  set -o pipefail
-                  # unitCheck already ran on the host for this exact checkout.
-                  ./scripts/run_containerized_tests.sh :kernelCheck assemble 2>&1 | tee build.log
-            - name: Run PITest (Host Unit Tests Only)
-              if: steps.filter.outputs.code == 'true'
-              run: ./scripts/run_containerized_tests.sh :enforcer:pitest :platform:pitest :profiler:pitest -Pmazewall.pitest.threads=2
-            - name: Run Vulnerability Exploitation Demo
-              if: steps.filter.outputs.code == 'true'
-              run: ./scripts/run_vulnerable_app_demo.sh
-            - name: Save All Podman Images to Cache Folder
-              if: always() && steps.cache-podman.outputs.cache-hit != 'true'
-              run: |
-                  mkdir -p ${{ github.workspace }}/.cache/podman-image
-                  if podman image exists mazewall-test-runner || podman image exists localhost/mazewall-test-runner; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest || true
-                  fi
-                  if podman image exists vulnerable-web-app-unprotected || podman image exists localhost/vulnerable-web-app-unprotected; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar vulnerable-web-app-unprotected:latest || true
-                  fi
-                  if podman image exists vulnerable-web-app-protected || podman image exists localhost/vulnerable-web-app-protected; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar vulnerable-web-app-protected:latest || true
-                  fi
-            - name: Upload Podman Image Cache
-              uses: actions/cache/save@v4
-              if: always() && steps.cache-podman.outputs.cache-hit != 'true'
-              with:
-                  path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
-            - name: Run Security Check
-              if: steps.filter.outputs.code == 'true'
-              run: ./gradlew dependencyCheckAnalyze --info --no-configuration-cache --no-daemon
-              env:
-                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
-            - name: Verify Workspace and Cache Ownership
-              if: always()
-              run: |
-                  for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
-                      if [ -d "$path" ]; then
-                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
-                          if [ -n "$foreign" ]; then
-                              echo "Unexpected non-caller-owned build output: $foreign" >&2
-                              exit 1
-                          fi
-                      fi
-                  done
-            - name: Upload Gradle diagnostics
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: gradle-diagnostics
-                  path: |
-                      build/reports/problems/
-                      build/reports/triage/
-                      build/reports/gradle-baseline/
-                      build/reports/test-health/
-                      **/build/test-results/**/*.xml
-                      **/hs_err_pid*.log
-                  if-no-files-found: ignore
-            - name: Save Container Gradle Cache (Master Only)
-              uses: actions/cache/save@v4
-              if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-              with:
-                  path: |
-                      ~/.cache/mazewall/container-gradle
-                  key: container-gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle.properties', 'gradle/libs.versions.toml') }}-${{ github.sha }}
+                  test -s .cache/podman-image/mazewall-test-runner.tar
+                  podman load -i .cache/podman-image/mazewall-test-runner.tar
             - name: Publish to GitHub Packages
-              if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
               run: >-
                   ./scripts/run_containerized_tests.sh -PincludeSpringIntegration=true
                   -PincludeKoogIntegration=true -PkoogBootstrap=true publishAllPublicationsToGitHubPackagesRepository
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                   GITHUB_ACTOR: ${{ github.actor }}
+            - name: Verify Workspace and Cache Ownership
+              if: always()
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "$HOME/.cache/mazewall"; do
+                      if [ -d "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          if [ -n "$foreign" ]; then
+                              echo "Unexpected non-caller-owned publication output: $foreign" >&2
+                              exit 1
+                          fi
+                      fi
+                  done

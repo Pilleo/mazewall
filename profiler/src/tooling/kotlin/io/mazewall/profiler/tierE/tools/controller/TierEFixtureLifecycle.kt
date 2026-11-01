@@ -54,10 +54,10 @@ public class TierEFixtureLifecycle(
                     settle(controller, creationLock)
                     settled = true
                 }
-                if (settled && !(retainOnFailure && primary != null)) {
-                    attempt { owner.close() }
-                } else {
+                if (!settled || (retainOnFailure && primary != null)) {
                     attempt { owner.stopForRecovery() }
+                } else {
+                    attempt { owner.close() }
                 }
                 attempt(extraCleanup)
             } finally {

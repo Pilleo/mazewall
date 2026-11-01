@@ -37,7 +37,8 @@ internal class TraceeAuthorityNotificationWork(
     context(arena: NativeArena) override fun poll(): NotificationProgress {
         check(!closed)
         exec?.let { return it.poll() }
-        if (request == null) {
+        val currentRequest = request
+        if (currentRequest == null) {
             if (!job.prepared.isDone) return NotificationProgress.Await
             val snapshot = job.prepared.join()
             if (!valid()) return terminal(SupervisorReplyEffect.Error(), NotifResult.TERMINATE)
@@ -55,7 +56,7 @@ internal class TraceeAuthorityNotificationWork(
             val bytes = transport.poll() ?: return NotificationProgress.Await
             control = null
             if (!valid()) return terminal(SupervisorReplyEffect.Error(), NotifResult.TERMINATE)
-            when (val verdict = exchange.decode(checkNotNull(request), bytes)) {
+            when (val verdict = exchange.decode(currentRequest, bytes)) {
                 is JvmExchangeResult.Verdict -> job.decision.complete(TraceeAuthorityDecision(verdict.route, verdict.path))
                 is JvmExchangeResult.Timeout, is JvmExchangeResult.Malformed, is JvmExchangeResult.TransportFailed ->
                     return terminal(SupervisorReplyEffect.Error(), NotifResult.TERMINATE)

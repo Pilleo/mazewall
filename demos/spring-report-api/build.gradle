@@ -1,0 +1,104 @@
+import org.gradle.api.credentials.PasswordCredentials
+import org.gradle.process.CommandLineArgumentProvider
+
+plugins { id 'java'; id 'org.springframework.boot' version '4.1.1' }
+java { toolchain { languageVersion = JavaLanguageVersion.of(25) } }
+def candidate = providers.gradleProperty('consumerVersion').get()
+if (!(candidate ==~ /[0-9]+\.[0-9]+\.[0-9]+[-.A-Za-z0-9]*/)) throw new GradleException('Pinned safe consumerVersion required')
+repositories {
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'mazewall'
+                url = uri(providers.gradleProperty('consumerRepository').get())
+                if (url.scheme == 'https' && url.host == 'maven.pkg.github.com') credentials(PasswordCredentials)
+            }
+        }
+        filter { includeGroup 'io.mazewall' }
+    }
+    mavenCentral()
+}
+dependencies {
+    implementation platform('org.springframework.boot:spring-boot-dependencies:4.1.1')
+    implementation "io.mazewall:mazewall-spring-boot-starter:$candidate"
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'com.h2database:h2'
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+dependencyLocking { lockAllConfigurations(); lockMode = LockMode.STRICT; lockFile = file("locks/$candidate/gradle.lockfile") }
+springBoot { mainClass = 'demo.report.ReportApplication' }
+tasks.named('bootJar') { archiveFileName = 'application.jar' }
+tasks.named('jar') { enabled = false }
+tasks.register('evaluationZip', Zip) {
+    archiveFileName = 'spring-report-api.zip'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    from(tasks.bootJar.archiveFile)
+    from('README.md')
+    from('fixtures')
+}
+tasks.register('sourceZip', Zip) {
+    archiveFileName = 'spring-report-api-sources.zip'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+    from(layout.projectDirectory) {
+        include 'README.md', 'build.gradle', 'settings.gradle', 'gradle.properties', 'gradlew', 'gradlew.bat',
+                'gradle/wrapper/**', 'gradle/verification-metadata.xml', 'locks/**', 'src/**', 'fixtures/**'
+        filesMatching('gradlew') { permissions { unix('rwxr-xr-x') } }
+    }
+}
+abstract class BootJarArguments implements CommandLineArgumentProvider {
+    @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getApplicationJar()
+    @InputFile @PathSensitive(PathSensitivity.NONE) abstract RegularFileProperty getLifecycleJar()
+    List<String> asArguments() { ["-Dexample.bootJar=${applicationJar.get().asFile.absolutePath}".toString(), "-Dexample.lifecycleJar=${lifecycleJar.get().asFile.absolutePath}".toString()] }
+}
+tasks.register('lifecycleJar', org.springframework.boot.gradle.tasks.bundling.BootJar) {
+    archiveFileName = 'lifecycle-fixture.jar'
+    mainClass = 'demo.report.HeldReportLifecycleProbe'
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.test.output
+    targetJavaVersion = java.targetCompatibility
+}
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+    maxParallelForks = 1
+    jvmArgumentProviders.add(objects.newInstance(BootJarArguments).tap {
+        applicationJar.set(tasks.bootJar.archiveFile)
+        lifecycleJar.set(tasks.named('lifecycleJar').flatMap { it.archiveFile })
+    })
+    testLogging { events 'passed', 'failed', 'standardOut', 'standardError'; showStandardStreams = true }
+}
+tasks.test { useJUnitPlatform { excludeTags 'native' } }
+tasks.register('nativeTest', Test) {
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'native' }
+    outputs.upToDateWhen { false }; outputs.cacheIf { false }
+}
+tasks.register('presentationTest', Test) {
+    group = 'verification'
+    description = 'Runs the actual HTTP report tour with visible verified request/transaction output.'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'presentation' }
+    outputs.upToDateWhen { false }; outputs.cacheIf { false }
+}
+tasks.register('verifyPublishedClosure') {
+    notCompatibleWithConfigurationCache('Fresh publication audit inspects the actual dependency graph')
+    def graph = configurations.runtimeClasspath
+    inputs.files(graph)
+    doLast {
+        def rootId = graph.incoming.resolutionResult.rootComponent.get().id
+        if (graph.incoming.resolutionResult.allComponents.any { it.id instanceof org.gradle.api.artifacts.component.ProjectComponentIdentifier && it.id != rootId }) {
+            throw new GradleException('Published dependencies only; no sibling source substitution')
+        }
+        def artifacts = graph.resolvedConfiguration.resolvedArtifacts.findAll { it.moduleVersion.id.group == 'io.mazewall' }
+        if (artifacts.isEmpty()) throw new GradleException('Actual published mazewall closure required')
+        artifacts.each {
+            if (it.moduleVersion.id.version != candidate) throw new GradleException('Mixed mazewall versions')
+            println "PUBLISHED ${it.moduleVersion.id} sha256=${java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance('SHA-256').digest(it.file.bytes))}"
+        }
+    }
+}

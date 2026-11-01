@@ -1,5 +1,7 @@
 import io.mazewall.build.TriageArguments
 import io.mazewall.build.VerifyDependencyState
+import org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension
+import org.owasp.dependencycheck.gradle.tasks.ConfiguredTask
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
@@ -9,6 +11,7 @@ fun Project.skipsKotlinStyleTools(): Boolean = path.startsWith(":demos") || path
 
 plugins {
     id("mazewall.quality-conventions")
+    id("io.mazewall.spotbugs-toolchain")
     id("mazewall.publishing-conventions")
     alias(libs.plugins.dependencyCheck)
     alias(libs.plugins.pitest) apply false
@@ -188,6 +191,13 @@ tasks.register<io.mazewall.build.CheckCiCachePolicy>("checkCiCachePolicy") {
 
 tasks.named("check") { dependsOn("checkCiCachePolicy") }
 
+tasks.named<Test>("test") {
+    inputs
+        .file(layout.projectDirectory.file("scripts/run_containerized_tests.sh"))
+        .withPropertyName("containerizedTestRunner")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 tasks.register("format") {
     group = "formatting"
     description = "Formats Kotlin sources in projects that opt into KtLint."
@@ -228,14 +238,7 @@ configurations.named("sharedTestCompileClasspath") {
 rootKotlinCompilations.matching { it.name == "sharedTest" }.configureEach {
     compileTaskProvider.configure {
         dependsOn(":platform:jar", ":enforcer:jar")
-        compilerOptions.freeCompilerArgs.addAll(
-            rootPlatformJar.zip(rootEnforcerJar) { platform, enforcer ->
-                listOf(
-                    "-Xfriend-paths=${platform.asFile.absolutePath}",
-                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
-                )
-            },
-        )
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(rootPlatformJar, rootEnforcerJar)
     }
 }
 
@@ -274,17 +277,69 @@ tasks.named<Test>("test") {
 val consumerVerification =
     sourceSets.create("consumerVerification") {
         kotlin.srcDir("src/consumerVerification/kotlin")
-        compileClasspath += configurations.testRuntimeClasspath.get() + sourceSets["sharedTest"].output
+        // Consumer fixtures need shared process support, not the aggregate architecture SDK runtime.
+        compileClasspath +=
+            files(
+                configurations["sharedTestRuntimeClasspath"],
+                sourceSets["sharedTest"].output,
+                configurations.testRuntimeClasspath
+                    .get()
+                    .incoming
+                    .artifactView {
+                        componentFilter { id ->
+                            id is org.gradle.api.artifacts.component.ModuleComponentIdentifier &&
+                                (id.group.startsWith("org.junit.") || id.group in setOf("org.opentest4j", "org.apiguardian"))
+                        }
+                    }.files,
+            )
         runtimeClasspath += output + compileClasspath
     }
+
+tasks.named<com.github.spotbugs.snom.SpotBugsTask>("spotbugsConsumerVerification") {
+    // JUnit's compile-only API annotations are absent from the consumer harness's runtime-derived classpath.
+    auxClassPaths.from(configurations.testCompileClasspath)
+}
 
 tasks.register<Test>("consumerHarnessTest") {
     group = "verification"
     description = "Checks portable consumer harness ownership without requiring published applications."
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
-    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
+    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration", "build-logic") }
+    inputs
+        .files(
+            layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
+            layout.projectDirectory.file(".github/workflows/ci.yml"),
+            layout.projectDirectory.file("build.gradle.kts"),
+            layout.projectDirectory.file("demos/spring-report-api/build.gradle"),
+            layout.projectDirectory.file("tests/consumers/stage.init.gradle"),
+            layout.projectDirectory.file("gradlew"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.jar"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.properties"),
+        ).withPropertyName("ciVerificationInputs")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
+
+tasks.register<Test>("consumerBuildLogicTest") {
+    group = "verification"
+    description = "Runs Gradle-backed consumer regressions in the required build-logic lane."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("build-logic") }
+    inputs
+        .files(
+            layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
+            layout.projectDirectory.file(".github/workflows/ci.yml"),
+            layout.projectDirectory.file("build.gradle.kts"),
+            layout.projectDirectory.file("demos/spring-report-api/build.gradle"),
+            layout.projectDirectory.file("tests/consumers/stage.init.gradle"),
+            layout.projectDirectory.file("gradlew"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.jar"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.properties"),
+        ).withPropertyName("ciVerificationInputs")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+tasks.named("check") { dependsOn("consumerHarnessTest", "consumerBuildLogicTest") }
 
 tasks.register<Test>("consumerCheck") {
     group = "verification"
@@ -367,12 +422,18 @@ dependencyCheck {
     }
     // Disable OSS Index as it requires separate credentials and is currently failing in CI
     analyzers {
-        ossIndexEnabled = false
+        ossIndex.enabled = false
     }
     // Skip checking demo projects since they are deliberately vulnerable
     skipProjects = listOf(":demos:cli-demo", ":demos:vulnerable-web-app")
     // Only scan production compile and runtime configurations to avoid scanning build tooling like detekt and ktlint
     scanConfigurations = listOf("compileClasspath", "runtimeClasspath")
+}
+
+// 13.0.0 task defaults otherwise override the extension's data-directory convention.
+tasks.withType<ConfiguredTask>().configureEach {
+    val extension = project.extensions.getByType<DependencyCheckExtension>()
+    data.directory.set(extension.data.directory)
 }
 
 tasks.named("dependencyCheckAnalyze").configure {
@@ -487,7 +548,8 @@ subprojects {
             showProgress.set(false)
             effort.set(com.github.spotbugs.snom.Effort.DEFAULT)
             reportLevel.set(com.github.spotbugs.snom.Confidence.HIGH)
-            onlyAnalyze.set(listOf("io.mazewall.*", "demo.vulnapp.*"))
+            // SpotBugs uses .- for recursive package prefixes; .* stops at one package.
+            onlyAnalyze.set(listOf("io.mazewall.-", "demo.vulnapp.-"))
             excludeFilter.set(file("$rootDir/config/spotbugs/exclude.xml"))
         }
 
@@ -553,7 +615,10 @@ subprojects {
         if (project.name == "enforcer") {
             val agent = files(configurations.named("jacocoAgent"))
             unitTest.configure {
-                inputs.files(agent).withPropertyName("ownedChildJacocoAgent")
+                inputs
+                    .files(agent)
+                    .withPropertyName("ownedChildJacocoAgent")
+                    .withPathSensitivity(PathSensitivity.NONE)
                 outputs.dir(childExecutionDirectory).withPropertyName("ownedChildExecutionData")
                 doFirst {
                     val directory = childExecutionDirectory.get().asFile
@@ -783,9 +848,7 @@ subprojects {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         if (name.contains("Test", ignoreCase = true)) {
             dependsOn(":compileSharedTestKotlin")
-            compilerOptions.freeCompilerArgs.addAll(
-                sharedTestClasses.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") },
-            )
+            friendPaths.from(sharedTestClasses)
         }
     }
 }
@@ -826,6 +889,28 @@ tasks.register("kernelCheck") {
         },
     )
 }
+
+// BEGIN explicit build-logic gate
+val buildLogicCheck =
+    tasks.register<GradleBuild>("buildLogicCheck") {
+        group = "verification"
+        description = "Runs the complete build-logic verification suite."
+        setDir(layout.projectDirectory.dir("buildSrc").asFile)
+        setBuildName("build-logic-verification")
+        setTasks(listOf("verificationActionsTest"))
+        startParameter.maxWorkerCount = 1
+        startParameter.isParallelProjectExecutionEnabled = false
+    }
+tasks.named("check") { dependsOn(buildLogicCheck) }
+// Ordering does not select the gate on help, compilation or assemble paths.
+allprojects {
+    tasks.configureEach {
+        if (path != ":buildLogicCheck") {
+            mustRunAfter(":buildLogicCheck")
+        }
+    }
+}
+// END explicit build-logic gate
 
 tasks.register("mergeCheck") {
     group = "verification"

@@ -11,12 +11,30 @@ owner; an incomplete stop retains the old owner and exposes its `DrainReport` fo
 subsequent draining. A stop callback means the bounded stop returned, not that
 unfinished executions physically ended.
 
+An inactive readiness guard throws `DomainLifecycle.InactiveDomainException`, a
+typed `IllegalStateException` subtype. Callers may identify an admission refusal
+without parsing diagnostic text. This can also arise at nested entry: an HTTP
+request must additionally prove its own body has not entered before labelling the
+whole request BUSY/unstarted. Other execution/configuration failures remain failures.
+
 Create a `SpringOperationBinder` per reviewed operation, and install its immutable
 `dispatchAdvisor()` in the application's existing `ProxyFactory` before publishing
 the bean. Retain the transaction, diagnosis, and authorization advisors after it,
 freeze the factory, and register that exact proxy as a singleton. Binding inspects
 that registered proxy; it does not replace it, clone its target, or invoke a raw
 target. It requires the already-reviewed S0 chain and rejects nested proxy topology.
+
+For the supported JDBC path, `binder.createJdbcProxy(Contract.class, initializedTarget,
+authorizationAdvisor)` assembles that same frozen JDK proxy using the exact JDBC
+guard supplied to the binder. It retains the target and transaction/diagnosis/
+authorization advisors; class contracts and existing proxies reject. It neither
+registers the bean nor grants approval. Return it from the application's explicit
+`@Bean` method, then bind and validate the actual registered singleton before use.
+The application still owns target initialization/destruction and must not expose a
+raw target as an alternative protected entry. The manual factory path remains supported.
+Proxy creation uses Spring's normal application-loader selection, not the shared
+interface's defining loader. An interface in a parent loader need not load Spring;
+the actual implementation loader and resources still require exact explicit approval.
 
 Application-owned `Approval` pins the actual registered bean reference, defining
 classloader, runtime, externally reviewed deployment resource generation and both BODY and
@@ -30,8 +48,17 @@ Discovery inspects declared implementation/interface methods across the hierarch
 including inherited private/protected/package declarations. Required non-public,
 static, final or non-interface-mappable declarations reject; they are never silently
 optional infrastructure. Unannotated private superclass shadows remain unmarked.
-Only the existing scalar/string/byte-array synchronous result allowlist is supported;
-erased generic entries are checked against their actual bridged target result.
+The scalar/string/byte-array synchronous result allowlist is preserved. Qualified
+JDBC additionally admits public nongeneric Java records in the exact reviewed
+target loader/code-source, with1–16 primitive/boxed primitive/String components,
+conventional bytecode field accessors and no serialization hooks. Aggregate string
+values are valid Unicode and at most65536 UTF-8 bytes; null references/whole results
+are allowed. Arrays/collections/nesting/lazy entities/Kotlin data classes reject.
+Shape validation happens at binding; value validation happens inside the worker's
+physical transaction before commit. Invalid output is retained and rolled back,
+including caught nested invalid output; incompatible rollback/propagation metadata
+rejects. S0 without the JDBC guard does not admit records. Erased generic entries
+are checked against their actual bridged target result.
 
 Each binder accepts one exact operation descriptor; a bean containing another
 required annotated operation is rejected rather than partially protected. Multiple
@@ -70,8 +97,10 @@ Incomplete drain retains the runtime/owner and is retried explicitly; no physica
 claim is made from a caller result or bounded stop callback.
 
 Production binding compares the selected actual Class/loader, finished-JAR digest and
-actual deployment generation, and checks effective member origin. The metadata-only
-lifecycle constructor has been removed under the approved migration. There is no
+actual deployment generation, and checks effective member origin. Origin comparison
+uses URI value identity without URL-handler/DNS equivalence; different loader
+identities and missing/malformed locations reject. The metadata-only lifecycle
+constructor has been removed under the approved migration. There is no
 fallback when resource resolution or strong preparation rejects. The renamed helper
 `classResourceSha256` belongs only to explicit uncontained host characterization;
 its hash is never substituted for a production JAR hash. Covered phases and expected

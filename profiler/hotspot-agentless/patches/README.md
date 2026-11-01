@@ -1,5 +1,14 @@
 # Upstream patch status
 
+## Containerd v2 client (local, not submitted upstream)
+
+`gadget-containerd-v2.patch` replaces the v1 client imports and requirement with
+patched v2.3.7, including Gadget's runtime discovery, local manager, CLI and test utilities.
+It retains `k8s.io` explicitly: v2's public default namespace is `default`, not the
+Kubernetes namespace. The collector's Unix gRPC regression checks default/custom
+namespaces and permission-error propagation. Prepared graph tests reject v1 imports;
+the normal vulnerability gate has no exception for containerd records.
+
 ## Contribution review inventory (2026-10-03)
 
 The [local Kubescape proposal](../../../docs/plans/2026-10-03-hotspot-kubescape-contribution-proposal.md)

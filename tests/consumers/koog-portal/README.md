@@ -1,4 +1,4 @@
-# Published Koog/Portal native consumer
+# Published Koog native consumers
 
 This is an independent Gradle build: **stable Kotlin 2.4.20**, JDK25, upstream
 `ai.koog:agents-tools:1.3.0`, coroutines1.10.2 and host serialization1.10.0.
@@ -53,11 +53,15 @@ flock "$lock" bash scripts/koog-build.sh -I "$root/tests/consumers/stage.init.gr
 
 flock "$lock" ./gradlew -p "$root/tests/consumers/koog-portal" \
   -PconsumerVersion="$version" -PconsumerRepository="$repository" \
-  --write-locks verifyOperationRoot stageFreshProbe verifyPublishedClosure --no-configuration-cache
+   --write-locks --write-verification-metadata sha256 verifyOperationRoot stageFreshProbe verifyPublishedClosure --no-configuration-cache
 
 flock "$lock" ./gradlew -p "$root/tests/consumers/koog-portal" \
   -PconsumerVersion="$version" -PconsumerRepository="$repository" \
   verifyFreshNative --no-configuration-cache
+
+flock "$lock" ./gradlew -p "$root/tests/consumers/koog-portal" \
+  -PconsumerVersion="$version" -PconsumerRepository="$repository" \
+  verifyFreshThreadNative --no-configuration-cache
 ```
 
 The external javac probe must reject an arbitrary-submitter operation constructor
@@ -76,7 +80,8 @@ retains command/timeout/reap evidence and checks the original checkout unchanged
 
 The probe exercises the exact upstream registry tool, strict host JSON decoding,
 generated typed service, 64KiB text inputs, 64KiB result rejection, 128KiB request
-and response limits, completed remote filesystem denial, terminal crash/wire
+and response limits, controlled read/write/symlink, loopback-connection and process-launch
+denials with outside-worker positive controls, terminal crash/wire
 failure, pre-crash original owner/PID, independent group, coroutine cancellation
   and physical child shutdown. A focused broker native regression also samples the
 monotonic lifetime spawn count before crash and checks it after joined close, so
@@ -85,7 +90,131 @@ The denied/crash/oversized service is test-only and never advertised to the mode
 Selector-looking text is data. Host mappings/codecs remain outside protection.
 The probe additionally observes a genuine READY generation before submission,
 immutable counter snapshots, and CLOSED/retirement-complete only after actual
-runtime close. These operational observations are not denial-provenance claims.
+runtime close. Acquired worker `ProcessHandle`s must be dead after joined close.
+Only after all assertions and retirement checks does it emit `KOOG_CONTAINMENT_V1_OK`;
+the parent gate rejects missing, duplicate or altered summaries. See the
+[containment contract demonstration](../../../benchmarks/koog-containment/README.md)
+for the scenario matrix, expected summary, disposable-environment recipe and limits.
+These operational observations are not denial-provenance or general agent-isolation claims.
+
+## Separate thread-backed qualification
+
+`verifyFreshThreadNative` launches `KoogThreadProbeKt` in its **own fresh JVM** and
+working directory from the same staged published JAR closure, never producer
+class directories. It is non-cacheable and always executes. Keep the preceding
+Portal command unchanged and separate: thread bootstrap explicitly opens
+`ManagedRuntime` with permanent process-wide `Policy.NO_EXEC_HOTSPOT`, which
+forbids later Portal child startup/replacement. Neither close nor test completion
+removes that baseline. Never install it in Gradle or the Portal probe JVM, or
+weaken it to combine these qualifications. Required native setup or denial failure
+is fatal/unavailable, never a successful skip or fallback.
+
+The upstream thread registry exposes only `read_note`, bound to its real owner and
+fixed read domain with `DomainLimits(1, 8)`, JVM-classpath reads, its owned allowed
+directory and an explicit `Syscall.SOCKET` block. The probe checks strict bounded
+UTF-8 reads, a denied host-readable sibling and a host-positive live loopback
+control versus denied socket creation. Permission exceptions are classified as
+`INFERRED_PERMISSION_FAILURE`, not authenticated kernel-denial provenance; the
+socket check makes no already-open-FD or universal networking claim.
+
+It also checks same-JVM/distinct platform-worker execution, passive generation
+diagnostics, unchanged host/validator/virtual/Unconfined callers, invalid-input
+non-admission, result bounds, single business-failure execution, strict unknown
+JSON-field rejection, equal-generation foreign-owner rejection, nested rejection
+and closed-owner rejection. Test-only socket/oversized/held controls are not
+advertised. The separate held domain uses `DomainLimits(1, 2)` to require overload
+rejection and zero queued-body entry after cancellation. Running cancellation is
+cooperative: while lexical cleanup is held, the worker stays alive, work remains
+unfinished and drain is incomplete. Only cleanup release, captured-worker joins
+and canonical complete drain establish retirement; caller cancellation alone does
+not. Native setup/close budgets are 10 seconds, latch/join waits 5 seconds and the
+intentional incomplete-drain observation 20 ms.
+
+Only after all assertions, runtime drains and captured worker death does the
+thread probe emit exactly:
+
+```text
+KOOG_THREAD_V1_OK registry=upstream worker=platform fs=isolated socket=denied caller=unchanged virtual=true unconfined=true validation=pass overload=rejected cancellation=cooperative ownership=checked retirement=complete fallback=false replay=false
+```
+
+The existing optional aggregate adds `strict-fresh-native-koog-thread` after the
+unchanged Portal phase, requires exit zero and exactly one exact `KOOG_THREAD_V1_`
+line, and prints only the validated thread summary into its existing parent JUnit
+artifact. Missing, duplicate, partial, altered or contradictory summaries fail;
+host summary fixtures test that gate and are **not native evidence**. See the
+[adapter guide](../../../integrations/koog/README.md#explicit-thread-backed-tools)
+for the explicit owner/domain API, bounded reader and limits. This is trusted
+synchronous first-party data-plane restriction, not arbitrary Java/ACE, heap or
+tenant isolation, hard CPU/RAM isolation or guaranteed termination.
+
+## Real agent loops without a model account
+
+This consumer alone adds `ai.koog:agents-core:1.3.0`; the adapters' public dependency
+graph and the worker bundle are unchanged. `verifyFreshThreadAgent` and
+`verifyFreshPortalAgent` run actual upstream `AIAgent` loops from staged JARs in
+separate fresh JVMs/directories. Run the complete committed-source qualification
+with `optionalIntegrationCheck`, or run these tasks after the local staging above.
+
+The first local staging command now explicitly writes verification metadata as
+well as the new version's lockfile. Review that diff: only the freshly built local
+fixture coordinates and deliberately approved dependencies may gain checksums;
+unexpected changes to existing external approvals are not acceptable. Ordinary
+strict runs do not rewrite metadata. The parent aggregate adds checksums of its
+exact fresh producer's seven staged coordinates in the disposable clone, retaining
+historical and external approvals byte-for-byte.
+
+The bounded scripted executor verifies actual tool-result history, call identity
+and error status. The original one-call script keeps two model requests/five graph
+nodes; separate two-call scripts use three requests/seven nodes. Inputs are copied
+and only these two finite script lengths are supported. Self-checks reject missing,
+reordered, duplicate or altered history, wrong outputs/status and extra requests
+without invoking protected work. No network model, provider credentials,
+provider client or `agents-test` dependency is used.
+
+Both modes cover success, malformed/missing/invalid arguments, unknown tools,
+oversized materialized results and genuine kernel-denied host-readable files.
+Koog converts ordinary tool failures to error observations: the probe checks both
+the model-facing error status (or default missing-tool text) and the original
+failure event. Agent completion is not operation success. Model-visible errors
+are not automatically sanitized; these synthetic probes do not certify live-provider
+data handling. One fixed model request leads to one adapter submission; a later
+explicit model request is not adapter replay and requires ordinary authorization.
+
+The two-call cases require actual denied-then-allowed recovery with unchanged
+host-selected tool policies. The thread reader keeps a denied sibling unreadable;
+the Portal registry explicitly supplies both the denied-read and safe transformer
+tools. Two identical arguments with distinct call IDs require two submissions.
+A separate Portal two-call crash sequence retains UNKNOWN_COMPLETION followed by
+STATE_LOST without recreating the lost stateful worker. None of these results
+provide application-wide exactly-once business effects.
+
+New queue cases use one worker and two admissions: active A and queued B fill
+capacity; C is rejected without entry. Cancelling B must leave its body/mapping
+unentered even after A completes, while A still returns its original result.
+Thread admission rejection remains `RejectedExecutionException`; Portal rejection
+is `PortalCallException` with NOT_STARTED. Portal's isolated test configuration
+copies every existing artifact/profile/launch/resource field and lowers capacity
+from eight to two, holding A's host mapping before RPC. It does not claim two
+simultaneously executing child bodies. Read-only diagnostic/yield waits are bounded
+by the existing five-second coordination deadline and never submit again or stand
+in for canonical retirement.
+
+The thread mode retains `DomainLimits(1,1)`, rejects overload without another body
+entry, and qualifies both agent cancellation and a one-second caller deadline.
+Held lexical cleanup keeps work unfinished and canonical drain incomplete. The
+Portal mode also qualifies cancellation/deadlines, holds the original host mapping's
+cleanup, and verifies unknown completion is terminal with no reconstruction of
+the lost stateful service. Mapper entry does not authenticate when the child body
+started. Existing setup/close budgets stay ten seconds, latch/join waits five
+seconds and the deliberate incomplete thread drain twenty milliseconds.
+
+Each mode emits its original exact `KOOG_AGENT_V1_OK boundary=...` summary plus
+`KOOG_AGENT_SEQUENCE_V1_OK boundary=...` only after all assertions and captured
+worker retirement checks. The existing optional aggregate requires all four
+complete summaries and rejects absent, duplicate, partial, altered
+or contradictory evidence. This supplements, never replaces, direct-tool, JDBC,
+Security and finished-Boot gates. It is deterministic contract evidence, not a
+real-model usability, hard resource isolation or arbitrary-code security claim.
 
 ## Bootstrap freshness and generated packaging checks
 

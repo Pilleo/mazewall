@@ -91,3 +91,15 @@ publishing {
     publications { create<MavenPublication>("containedTool") { from(components["java"]) } }
     repositories { maven { name = "consumerStage"; url = uri(layout.buildDirectory.dir("consumer-stage")) } }
 }
+
+for ((task, entry) in listOf("runPortalExample" to "PortalExample", "runThreadExample" to "ThreadReadExample")) {
+    tasks.register<JavaExec>(task) {
+        group = "application"
+        description = "Run the $entry in its own JVM using the actual packaged demo."
+        dependsOn(tasks.named("jar"))
+        javaLauncher.set(javaToolchains.launcherFor(java.toolchain))
+        classpath = files(tasks.named<Jar>("jar").flatMap { it.archiveFile }, configurations.named("runtimeClasspath"))
+        mainClass.set("io.mazewall.demo.koog.$entry")
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
+    }
+}
