@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 205 | *Total Resolved Issues:* 717
+*Total Active Issues:* 206 | *Total Resolved Issues:* 717
 
-Active status detail: 204 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 205 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261101-164416-960](issue-20261101-164416-960-upgrade-gradle-9-8-2-and-qualify-build-compatibili.md) | Upgrade Gradle 9.8.2 and qualify build compatibility | high | build |
 | [issue-20261101-142339-773](issue-20261101-142339-773-qualify-kernel-uapi-watcher-input.md) | Qualify kernel UAPI watcher input | high | ci |
 | [issue-20261031-143810-764](issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md) | Fix cold Spring verification and reduce CI cache churn | high | core |
 | [issue-20261030-225329-595](issue-20261030-225329-595-replace-pitch-only-measurements-with-optional-glob.md) | Replace pitch-only measurements with optional global benchmark workflow | medium | core |
