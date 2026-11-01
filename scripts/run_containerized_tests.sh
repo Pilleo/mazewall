@@ -11,6 +11,19 @@ SECCOMP_PROFILE="${PROJECT_ROOT}/infra/dev/podman-seccomp.json"
 CONTAINER_NAME="mazewall-integration-tests-$$-$(date +%s)"
 CALLER_UID=$(id -u)
 CALLER_GID=$(id -g)
+PRINT_CACHE_HOME=false
+QUERY_COUNT=0
+for argument in "$@"; do
+    if [[ "${argument}" == "--print-cache-home" ]]; then
+        QUERY_COUNT=$((QUERY_COUNT + 1))
+    fi
+done
+if [[ "${QUERY_COUNT}" -gt 0 ]]; then
+    [[ "${QUERY_COUNT}" == 1 && "$#" == 1 ]] || { echo '--print-cache-home must be the only argument' >&2; exit 2; }
+    CACHE_BASE="${XDG_CACHE_HOME:-${HOME}/.cache}"
+    [[ "${CACHE_BASE}" == /* ]] || { echo 'XDG_CACHE_HOME must be absolute for --print-cache-home' >&2; exit 2; }
+    PRINT_CACHE_HOME=true
+fi
 
 # A previous interrupted root build can poison host compilation before the
 # current container even starts. Report the exact owned-output blocker rather
@@ -61,7 +74,9 @@ select_engine() {
 
 CONTAINER_ENGINE=""
 select_engine
-echo "Using ${CONTAINER_ENGINE} for containerized integration tests."
+if [[ "${PRINT_CACHE_HOME}" == false ]]; then
+    echo "Using ${CONTAINER_ENGINE} for containerized integration tests."
+fi
 if [[ "${CONTAINER_ENGINE}" == docker && -n "${MAZEWALL_DOCKER_HOST:-}" ]]; then
     DOCKER_HOST="${MAZEWALL_DOCKER_HOST}"
     export DOCKER_HOST
@@ -81,6 +96,10 @@ TOOLCHAIN_KEY=$(sha256sum "${PROJECT_ROOT}/gradle/wrapper/gradle-wrapper.propert
     "${PROJECT_ROOT}/infra/dev/Containerfile" | sha256sum | cut -c1-12)
 CACHE_HOME="${XDG_CACHE_HOME:-${HOME}/.cache}/mazewall/container-gradle/${CONTAINER_ENGINE}/${CALLER_UID}/${PROJECT_KEY}/${TOOLCHAIN_KEY}"
 NVD_CACHE="${XDG_CACHE_HOME:-${HOME}/.cache}/mazewall/nvd-db"
+if [[ "${PRINT_CACHE_HOME}" == true ]]; then
+    printf '%s\n' "${CACHE_HOME}"
+    exit 0
+fi
 mkdir -p "${CACHE_HOME}/dependency-check-data" "${NVD_CACHE}"
 [[ -O "${CACHE_HOME}" && -O "${CACHE_HOME}/dependency-check-data" && -O "${NVD_CACHE}" ]] || {
     echo 'container-specific cache must be caller-owned' >&2; exit 1;

@@ -191,6 +191,13 @@ tasks.register<io.mazewall.build.CheckCiCachePolicy>("checkCiCachePolicy") {
 
 tasks.named("check") { dependsOn("checkCiCachePolicy") }
 
+tasks.named<Test>("test") {
+    inputs
+        .file(layout.projectDirectory.file("scripts/run_containerized_tests.sh"))
+        .withPropertyName("containerizedTestRunner")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 tasks.register("format") {
     group = "formatting"
     description = "Formats Kotlin sources in projects that opt into KtLint."

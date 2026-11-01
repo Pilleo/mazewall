@@ -319,6 +319,19 @@ and broad optional-container entries before its older broad main fallback. This
 reuses the compatible PR container home already saved by optional acceptance,
 without adding another per-PR archive or mixing host/container cache directories.
 
+Core PR reruns additionally restore and save only the selected container Gradle
+local task-output subtree, `caches/build-cache-1`, after Podman selects the
+actual engine. `run_containerized_tests.sh --print-cache-home` is a read-only,
+sole-argument query with an absolute cache base; it never creates cache state or
+launches a container. The narrow cache remains PR-scoped and does not include
+dependency metadata, transforms, NVD data, native executions, or the trusted
+default-branch container-home archive.
+
+The host Core gate executes `:unitCheck` and `:verifyGradleReproducibility` in
+one bounded Gradle invocation. Its configuration-cache proof primes and replays
+that same graph with `--dry-run`; no task action is re-executed by the proof, and
+the replay must report literal cache reuse in retained diagnostics.
+
 The helper hashes current bytes and NUL-delimited relative names of Git-tracked
 Gradle/Groovy/Kotlin build scripts, root/nested `gradle.properties` and
 `gradle.lockfile`, the versions catalog, verification metadata, wrapper JAR/properties,

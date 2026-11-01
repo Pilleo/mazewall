@@ -32,6 +32,8 @@ target_files:
   - "src/consumerVerification/kotlin/io/mazewall/verification/PitchExamplesAcceptanceTest.kt"
   - "src/consumerVerification/kotlin/io/mazewall/verification/IndependentConsumerCacheTest.kt"
   - "src/consumerVerification/kotlin/io/mazewall/verification/ConsumerFixtureTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/KoogAgentSummaryTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/KoogProbeBatchTest.kt"
   - "buildSrc/src/main/java/io/mazewall/build/FreshJvmClassSelector.java"
   - "buildSrc/src/main/java/io/mazewall/build/JUnitTestClassFilterAction.java"
   - "buildSrc/src/main/java/io/mazewall/build/TestKitCacheArguments.java"
@@ -40,6 +42,8 @@ target_files:
   - "buildSrc/src/test/java/io/mazewall/build/AggregateVerificationFunctionalTest.java"
   - "portals/codegen/src/test/kotlin/io/mazewall/portal/codegen/PortalCodegenFunctionalTest.kt"
   - "scripts/run_vulnerable_app_demo.sh"
+  - "scripts/run_containerized_tests.sh"
+  - "src/test/kotlin/io/mazewall/testing/containers/ContainerizedTestRunnerOwnershipTest.kt"
   - "exploits/test_web_demo.py"
 target_symbols: []
 open_questions: false
@@ -110,8 +114,9 @@ Runtime discovery emits9 empty forks among17; Compose builds one image three tim
   preserve inherited/nested tests, explicit filters, all native assertions and fresh forks.
 - [x] Build the owned demo image once; preserve all three modes, artifact checks,
   original failures, capability boundaries and physical retirement.
-- [ ] RED→GREEN focused checks, full gates, one independent review and measured
+- [x] RED→GREEN focused checks, full gates, one independent review and measured
   Core qualification; report all affected lane costs rather than moving the bottleneck.
+  At `f5ebc4c5`, all six lanes pass; same-source Core794s→608s and BuildLogic578s→190s.
 
 Ruling: reuse existing lanes and scope record, not new jobs/journals/worktrees;
 no dependencies, larger resource/deadline budgets, skipped assertions or release actions.
@@ -125,6 +130,25 @@ inner retirement; no cleanup check, resource reserve or deadline is relaxed.
 Ruling: consumer classpaths reuse shared fixtures and locked JUnit artifacts,
 not the architecture suite's whole SDK graph. Real task-graph regression excludes
 unrelated producers while preserving architecture dependencies and all case owners.
+
+## Delegated remaining reuse work
+
+Operator requests Terra subagents with bounded tasks; one repository writer and
+serial Gradle checks. Existing test inventories, limits, ownership and required
+joins remain binding. The scheduled kernel-drift failure41307728608 is separate.
+- [x] Persist only Core's task-output cache under a PR-scoped key; prove transport,
+  changed-input invalidation and fresh native actions without another whole-home archive.
+- [x] Batch compatible Optional invocations while retaining per-probe fresh JVMs,
+  closure assertions, lock phases, failure evidence and physical retirement.
+- [x] Diagnose remaining host/producer compilation-key differences before changing
+  caching; consolidate compatible host verification invocations with real graph proof.
+- [ ] Review, full gates and affected-lane measurements; publish evidence in PR563.
+
+Host and container homes have no same-job output transfer; their source version
+contexts also differ. Matching keys/toolchains are not yet demonstrated, so this
+change does not copy the host Gradle home into the privileged container. Local Core
+task-output cache measured4MiB versus2.6GiB for the whole home; hosted size/savings
+remain qualification evidence rather than a promised bound.
 
 ---
 <!-- id: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c  file: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md -->

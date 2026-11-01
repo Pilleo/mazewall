@@ -13,6 +13,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption.COPY_ATTRIBUTES
+import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.time.Duration
 
 @Tag("build-logic")
@@ -101,9 +102,15 @@ class IndependentConsumerCacheTest {
                 .filter { it.trimStart().startsWith("outputs.") }
                 .joinToString("\n")
 
-        fun fixture(copy: String): Path {
+        fun fixture(
+            copy: String,
+            cacheHome: Path,
+        ): Path {
             val project = Files.createDirectories(root.resolve("$copy/spring-report-api"))
-            Files.writeString(project.resolve("settings.gradle"), "rootProject.name='consumer-cache-fixture'\nbuildCache { local { directory = file('${root.resolve("cache")}') } }\n")
+            Files.writeString(
+                project.resolve("settings.gradle"),
+                "rootProject.name='consumer-cache-fixture'\nbuildCache { local { directory = file('${cacheHome.resolve("caches/build-cache-1")}') } }\n",
+            )
             Files.writeString(project.resolve("gradle.properties"), "org.gradle.caching=false\norg.gradle.workers.max=1\n")
             Files.createDirectories(project.resolve("gradle"))
             Files.writeString(
@@ -156,7 +163,9 @@ class IndependentConsumerCacheTest {
             )
             return project
         }
-        val first = fixture("first")
+        val firstCacheHome = root.resolve("first-container-home")
+        val secondCacheHome = root.resolve("second-container-home")
+        val first = fixture("first", firstCacheHome)
         val firstEvidence = Files.createDirectory(root.resolve("first-evidence"))
         PitchExamplesAcceptance.buildConsumer(
             listOf(Path.of("gradlew").toAbsolutePath().toString(), "-p", first.toString(), "--console=plain", "--max-workers=1"),
@@ -164,7 +173,21 @@ class IndependentConsumerCacheTest {
             firstEvidence,
             listOf("test", "nativeTest", "presentationTest"),
         )
-        val project = fixture("second")
+        val firstCache = firstCacheHome.resolve("caches/build-cache-1")
+        val secondCache = secondCacheHome.resolve("caches/build-cache-1")
+        assertTrue(Files.isDirectory(firstCache), "First build must create the Gradle build-cache subtree")
+        Files.walk(firstCache).use { paths ->
+            paths.forEach { source ->
+                val target = secondCache.resolve(firstCache.relativize(source).toString())
+                if (Files.isDirectory(source)) {
+                    Files.createDirectories(target)
+                } else {
+                    Files.createDirectories(target.parent)
+                    Files.copy(source, target, REPLACE_EXISTING, COPY_ATTRIBUTES)
+                }
+            }
+        }
+        val project = fixture("second", secondCacheHome)
         val evidence = Files.createDirectory(root.resolve("second-evidence"))
         val arguments = Json
             .parseToJsonElement(Files.readString(firstEvidence.resolve("spring-report-api-strict.command.json")))

@@ -186,20 +186,21 @@ jobs:
                       notifications
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
-            - name: Run Host-Safe Unit Quality Gate
-              id: host_unit
+            - name: Run Host-Safe Unit and Reproducibility Gates
+              id: host_verification
               # This gate intentionally precedes Podman setup: ordinary CI
               # runners must be able to prove unit behavior and coverage.
-              run: ./gradlew :unitCheck --no-daemon
-            - name: Verify reproducible dependency state
-              run: ./gradlew verifyGradleReproducibility --no-daemon
+              run: ./gradlew :unitCheck :verifyGradleReproducibility --no-daemon
             - name: Prove configuration-cache reuse
               run: |
-                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
-                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
+                  set -o pipefail
+                  mkdir -p build/reports/ci-resources
+                  ./gradlew :unitCheck :verifyGradleReproducibility --dry-run --configuration-cache --configuration-cache-problems=fail --no-daemon 2>&1 | tee build/reports/ci-resources/core-configuration-cache-prime.log
+                  ./gradlew :unitCheck :verifyGradleReproducibility --dry-run --configuration-cache --configuration-cache-problems=fail --no-daemon 2>&1 | tee build/reports/ci-resources/core-configuration-cache-replay.log
+                  grep -Fq 'Configuration cache entry reused' build/reports/ci-resources/core-configuration-cache-replay.log
             - name: Triage failed host verification
-              if: steps.host_unit.outcome == 'failure'
-              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon
+              if: steps.host_verification.outcome == 'failure'
+              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck-or-verifyGradleReproducibility --no-daemon
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -207,6 +208,20 @@ jobs:
                   systemctl --user enable --now podman.socket
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
+            - name: Resolve Core Integration Compilation Cache
+              id: core_compile_cache
+              run: |
+                  cache_home=$(./scripts/run_containerized_tests.sh --print-cache-home)
+                  test -n "$cache_home"
+                  printf 'path=%s/caches/build-cache-1\n' "$cache_home" >> "$GITHUB_OUTPUT"
+            - name: Restore Core Integration Compilation Cache
+              if: github.event_name == 'pull_request' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ steps.core_compile_cache.outputs.path }}
+                  key: core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+                  restore-keys: |
+                      core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
             - name: Restore Podman Cache
               id: cache-podman
               uses: actions/cache/restore@v4
@@ -241,6 +256,7 @@ jobs:
                   path: ${{ github.workspace }}/.cache/podman-image
                   key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
             - name: Verify Workspace and Cache Ownership
+              id: core_ownership
               if: always()
               run: |
                   for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
@@ -252,6 +268,12 @@ jobs:
                           fi
                       fi
                   done
+            - name: Save Core Integration Compilation Cache
+              if: always() && github.event_name == 'pull_request' && steps.core_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{ steps.core_compile_cache.outputs.path }}
+                  key: core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
             - name: Upload Gradle diagnostics
               if: always()
               uses: actions/upload-artifact@v4
@@ -262,6 +284,8 @@ jobs:
                       build/reports/triage/
                       build/reports/gradle-baseline/
                       build/reports/test-health/
+                      build/reports/ci-resources/core-configuration-cache-prime.log
+                      build/reports/ci-resources/core-configuration-cache-replay.log
                       **/build/test-results/**/*.xml
                       **/hs_err_pid*.log
                   if-no-files-found: ignore

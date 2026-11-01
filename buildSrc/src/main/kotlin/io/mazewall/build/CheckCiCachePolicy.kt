@@ -19,6 +19,7 @@ internal enum class CiCacheViolation(val explanation: String) {
     CONTAINER_CACHE_IDENTITY("Both jobs must compute one tracked-input identity immediately after checkout and reuse its output"),
     CONTAINER_CACHE_SAVE("Container cache saves must require successful identity computation"),
     CONTAINER_CACHE_REUSE("Main verification must try compatible optional PR caches before the broad main fallback"),
+    CORE_COMPILATION_CACHE("Core PR reruns must overlay only the discovered container Gradle build-cache subtree after the whole-home restore"),
     SERIAL_VALIDATION("Optional, core and mutation validation must run independently without allowing failure"),
     VALIDATION_RUNNER("All three validation lanes must use ubuntu-26.04 and JDK 25"),
     CODE_CHANGE_FILTER("Core and mutation need unconditional PR-readable code filters including the CI workflow"),
@@ -66,6 +67,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
                     "container-gradle-${'$'}{{ runner.os }}-",
                 )
             }
+            CiCacheViolation.CORE_COMPILATION_CACHE -> !hasCoreCompilationCache(containerJobs[1])
             CiCacheViolation.SERIAL_VALIDATION -> validationJobs.withIndex().any { (index, job) ->
                 val headers = workflowHeaders(job)
                 headers.filter { it.startsWith("name:") } != listOf("name: ${validationNames[index]}") ||
@@ -101,6 +103,38 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
             }
         }
     }
+}
+
+private fun hasCoreCompilationCache(core: String): Boolean {
+    val resolve = workflowStep(core, "Resolve Core Integration Compilation Cache").trimIndent().trim()
+    val restore = workflowStep(core, "Restore Core Integration Compilation Cache").trimIndent().trim()
+    val save = workflowStep(core, "Save Core Integration Compilation Cache").trimIndent().trim()
+    val ownership = workflowStep(core, "Verify Workspace and Cache Ownership").trimIndent().trim()
+    val path = "${'$'}{{ steps.core_compile_cache.outputs.path }}"
+    val key = "core-integration-compile-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}"
+    val guard = "github.event_name == 'pull_request' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''"
+    return resolve == """
+        id: core_compile_cache
+        run: |
+            cache_home=${'$'}(./scripts/run_containerized_tests.sh --print-cache-home)
+            test -n "${'$'}cache_home"
+            printf 'path=%s/caches/build-cache-1\n' "${'$'}cache_home" >> "${'$'}GITHUB_OUTPUT"
+    """.trimIndent() && ownership.lines().any { it.trim() == "id: core_ownership" } && restore == """
+        if: $guard
+        uses: actions/cache/restore@v4
+        with:
+            path: $path
+            key: $key
+            restore-keys: |
+                core-integration-compile-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-
+    """.trimIndent() && save == """
+        if: always() && github.event_name == 'pull_request' && steps.core_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+        uses: actions/cache/save@v4
+        with:
+            path: $path
+            key: $key
+    """.trimIndent() && core.indexOf("- name: Restore Container Gradle Cache") < core.indexOf("- name: Restore Core Integration Compilation Cache") &&
+        core.indexOf("- name: Verify Workspace and Cache Ownership") < core.indexOf("- name: Save Core Integration Compilation Cache")
 }
 
 private fun workflowJob(workflow: String, job: String): String =

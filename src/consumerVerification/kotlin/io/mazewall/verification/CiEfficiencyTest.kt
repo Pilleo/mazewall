@@ -112,6 +112,83 @@ class CiEfficiencyTest {
         assertFalse(Files.exists(project.resolve("-.count")), "Unselected root work must not execute")
     }
 
+    @Test fun `Core configuration cache proof preserves dry run failures through tee`() {
+        val project = Files.createDirectory(root.resolve("core-proof"))
+        copyWrapper(project)
+        val proof = script(steps("core-quality").getValue("Prove configuration-cache reuse"))
+        Files.createDirectories(project.resolve("build/reports/ci-resources"))
+        Files.writeString(
+            project.resolve("gradlew"),
+            """
+            #!/bin/sh
+            n=0; [ -f calls ] && n=${'$'}(cat calls); n=${'$'}((n + 1)); echo "${'$'}n" > calls
+            [ "${'$'}n" = 2 ] && echo 'Configuration cache entry reused'
+            case "${'$'}FAIL_PHASE:${'$'}n" in prime:1|replay:2) echo "failure-${'$'}n" >&2; exit 23;; esac
+            """.trimIndent() + "\n",
+        )
+        assertTrue(project.resolve("gradlew").toFile().setExecutable(true))
+
+        fun run(phase: String): ConsumerCommandResult =
+            command(
+                listOf(
+                    "bash",
+                    "-ec",
+                    "export FAIL_PHASE=$phase\n" + proof.replace("./gradlew", project.resolve("gradlew").toString()),
+                ),
+                project,
+            )
+
+        for (phase in listOf("prime", "replay")) {
+            Files.deleteIfExists(project.resolve("calls"))
+            val result = run(phase)
+            assertEquals(23, result.exitCode, result.stdout + result.stderr)
+            assertTrue("failure-" in result.stdout + result.stderr)
+        }
+        Files.deleteIfExists(project.resolve("calls"))
+        val clean = run("none")
+        assertEquals(0, clean.exitCode, clean.stdout + clean.stderr)
+        assertEquals("2", Files.readString(project.resolve("calls")).trim())
+        assertTrue("Configuration cache entry reused" in clean.stdout)
+    }
+
+    @Test fun `Core host graph runs actions once and dry run replay reuses its actual graph`() {
+        val project = Files.createDirectory(root.resolve("core-graph"))
+        Files.writeString(project.resolve("settings.gradle"), "rootProject.name='core-graph-fixture'\n")
+        Files.writeString(project.resolve("gradle.properties"), "org.gradle.workers.max=1\n")
+        Files.writeString(
+            project.resolve("build.gradle"),
+            """
+            def observed = providers.fileContents(layout.projectDirectory.file('generated.flag')).asText.orElse('absent').get()
+            abstract class CountRuns extends DefaultTask {
+              @OutputFile abstract RegularFileProperty getCounter()
+              @TaskAction void run() { counter.get().asFile.append('executed\n'); project.file('generated.flag').text = 'observed' }
+            }
+            ['unitCheck', 'verifyGradleReproducibility'].each { name -> tasks.register(name, CountRuns) { counter.set(layout.projectDirectory.file("${'$'}{name}.count")); outputs.upToDateWhen { false }; outputs.cacheIf { false } } }
+            """.trimIndent(),
+        )
+        copyWrapper(project)
+        val core = steps("core-quality")
+        val host = core
+            .getValue("Run Host-Safe Unit and Reproducibility Gates")
+            .substringAfter("run: ")
+            .trim()
+        val proof = script(core.getValue("Prove configuration-cache reuse"))
+        val hostResult = command(
+            listOf("bash", "-ec", host.replace("./gradlew", project.resolve("gradlew").toString())),
+            project,
+        )
+        assertEquals(0, hostResult.exitCode, hostResult.stdout + hostResult.stderr)
+        val proofResult = command(
+            listOf("bash", "-ec", proof.replace("./gradlew", project.resolve("gradlew").toString())),
+            project,
+        )
+        assertEquals(0, proofResult.exitCode, proofResult.stdout + proofResult.stderr)
+        for (name in listOf("unitCheck", "verifyGradleReproducibility")) {
+            assertEquals("executed\n", Files.readString(project.resolve("$name.count")))
+        }
+        assertTrue("Configuration cache entry reused" in proofResult.stdout, proofResult.stdout)
+    }
+
     @Test fun `owned child coverage agent cache identity follows bytes rather than Gradle home`() {
         val project = Files.createDirectory(root.resolve("coverage"))
         Files.writeString(project.resolve("settings.gradle"), "rootProject.name='coverage-cache-fixture'\nbuildCache { local { directory = file('owned-cache') } }\n")

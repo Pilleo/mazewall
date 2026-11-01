@@ -16,7 +16,7 @@ public final class CoreLaneFunctionalTest {
     static void verify(Path repository) throws Exception {
         String workflow = Files.readString(repository.resolve(".github/workflows/ci.yml"));
         String source = Files.readString(repository.resolve("build.gradle.kts"));
-        List<String> core = arguments(step(workflow, "Run Host-Safe Unit Quality Gate"));
+        List<String> core = arguments(step(workflow, "Run Host-Safe Unit and Reproducibility Gates"));
         Path root = Files.createTempDirectory("core-lane-");
         write(root, "settings.gradle.kts", "rootProject.name=\"lane-fixture\"\ninclude(\":demos:vulnerable-web-app\", \":platform\", \":enforcer\", \":profiler\", \":portals:codegen\")\n");
         write(root, "demos/vulnerable-web-app/build.gradle.kts", "tasks.register(\"unitCheck\") { doLast { println(\"DEMO_HOST_GATE_OK\") } }\n");
@@ -49,6 +49,7 @@ public final class CoreLaneFunctionalTest {
                 systemProperty("fixture.task", name)
             }
             tasks.register("buildLogicCheck")
+            tasks.register("verifyGradleReproducibility") { doLast { println("REPRODUCIBILITY_OK") } }
             """ + harness + AggregateVerificationFunctionalTest.declaration(source, "unitCheck")
             + "\ntasks.named(\"unitCheck\") { dependsOn(\"consumerHarnessTest\") }\n");
         for (String name : List.of("FastTest", "HeavyTest", "NativeTest")) {
@@ -66,6 +67,10 @@ public final class CoreLaneFunctionalTest {
                 """.formatted(tag, name));
         }
         BuildResult host = run(root, core);
+        require(host.task(":verifyGradleReproducibility") != null && host.getOutput().contains("REPRODUCIBILITY_OK"), "Core must execute reproducibility verification with unitCheck");
+        String cacheProof = step(workflow, "Prove configuration-cache reuse");
+        require(!cacheProof.contains(" help ") && count(cacheProof, ":unitCheck :verifyGradleReproducibility --dry-run") == 2 &&
+            cacheProof.contains("Configuration cache entry reused"), "Core must prime and replay the actual host graph without task actions");
         require(host.task(":profiler:compileJava") != null && host.task(":portals:codegen:compileJava") != null, "Architecture runtime must retain its producer dependencies");
         require(host.task(":demos:vulnerable-web-app:unitCheck") == null, "Bare CI selector executed demo work in Core");
         require(Files.readString(root.resolve("effects/consumerHarnessTest-FastTest")).equals("executed\n"), "Fast harness did not execute once");
@@ -162,6 +167,8 @@ public final class CoreLaneFunctionalTest {
     }
 
     private static void require(boolean value, String message) { if (!value) throw new AssertionError(message); }
+
+    private static int count(String text, String needle) { return text.split(java.util.regex.Pattern.quote(needle), -1).length - 1; }
 
     private static void write(Path root, String name, String contents) throws Exception {
         Path file = root.resolve(name); Files.createDirectories(file.getParent()); Files.writeString(file, contents);

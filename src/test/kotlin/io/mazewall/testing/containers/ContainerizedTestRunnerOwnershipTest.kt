@@ -10,6 +10,41 @@ import java.util.concurrent.TimeUnit
 
 class ContainerizedTestRunnerOwnershipTest {
     @Test
+    fun `cache home query prints only the computed path without launching a container`() {
+        val run = launch("podman", "--print-cache-home")
+
+        assertEquals(0, run.exit, run.output)
+        assertTrue(run.output.trim().matches(Regex("${Regex.escape(run.cacheRoot.toString())}/[0-9a-f]{12}/[0-9a-f]{12}")), run.output)
+        assertFalse(run.commands.any { it.contains(" run ") }, run.commands.toString())
+        assertFalse(Files.exists(run.cacheRoot), "Query must not create the cache home")
+    }
+
+    @Test
+    fun `cache home query rejects Gradle arguments`() {
+        for (arguments in listOf(
+            arrayOf("--print-cache-home", ":platform:integrationTest"),
+            arrayOf(":platform:integrationTest", "--print-cache-home"),
+            arrayOf("--print-cache-home", "--print-cache-home"),
+        )) {
+            val run = launch("docker", *arguments)
+            assertFalse(run.exit == 0, run.output)
+            assertTrue("--print-cache-home" in run.output, run.output)
+            assertTrue(run.commands.none { it.contains(" run ") }, run.commands.toString())
+            assertFalse(Files.exists(run.cacheRoot), "Rejected query must not create cache state")
+        }
+    }
+
+    @Test
+    fun `cache home query rejects a relative cache base without mutation`() {
+        val run = launch("podman", true, "--print-cache-home")
+
+        assertFalse(run.exit == 0, run.output)
+        assertTrue("XDG_CACHE_HOME" in run.output, run.output)
+        assertTrue(run.commands.none { it.contains(" run ") }, run.commands.toString())
+        assertFalse(Files.exists(run.cacheRoot), "Rejected relative base must not create cache state")
+    }
+
+    @Test
     fun `Docker launcher runs as caller and never mounts host Gradle home`() {
         val run = launch("docker")
         assertEquals(0, run.exit, run.output)
@@ -17,6 +52,7 @@ class ContainerizedTestRunnerOwnershipTest {
         assertTrue(run.commands.any { it.contains("--userns host") }, run.commands.toString())
         assertFalse(run.commands.any { it.contains("${System.getProperty("user.home")}/.gradle") }, run.commands.toString())
         assertTrue(run.commands.any { it.contains("GRADLE_USER_HOME=/container-gradle-home") }, run.commands.toString())
+        assertTrue(run.commands.any { it.contains("./gradlew :profiler:test --no-daemon --stacktrace") }, run.commands.toString())
     }
 
     @Test
@@ -33,9 +69,12 @@ class ContainerizedTestRunnerOwnershipTest {
         val commands: List<String>,
         val uid: String,
         val gid: String,
+        val cacheRoot: Path,
     )
 
-    private fun launch(engine: String): LaunchResult {
+    private fun launch(engine: String, vararg arguments: String): LaunchResult = launch(engine, false, *arguments)
+
+    private fun launch(engine: String, relativeCacheHome: Boolean, vararg arguments: String): LaunchResult {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.exists(it.resolve("scripts/run_containerized_tests.sh")) }
         val scratch = Files.createTempDirectory("mazewall-launcher-test-")
@@ -70,13 +109,13 @@ esac
             )
             fake.toFile().setExecutable(true)
             val log = scratch.resolve("commands.log")
-            val env = ProcessBuilder("bash", "scripts/run_containerized_tests.sh", ":profiler:test")
+            val env = ProcessBuilder("bash", "scripts/run_containerized_tests.sh", *(arguments.ifEmpty { arrayOf(":profiler:test") }))
                 .directory(project.toFile())
                 .redirectErrorStream(true)
                 .apply {
                     environment()["PATH"] = "$scratch:${System.getenv("PATH")}"
                     environment()["MAZEWALL_CONTAINER_ENGINE"] = engine
-                    environment()["XDG_CACHE_HOME"] = scratch.resolve("container-cache").toString()
+                    environment()["XDG_CACHE_HOME"] = if (relativeCacheHome) "relative-cache" else scratch.resolve("container-cache").toString()
                     environment()["MAZEWALL_FAKE_LOG"] = log.toString()
                     environment().remove("DOCKER_HOST")
                     environment().remove("CONTAINER_HOST")
@@ -96,6 +135,7 @@ esac
                 if (Files.exists(log)) Files.readAllLines(log) else emptyList(),
                 id("-u"),
                 id("-g"),
+                scratch.resolve("container-cache/mazewall/container-gradle/$engine").resolve(id("-u")),
             )
         } finally {
             scratch.toFile().deleteRecursively()
