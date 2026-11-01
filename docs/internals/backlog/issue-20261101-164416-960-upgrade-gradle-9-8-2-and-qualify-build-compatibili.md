@@ -17,6 +17,7 @@ target_files:
   - "buildSrc/gradle.lockfile"
   - "buildSrc/settings-gradle.lockfile"
   - "demos/koog-document-agent/gradle/wrapper/gradle-wrapper.properties"
+  - "demos/koog-document-agent/gradle/verification-metadata.xml"
   - "demos/koog-document-agent/gradle/wrapper/gradle-wrapper.jar"
   - "demos/koog-document-agent/gradlew"
   - "demos/koog-document-agent/gradlew.bat"
@@ -50,6 +51,9 @@ required regenerated strict `buildSrc` and root verification metadata plus `buil
 Application and catalog plugin versions stay unchanged; strict verification remains enabled.
 Focused build logic, consumer harness, and configuration-cache replay checks passed. Redundant
 root-only retry settings were removed after verifying that omission preserves zero retries.
+The hosted optional copied-Koog acceptance additionally required four strict Kotlin 2.4.10
+artifact approvals; direct Maven Central SHA-256 retrieval matched the existing root/buildSrc
+approvals. Other current Kotlin-DSL consumer metadata was probed cold without this missing set.
 
 ---
 <!-- id: issue-20261101-164416-960-upgrade-gradle-9-8-2-and-qualify-build-compatibili  file: issue-20261101-164416-960-upgrade-gradle-9-8-2-and-qualify-build-compatibili.md -->
