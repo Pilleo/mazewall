@@ -44,15 +44,14 @@ public final class TestHealthPlugin implements Plugin<Project> {
                 test.getOutputs().doNotCacheIf("Kernel integration tests require current external-state evidence", ignored -> true);
             }
             test.dependsOn(prepare);
-            test.systemProperty("io.mazewall.testHealth.fragmentDir", fragments.get().getAsFile().getAbsolutePath());
             test.systemProperty("io.mazewall.testHealth.module", project.getPath().isBlank() ? ":" : project.getPath());
             test.systemProperty("io.mazewall.testHealth.task", test.getName());
             test.systemProperty("io.mazewall.testHealth.taskPath", test.getPath());
             test.usesService(invocation);
-            test.doFirst(ignored -> test.systemProperty(
-                "io.mazewall.testHealth.invocationToken",
-                invocation.get().token()
-            ));
+            test.doFirst(ignored -> {
+                test.systemProperty("io.mazewall.testHealth.fragmentDir", fragments.get().getAsFile().getAbsolutePath());
+                test.systemProperty("io.mazewall.testHealth.invocationToken", invocation.get().token());
+            });
             // This imposes ordering only when a producer is already in the chosen gate.
             // It deliberately does not make unitCheck execute kernel/integration tests.
             aggregateTask.mustRunAfter(test);

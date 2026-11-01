@@ -18,10 +18,16 @@ class KoogAgentSummaryTest {
 
     @Test
     fun `requires both actual agent modes rather than direct tool evidence`() {
-        assertEquals(setOf(thread, portal, threadSequence, portalSequence), requireKoogAgentSummaries("noise\n$threadOutput", portalOutput))
+        assertEquals(setOf(thread, portal, threadSequence, portalSequence), requireKoogAgentSummaries("noise\n$threadOutput\n$portalOutput"))
         for ((left, right) in listOf("" to portal, thread to "", portal to thread, "KOOG_THREAD_V1_OK" to portal, thread to "KOOG_NATIVE_FRESH_OK")) {
-            assertThrows<IllegalStateException> { requireKoogAgentSummaries(left, right) }
+            assertThrows<IllegalStateException> { requireKoogAgentSummaries("$left\n$right") }
         }
+    }
+
+    @Test
+    fun `combined Gradle output requires every agent summary exactly once`() {
+        val combined = "noise\n$threadOutput\n$portalOutput"
+        assertEquals(setOf(thread, portal, threadSequence, portalSequence), requireKoogAgentSummaries(combined))
     }
 
     @Test
@@ -35,9 +41,9 @@ class KoogAgentSummaryTest {
             thread.replace("replay=false", "replay=true"),
                 thread.replace("deadline=propagated", "deadline=ignored"),
         )) {
-            assertThrows<IllegalStateException> { requireKoogAgentSummaries("$bad\n$threadSequence", portalOutput) }
+            assertThrows<IllegalStateException> { requireKoogAgentSummaries("$bad\n$threadSequence\n$portalOutput") }
         }
-        assertThrows<IllegalStateException> { requireKoogAgentSummaries(threadOutput, "${portal.replace("unknown=terminal", "unknown=retried")}\n$portalSequence") }
+        assertThrows<IllegalStateException> { requireKoogAgentSummaries("$threadOutput\n${portal.replace("unknown=terminal", "unknown=retried")}\n$portalSequence") }
     }
 
     @Test
@@ -46,10 +52,9 @@ class KoogAgentSummaryTest {
             thread to portal,
                 threadOutput to portal,
                 thread to portalOutput,
-            threadSequence to portalSequence,
-                portalOutput to threadOutput,
+                threadSequence to portalSequence,
         )) {
-            assertThrows<IllegalStateException> { requireKoogAgentSummaries(left, right) }
+            assertThrows<IllegalStateException> { requireKoogAgentSummaries("$left\n$right") }
         }
     }
 
@@ -65,9 +70,9 @@ class KoogAgentSummaryTest {
             threadOutput.replace("queuedCancellation=not-started", "queuedCancellation=entered"),
             "$thread\n${threadSequence.replace("retirement=complete", "retirement=incomplete")}",
         )) {
-            assertThrows<IllegalStateException> { requireKoogAgentSummaries(bad, portalOutput) }
+            assertThrows<IllegalStateException> { requireKoogAgentSummaries("$bad\n$portalOutput") }
         }
-        assertThrows<IllegalStateException> { requireKoogAgentSummaries(threadOutput, "$portalOutput\n$portalSequence") }
-        assertThrows<IllegalStateException> { requireKoogAgentSummaries(threadOutput, "$portal\n${portalSequence.replace("unknown=terminal", "unknown=retried")}") }
+        assertThrows<IllegalStateException> { requireKoogAgentSummaries("$threadOutput\n$portalOutput\n$portalSequence") }
+        assertThrows<IllegalStateException> { requireKoogAgentSummaries("$threadOutput\n$portal\n${portalSequence.replace("unknown=terminal", "unknown=retried")}") }
     }
 }

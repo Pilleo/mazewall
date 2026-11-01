@@ -94,7 +94,7 @@ final class AggregateVerificationFunctionalTest {
             .build();
     }
 
-    private static String declaration(String source, String task) {
+    static String declaration(String source, String task) {
         String registration = "\ntasks.register(\"" + task + "\") {";
         int start = source.lastIndexOf(registration);
         if (start < 0) throw new AssertionError("Missing root aggregate declaration: " + task);

@@ -1,0 +1,154 @@
+---
+title: "Fix cold Spring verification and reduce CI cache churn"
+severity: "HIGH"
+status: "open"
+priority: high
+dependencies: []
+component: "core"
+target_modules: []
+target_files:
+  - "demos/spring-report-api/gradle/verification-metadata.xml"
+  - ".github/workflows/ci.yml"
+  - "build.gradle.kts"
+  - "buildSrc/src/main/kotlin/io/mazewall/build/CheckCiCachePolicy.kt"
+  - "buildSrc/src/test/java/io/mazewall/build/VerificationWorkflowInputFunctionalTest.java"
+  - "buildSrc/src/verification/kotlin/io/mazewall/build/CiCachePolicyTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/CiEfficiencyTest.kt"
+  - "docs/internals/designs/core/testing-strategy.md"
+  - "buildSrc/build.gradle.kts"
+  - "buildSrc/src/main/java/io/mazewall/build/TestHealthPlugin.java"
+  - "buildSrc/src/test/java/io/mazewall/build/TestHealthPluginFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/FriendPathCacheFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/BtfRelocationFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/VerificationActionsTest.java"
+  - "enforcer/build.gradle.kts"
+  - "profiler/build.gradle.kts"
+  - "portals/runtime/build.gradle.kts"
+  - "portals/worker/build.gradle.kts"
+  - "portals/codegen/build.gradle.kts"
+  - "demos/cli-demo/build.gradle.kts"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/ConsumerFixture.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/OptionalIntegrationAcceptanceTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/PitchExamplesAcceptanceTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/IndependentConsumerCacheTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/ConsumerFixtureTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/KoogAgentSummaryTest.kt"
+  - "src/consumerVerification/kotlin/io/mazewall/verification/KoogProbeBatchTest.kt"
+  - "buildSrc/src/main/java/io/mazewall/build/FreshJvmClassSelector.java"
+  - "buildSrc/src/main/java/io/mazewall/build/JUnitTestClassFilterAction.java"
+  - "buildSrc/src/main/java/io/mazewall/build/TestKitCacheArguments.java"
+  - "buildSrc/src/test/java/io/mazewall/build/NativeTestDiscoveryFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/CoreLaneFunctionalTest.java"
+  - "buildSrc/src/test/java/io/mazewall/build/AggregateVerificationFunctionalTest.java"
+  - "portals/codegen/src/test/kotlin/io/mazewall/portal/codegen/PortalCodegenFunctionalTest.kt"
+  - "scripts/run_vulnerable_app_demo.sh"
+  - "scripts/run_containerized_tests.sh"
+  - "src/test/kotlin/io/mazewall/testing/containers/ContainerizedTestRunnerOwnershipTest.kt"
+  - "exploits/test_web_demo.py"
+target_symbols: []
+open_questions: false
+---
+
+# 🟡 [Severity: HIGH]: Fix cold Spring verification and reduce CI cache churn
+
+**Context:**
+Master run41157097057 fails on four unpinned BOM module files; warm PR cache hid the omission. User requests fix plus measured GitHub/Gradle efficiency and cache verification. Preserve mandatory tests/native freshness, approval/publication boundaries, security policy, resource limits and deadlines. No broad cache deletion, worktrees, new dependencies or execution diaries.
+
+**Needed:**
+1. Reproduce cold resolution before changes; verify upstream metadata and add only required SHA256 pins; measure job/task/cache costs and fix demonstrated waste with focused regressions; verify cold/warm behavior, full quality gate and independent scope review. Record final evidence briefly, not per-attempt logs.
+
+## Outcome and verification
+
+- Four missing module approvals reproduced cold, then pinned after Central/Portal/
+  actual-resolved byte comparison and existing POM approval checks. Fresh resolution
+  passes; a wrong cold checksum still fails. No versions or locks changed.
+- Versioned runner cache refuses missing/failed/empty exports and saves only after
+  successful export; obsolete demo-image handling is removed. Adapter cache proof
+  now requires real reuse with no repeated task actions. Policy self-tests run once,
+  not recursively in the workflow-input fixture; all status matrices remain.
+- Coverage-agent path normalization preserves byte invalidation. Actual host and
+  container enforcer unit runs have the same cache key; the latter is UP-TO-DATE.
+- Initial fix at `d0fa7ea1` passed the full gate, independent review and hosted CI.
+  Core-only warm qualification:1249s→519s, unit690s→34s; all unchanged host tests
+  restored, native checks fresh. This did not qualify Optional warm efficiency.
+
+Baseline master core1059s/optional1010s; green PR core575s/optional733s. The apparent
+warm build-logic run was actually cold: its626MiB cache download hit GitHub's egress
+account limit. Rebuilding the empty cached image cost about57–61s/job; no net saving
+is claimed before hosted measurement. Snapshot splitting/quota changes and cached
+native passes are not substituted for verification. Open pending managed landing.
+
+## Approved Optional-lane follow-up
+
+The operator requests a plan and fixes for all four review findings in PR563.
+- [x] Real two-copy compilation/host-test reuse, changed-input invalidation and fresh
+  native/presentation tasks; independent builders explicitly enable build caching.
+- [x] Final root acceptance retains staging version/namespace and unchanged JAR bytes.
+- [x] Typed friend files retain producer dependencies/internal access; relocated
+  compilation reuses outputs, absent authority and changed internal APIs reject.
+- [x] Diagnostic paths leave cache keys; cached tests do not attest fresh forks,
+  while integration tasks execute each time.
+- [x] Warm qualification exposed absolute source paths in generated BTF, changing
+  profiler/plugin bytes across checkouts. Normalize debug paths only; real generated
+  BTF/JAR relocation equality and changed-C-type invalidation pass.
+- [x] Full gates/review and Optional warm qualification at `13aefddb`:736s→416s;
+  both copied consumers restore ordinary compilation/tests; native checks stay fresh.
+  Final evidence: https://github.com/Pilleo/mazewall/pull/563.
+
+Impact index was unavailable; exact caller/configuration reads and real regressions
+supply evidence instead. No public SDK changes, new dependencies, broader friend
+grants, timeout increases, cached native passes or separate execution journals.
+
+## Approved Core critical-path follow-up
+
+Core run41244799711 takes891s despite cached compilation. Host consumer Gradle
+fixtures take235s, codegen156s and unintended demo tests82s (overlapping times).
+Runtime discovery emits9 empty forks among17; Compose builds one image three times.
+
+- [x] Keep heavy consumer Gradle regressions required in Build Logic; fast cases in
+  Core. Make `:unitCheck` explicit and retain demo host checks in Security, independent
+  of scanner eligibility/failure. Preserve the six-success join and diagnostics.
+- [x] Persist Portal TestKit state under the configured Gradle home; enable ordinary
+  fixture caching, normalize local paths, prove two-copy reuse/changed-input invalidation.
+- [x] Restrict runtime candidates to real JUnit roots with existing metadata logic;
+  preserve inherited/nested tests, explicit filters, all native assertions and fresh forks.
+- [x] Build the owned demo image once; preserve all three modes, artifact checks,
+  original failures, capability boundaries and physical retirement.
+- [x] RED→GREEN focused checks, full gates, one independent review and measured
+  Core qualification; report all affected lane costs rather than moving the bottleneck.
+  At `f5ebc4c5`, all six lanes pass; same-source Core794s→608s and BuildLogic578s→190s.
+
+Ruling: reuse existing lanes and scope record, not new jobs/journals/worktrees;
+no dependencies, larger resource/deadline budgets, skipped assertions or release actions.
+Explicit file includes remain caller-owned; the helper-free optimization applies
+only to default discovery, preventing a selected native subset from being broadened.
+Review correction: retain composed annotations and external inherited test roots;
+real default/CLI regressions cover methods, interfaces and nested inheritance.
+Ruling: consumer fixtures keep their own lifetime supervision after the unchanged
+resource-probed verifier. A controlled probe reproduced adopted zombies blocking
+inner retirement; no cleanup check, resource reserve or deadline is relaxed.
+Ruling: consumer classpaths reuse shared fixtures and locked JUnit artifacts,
+not the architecture suite's whole SDK graph. Real task-graph regression excludes
+unrelated producers while preserving architecture dependencies and all case owners.
+
+## Delegated remaining reuse work
+
+Operator requests Terra subagents with bounded tasks; one repository writer and
+serial Gradle checks. Existing test inventories, limits, ownership and required
+joins remain binding. The scheduled kernel-drift failure41307728608 is separate.
+- [x] Persist only Core's task-output cache under a PR-scoped key; prove transport,
+  changed-input invalidation and fresh native actions without another whole-home archive.
+- [x] Batch compatible Optional invocations while retaining per-probe fresh JVMs,
+  closure assertions, lock phases, failure evidence and physical retirement.
+- [x] Diagnose remaining host/producer compilation-key differences before changing
+  caching; consolidate compatible host verification invocations with real graph proof.
+- [ ] Review, full gates and affected-lane measurements; publish evidence in PR563.
+
+Host and container homes have no same-job output transfer; their source version
+contexts also differ. Matching keys/toolchains are not yet demonstrated, so this
+change does not copy the host Gradle home into the privileged container. Local Core
+task-output cache measured4MiB versus2.6GiB for the whole home; hosted size/savings
+remain qualification evidence rather than a promised bound.
+
+---
+<!-- id: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c  file: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md -->

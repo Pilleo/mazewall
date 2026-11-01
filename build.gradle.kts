@@ -191,6 +191,13 @@ tasks.register<io.mazewall.build.CheckCiCachePolicy>("checkCiCachePolicy") {
 
 tasks.named("check") { dependsOn("checkCiCachePolicy") }
 
+tasks.named<Test>("test") {
+    inputs
+        .file(layout.projectDirectory.file("scripts/run_containerized_tests.sh"))
+        .withPropertyName("containerizedTestRunner")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 tasks.register("format") {
     group = "formatting"
     description = "Formats Kotlin sources in projects that opt into KtLint."
@@ -231,14 +238,7 @@ configurations.named("sharedTestCompileClasspath") {
 rootKotlinCompilations.matching { it.name == "sharedTest" }.configureEach {
     compileTaskProvider.configure {
         dependsOn(":platform:jar", ":enforcer:jar")
-        compilerOptions.freeCompilerArgs.addAll(
-            rootPlatformJar.zip(rootEnforcerJar) { platform, enforcer ->
-                listOf(
-                    "-Xfriend-paths=${platform.asFile.absolutePath}",
-                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
-                )
-            },
-        )
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(rootPlatformJar, rootEnforcerJar)
     }
 }
 
@@ -277,7 +277,21 @@ tasks.named<Test>("test") {
 val consumerVerification =
     sourceSets.create("consumerVerification") {
         kotlin.srcDir("src/consumerVerification/kotlin")
-        compileClasspath += configurations.testRuntimeClasspath.get() + sourceSets["sharedTest"].output
+        // Consumer fixtures need shared process support, not the aggregate architecture SDK runtime.
+        compileClasspath +=
+            files(
+                configurations["sharedTestRuntimeClasspath"],
+                sourceSets["sharedTest"].output,
+                configurations.testRuntimeClasspath
+                    .get()
+                    .incoming
+                    .artifactView {
+                        componentFilter { id ->
+                            id is org.gradle.api.artifacts.component.ModuleComponentIdentifier &&
+                                (id.group.startsWith("org.junit.") || id.group in setOf("org.opentest4j", "org.apiguardian"))
+                        }
+                    }.files,
+            )
         runtimeClasspath += output + compileClasspath
     }
 
@@ -291,12 +305,41 @@ tasks.register<Test>("consumerHarnessTest") {
     description = "Checks portable consumer harness ownership without requiring published applications."
     testClassesDirs = consumerVerification.output.classesDirs
     classpath = consumerVerification.runtimeClasspath
-    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration") }
+    useJUnitPlatform { excludeTags("packaged-consumer", "consumer-bootstrap", "consumer-native", "boundary-evidence", "optional-integration", "build-logic") }
     inputs
-        .file(layout.projectDirectory.file(".github/workflows/benchmarks.yml"))
-        .withPropertyName("manualBenchmarkWorkflow")
+        .files(
+            layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
+            layout.projectDirectory.file(".github/workflows/ci.yml"),
+            layout.projectDirectory.file("build.gradle.kts"),
+            layout.projectDirectory.file("demos/spring-report-api/build.gradle"),
+            layout.projectDirectory.file("tests/consumers/stage.init.gradle"),
+            layout.projectDirectory.file("gradlew"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.jar"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.properties"),
+        ).withPropertyName("ciVerificationInputs")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
+
+tasks.register<Test>("consumerBuildLogicTest") {
+    group = "verification"
+    description = "Runs Gradle-backed consumer regressions in the required build-logic lane."
+    testClassesDirs = consumerVerification.output.classesDirs
+    classpath = consumerVerification.runtimeClasspath
+    useJUnitPlatform { includeTags("build-logic") }
+    inputs
+        .files(
+            layout.projectDirectory.file(".github/workflows/benchmarks.yml"),
+            layout.projectDirectory.file(".github/workflows/ci.yml"),
+            layout.projectDirectory.file("build.gradle.kts"),
+            layout.projectDirectory.file("demos/spring-report-api/build.gradle"),
+            layout.projectDirectory.file("tests/consumers/stage.init.gradle"),
+            layout.projectDirectory.file("gradlew"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.jar"),
+            layout.projectDirectory.file("gradle/wrapper/gradle-wrapper.properties"),
+        ).withPropertyName("ciVerificationInputs")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+tasks.named("check") { dependsOn("consumerHarnessTest", "consumerBuildLogicTest") }
 
 tasks.register<Test>("consumerCheck") {
     group = "verification"
@@ -572,7 +615,10 @@ subprojects {
         if (project.name == "enforcer") {
             val agent = files(configurations.named("jacocoAgent"))
             unitTest.configure {
-                inputs.files(agent).withPropertyName("ownedChildJacocoAgent")
+                inputs
+                    .files(agent)
+                    .withPropertyName("ownedChildJacocoAgent")
+                    .withPathSensitivity(PathSensitivity.NONE)
                 outputs.dir(childExecutionDirectory).withPropertyName("ownedChildExecutionData")
                 doFirst {
                     val directory = childExecutionDirectory.get().asFile
@@ -802,9 +848,7 @@ subprojects {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         if (name.contains("Test", ignoreCase = true)) {
             dependsOn(":compileSharedTestKotlin")
-            compilerOptions.freeCompilerArgs.addAll(
-                sharedTestClasses.map { listOf("-Xfriend-paths=${it.asFile.absolutePath}") },
-            )
+            friendPaths.from(sharedTestClasses)
         }
     }
 }

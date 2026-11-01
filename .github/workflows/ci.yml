@@ -42,12 +42,23 @@ jobs:
                   :integrations:koog:build :integrations:spring:mazewall-spring-boot:build
                   :integrations:spring:mazewall-spring-boot-starter:build
                   --configuration-cache-problems=fail --no-daemon --max-workers=1
+            - name: Prime Optional Adapter Post-Build Configuration Cache
+              run: |
+                  mkdir -p build/reports/ci-resources
+                  : > build/reports/ci-resources/optional-adapters-cache.log
+                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true \
+                      :integrations:koog:build :integrations:spring:mazewall-spring-boot:build \
+                      :integrations:spring:mazewall-spring-boot-starter:build \
+                      --configuration-cache-problems=fail --no-daemon --max-workers=1 --dry-run
             - name: Prove Optional Adapter Configuration Cache Reuse
-              run: >-
-                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true
-                  :integrations:koog:build :integrations:spring:mazewall-spring-boot:build
-                  :integrations:spring:mazewall-spring-boot-starter:build
-                  --configuration-cache-problems=fail --no-daemon --max-workers=1
+              run: |
+                  set -o pipefail
+                  ./gradlew -PincludeKoogIntegration=true -PkoogBootstrap=true -PincludeSpringIntegration=true \
+                      :integrations:koog:build :integrations:spring:mazewall-spring-boot:build \
+                      :integrations:spring:mazewall-spring-boot-starter:build \
+                      --configuration-cache-problems=fail --no-daemon --max-workers=1 --dry-run \
+                      2>&1 | tee build/reports/ci-resources/optional-adapters-cache.log
+                  grep -Fq 'Configuration cache entry reused' build/reports/ci-resources/optional-adapters-cache.log
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -65,15 +76,16 @@ jobs:
                       optional-container-gradle-${{ runner.os }}-
                       container-gradle-${{ runner.os }}-
             - name: Restore Existing Test Runner Image
+              id: runner_image_restore
               uses: actions/cache/restore@v4
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
             - name: Load Existing Test Runner Image
+              if: steps.runner_image_restore.outputs.cache-hit == 'true'
               run: |
-                  if [ -f .cache/podman-image/mazewall-test-runner.tar ]; then
-                      podman load -i .cache/podman-image/mazewall-test-runner.tar
-                  fi
+                  test -s .cache/podman-image/mazewall-test-runner.tar
+                  podman load -i .cache/podman-image/mazewall-test-runner.tar
             - name: Verify Real Optional Publications and Native Showcases
               run: ./scripts/run_containerized_tests.sh :optionalIntegrationCheck --no-configuration-cache --max-workers=1
             - name: Verify Optional Workspace and Cache Ownership
@@ -102,6 +114,7 @@ jobs:
                   name: optional-integration-junit
                   path: |
                       integrations/**/build/test-results/**/*.xml
+                      build/reports/ci-resources/optional-adapters-cache.log
                       build/test-results/optionalIntegrationCheck/*.xml
                       build/reports/optional-integrations/run-*/*.log
                       build/reports/optional-integrations/run-*/*.command.json
@@ -173,20 +186,21 @@ jobs:
                       notifications
             - name: Grant Execute Permission for Gradlew
               run: chmod +x gradlew
-            - name: Run Host-Safe Unit Quality Gate
-              id: host_unit
+            - name: Run Host-Safe Unit and Reproducibility Gates
+              id: host_verification
               # This gate intentionally precedes Podman setup: ordinary CI
               # runners must be able to prove unit behavior and coverage.
-              run: ./gradlew unitCheck --no-daemon
-            - name: Verify reproducible dependency state
-              run: ./gradlew verifyGradleReproducibility --no-daemon
+              run: ./gradlew :unitCheck :verifyGradleReproducibility --no-daemon
             - name: Prove configuration-cache reuse
               run: |
-                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
-                  ./gradlew help --configuration-cache --configuration-cache-problems=fail --no-daemon
+                  set -o pipefail
+                  mkdir -p build/reports/ci-resources
+                  ./gradlew :unitCheck :verifyGradleReproducibility --dry-run --configuration-cache --configuration-cache-problems=fail --no-daemon 2>&1 | tee build/reports/ci-resources/core-configuration-cache-prime.log
+                  ./gradlew :unitCheck :verifyGradleReproducibility --dry-run --configuration-cache --configuration-cache-problems=fail --no-daemon 2>&1 | tee build/reports/ci-resources/core-configuration-cache-replay.log
+                  grep -Fq 'Configuration cache entry reused' build/reports/ci-resources/core-configuration-cache-replay.log
             - name: Triage failed host verification
-              if: steps.host_unit.outcome == 'failure'
-              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck --no-daemon
+              if: steps.host_verification.outcome == 'failure'
+              run: ./gradlew runTriage -Ptriage.failedTask=:unitCheck-or-verifyGradleReproducibility --no-daemon
             - name: Setup Podman Socket
               run: |
                   mkdir -p ~/.config/containers
@@ -194,23 +208,31 @@ jobs:
                   systemctl --user enable --now podman.socket
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
+            - name: Resolve Core Integration Compilation Cache
+              id: core_compile_cache
+              run: |
+                  cache_home=$(./scripts/run_containerized_tests.sh --print-cache-home)
+                  test -n "$cache_home"
+                  printf 'path=%s/caches/build-cache-1\n' "$cache_home" >> "$GITHUB_OUTPUT"
+            - name: Restore Core Integration Compilation Cache
+              if: github.event_name == 'pull_request' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ steps.core_compile_cache.outputs.path }}
+                  key: core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
+                  restore-keys: |
+                      core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-
             - name: Restore Podman Cache
               id: cache-podman
               uses: actions/cache/restore@v4
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
             - name: Load Cached Podman Images
+              if: steps.cache-podman.outputs.cache-hit == 'true'
               run: |
-                  if [ -f ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar ]; then
-                      podman load -i ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar
-                  fi
-                  if [ -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar ]; then
-                      podman load -i ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar
-                  fi
-                  if [ -f ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar ]; then
-                      podman load -i ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar
-                  fi
+                  test -s .cache/podman-image/mazewall-test-runner.tar
+                  podman load -i .cache/podman-image/mazewall-test-runner.tar
             - name: Run Privileged Kernel Gate and Assemble
               run: |
                   set -o pipefail
@@ -220,25 +242,21 @@ jobs:
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh
             - name: Save All Podman Images to Cache Folder
+              id: runner_image_export
               if: always() && steps.cache-podman.outputs.cache-hit != 'true'
               run: |
-                  mkdir -p ${{ github.workspace }}/.cache/podman-image
-                  if podman image exists mazewall-test-runner || podman image exists localhost/mazewall-test-runner; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/mazewall-test-runner.tar mazewall-test-runner:latest || true
-                  fi
-                  if podman image exists vulnerable-web-app-unprotected || podman image exists localhost/vulnerable-web-app-unprotected; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-unprotected.tar vulnerable-web-app-unprotected:latest || true
-                  fi
-                  if podman image exists vulnerable-web-app-protected || podman image exists localhost/vulnerable-web-app-protected; then
-                      podman save -o ${{ github.workspace }}/.cache/podman-image/vulnerable-web-app-protected.tar vulnerable-web-app-protected:latest || true
-                  fi
+                  podman image exists mazewall-test-runner
+                  mkdir -p "$GITHUB_WORKSPACE/.cache/podman-image"
+                  podman save -o "$GITHUB_WORKSPACE/.cache/podman-image/mazewall-test-runner.tar" mazewall-test-runner:latest
+                  test -s "$GITHUB_WORKSPACE/.cache/podman-image/mazewall-test-runner.tar"
             - name: Upload Podman Image Cache
               uses: actions/cache/save@v4
-              if: always() && steps.cache-podman.outputs.cache-hit != 'true'
+              if: always() && steps.cache-podman.outputs.cache-hit != 'true' && steps.runner_image_export.outcome == 'success'
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
             - name: Verify Workspace and Cache Ownership
+              id: core_ownership
               if: always()
               run: |
                   for path in "$GITHUB_WORKSPACE" "$HOME/.gradle" "$HOME/.cache/mazewall"; do
@@ -250,6 +268,12 @@ jobs:
                           fi
                       fi
                   done
+            - name: Save Core Integration Compilation Cache
+              if: always() && github.event_name == 'pull_request' && steps.core_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{ steps.core_compile_cache.outputs.path }}
+                  key: core-integration-compile-${{ runner.os }}-${{ steps.container_cache_key.outputs.hash }}-${{ github.sha }}
             - name: Upload Gradle diagnostics
               if: always()
               uses: actions/upload-artifact@v4
@@ -260,6 +284,8 @@ jobs:
                       build/reports/triage/
                       build/reports/gradle-baseline/
                       build/reports/test-health/
+                      build/reports/ci-resources/core-configuration-cache-prime.log
+                      build/reports/ci-resources/core-configuration-cache-replay.log
                       **/build/test-results/**/*.xml
                       **/hs_err_pid*.log
                   if-no-files-found: ignore
@@ -293,7 +319,9 @@ jobs:
               run: |
                   set -o pipefail
                   mkdir -p build/reports/ci-resources
-                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew :buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+            - name: Run Consumer Build Logic Regressions
+              run: ./gradlew :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel
             - name: Upload Build Logic Diagnostics
               if: always()
               uses: actions/upload-artifact@v4
@@ -306,6 +334,8 @@ jobs:
                       buildSrc/build/reports/
                       buildSrc/build/test-results/
                       buildSrc/build/verification/
+                      build/test-results/consumerBuildLogicTest/
+                      build/reports/tests/consumerBuildLogicTest/
                   if-no-files-found: ignore
     mutation-tests:
         name: Mutation Validation
@@ -763,6 +793,11 @@ jobs:
                   python3 "$RUNNER_TEMP/security-snapshot.py" check-records security-analysis.log
               env:
                   NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+            - name: Run Demo Host Quality Gate
+              if: ${{ !cancelled() }}
+              run: |
+                  ./gradlew :demos:vulnerable-web-app:unitCheck --no-daemon
+                  python3 -m unittest discover -s exploits -p test_web_demo.py -k test_shared_image_is_built_once_for_all_three_modes
             - name: Verify Final Security Ownership
               if: always()
               run: |
@@ -785,6 +820,9 @@ jobs:
                       security-analysis.log
                       build/reports/dependency-verification/
                       **/build/reports/dependency-check*
+                      demos/vulnerable-web-app/build/test-results/
+                      demos/vulnerable-web-app/build/reports/tests/
+                      build/reports/triage/
                   if-no-files-found: ignore
     go-validation:
         name: Agentless Go Validation
@@ -886,15 +924,16 @@ jobs:
                   echo "DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock" >> $GITHUB_ENV
                   echo "MAZEWALL_CONTAINER_ENGINE=podman" >> $GITHUB_ENV
             - name: Restore Existing Test Runner Image
+              id: runner_image_restore
               uses: actions/cache/restore@v4
               with:
                   path: ${{ github.workspace }}/.cache/podman-image
-                  key: podman-image-${{ hashFiles('infra/dev/Containerfile', 'demos/vulnerable-web-app/Containerfile') }}
+                  key: podman-runner-v2-${{ hashFiles('infra/dev/Containerfile') }}
             - name: Load Existing Test Runner Image
+              if: steps.runner_image_restore.outputs.cache-hit == 'true'
               run: |
-                  if [ -f .cache/podman-image/mazewall-test-runner.tar ]; then
-                      podman load -i .cache/podman-image/mazewall-test-runner.tar
-                  fi
+                  test -s .cache/podman-image/mazewall-test-runner.tar
+                  podman load -i .cache/podman-image/mazewall-test-runner.tar
             - name: Publish to GitHub Packages
               run: >-
                   ./scripts/run_containerized_tests.sh -PincludeSpringIntegration=true

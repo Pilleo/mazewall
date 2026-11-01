@@ -32,7 +32,20 @@ abstract class GenerateInvocationStateBtf
                 .asFile.parentFile
                 .mkdirs()
             execOperations.exec {
-                commandLine("clang", "-target", "bpf", "-g", "-O2", "-c", source.get().asFile.absolutePath, "-o", objectFile.get().asFile.absolutePath)
+                // Disposable producer paths must not change the published BTF/plugin classpath.
+                commandLine(
+                    "clang",
+                    "-target",
+                    "bpf",
+                    "-g",
+                    "-O2",
+                    "-fdebug-prefix-map=${source.get().asFile.parentFile.absolutePath}=.",
+                    "-fdebug-compilation-dir=.",
+                    "-c",
+                    source.get().asFile.absolutePath,
+                    "-o",
+                    objectFile.get().asFile.absolutePath,
+                )
             }
             extractBtf(objectFile.get().asFile, resource.get().asFile)
         }
@@ -682,14 +695,7 @@ configurations.matching { it.name == "compileClasspath" || it.name.endsWith("Com
 kotlinCompilations.matching { it.name in setOf("main", "test", "integrationTest") }.configureEach {
     compileTaskProvider.configure {
         dependsOn(enforcerJar, platformJar)
-        compilerOptions.freeCompilerArgs.addAll(
-            enforcerJar.zip(platformJar) { enforcer, platform ->
-                listOf(
-                    "-Xfriend-paths=${enforcer.asFile.absolutePath}",
-                    "-Xfriend-paths=${platform.asFile.absolutePath}",
-                )
-            },
-        )
+        (this as org.jetbrains.kotlin.gradle.tasks.BaseKotlinCompile).friendPaths.from(enforcerJar, platformJar)
     }
 }
 kotlinCompilations.named("integrationTest") {

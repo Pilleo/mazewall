@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 object CiCachePolicyTest {
     @JvmStatic
     fun run() {
+        verifyCoreIntegrationCompilationOverlay()
         verifyOptionalJoin()
         verifyOptionalDiagnostics()
         verifySecuritySnapshotRecovery()
@@ -97,13 +98,37 @@ object CiCachePolicyTest {
                               restore-keys: |
                                   container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-
                                   optional-container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-
-                                  optional-container-gradle-${'$'}{{ runner.os }}-
-                                  container-gradle-${'$'}{{ runner.os }}-
+                                   optional-container-gradle-${'$'}{{ runner.os }}-
+                                   container-gradle-${'$'}{{ runner.os }}-
+                        - name: Resolve Core Integration Compilation Cache
+                          id: core_compile_cache
+                          run: |
+                              cache_home=${'$'}(./scripts/run_containerized_tests.sh --print-cache-home)
+                              test -n "${'$'}cache_home"
+                              printf 'path=%s/caches/build-cache-1\n' "${'$'}cache_home" >> "${'$'}GITHUB_OUTPUT"
+                        - name: Restore Core Integration Compilation Cache
+                          if: github.event_name == 'pull_request' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+                          uses: actions/cache/restore@v4
+                          with:
+                              path: ${'$'}{{ steps.core_compile_cache.outputs.path }}
+                              key: core-integration-compile-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
+                              restore-keys: |
+                                  core-integration-compile-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-
                         - name: Save Container Gradle Cache (Master Only)
                           uses: actions/cache/save@v4
                           if: always() && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && steps.container_cache_key.outcome == 'success'
                           with:
                               key: container-gradle-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
+                        - name: Verify Workspace and Cache Ownership
+                          id: core_ownership
+                          if: always()
+                          run: :
+                        - name: Save Core Integration Compilation Cache
+                          if: always() && github.event_name == 'pull_request' && steps.core_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+                          uses: actions/cache/save@v4
+                          with:
+                              path: ${'$'}{{ steps.core_compile_cache.outputs.path }}
+                              key: core-integration-compile-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}
                 mutation-tests:
                     name: Mutation Validation
                     runs-on: ubuntu-26.04
@@ -375,6 +400,46 @@ object CiCachePolicyTest {
         println("CI policy: cache/graph regressions, required security/build-logic/Go/integration checks, join projections, default-push publication and PR-only cancellation passed.")
     }
 
+    private fun verifyCoreIntegrationCompilationOverlay() {
+        val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
+        val workflow = repository.resolve(".github/workflows/ci.yml").readText()
+        val core = job(workflow, "core-quality")
+        val restore = step(core, "Restore Core Integration Compilation Cache")
+        val save = step(core, "Save Core Integration Compilation Cache")
+        check("github.event_name == 'pull_request'" in restore) { "Core compilation restore must be PR-only" }
+        val resolve = step(core, "Resolve Core Integration Compilation Cache")
+        check("steps.core_compile_cache.outputs.path" in restore && "caches/build-cache-1" in resolve) {
+            "Core compilation restore must target only the discovered Gradle build cache"
+        }
+        check("core-integration-compile-" in restore && "steps.container_cache_key.outputs.hash" in restore) {
+            "Core compilation restore must use the tracked container identity"
+        }
+        check("github.event_name == 'pull_request'" in save && "steps.core_ownership.outcome == 'success'" in save &&
+            "steps.core_compile_cache.outcome == 'success'" in save && "steps.container_cache_key.outcome == 'success'" in save) {
+            "Core compilation save must be PR-only and require discovery, ownership and identity"
+        }
+        check("~/.cache/mazewall/container-gradle" !in restore && "container-gradle-home" !in restore) {
+            "Core compilation restore must not archive the whole container Gradle home"
+        }
+        check(core.indexOf("- name: Restore Container Gradle Cache") < core.indexOf("- name: Resolve Core Integration Compilation Cache") &&
+            core.indexOf("- name: Setup Podman Socket") < core.indexOf("- name: Resolve Core Integration Compilation Cache") &&
+            core.indexOf("- name: Resolve Core Integration Compilation Cache") < core.indexOf("- name: Restore Core Integration Compilation Cache")) {
+            "Core compilation overlay must follow the whole-home restore and the selected Podman engine"
+        }
+        for ((from, to) in listOf(
+            "github.event_name == 'pull_request'" to "github.event_name == 'push'",
+            "caches/build-cache-1" to "caches",
+            "id: core_ownership" to "id: wrong_ownership",
+            "steps.core_ownership.outcome == 'success'" to "true",
+            "steps.core_compile_cache.outcome == 'success'" to "true",
+        )) {
+            val mutated = workflow.replace(from, to)
+            check(mutated != workflow && CiCacheViolation.CORE_COMPILATION_CACHE in ciCachePolicyViolations(mutated)) {
+                "Unsafe core compilation cache mutation accepted: $from"
+            }
+        }
+    }
+
     private fun verifyOptionalJoin() {
         val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
         val workflow = repository.resolve(".github/workflows/ci.yml").readText()
@@ -398,6 +463,7 @@ object CiCachePolicyTest {
         val upload = step(job(workflow, "optional-integrations"), "Upload Optional JUnit Diagnostics")
         for (required in listOf(
                 "if: always()",
+                "build/reports/ci-resources/optional-adapters-cache.log",
                 "build/reports/optional-integrations/run-*/*.log",
                 "build/reports/optional-integrations/run-*/*.command.json",
                 "build/reports/optional-integrations/run-*/*-reports/**",
@@ -431,6 +497,8 @@ object CiCachePolicyTest {
             "python3 scripts/ci_resource_probe.py" to "python3 scripts/other.py",
             "--output build/reports/ci-resources/build-logic.json" to "--output other.json",
             "buildLogicCheck" to "check",
+            ":consumerBuildLogicTest" to ":help",
+            "Run Consumer Build Logic Regressions" to "Omitted Consumer Regressions",
             "--configuration-cache " to "",
             "--configuration-cache-problems=fail" to "--configuration-cache-problems=warn",
             "--no-daemon" to "",
@@ -445,6 +513,7 @@ object CiCachePolicyTest {
             "buildSrc/build/reports/" to "",
             "buildSrc/build/test-results/" to "",
             "buildSrc/build/verification/" to "",
+            "build/test-results/consumerBuildLogicTest/" to "",
         )
         for ((from, to) in mutations) {
             check(from in lane && from != to) { "Ineffective build-logic mutation: $from" }
@@ -801,6 +870,8 @@ object CiCachePolicyTest {
             "Verify Updated Security Ownership" to "Omit Updated Security Ownership",
             "Verify Restored Security Ownership" to "Omit Restored Security Ownership",
             "Verify Final Security Ownership" to "Omit Final Security Ownership",
+            ":demos:vulnerable-web-app:unitCheck" to ":help",
+            "test_shared_image_is_built_once_for_all_three_modes" to "omitted_image_regression",
             "NVD_API_KEY: \${{ secrets.NVD_API_KEY }}" to "NVD_API_KEY: unused",
             "steps.security_update.outcome == 'success'" to "steps.security_update.outcome != 'cancelled'",
             "steps.updated_ownership.outcome == 'success'" to "steps.updated_ownership.outcome != 'failure'",

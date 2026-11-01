@@ -70,11 +70,7 @@ val verification = sourceSets.create("verification") {
 }
 kotlin.sourceSets.named("verification") { kotlin.srcDir("src/verification/kotlin") }
 tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileVerificationKotlin") {
-    compilerOptions.freeCompilerArgs.addAll(
-        providers.provider {
-            listOf("-Xfriend-paths=" + sourceSets.main.get().output.classesDirs.files.joinToString(",") { it.absolutePath })
-        },
-    )
+    friendPaths.from(sourceSets.main.get().output.classesDirs)
 }
 sourceSets.test.get().java.setSrcDirs(emptyList<String>())
 configurations.named(verification.implementationConfigurationName) {
@@ -96,6 +92,25 @@ tasks.register<JavaExec>("testKitCacheTest") {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
     mainClass.set("io.mazewall.build.TestKitCacheFunctionalTest")
+}
+tasks.register<JavaExec>("testHealthCacheTest") {
+    mainClass.set("io.mazewall.build.TestHealthPluginFunctionalTest")
+}
+tasks.register<JavaExec>("friendPathCacheTest") {
+    mainClass.set("io.mazewall.build.FriendPathCacheFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
+tasks.register<JavaExec>("btfRelocationTest") {
+    mainClass.set("io.mazewall.build.BtfRelocationFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
+tasks.register<JavaExec>("nativeDiscoveryTest") {
+    mainClass.set("io.mazewall.build.NativeTestDiscoveryFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
+tasks.register<JavaExec>("coreLaneTest") {
+    mainClass.set("io.mazewall.build.CoreLaneFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
 }
 tasks.register<JavaExec>("spotbugsReportTest") {
     dependsOn(tasks.named(verification.classesTaskName))
@@ -152,7 +167,7 @@ tasks.register<JavaExec>("failureTriageTest") {
     doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "btfRelocationTest", "nativeDiscoveryTest", "coreLaneTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
     // Cache transport is not verification input: host/container homes intentionally differ.
@@ -190,6 +205,29 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
     inputs.dir(layout.projectDirectory.dir("../profiler/src/main/kotlin/io/mazewall/profiler/triage"))
         .withPropertyName("productionTriageSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "friendPathCacheTest") }.configureEach {
+    inputs.file(layout.projectDirectory.file("../enforcer/build.gradle.kts"))
+        .withPropertyName("friendPathConvention")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "btfRelocationTest") }.configureEach {
+    inputs.files(
+        layout.projectDirectory.file("../profiler/build.gradle.kts"),
+        layout.projectDirectory.file("../profiler/src/main/c/btf/invocation_state.c"),
+    ).withPropertyName("btfResourceProducer").withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "nativeDiscoveryTest") }.configureEach {
+    inputs.file(layout.projectDirectory.file("../portals/runtime/build.gradle.kts"))
+        .withPropertyName("nativeTestDiscoveryWiring").withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
+tasks.named<JavaExec>("coreLaneTest") {
+    inputs.file(layout.projectDirectory.file("../.github/workflows/ci.yml"))
+        .withPropertyName("coreLaneWorkflow").withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 tasks.test {

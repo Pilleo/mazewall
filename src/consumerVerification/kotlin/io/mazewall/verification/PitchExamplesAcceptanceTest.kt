@@ -2,6 +2,7 @@ package io.mazewall.verification
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -22,7 +23,9 @@ import javax.xml.parsers.DocumentBuilderFactory
 class PitchExamplesAcceptanceTest {
     @TempDir private lateinit var root: Path
 
-    @Test fun `lock seeding and cache replay execute each forced fresh consumer task only once`() {
+    @Tag("build-logic")
+    @Test
+    fun `lock seeding and cache replay execute each forced fresh consumer task only once`() {
         val copy = Files.createDirectory(root.resolve("spring-report-api"))
         Files.writeString(copy.resolve("settings.gradle"), "rootProject.name = 'single-pass-fixture'\n")
         Files.writeString(
@@ -166,7 +169,7 @@ internal object PitchExamplesAcceptance {
                 tasks
             }
             println("PITCH_CONSUMER_PHASE name=$name phase=$label evidence=$evidence")
-            val result = ConsumerFixture.command(command + selected + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
+            val result = ConsumerFixture.command(command + "--build-cache" + selected + flags, copy, evidence, "$name-$label", Duration.ofMinutes(8))
             check(result.exitCode == 0) { "Copied $name $label failed: ${result.stdout.takeLast(6000)}${result.stderr.takeLast(6000)}; evidence=$evidence" }
             if (label == "cache-reuse") {
                 check("Configuration cache entry reused" in result.stdout) {

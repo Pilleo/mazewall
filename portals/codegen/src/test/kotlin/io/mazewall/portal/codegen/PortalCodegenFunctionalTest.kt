@@ -14,6 +14,7 @@ import io.mazewall.portal.codegen.testapi.KotlinDataDtoService
 import io.mazewall.portal.codegen.testapi.KotlinJvmRecordDtoService
 import io.mazewall.portal.codegen.testapi.MethodIdShadowService
 import io.mazewall.portal.worker.PortalWorkerMain
+import org.gradle.testkit.runner.BuildResult
 import org.gradle.testkit.runner.GradleRunner
 import org.gradle.testkit.runner.TaskOutcome
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -37,6 +38,40 @@ import kotlin.io.path.writeText
 class PortalCodegenFunctionalTest {
     @TempDir
     lateinit var projectDir: Path
+
+    @Test
+    fun `independent fixture copies reuse compilation while changed guest bytes rebuild the bundle`() {
+        val home = System.getProperty("mazewall.test.gradleUserHome")
+        assertTrue(home != null, "Portal TestKit must use the cache-owned Gradle home")
+        assertEquals(Path.of(home).resolve("caches/mazewall-test-kit"), Path.of(System.getProperty("org.gradle.testkit.dir")))
+        val fixtureRoot = projectDir
+        val cache = fixtureRoot.resolve("cache")
+        var previousBundle: String? = null
+        for (copy in listOf("first", "second")) {
+            projectDir = fixtureRoot.resolve(copy).createDirectories()
+            val api = compileApiJar(projectDir)
+            writeFixture(
+                api,
+                listOf("fixture.A", KotlinDataDtoService::class.java.name, KotlinJvmRecordDtoService::class.java.name),
+                compileGenerated = true,
+            )
+            projectDir.resolve("settings.gradle.kts").toFile().appendText("\nbuildCache { local { directory = file(\"$cache\") } }\n")
+            val built = runner("classes").build()
+            if (copy == "second") {
+                for (task in listOf(":compileKotlin", ":compilePortalWorkerKotlin", ":generatePortalStubs", ":portalWorkerBundle")) {
+                    assertEquals(TaskOutcome.FROM_CACHE, built.task(task)?.outcome, built.output)
+                }
+            }
+            val bundle = sha256(projectDir.resolve("build/libs/portal-codegen-fixture-portal-worker.zip"))
+            if (previousBundle != null) assertEquals(previousBundle, bundle)
+            previousBundle = bundle
+        }
+        val guest = projectDir.resolve("src/portalWorker/kotlin/fixture/Main.kt")
+        guest.writeText(guest.readText().replace("ROUND_TRIP_OK", "CHANGED_ROUND_TRIP_OK"))
+        val changed = runner("classes").build()
+        assertEquals(TaskOutcome.SUCCESS, changed.task(":compilePortalWorkerKotlin")?.outcome, changed.output)
+        assertFalse(previousBundle == sha256(projectDir.resolve("build/libs/portal-codegen-fixture-portal-worker.zip")))
+    }
 
     @Test
     fun `host only configuration publishes no worker code or descriptor`() {
@@ -79,8 +114,8 @@ class PortalCodegenFunctionalTest {
 
         val result = runner("build", "plainJavaPortalExample").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":compileKotlin")?.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":compilePortalWorkerKotlin")?.outcome)
+        assertBuilt(result, ":compileKotlin")
+        assertBuilt(result, ":compilePortalWorkerKotlin")
         assertTrue(result.output.contains("PLAIN_JAVA_PORTAL_EXAMPLE_OK"), result.output)
     }
 
@@ -101,7 +136,7 @@ class PortalCodegenFunctionalTest {
 
         val result = runner("portalWorkerBundle").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":portalWorkerBundle")?.outcome)
+        assertBuilt(result, ":portalWorkerBundle")
         val bundle = projectDir.resolve("build/libs/portal-codegen-fixture-portal-worker.zip")
         val digest = bundle.resolveSibling("${bundle.fileName}.sha256")
         java.util.zip.ZipFile(bundle.toFile()).use { zip ->
@@ -216,7 +251,7 @@ class PortalCodegenFunctionalTest {
         val result = runner("portalCheck").build()
 
         assertEquals(TaskOutcome.SUCCESS, result.task(":portalCheck")?.outcome)
-        assertEquals(TaskOutcome.SUCCESS, result.task(":portalWorkerBundle")?.outcome)
+        assertBuilt(result, ":portalWorkerBundle")
     }
 
     @Test
@@ -244,7 +279,7 @@ class PortalCodegenFunctionalTest {
 
         val result = runner("build", "roundTrip").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":compileKotlin")?.outcome)
+        assertBuilt(result, ":compileKotlin")
         assertEquals(TaskOutcome.SUCCESS, result.task(":portalWorkerJar")?.outcome)
         assertTrue(result.output.contains("ROUND_TRIP_OK"), result.output)
         val jars = Files.list(projectDir.resolve("build/libs")).use { it.toList() }
@@ -295,7 +330,7 @@ class PortalCodegenFunctionalTest {
 
         val result = runner("roundTrip").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":compilePortalWorkerKotlin")?.outcome)
+        assertBuilt(result, ":compilePortalWorkerKotlin")
         assertTrue(result.output.contains("BOOLEAN_IS_ACCESSORS_OK"), result.output)
     }
 
@@ -370,7 +405,7 @@ class PortalCodegenFunctionalTest {
         )
 
         val result = runner("generatePortalStubs").build()
-        assertEquals(TaskOutcome.SUCCESS, result.task(":generatePortalStubs")?.outcome)
+        assertBuilt(result, ":generatePortalStubs")
 
         val host = projectDir.resolve("build/generated/portal-manifests/META-INF/mazewall/portal/services/fixture-a").readText()
         val worker = projectDir.resolve("build/generated/portal-worker-resources/META-INF/mazewall/portal/services/fixture-a").readText()
@@ -419,7 +454,7 @@ class PortalCodegenFunctionalTest {
         projectDir.resolve("build.gradle.kts").toFile().appendText("\ndependencies { implementation(files(\"$hostOnly\")) }\n")
         val result = runner("jar", "publishPortalWorkerArtifactMetadata").build()
 
-        assertEquals(TaskOutcome.SUCCESS, result.task(":publishPortalWorkerArtifactMetadata")?.outcome)
+        assertBuilt(result, ":publishPortalWorkerArtifactMetadata")
         val metadata =
             projectDir.resolve(
                 "build/generated/portal-worker-artifacts/META-INF/mazewall/portal/worker-artifacts/fixture-worker",
@@ -463,6 +498,7 @@ class PortalCodegenFunctionalTest {
         applyKotlinPlugin: Boolean = true,
     ) {
         projectDir.resolve("settings.gradle.kts").writeText("rootProject.name = \"portal-codegen-fixture\"\n")
+        val apiPath = projectDir.relativize(apiJar)
         val portalJar = Path.of(System.getProperty("portal.codegen.portalJar")).toAbsolutePath()
         val platformJar = Path.of(System.getProperty("portal.codegen.platformJar")).toAbsolutePath()
         val enforcerJar = Path.of(System.getProperty("portal.codegen.enforcerJar")).toAbsolutePath()
@@ -535,7 +571,7 @@ class PortalCodegenFunctionalTest {
             ${if (workerSourceSet != null && workerSourceSet !in setOf("main", "test")) "sourceSets.create(\"$workerSourceSet\")" else ""}
             dependencies {
                 implementation(files(
-                    "${apiJar.toAbsolutePath()}", "$portalJar", "$platformJar", "$enforcerJar",
+                    "$apiPath", "$portalJar", "$platformJar", "$enforcerJar",
                     "$testApiClasses", "$javaTestApiClasses",
                 ))
                 ${if (workerSourceSet != null &&
@@ -544,7 +580,7 @@ class PortalCodegenFunctionalTest {
                     "test",
                 )
             ) {
-                    "\"${workerSourceSet}Implementation\"(files(\"${apiJar.toAbsolutePath()}\", \"$portalJar\", \"$platformJar\", \"$enforcerJar\", \"$testApiClasses\", \"$javaTestApiClasses\"))"
+                    "\"${workerSourceSet}Implementation\"(files(\"$apiPath\", \"$portalJar\", \"$platformJar\", \"$enforcerJar\", \"$testApiClasses\", \"$javaTestApiClasses\"))"
                 } else {
                     ""
                 }}
@@ -825,7 +861,7 @@ class PortalCodegenFunctionalTest {
             Files.walk(classes).use { paths ->
                 paths.filter(Files::isRegularFile).sorted().forEach { file ->
                     val entry = classes.relativize(file).toString().replace('\\', '/')
-                    output.putNextEntry(JarEntry(entry))
+                    output.putNextEntry(JarEntry(entry).apply { time = 0 })
                     Files.copy(file, output)
                     output.closeEntry()
                 }
@@ -859,10 +895,17 @@ class PortalCodegenFunctionalTest {
         }
     }
 
+    private fun assertBuilt(
+        result: BuildResult,
+        task: String,
+    ) {
+        assertTrue(result.task(task)?.outcome in setOf(TaskOutcome.SUCCESS, TaskOutcome.FROM_CACHE), result.output)
+    }
+
     private fun runner(vararg arguments: String): GradleRunner =
         GradleRunner
             .create()
             .withProjectDir(projectDir.toFile())
             .withPluginClasspath()
-            .withArguments(*arrayOf("--stacktrace", *arguments))
+            .withArguments(*arrayOf("--stacktrace", "--build-cache", "--max-workers=1", *arguments))
 }

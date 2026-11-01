@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -36,7 +37,9 @@ class ConsumerFixtureTest {
         assertTrue(failure.message!!.contains(evidence.toString()))
     }
 
-    @Test fun `failed JUnit module in a disposable producer clone retains its real failure reports`() {
+    @Tag("build-logic")
+    @Test
+    fun `failed JUnit module in a disposable producer clone retains its real failure reports`() {
         val repository = Files.createDirectory(root.resolve("original"))
         val evidence = Files.createDirectory(root.resolve("evidence"))
         Files.writeString(repository.resolve(".gitignore"), "/build/\n**/build/\n.gradle/\n")

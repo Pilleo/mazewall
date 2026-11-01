@@ -19,6 +19,7 @@ internal enum class CiCacheViolation(val explanation: String) {
     CONTAINER_CACHE_IDENTITY("Both jobs must compute one tracked-input identity immediately after checkout and reuse its output"),
     CONTAINER_CACHE_SAVE("Container cache saves must require successful identity computation"),
     CONTAINER_CACHE_REUSE("Main verification must try compatible optional PR caches before the broad main fallback"),
+    CORE_COMPILATION_CACHE("Core PR reruns must overlay only the discovered container Gradle build-cache subtree after the whole-home restore"),
     SERIAL_VALIDATION("Optional, core and mutation validation must run independently without allowing failure"),
     VALIDATION_RUNNER("All three validation lanes must use ubuntu-26.04 and JDK 25"),
     CODE_CHANGE_FILTER("Core and mutation need unconditional PR-readable code filters including the CI workflow"),
@@ -66,6 +67,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
                     "container-gradle-${'$'}{{ runner.os }}-",
                 )
             }
+            CiCacheViolation.CORE_COMPILATION_CACHE -> !hasCoreCompilationCache(containerJobs[1])
             CiCacheViolation.SERIAL_VALIDATION -> validationJobs.withIndex().any { (index, job) ->
                 val headers = workflowHeaders(job)
                 headers.filter { it.startsWith("name:") } != listOf("name: ${validationNames[index]}") ||
@@ -101,6 +103,38 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
             }
         }
     }
+}
+
+private fun hasCoreCompilationCache(core: String): Boolean {
+    val resolve = workflowStep(core, "Resolve Core Integration Compilation Cache").trimIndent().trim()
+    val restore = workflowStep(core, "Restore Core Integration Compilation Cache").trimIndent().trim()
+    val save = workflowStep(core, "Save Core Integration Compilation Cache").trimIndent().trim()
+    val ownership = workflowStep(core, "Verify Workspace and Cache Ownership").trimIndent().trim()
+    val path = "${'$'}{{ steps.core_compile_cache.outputs.path }}"
+    val key = "core-integration-compile-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-${'$'}{{ github.sha }}"
+    val guard = "github.event_name == 'pull_request' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''"
+    return resolve == """
+        id: core_compile_cache
+        run: |
+            cache_home=${'$'}(./scripts/run_containerized_tests.sh --print-cache-home)
+            test -n "${'$'}cache_home"
+            printf 'path=%s/caches/build-cache-1\n' "${'$'}cache_home" >> "${'$'}GITHUB_OUTPUT"
+    """.trimIndent() && ownership.lines().any { it.trim() == "id: core_ownership" } && restore == """
+        if: $guard
+        uses: actions/cache/restore@v4
+        with:
+            path: $path
+            key: $key
+            restore-keys: |
+                core-integration-compile-${'$'}{{ runner.os }}-${'$'}{{ steps.container_cache_key.outputs.hash }}-
+    """.trimIndent() && save == """
+        if: always() && github.event_name == 'pull_request' && steps.core_ownership.outcome == 'success' && steps.container_cache_key.outcome == 'success' && steps.core_compile_cache.outcome == 'success' && steps.core_compile_cache.outputs.path != ''
+        uses: actions/cache/save@v4
+        with:
+            path: $path
+            key: $key
+    """.trimIndent() && core.indexOf("- name: Restore Container Gradle Cache") < core.indexOf("- name: Restore Core Integration Compilation Cache") &&
+        core.indexOf("- name: Verify Workspace and Cache Ownership") < core.indexOf("- name: Save Core Integration Compilation Cache")
 }
 
 private fun workflowJob(workflow: String, job: String): String =
@@ -186,7 +220,9 @@ private fun hasBuildLogicValidation(workflow: String): Boolean {
                   run: |
                       set -o pipefail
                       mkdir -p build/reports/ci-resources
-                      python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+                      python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew :buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+                - name: Run Consumer Build Logic Regressions
+                  run: ./gradlew :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel
                 - name: Upload Build Logic Diagnostics
                   if: always()
                   uses: actions/upload-artifact@v4
@@ -199,6 +235,8 @@ private fun hasBuildLogicValidation(workflow: String): Boolean {
                           buildSrc/build/reports/
                           buildSrc/build/test-results/
                           buildSrc/build/verification/
+                          build/test-results/consumerBuildLogicTest/
+                          build/reports/tests/consumerBuildLogicTest/
                       if-no-files-found: ignore
     """.trimIndent()
     return workflowJobBlock(workflow, "build-logic-validation").trimEnd().trimIndent() == expected
@@ -277,6 +315,7 @@ private fun hasOptionalDiagnostics(job: String): Boolean =
             name: optional-integration-junit
             path: |
                 integrations/**/build/test-results/**/*.xml
+                build/reports/ci-resources/optional-adapters-cache.log
                 build/test-results/optionalIntegrationCheck/*.xml
                 build/reports/optional-integrations/run-*/*.log
                 build/reports/optional-integrations/run-*/*.command.json
@@ -354,7 +393,7 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
         "Verify Restored Security Ownership", "Update Security Data", "Verify Updated Security Ownership",
         "Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot",
         "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot",
-        "Run Security Check", "Verify Final Security Ownership", "Upload Security Diagnostics",
+        "Run Security Check", "Run Demo Host Quality Gate", "Verify Final Security Ownership", "Upload Security Diagnostics",
     )
     if (security
         .lines()
@@ -457,6 +496,12 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
             env:
                 $binding
         """.trimIndent() &&
+        matches("Run Demo Host Quality Gate", """
+            if: ${'$'}{{ !cancelled() }}
+            run: |
+                ./gradlew :demos:vulnerable-web-app:unitCheck --no-daemon
+                python3 -m unittest discover -s exploits -p test_web_demo.py -k test_shared_image_is_built_once_for_all_three_modes
+        """.trimIndent()) &&
         matches("Verify Final Security Ownership", "if: always()\n$ownership") &&
         matches("Upload Security Diagnostics", """
             if: always()
@@ -468,6 +513,9 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
                     security-analysis.log
                     build/reports/dependency-verification/
                     **/build/reports/dependency-check*
+                    demos/vulnerable-web-app/build/test-results/
+                    demos/vulnerable-web-app/build/reports/tests/
+                    build/reports/triage/
                 if-no-files-found: ignore
         """.trimIndent())
 }
