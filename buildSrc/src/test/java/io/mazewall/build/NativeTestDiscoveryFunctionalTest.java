@@ -25,8 +25,16 @@ public final class NativeTestDiscoveryFunctionalTest {
             import org.gradle.process.CommandLineArgumentProvider
             plugins { java; id("io.mazewall.test-health") }
             sourceSets.create("integrationTest")
+            sourceSets["integrationTest"].compileClasspath += sourceSets.test.get().output
+            sourceSets["integrationTest"].runtimeClasspath += sourceSets.test.get().output
+            val ancestors = sourceSets.create("ancestors")
+            configurations[ancestors.implementationConfigurationName].extendsFrom(configurations.testImplementation.get())
+            val ancestorJar = tasks.register<Jar>("ancestorJar") { from(ancestors.output) }
+            sourceSets["integrationTest"].compileClasspath += files(ancestorJar)
+            sourceSets["integrationTest"].runtimeClasspath += files(ancestorJar)
             repositories { mavenCentral() }
             dependencies {
+                testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
                 "integrationTestImplementation"("org.junit.jupiter:junit-jupiter:5.10.2")
                 "integrationTestRuntimeOnly"("org.junit.platform:junit-platform-launcher:1.10.2")
             }
@@ -47,19 +55,35 @@ public final class NativeTestDiscoveryFunctionalTest {
             class IndependentTest { @Test void independent() {} }
             class OuterContainer { @Nested class Checks { @Test void nestedOnly() {} } }
             class Helper { static { if (true) throw new AssertionError("Helper must never load"); } }
+            @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
+            @java.lang.annotation.Target(java.lang.annotation.ElementType.METHOD)
+            @Test @interface NativeCase {}
+            class ComposedRoot { @NativeCase void composed() {} }
+            class ExternalInherited extends ExternalBase {}
+            class InterfaceInherited implements ExternalContract {}
+            class ExternalNestedInherited extends ExternalNestedBase {}
+            class JarHelper implements PlainContract { public void work() {} }
+            class JdkHelper implements AutoCloseable { public void close() {} }
             """);
+        write(root, "src/test/java/fixture/ExternalBase.java", "package fixture; public abstract class ExternalBase { @org.junit.jupiter.api.Test public void externalInherited() {} }\n");
+        write(root, "src/ancestors/java/fixture/ExternalContract.java", "package fixture; public interface ExternalContract { @org.junit.jupiter.api.Test default void externalDefaultTest() {} }\n");
+        write(root, "src/ancestors/java/fixture/PlainContract.java", "package fixture; public interface PlainContract { void work(); }\n");
+        write(root, "src/test/java/fixture/ExternalNestedBase.java", "package fixture; public abstract class ExternalNestedBase { @org.junit.jupiter.api.Nested class Checks { @org.junit.jupiter.api.Test void nestedExternal() {} } }\n");
         run(root);
-        equal(3L, count(forks), "One fresh JVM per real root, none for helpers");
-        equal(4, cases(root), "Inherited/nested test inventory");
+        equal(8, cases(root), "Direct/composed/external-inherited/nested test inventory");
+        equal(7L, count(forks), "One fresh JVM per real root, none for helpers");
+        run(root, "--tests", "fixture.ComposedRoot", "--tests", "fixture.ExternalInherited", "--tests", "fixture.InterfaceInherited", "--tests", "fixture.ExternalNestedInherited");
+        equal(11L, count(forks), "Composed and external-inherited CLI roots must remain executable");
+        equal(4, cases(root), "Composed and external-inherited CLI cases");
         run(root, "--tests", "fixture.ConcreteTest");
-        equal(4L, count(forks), "CLI filter must launch only its selected root");
+        equal(12L, count(forks), "CLI filter must launch only its selected root");
         equal(2, cases(root), "CLI filter must retain inherited and nested cases");
         write(root, "src/integrationTest/java/fixture/AddedTest.java", "package fixture; class AddedTest { @org.junit.jupiter.api.Test void added() {} }\n");
         run(root);
-        equal(8L, count(forks), "Changed compiled input must discover the added root");
-        equal(5, cases(root), "Changed input inventory");
+        equal(20L, count(forks), "Changed compiled input must discover the added root");
+        equal(9, cases(root), "Changed input inventory");
         run(root, "-Pfixture.include=fixture/IndependentTest.class");
-        equal(9L, count(forks), "Explicit file selection must not be broadened");
+        equal(21L, count(forks), "Explicit file selection must not be broadened");
         equal(1, cases(root), "Explicit file filter inventory");
         System.out.println("NATIVE_DISCOVERY_OK no empty forks; inherited/nested/filtered/added tests execute with fresh JVMs");
     }

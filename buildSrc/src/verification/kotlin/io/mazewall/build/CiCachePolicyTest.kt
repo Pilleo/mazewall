@@ -433,6 +433,7 @@ object CiCachePolicyTest {
             "--output build/reports/ci-resources/build-logic.json" to "--output other.json",
             "buildLogicCheck" to "check",
             ":consumerBuildLogicTest" to ":help",
+            "Run Consumer Build Logic Regressions" to "Omitted Consumer Regressions",
             "--configuration-cache " to "",
             "--configuration-cache-problems=fail" to "--configuration-cache-problems=warn",
             "--no-daemon" to "",

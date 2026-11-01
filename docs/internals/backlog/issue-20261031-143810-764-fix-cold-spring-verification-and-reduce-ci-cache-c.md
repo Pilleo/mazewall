@@ -117,6 +117,11 @@ Ruling: reuse existing lanes and scope record, not new jobs/journals/worktrees;
 no dependencies, larger resource/deadline budgets, skipped assertions or release actions.
 Explicit file includes remain caller-owned; the helper-free optimization applies
 only to default discovery, preventing a selected native subset from being broadened.
+Review correction: retain composed annotations and external inherited test roots;
+real default/CLI regressions cover methods, interfaces and nested inheritance.
+Ruling: consumer fixtures keep their own lifetime supervision after the unchanged
+resource-probed verifier. A controlled probe reproduced adopted zombies blocking
+inner retirement; no cleanup check, resource reserve or deadline is relaxed.
 
 ---
 <!-- id: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c  file: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md -->

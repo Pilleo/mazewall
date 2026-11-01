@@ -293,7 +293,10 @@ Portal runtime's per-class integration task filters compiled candidates to real
 JUnit root classes before forking, using the existing metadata reader without
 loading application classes. Inherited methods and nested containers remain
 discoverable; CLI filters and caller-owned file includes remain intact. Empty
-default discovery fails closed. Helpers
+default discovery fails closed. Unresolved runtime annotations or external class
+ancestry remain candidates for Jupiter rather than being silently excluded;
+interface metadata can be inspected on the runtime classpath without class loading.
+Provably helper-only classes
 do not consume empty JVM launches, but every selected real root still gets its
 own fresh JVM and native tasks remain uncached.
 
@@ -378,7 +381,7 @@ always-uploaded diagnostics. It runs:
 
 ```bash
 python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- \
-  ./gradlew :buildLogicCheck :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail \
+  ./gradlew :buildLogicCheck --configuration-cache --configuration-cache-problems=fail \
   --no-daemon --max-workers=1 --no-parallel
 ```
 
@@ -388,8 +391,13 @@ UP-TO-DATE/cached nested verifier can demonstrate reuse but is not full-workload
 memory evidence. Other CI lanes compile build logic as needed without implicitly
 repeating its complete regression suite. Intentional bounded fixture builds can
 reuse verifier task names; global task-name counts are not duplicate-suite proof.
-The resource probe covers both required build-tool tasks serially under the same
-worker/fork/heap budgets; diagnostics also retain the consumer regression JUnit/HTML.
+The consumer regressions run in a required subsequent step with the same strict
+configuration-cache and one-worker/no-parallel limits. They own and verify their
+child lifetimes, so they must not run beneath the resource probe's outer subreaper:
+it can otherwise adopt killed descendants but defer reaping them until Gradle exits,
+preventing the inner fixture from confirming retirement. The original build-logic
+resource gate and reserve remain intact; consumer tests retain their former Core
+budgets. Diagnostics also retain their JUnit/HTML.
 
 Go validation installs Go from the canonical module's directive and pins
 `govulncheck` v1.9.0. Race tests and vulnerability scans run serially for both

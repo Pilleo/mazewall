@@ -54,7 +54,8 @@ public final class CoreLaneFunctionalTest {
         require(host.task(":demos:vulnerable-web-app:unitCheck") == null, "Bare CI selector executed demo work in Core");
         require(Files.readString(root.resolve("effects/consumerHarnessTest-FastTest")).equals("executed\n"), "Fast harness did not execute once");
         require(!Files.exists(root.resolve("effects/consumerHarnessTest-HeavyTest")), "Heavy build fixture remained in Core");
-        BuildResult buildLogic = run(root, arguments(step(workflow, "Run Build Logic Verification")));
+        run(root, arguments(step(workflow, "Run Build Logic Verification")));
+        BuildResult buildLogic = run(root, arguments(step(workflow, "Run Consumer Build Logic Regressions")));
         require(buildLogic.task(":consumerBuildLogicTest") != null, "Build Logic omitted required consumer regressions");
         require(Files.readString(root.resolve("effects/consumerBuildLogicTest-HeavyTest")).equals("executed\n"), "Heavy case missing or duplicated");
         require(!Files.exists(root.resolve("effects/consumerBuildLogicTest-FastTest")), "Fast case duplicated in Build Logic");
@@ -69,7 +70,56 @@ public final class CoreLaneFunctionalTest {
             int exit = new ProcessBuilder("bash", "-c", expression).start().waitFor();
             require((exit == 0) == !cancelled, "Demo gate depends on scanner success/eligibility instead of cancellation only");
         }
+        verifySupervisionBoundary(workflow, root);
         System.out.println("CORE_LANES_OK fast/heavy cases execute once in their owners; explicit demo survives scanner failure");
+    }
+
+    private static void verifySupervisionBoundary(String workflow, Path root) throws Exception {
+        write(root, "gradlew", """
+            #!/bin/bash
+            set -eu
+            mkdir -p effects
+            for arg in "$@"; do
+                case "$arg" in
+                    :buildLogicCheck)
+                        test "$MAZEWALL_TEST_INSIDE_PROBE" = 1
+                        echo verifier:owned >> effects/supervision ;;
+                    :consumerBuildLogicTest)
+                        test "$MAZEWALL_TEST_INSIDE_PROBE" = 0 || { echo 'Nested lifetime owners' >&2; exit 73; }
+                        echo consumer:independent >> effects/supervision ;;
+                esac
+            done
+            """);
+        write(root, "probe.sh", """
+            #!/bin/bash
+            set -eu
+            while [[ "$1" != -- ]]; do shift; done
+            shift
+            export MAZEWALL_TEST_INSIDE_PROBE=1
+            exec "$@"
+            """);
+        root.resolve("gradlew").toFile().setExecutable(true);
+        root.resolve("probe.sh").toFile().setExecutable(true);
+        var steps = new ArrayList<>(List.of("Run Build Logic Verification"));
+        if (workflow.contains("- name: Run Consumer Build Logic Regressions\n")) steps.add("Run Consumer Build Logic Regressions");
+        for (String name : steps) {
+            String body = step(workflow, name);
+            body = body.substring(body.indexOf("run: ") + 5);
+            body = body.startsWith("|") ? body.substring(body.indexOf('\n') + 1) : body.strip();
+            body = body.replace("python3 scripts/ci_resource_probe.py", root.resolve("probe.sh").toString());
+            Path log = root.resolve("supervision.log");
+            var command = new ProcessBuilder("bash", "-euc", body).directory(root.toFile()).redirectErrorStream(true).redirectOutput(log.toFile());
+            command.environment().put("MAZEWALL_TEST_INSIDE_PROBE", "0");
+            Process child = command.start();
+            try {
+                require(child.waitFor(30, java.util.concurrent.TimeUnit.SECONDS), "Supervision fixture timed out");
+                require(child.exitValue() == 0, "Consumer process fixtures must not be nested under another lifetime owner: " + Files.readString(log));
+            } finally {
+                if (child.isAlive()) child.destroyForcibly();
+                require(child.waitFor(5, java.util.concurrent.TimeUnit.SECONDS), "Supervision fixture did not retire");
+            }
+        }
+        require(Files.readAllLines(root.resolve("effects/supervision")).equals(List.of("verifier:owned", "consumer:independent")), "Both supervision phases must remain required and serial");
     }
 
     private static String step(String workflow, String name) {

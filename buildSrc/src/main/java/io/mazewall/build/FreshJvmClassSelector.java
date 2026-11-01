@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -11,6 +12,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.jar.JarFile;
 
 /** Minimal class-file metadata reader used to select annotated tests without class loading. */
 final class FreshJvmClassSelector {
@@ -33,14 +35,14 @@ final class FreshJvmClassSelector {
     private FreshJvmClassSelector() {}
 
     static List<String> select(Iterable<File> roots) {
-        return select(roots, Discovery.FRESH_JVM);
+        return select(roots, Discovery.FRESH_JVM, List.of());
     }
 
-    static List<String> selectTests(Iterable<File> roots) {
-        return select(roots, Discovery.ALL_JUNIT);
+    static List<String> selectTests(Iterable<File> roots, Iterable<File> classpath) {
+        return select(roots, Discovery.ALL_JUNIT, classpath);
     }
 
-    private static List<String> select(Iterable<File> roots, Discovery discovery) {
+    private static List<String> select(Iterable<File> roots, Discovery discovery, Iterable<File> classpath) {
         Map<String, ClassMetadata> classes = new HashMap<>();
         for (File root : roots) {
             if (!root.isDirectory()) continue;
@@ -61,7 +63,7 @@ final class FreshJvmClassSelector {
         classes.values().stream().sorted(Comparator.comparing(ClassMetadata::className))
             .filter(FreshJvmClassSelector::concrete)
             .filter(metadata -> !metadata.nested())
-            .filter(metadata -> hasFreshTestTree(metadata, classes, discovery == Discovery.ALL_JUNIT, new LinkedHashSet<>()))
+            .filter(metadata -> hasFreshTestTree(metadata, classes, discovery == Discovery.ALL_JUNIT, new LinkedHashSet<>(), discovery, classpath))
             .map(ClassMetadata::className).forEach(selected::add);
         if (selected.isEmpty() && discovery == Discovery.FRESH_JVM) {
             List<String> declarations = classes.values().stream()
@@ -84,11 +86,14 @@ final class FreshJvmClassSelector {
         ClassMetadata metadata,
         Map<String, ClassMetadata> classes,
         boolean enclosingTagged,
-        Set<String> visiting
+        Set<String> visiting,
+        Discovery discovery,
+        Iterable<File> classpath
     ) {
         if (!visiting.add(metadata.className())) return false;
         boolean tagged = enclosingTagged || classTagged(metadata, classes, new LinkedHashSet<>());
         if (hasFreshTest(metadata, classes, tagged)) return true;
+        if (discovery == Discovery.ALL_JUNIT && mightHaveTests(metadata, classes, classpath, new LinkedHashSet<>())) return true;
         // JUnit inherits @Nested members from abstract and concrete bases.
         // Their enclosing instance is the current discovery class, so emitting
         // the lexical base would skip subclass-only nested test executions.
@@ -101,7 +106,47 @@ final class FreshJvmClassSelector {
             .filter(ClassMetadata::nested)
             .filter(FreshJvmClassSelector::concrete)
             .filter(nested -> containers.contains(enclosingName(nested)))
-            .anyMatch(nested -> hasFreshTestTree(nested, classes, tagged, new LinkedHashSet<>(visiting)));
+            .anyMatch(nested -> hasFreshTestTree(nested, classes, tagged, new LinkedHashSet<>(visiting), discovery, classpath));
+    }
+
+    /** Unknown annotations or external class ancestry belong to Jupiter, not a negative metadata guess. */
+    private static boolean mightHaveTests(ClassMetadata metadata, Map<String, ClassMetadata> classes, Iterable<File> classpath, Set<String> visiting) {
+        if (!visiting.add(metadata.className())) return false;
+        if (metadata.runtimeAnnotated() || metadata.methods().stream().anyMatch(method -> method.canOverride() && method.runtimeAnnotated())) return true;
+        if (metadata.superName() != null && !metadata.superName().equals("java.lang.Object")) {
+            ClassMetadata parent = classes.get(metadata.superName());
+            if (parent == null || mightHaveTests(parent, classes, classpath, visiting)) return true;
+        }
+        for (String name : metadata.interfaces()) {
+            ClassMetadata parent = classes.get(name);
+            if (parent == null) parent = findClass(name, classpath);
+            if (parent == null || mightHaveTests(parent, classes, classpath, visiting)) return true;
+        }
+        return false;
+    }
+
+    private static ClassMetadata findClass(String name, Iterable<File> classpath) {
+        String entryName = name.replace('.', '/') + ".class";
+        for (File entry : classpath) {
+            try {
+                if (entry.isDirectory()) {
+                    File file = new File(entry, entryName);
+                    if (file.isFile()) return read(file);
+                } else if (entry.isFile() && entry.getName().endsWith(".jar")) {
+                    try (JarFile jar = new JarFile(entry)) {
+                        var member = jar.getJarEntry(entryName);
+                        if (member != null) return jar.isMultiRelease() ? null : read(jar.getInputStream(member));
+                    }
+                }
+            } catch (IOException failure) {
+                throw new IllegalStateException("Cannot inspect JUnit ancestor " + name + " in " + entry, failure);
+            }
+        }
+        try (InputStream platform = ClassLoader.getPlatformClassLoader().getResourceAsStream(entryName)) {
+            return platform == null ? null : read(platform);
+        } catch (IOException failure) {
+            throw new IllegalStateException("Cannot inspect platform JUnit ancestor " + name, failure);
+        }
     }
 
     private static boolean hasFreshTest(ClassMetadata metadata, Map<String, ClassMetadata> classes, boolean tagged) {
@@ -138,7 +183,11 @@ final class FreshJvmClassSelector {
     }
 
     private static ClassMetadata read(File file) throws IOException {
-        try (DataInputStream input = new DataInputStream(Files.newInputStream(file.toPath()))) {
+        return read(Files.newInputStream(file.toPath()));
+    }
+
+    private static ClassMetadata read(InputStream source) throws IOException {
+        try (DataInputStream input = new DataInputStream(source)) {
             if (input.readInt() != 0xCAFEBABE) throw new IOException("Invalid class-file magic");
             input.skipNBytes(4);
             Object[] pool = constantPool(input);
@@ -153,7 +202,9 @@ final class FreshJvmClassSelector {
             List<MethodMetadata> methods = readMethods(input, pool);
             Set<String> annotations = classAnnotations(input, pool);
             return new ClassMetadata(name, parent, List.copyOf(interfaces), annotations.stream().anyMatch(FRESH_JVM_DESCRIPTORS::contains),
-                annotations.contains(NESTED_DESCRIPTOR), access, List.copyOf(methods));
+                annotations.contains(NESTED_DESCRIPTOR), access, List.copyOf(methods),
+                annotations.stream().anyMatch(annotation -> !annotation.equals("Lkotlin/Metadata;")
+                    && !annotation.equals(NESTED_DESCRIPTOR) && !FRESH_JVM_DESCRIPTORS.contains(annotation)));
         }
     }
 
@@ -204,6 +255,7 @@ final class FreshJvmClassSelector {
             String descriptor = (String) pool[input.readUnsignedShort()];
             boolean freshJvm = false;
             boolean junitTest = false;
+            boolean runtimeAnnotated = false;
             int count = input.readUnsignedShort();
             for (int index = 0; index < count; index++) {
                 String attribute = (String) pool[input.readUnsignedShort()];
@@ -211,11 +263,12 @@ final class FreshJvmClassSelector {
                 byte[] bytes = input.readNBytes(length);
                 if (bytes.length != length) throw new IOException("Truncated member attribute");
                 if (annotationAttribute(attribute)) {
+                    if (attribute.equals("RuntimeVisibleAnnotations")) runtimeAnnotated |= !annotationTypes(bytes, pool).isEmpty();
                     freshJvm |= hasAnyAnnotation(bytes, pool, FRESH_JVM_DESCRIPTORS);
                     for (String descriptorName : JUNIT_TEST_DESCRIPTORS) junitTest |= hasAnnotation(bytes, pool, descriptorName);
                 }
             }
-            methods.add(new MethodMetadata(name + descriptor, freshJvm, junitTest, (access & (ACC_PRIVATE | ACC_STATIC)) == 0));
+            methods.add(new MethodMetadata(name + descriptor, freshJvm, junitTest, (access & (ACC_PRIVATE | ACC_STATIC)) == 0, runtimeAnnotated));
         }
         return methods;
     }
@@ -229,6 +282,7 @@ final class FreshJvmClassSelector {
             byte[] bytes = input.readNBytes(length);
             if (bytes.length != length) throw new IOException("Truncated class attribute");
             if (annotationAttribute(name)) {
+                if (name.equals("RuntimeVisibleAnnotations")) annotations.addAll(annotationTypes(bytes, pool));
                 if (hasAnyAnnotation(bytes, pool, FRESH_JVM_DESCRIPTORS)) annotations.addAll(FRESH_JVM_DESCRIPTORS);
                 if (hasAnnotation(bytes, pool, NESTED_DESCRIPTOR)) annotations.add(NESTED_DESCRIPTOR);
             }
@@ -257,13 +311,26 @@ final class FreshJvmClassSelector {
     }
 
     private static boolean readAnnotation(DataInputStream input, Object[] pool, String descriptor) throws IOException {
-        boolean target = descriptor.equals(pool[input.readUnsignedShort()]);
+        return descriptor.equals(readAnnotationType(input, pool));
+    }
+
+    private static Set<String> annotationTypes(byte[] bytes, Object[] pool) throws IOException {
+        try (DataInputStream input = new DataInputStream(new ByteArrayInputStream(bytes))) {
+            int count = input.readUnsignedShort();
+            Set<String> types = new LinkedHashSet<>();
+            for (int index = 0; index < count; index++) types.add(readAnnotationType(input, pool));
+            return types;
+        }
+    }
+
+    private static String readAnnotationType(DataInputStream input, Object[] pool) throws IOException {
+        String type = (String) pool[input.readUnsignedShort()];
         int pairs = input.readUnsignedShort();
         for (int index = 0; index < pairs; index++) {
             input.readUnsignedShort();
-            skipElement(input, pool, descriptor);
+            skipElement(input, pool, type);
         }
-        return target;
+        return type;
     }
 
     private static void skipElement(DataInputStream input, Object[] pool, String descriptor) throws IOException {
@@ -286,8 +353,9 @@ final class FreshJvmClassSelector {
         boolean classAnnotated,
         boolean nested,
         int access,
-        List<MethodMetadata> methods
+        List<MethodMetadata> methods,
+        boolean runtimeAnnotated
     ) {}
 
-    private record MethodMetadata(String signature, boolean freshJvmAnnotated, boolean junitTestAnnotated, boolean canOverride) {}
+    private record MethodMetadata(String signature, boolean freshJvmAnnotated, boolean junitTestAnnotated, boolean canOverride, boolean runtimeAnnotated) {}
 }

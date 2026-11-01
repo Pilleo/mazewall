@@ -295,7 +295,9 @@ jobs:
               run: |
                   set -o pipefail
                   mkdir -p build/reports/ci-resources
-                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew :buildLogicCheck :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+                  python3 scripts/ci_resource_probe.py --output build/reports/ci-resources/build-logic.json -- ./gradlew :buildLogicCheck --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel 2>&1 | tee build/reports/ci-resources/build-logic.log
+            - name: Run Consumer Build Logic Regressions
+              run: ./gradlew :consumerBuildLogicTest --configuration-cache --configuration-cache-problems=fail --no-daemon --max-workers=1 --no-parallel
             - name: Upload Build Logic Diagnostics
               if: always()
               uses: actions/upload-artifact@v4
