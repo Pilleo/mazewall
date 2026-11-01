@@ -72,9 +72,16 @@ class ContainerizedTestRunnerOwnershipTest {
         val cacheRoot: Path,
     )
 
-    private fun launch(engine: String, vararg arguments: String): LaunchResult = launch(engine, false, *arguments)
+    private fun launch(
+        engine: String,
+        vararg arguments: String,
+    ): LaunchResult = launch(engine, false, *arguments)
 
-    private fun launch(engine: String, relativeCacheHome: Boolean, vararg arguments: String): LaunchResult {
+    private fun launch(
+        engine: String,
+        relativeCacheHome: Boolean,
+        vararg arguments: String,
+    ): LaunchResult {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.exists(it.resolve("scripts/run_containerized_tests.sh")) }
         val scratch = Files.createTempDirectory("mazewall-launcher-test-")
