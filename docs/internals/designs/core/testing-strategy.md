@@ -365,6 +365,11 @@ task-name selection of demo gates. Slow Gradle-backed consumer regressions are
 tagged `build-logic`: `consumerHarnessTest` excludes them and
 `consumerBuildLogicTest` selects them in the existing Build Logic lane. Root
 `check` also requires the latter; no acceptance assertion is removed.
+The consumer source set uses shared process-fixture support and the existing
+locked JUnit artifacts, not the architecture suite's aggregate SDK runtime.
+Its compile/test graph must not build unrelated profiler/Portal producers;
+ordinary architecture tests retain their full module runtime. This avoids moving
+unnecessary SDK compilation into the Build Logic lane without adding dependencies.
 
 The existing Security lane explicitly owns `:demos:vulnerable-web-app:unitCheck`
 and the shared-image script regression. This step runs unless cancelled, even

@@ -18,16 +18,31 @@ public final class CoreLaneFunctionalTest {
         String source = Files.readString(repository.resolve("build.gradle.kts"));
         List<String> core = arguments(step(workflow, "Run Host-Safe Unit Quality Gate"));
         Path root = Files.createTempDirectory("core-lane-");
-        write(root, "settings.gradle.kts", "rootProject.name=\"lane-fixture\"\ninclude(\":demos:vulnerable-web-app\")\n");
+        write(root, "settings.gradle.kts", "rootProject.name=\"lane-fixture\"\ninclude(\":demos:vulnerable-web-app\", \":platform\", \":enforcer\", \":profiler\", \":portals:codegen\")\n");
         write(root, "demos/vulnerable-web-app/build.gradle.kts", "tasks.register(\"unitCheck\") { doLast { println(\"DEMO_HOST_GATE_OK\") } }\n");
+        for (String module : List.of("platform", "enforcer", "profiler", "portals/codegen")) {
+            write(root, module + "/build.gradle.kts", "plugins { java }\n");
+            String name = module.replace('/', '_');
+            write(root, module + "/src/main/java/" + name + ".java", "public class " + name + " {}\n");
+        }
         String harness = source.substring(source.indexOf("tasks.register<Test>(\"consumerHarnessTest\")"), source.indexOf("tasks.register<Test>(\"consumerCheck\")"));
+        String consumerModel = source.substring(source.indexOf("val consumerVerification ="), source.indexOf("\ntasks.named<com.github.spotbugs.snom.SpotBugsTask>(\"spotbugsConsumerVerification\")"));
+        consumerModel = String.join("\n", consumerModel.lines().filter(line -> !line.trim().startsWith("kotlin.srcDir(")).toList());
         write(root, "build.gradle.kts", """
             plugins { java }
-            val consumerVerification = sourceSets.create("consumerVerification")
+            sourceSets.create("sharedTest")
+            """ + consumerModel + """
+
             repositories { mavenCentral() }
             dependencies {
-                "consumerVerificationImplementation"("org.junit.jupiter:junit-jupiter:5.10.2")
-                "consumerVerificationRuntimeOnly"("org.junit.platform:junit-platform-launcher:1.10.2")
+                "sharedTestImplementation"(project(":platform"))
+                "sharedTestImplementation"(project(":enforcer"))
+                "sharedTestImplementation"("org.junit.jupiter:junit-jupiter-api:5.10.2")
+                "sharedTestImplementation"("org.junit.platform:junit-platform-launcher:1.10.2")
+                testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+                testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.2")
+                testRuntimeOnly(project(":profiler"))
+                testRuntimeOnly(project(":portals:codegen"))
             }
             tasks.withType<Test>().configureEach {
                 systemProperty("fixture.effects", layout.projectDirectory.dir("effects").asFile.absolutePath)
@@ -51,11 +66,13 @@ public final class CoreLaneFunctionalTest {
                 """.formatted(tag, name));
         }
         BuildResult host = run(root, core);
+        require(host.task(":profiler:compileJava") != null && host.task(":portals:codegen:compileJava") != null, "Architecture runtime must retain its producer dependencies");
         require(host.task(":demos:vulnerable-web-app:unitCheck") == null, "Bare CI selector executed demo work in Core");
         require(Files.readString(root.resolve("effects/consumerHarnessTest-FastTest")).equals("executed\n"), "Fast harness did not execute once");
         require(!Files.exists(root.resolve("effects/consumerHarnessTest-HeavyTest")), "Heavy build fixture remained in Core");
         run(root, arguments(step(workflow, "Run Build Logic Verification")));
         BuildResult buildLogic = run(root, arguments(step(workflow, "Run Consumer Build Logic Regressions")));
+        require(buildLogic.task(":profiler:compileJava") == null && buildLogic.task(":portals:codegen:compileJava") == null, "Consumer harness selected unrelated architecture producers");
         require(buildLogic.task(":consumerBuildLogicTest") != null, "Build Logic omitted required consumer regressions");
         require(Files.readString(root.resolve("effects/consumerBuildLogicTest-HeavyTest")).equals("executed\n"), "Heavy case missing or duplicated");
         require(!Files.exists(root.resolve("effects/consumerBuildLogicTest-FastTest")), "Fast case duplicated in Build Logic");

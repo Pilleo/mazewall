@@ -270,7 +270,21 @@ tasks.named<Test>("test") {
 val consumerVerification =
     sourceSets.create("consumerVerification") {
         kotlin.srcDir("src/consumerVerification/kotlin")
-        compileClasspath += configurations.testRuntimeClasspath.get() + sourceSets["sharedTest"].output
+        // Consumer fixtures need shared process support, not the aggregate architecture SDK runtime.
+        compileClasspath +=
+            files(
+                configurations["sharedTestRuntimeClasspath"],
+                sourceSets["sharedTest"].output,
+                configurations.testRuntimeClasspath
+                    .get()
+                    .incoming
+                    .artifactView {
+                        componentFilter { id ->
+                            id is org.gradle.api.artifacts.component.ModuleComponentIdentifier &&
+                                (id.group.startsWith("org.junit.") || id.group in setOf("org.opentest4j", "org.apiguardian"))
+                        }
+                    }.files,
+            )
         runtimeClasspath += output + compileClasspath
     }
 

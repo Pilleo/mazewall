@@ -122,6 +122,9 @@ real default/CLI regressions cover methods, interfaces and nested inheritance.
 Ruling: consumer fixtures keep their own lifetime supervision after the unchanged
 resource-probed verifier. A controlled probe reproduced adopted zombies blocking
 inner retirement; no cleanup check, resource reserve or deadline is relaxed.
+Ruling: consumer classpaths reuse shared fixtures and locked JUnit artifacts,
+not the architecture suite's whole SDK graph. Real task-graph regression excludes
+unrelated producers while preserving architecture dependencies and all case owners.
 
 ---
 <!-- id: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c  file: issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md -->

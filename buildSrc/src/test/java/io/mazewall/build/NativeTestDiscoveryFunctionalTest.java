@@ -36,13 +36,15 @@ public final class NativeTestDiscoveryFunctionalTest {
             dependencies {
                 testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
                 "integrationTestImplementation"("org.junit.jupiter:junit-jupiter:5.10.2")
+                "integrationTestImplementation"(files(uri("%s")))
                 "integrationTestRuntimeOnly"("org.junit.platform:junit-platform-launcher:1.10.2")
             }
             class EmptyWorkerClasspath : CommandLineArgumentProvider {
                 override fun asArguments() = emptyList<String>()
             }
             val portalWorkerCpArgProvider = EmptyWorkerClasspath()
-            """ + registration + "\nintegrationTest.configure {\n"
+            """.formatted(kotlin.jvm.JvmStatic.class.getProtectionDomain().getCodeSource().getLocation().toURI().toASCIIString())
+            + registration + "\nintegrationTest.configure {\n"
             + "    providers.gradleProperty(\"fixture.include\").orNull?.let { include(it) }\n"
             + "    jvmArgs(\"-Xlog:os=info:file=" + forks + "/fork-%p.log\")\n}\n");
         write(root, "src/integrationTest/java/fixture/ConcreteTest.java", """
@@ -58,12 +60,13 @@ public final class NativeTestDiscoveryFunctionalTest {
             @java.lang.annotation.Retention(java.lang.annotation.RetentionPolicy.RUNTIME)
             @java.lang.annotation.Target(java.lang.annotation.ElementType.METHOD)
             @Test @interface NativeCase {}
-            class ComposedRoot { @NativeCase void composed() {} }
+            class ComposedRoot { @NativeCase @kotlin.jvm.JvmStatic void composed() {} }
             class ExternalInherited extends ExternalBase {}
             class InterfaceInherited implements ExternalContract {}
             class ExternalNestedInherited extends ExternalNestedBase {}
             class JarHelper implements PlainContract { public void work() {} }
             class JdkHelper implements AutoCloseable { public void close() {} }
+            class KotlinBridgeHelper { @kotlin.jvm.JvmStatic public void bridge() {} }
             """);
         write(root, "src/test/java/fixture/ExternalBase.java", "package fixture; public abstract class ExternalBase { @org.junit.jupiter.api.Test public void externalInherited() {} }\n");
         write(root, "src/ancestors/java/fixture/ExternalContract.java", "package fixture; public interface ExternalContract { @org.junit.jupiter.api.Test default void externalDefaultTest() {} }\n");

@@ -263,7 +263,10 @@ final class FreshJvmClassSelector {
                 byte[] bytes = input.readNBytes(length);
                 if (bytes.length != length) throw new IOException("Truncated member attribute");
                 if (annotationAttribute(attribute)) {
-                    if (attribute.equals("RuntimeVisibleAnnotations")) runtimeAnnotated |= !annotationTypes(bytes, pool).isEmpty();
+                    if (attribute.equals("RuntimeVisibleAnnotations")) {
+                        // Kotlin companion bridges are not composed test annotations.
+                        runtimeAnnotated |= annotationTypes(bytes, pool).stream().anyMatch(type -> !type.equals("Lkotlin/jvm/JvmStatic;"));
+                    }
                     freshJvm |= hasAnyAnnotation(bytes, pool, FRESH_JVM_DESCRIPTORS);
                     for (String descriptorName : JUNIT_TEST_DESCRIPTORS) junitTest |= hasAnnotation(bytes, pool, descriptorName);
                 }
