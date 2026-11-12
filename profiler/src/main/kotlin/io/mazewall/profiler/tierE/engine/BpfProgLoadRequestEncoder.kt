@@ -8,6 +8,7 @@ import java.lang.foreign.ValueLayout
 internal object BpfProgLoadRequestEncoder {
     private const val LD_MAP_FD = 0x18
     private const val PSEUDO_FD = 1
+    private const val BPF_LOG_STATS = 4
     private const val VERIFIER_LOG_SIZE = 64 * 1024L
 
     internal data class Request(
@@ -22,7 +23,9 @@ internal object BpfProgLoadRequestEncoder {
         mapFds: List<Int>,
         programType: Int,
         programName: String,
+        diagnostics: Boolean = false,
     ): Request {
+        require(!diagnostics || program.size <= TierEBpfProgramLoadFailureEvidence.MAXIMUM_SLOTS) { "diagnostic BPF program exceeds 1024 instruction slots" }
         val programNameBytes = programName.toAsciiProgramName()
         require(programNameBytes.size < BpfProgLoadLayout.PROGRAM_NAME_SIZE) {
             "BPF program name must fit ${BpfProgLoadLayout.PROGRAM_NAME_SIZE - 1} ASCII bytes"
@@ -43,12 +46,12 @@ internal object BpfProgLoadRequestEncoder {
         packed.forEachIndexed { index, value -> instructionSegment.set(ValueLayout.JAVA_LONG, index * 8L, value) }
 
         val verifierLog = arena.allocate(VERIFIER_LOG_SIZE)
-        val attr = arena.allocate(BpfProgLoadLayout.SIZE)
+        val attr = arena.allocate(if (diagnostics) BpfProgLoadLayout.DIAGNOSTIC_SIZE else BpfProgLoadLayout.SIZE)
         attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.PROGRAM_TYPE, programType)
         attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.INSTRUCTION_COUNT, instructions.size)
         attr.set(ValueLayout.ADDRESS, BpfProgLoadLayout.INSTRUCTIONS, instructionSegment)
         attr.set(ValueLayout.ADDRESS, BpfProgLoadLayout.LICENSE, ascii(arena, "GPL", 4))
-        attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_LEVEL, 1)
+        attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_LEVEL, if (diagnostics) BPF_LOG_STATS else 1)
         attr.set(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_SIZE, verifierLog.byteSize().toInt())
         attr.set(ValueLayout.ADDRESS, BpfProgLoadLayout.LOG_BUFFER, verifierLog)
         programNameBytes.forEachIndexed { index, byte ->

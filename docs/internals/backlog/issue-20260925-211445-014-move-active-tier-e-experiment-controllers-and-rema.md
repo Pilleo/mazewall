@@ -414,5 +414,11 @@ scope and were left intact. This does not qualify the newer source
 revision for the `07dcdb22` exact-environment acceptance receipt,
 enable a Tier E default, or change `policy_eligibility=false`.
 
+**2026-11-05 documentation progress:** The [migration guidance](../designs/profiler/tier-e-testing-migration.md#migration-sequence-and-qualification-2026-09-2526-historical-snapshot)
+dates former script ownership and links the separate replay pins and current
+operator workflow. This does not complete caller migration, parity/golden
+checks, before/after counts, or supported-configuration qualification; this
+issue remains open and no new runtime qualification is claimed.
+
 ---
 <!-- id: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema  file: issue-20260925-211445-014-move-active-tier-e-experiment-controllers-and-rema.md -->

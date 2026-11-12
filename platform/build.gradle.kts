@@ -28,6 +28,25 @@ sourceSets {
     }
 }
 
+// Isolated synthetic helper; it is never added to the production or default test classpath.
+val managedT4Fixture = sourceSets.create("managedT4Fixture")
+val managedT4PlatformFixtureJar =
+    tasks.register<Jar>("managedT4PlatformFixtureJar") {
+        val mainJar = tasks.named<Jar>("jar")
+        dependsOn(mainJar, managedT4Fixture.classesTaskName)
+        archiveClassifier.set("managed-t4-fixture")
+        duplicatesStrategy = DuplicatesStrategy.FAIL
+        from(mainJar.flatMap { it.archiveFile }.map { zipTree(it) }) {
+            exclude("META-INF/MANIFEST.MF")
+            exclude("io/mazewall/ffi/internal/LiveStackBootstrap.class")
+            exclude("io/mazewall/ffi/internal/LiveStackBootstrap\$*.class")
+        }
+        from(managedT4Fixture.output) {
+            include("io/mazewall/ffi/internal/LiveStackBootstrap.class")
+            include("io/mazewall/ffi/internal/LiveStackBootstrap\$*.class")
+        }
+    }
+
 val kotlinExtension = extensions.getByType<org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension>()
 val kotlinCompilations = kotlinExtension.target.compilations
 kotlinCompilations.named("integrationTest") {
@@ -59,17 +78,21 @@ val compileCAbiOracle =
         group = "verification"
         description = "Compiles the host C-header ABI oracle used by Layouts tests."
         inputs.file(layout.projectDirectory.file("src/test/resources/abi/layout_oracle.c"))
+        inputs.file(rootProject.layout.projectDirectory.file("profiler-native/include/live_stack_context_abi.h"))
         outputs.file(cAbiOracle)
         commandLine(
             "/bin/sh",
             "-c",
-            "mkdir -p \"$1\" && exec cc -std=c11 -Wall -Werror \"$2\" -o \"$3\"",
+            "mkdir -p \"$1\" && exec cc -std=c11 -Wall -Werror -I\"$4\" \"$2\" -o \"$3\"",
             "compileCAbiOracle",
             cAbiOracleDirectory.get().asFile.absolutePath,
             layout.projectDirectory
                 .file("src/test/resources/abi/layout_oracle.c")
                 .asFile.absolutePath,
             cAbiOracle.get().asFile.absolutePath,
+            rootProject.layout.projectDirectory
+                .dir("profiler-native/include")
+                .asFile.absolutePath,
         )
     }
 

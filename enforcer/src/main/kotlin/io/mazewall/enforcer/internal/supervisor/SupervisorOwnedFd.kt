@@ -32,10 +32,15 @@ internal class SupervisorOwnedFd(
         if (!handle.isLiveForIo()) return
         when (val result = fileSystem.close(handle)) {
             is LinuxNative.SyscallResult.Success -> Unit
-            is LinuxNative.SyscallResult.Error -> error("Supervisor close fd=${handle.value} failed with errno=${result.errno}")
+            is LinuxNative.SyscallResult.Error -> throw SupervisorCloseFailure(handle.value, result.errno)
         }
     }
 }
+
+internal class SupervisorCloseFailure(
+    fd: Int,
+    val errno: Int,
+) : IllegalStateException("Supervisor close fd=$fd failed with errno=$errno")
 
 internal sealed interface SupervisorDescriptorResult {
     data class Opened(

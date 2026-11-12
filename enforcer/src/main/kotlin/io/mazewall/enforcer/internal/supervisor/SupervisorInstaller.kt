@@ -8,14 +8,20 @@ import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.internal.execution.PreparedHelperReadPlan
 import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.internal.HelperSecurityObservation
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.SupervisorProcessMemoryReader
 import io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
+import io.mazewall.ffi.networking.ConfinedDeadline
+import io.mazewall.ffi.networking.ConfinedHelperChannel
+import io.mazewall.ffi.networking.SupervisorHelperCredentials
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import io.mazewall.ffi.networking.SupervisorValidationChannel
+import io.mazewall.ffi.networking.helperValue
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
@@ -34,13 +40,30 @@ import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
 import java.util.logging.Logger
 
 internal object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
     private val installations = ThreadLocal.withInitial { mutableListOf<SupervisorInstallationLifetime>() }
+
+    internal fun prepareConfinedHelper(
+        plan: PreparedHelperReadPlan,
+        context: SupervisorContext,
+        native: NativeEngine,
+        deadline: ConfinedDeadline,
+        retain: (ConfinedHelperSession) -> Unit,
+        cancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
+        observations: HelperSecurityObservation = HelperSecurityObservation(),
+    ): ConfinedHelperPreparation {
+        val session = ConfinedHelperSession(plan, context, native, cancelled, observations)
+        retain(session)
+        return session.prepare(deadline)
+    }
 
     internal fun requireReusableInstallations() {
         installations.get().forEach { it.requireReusable() }
@@ -51,15 +74,20 @@ internal object SupervisorInstaller {
         acquireTaskSession(scopingPolicy, LinuxNative.snapshot())
 
     /** Reuses this thread's installed filters with native authority captured by the caller. */
-    @Suppress("TooGenericExceptionCaught") // Rollback must preserve every original failure after unregistering acquired runtimes.
     internal fun acquireTaskSession(
         scopingPolicy: StacktraceScopingPolicy,
+        native: NativeEngine,
+    ): SupervisorSession = acquireCapturedTaskSession(CapturedScopingPolicy.capture(scopingPolicy), native)
+
+    @Suppress("TooGenericExceptionCaught") // Rollback must preserve every original failure after unregistering acquired runtimes.
+    internal fun acquireCapturedTaskSession(
+        capturedScoping: CapturedScopingPolicy,
         native: NativeEngine,
     ): SupervisorSession {
         val tid = native.process.gettid()
         val owners = installations.get()
         owners.forEach { it.requireReusable() }
-        check(owners.all { it.scopingPolicy === scopingPolicy }) { "Cannot replace the scoping policy of a permanent supervised filter; use a new platform thread" }
+        check(owners.all { it.capturedScoping.matches(capturedScoping) }) { "Cannot replace the scoping policy of a permanent supervised filter; use a new platform thread" }
         val runtimes = owners.map { it.runtime }
         check(runtimes.isNotEmpty()) { "Supervised filter has no installation runtime on this thread" }
         val acquired = mutableListOf<SupervisorRuntimeContext>()
@@ -91,8 +119,26 @@ internal object SupervisorInstaller {
         onFilterApplied: () -> Unit,
         native: NativeEngine,
         userNotifSupported: Boolean = Platform.featureMatrix.seccompUserNotifSupported,
+    ): SupervisorSession =
+        installCapturedSupervisedFilterForThread(
+            policy,
+            CapturedScopingPolicy.capture(scopingPolicy),
+            onFilterApplied,
+            native,
+            userNotifSupported,
+        )
+
+    internal fun installCapturedSupervisedFilterForThread(
+        policy: PolicyDefinition<*>,
+        capturedScoping: CapturedScopingPolicy,
+        onFilterApplied: () -> Unit,
+        native: NativeEngine,
+        userNotifSupported: Boolean,
     ): SupervisorSession {
         requireReusableInstallations()
+        check(installations.get().all { it.capturedScoping.matches(capturedScoping) }) {
+            "Cannot replace the scoping policy of a permanent supervised filter; use a new platform thread"
+        }
         ValidationListenerPreload.ensureLoaded()
         val context = SupervisorDaemonManager.getInstance().getOrSpawnSharedDaemon(native)
         val arch = Arch.current()
@@ -104,7 +150,7 @@ internal object SupervisorInstaller {
         val tid = native.process.gettid()
         val ownedInstallations = installations.get()
         val runtime = SupervisorRuntimeContext()
-        val lifetime = SupervisorInstallationLifetime(Thread.currentThread(), runtime, scopingPolicy)
+        val lifetime = SupervisorInstallationLifetime(Thread.currentThread(), runtime, capturedScoping)
         var previousLease: SupervisorSession? = null
         val session = SupervisorSession {
             runtime.unregister(tid)
@@ -112,7 +158,7 @@ internal object SupervisorInstaller {
         }
         var applied = false
         try {
-            previousLease = if (ownedInstallations.isEmpty()) null else acquireTaskSession(scopingPolicy, native)
+            previousLease = if (ownedInstallations.isEmpty()) null else acquireCapturedTaskSession(capturedScoping, native)
             lifetime.start()
             runtime.register(tid)
             SupervisorSeccompNotifInstaller.installOwned(
@@ -128,7 +174,7 @@ internal object SupervisorInstaller {
             ) { socketFd, readyLatch ->
                 val listener = JVMValidationListener(
                     socketFd,
-                    scopingPolicy,
+                    capturedScoping.dispatch,
                     runtime,
                     native,
                     onUnexpectedTermination = { cause -> lifetime.fail(cause) },
@@ -158,6 +204,229 @@ internal object SupervisorInstaller {
             session.close()
             throw expectedInstallError
         }
+    }
+}
+
+internal sealed interface ConfinedHelperPreparation {
+    data class Ready(
+        val binding: ConfinedBinding,
+        val session: ConfinedHelperSession,
+    ) : ConfinedHelperPreparation
+
+    data class Rejected(
+        val reason: ConfinedRejectReason,
+        val cause: Throwable,
+    ) : ConfinedHelperPreparation
+}
+
+internal class ConfinedHelperSession(
+    private val plan: PreparedHelperReadPlan,
+    private val context: SupervisorContext,
+    private val native: NativeEngine,
+    private val cancelled: () -> Boolean,
+    private val observations: HelperSecurityObservation = HelperSecurityObservation(),
+) {
+    private enum class Phase { Unprepared, Preparing, Ready, Stopped, Retired }
+
+    private val lock = ReentrantLock()
+    private val stopping = AtomicBoolean()
+
+    @Volatile private var phase = Phase.Unprepared
+    private var socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>? = null
+    private var channel: ConfinedHelperChannel? = null
+    private var transfer: SupervisorOwnedFd? = null
+    private var receipt: ConfinedHelperProtocol.Frame.Retired? = null
+    val retired: Boolean get() = phase == Phase.Retired
+
+    @Suppress("TooGenericExceptionCaught") // A failed readiness observation quarantines the session before worker installation.
+    fun requireReady(
+        binding: ConfinedBinding,
+        deadline: ConfinedDeadline,
+    ) {
+        acquire(deadline)
+        try {
+            check(phase == Phase.Ready && !stopping.get() && binding == plan.manifest.binding) { "Confined helper is not Ready for this generation" }
+            try {
+                plan.validate()
+                authenticate(requireNotNull(socket))
+                val connected = requireNotNull(channel)
+                check(connected.pollFrame(deadline) == null) { "Unsolicited confined helper response after Ready" }
+                connected.checkDeadline(deadline)
+            } catch (failure: Throwable) {
+                phase = Phase.Stopped
+                val cleanup = SocketCleanup()
+                cleanup.attempt { throw failure }
+                cleanup.attempt(::disconnect)
+                cleanup.rethrow()
+            }
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught", "InstanceOfCheckForException") // One ownership rollback retains the original fatal identity before refusing ordinary failures.
+    fun prepare(deadline: ConfinedDeadline): ConfinedHelperPreparation {
+        try {
+            acquire(deadline)
+        } catch (failure: Exception) {
+            stopping.set(true)
+            if (failure is InterruptedException) Thread.currentThread().interrupt()
+            val rejection = ConfinedHelperRejection.classify(failure, ConfinedRejectReason.RuntimeClosure)
+            return ConfinedHelperPreparation.Rejected(rejection.reason, rejection)
+        }
+        try {
+            check(phase == Phase.Unprepared) { "Confined parent setup is already spent" }
+            phase = Phase.Preparing
+            try {
+                plan.validate()
+                val connected = connect(deadline, cleanup = false)
+                val binding = plan.manifest.binding
+                connected.sendFrame(ConfinedHelperProtocol.Frame.Setup(plan.manifest, deadline))
+                expect(ConfinedHelperProtocol.Frame.Control(ConfinedHelperProtocol.ControlTag.SetupAccepted, binding, deadline), deadline)
+                plan.manifest.capabilities.indices.forEach { index ->
+                    connected.checkDeadline(deadline)
+                    transfer = plan.duplicateForTransfer(index)
+                    connected.sendFrame(ConfinedHelperProtocol.Frame.Root(ConfinedHelperProtocol.RootTag.Offer, binding, index, deadline))
+                    expect(ConfinedHelperProtocol.Frame.Root(ConfinedHelperProtocol.RootTag.Expected, binding, index, deadline), deadline)
+                    connected.sendDescriptor(requireNotNull(transfer), deadline)
+                    expect(ConfinedHelperProtocol.Frame.Root(ConfinedHelperProtocol.RootTag.Received, binding, index, deadline), deadline)
+                    closeTransfer()
+                }
+                connected.sendFrame(ConfinedHelperProtocol.Frame.Root(ConfinedHelperProtocol.RootTag.Complete, binding, plan.manifest.capabilities.size, deadline))
+                expect(ConfinedHelperProtocol.Frame.Control(ConfinedHelperProtocol.ControlTag.Ready, binding, deadline), deadline)
+                plan.validate()
+                connected.checkDeadline(deadline)
+                phase = Phase.Ready
+                return ConfinedHelperPreparation.Ready(binding, this)
+            } catch (failure: Throwable) {
+                phase = Phase.Stopped
+                val cleanup = SocketCleanup()
+                cleanup.attempt { throw failure }
+                cleanup.attempt(::closeTransfer)
+                cleanup.attempt(::disconnect)
+                if (cleanup.failure is Error) cleanup.rethrow()
+                val rejection = ConfinedHelperRejection.classify(requireNotNull(cleanup.failure), ConfinedRejectReason.RuntimeClosure)
+                return ConfinedHelperPreparation.Rejected(rejection.reason, rejection)
+            }
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // A failed receipt never releases the plan; failed socket close retains its exact owner.
+    fun retire(deadline: ConfinedDeadline) {
+        stopping.set(true)
+        acquire(deadline)
+        try {
+            if (phase == Phase.Retired) return
+            val readyChannel = if (phase == Phase.Ready) channel else null
+            phase = Phase.Stopped
+            try {
+                closeTransfer()
+                if (receipt == null) {
+                    val connected = readyChannel ?: run {
+                        disconnect()
+                        connect(deadline, cleanup = true)
+                    }
+                    authenticate(requireNotNull(socket))
+                    val binding = plan.manifest.binding
+                    connected.sendFrame(ConfinedHelperProtocol.Frame.Control(ConfinedHelperProtocol.ControlTag.Retire, binding, deadline))
+                    val received = connected.receiveFrame(deadline).frame
+                    val helper = requireNotNull(context.confinedHelper).identity
+                    check(
+                        received is ConfinedHelperProtocol.Frame.Retired &&
+                            received.binding == binding &&
+                            received.deadline == deadline &&
+                            received.helperPid == helper.pid &&
+                            received.helperStartTicks == helper.startTimeTicks,
+                    ) {
+                        "Confined retirement receipt differs from the acquired helper"
+                    }
+                    receipt = received
+                }
+                disconnect()
+                phase = Phase.Retired
+            } catch (failure: Throwable) {
+                val cleanup = SocketCleanup()
+                cleanup.attempt { throw failure }
+                cleanup.attempt(::disconnect)
+                cleanup.rethrow()
+            }
+        } finally {
+            lock.unlock()
+        }
+    }
+
+    private fun acquire(deadline: ConfinedDeadline) {
+        if (!lock.tryLock(deadline.remainingNanos(ConfinedDeadline.now(native)), TimeUnit.NANOSECONDS)) throw TimeoutException("Confined parent I/O is still active")
+    }
+
+    private fun connect(
+        deadline: ConfinedDeadline,
+        cleanup: Boolean,
+    ): ConfinedHelperChannel {
+        check(socket == null)
+        deadline.remainingNanos(ConfinedDeadline.now(native))
+        val result = native.networking.socket(1, 1 or NativeConstants.SOCK_CLOEXEC or NativeConstants.O_NONBLOCK.toInt(), 0)
+        result.helperValue("acquire parent helper control socket")
+        val acquired = result.getFdOrThrow("acquire parent helper control socket", FileDescriptorRole.UnixSocket)
+        socket = acquired
+        val connected = ConfinedHelperChannel(native, acquired, {
+            Thread.currentThread().isInterrupted || !cleanup && phase != Phase.Stopped && (stopping.get() || cancelled())
+        }, context.daemonProcess::isAlive)
+        channel = connected
+        connected.connect(context.socketPath, deadline)
+        authenticate(acquired)
+        connected.checkDeadline(deadline)
+        connected.send(byteArrayOf(0xe4.toByte()), deadline)
+        return connected
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Peer and ancestry refusal preserves native permission errno and original observation evidence.
+    private fun authenticate(acquired: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
+        try {
+            val bootstrap = requireNotNull(context.confinedBootstrap)
+            requireNotNull(context.confinedHelper)
+            bootstrap.requireCommon()
+            observations.requirePeer(SupervisorHelperCredentials.observe(native, acquired), bootstrap.child)
+            val daemon = observations.observeAncestry(bootstrap.child.identity.pid, Tid(bootstrap.child.identity.pid.value), HelperSecurityObservation.Lineage.Bootstrap)
+            check(daemon.identity == bootstrap.child.identity) { "Confined daemon incarnation changed" }
+            daemon.requireLineage(bootstrap.child, HelperSecurityObservation.Lineage.Bootstrap)
+            val lineage = HelperSecurityObservation.Lineage.entries.single { entry ->
+                plan.manifest.ancestry.canonical
+                    .endsWith("lineage=${entry.wire}\n")
+            }
+            val parent = observations.observeAncestry(plan.binding.ownerPid, native.process.gettid(), lineage)
+            check(
+                parent.identity == bootstrap.parent.identity &&
+                    parent.identity.startTimeTicks == plan.binding.ownerStartTicks &&
+                    parent.ancestry.canonical == plan.manifest.ancestry.canonical,
+            ) { "Confined parent ancestry differs" }
+            parent.requireLineage(bootstrap.parent, lineage)
+        } catch (failure: Exception) {
+            throw ConfinedHelperRejection.classify(failure, ConfinedRejectReason.Ancestry)
+        }
+    }
+
+    private fun expect(
+        expected: ConfinedHelperProtocol.Frame,
+        deadline: ConfinedDeadline,
+    ) {
+        val received = requireNotNull(channel).receiveFrame(deadline).frame
+        check(received.binding == expected.binding && received.deadline == expected.deadline) { "Confined parent response binding or deadline differs" }
+        if (received is ConfinedHelperProtocol.Frame.Rejected) throw ConfinedHelperRejection(received.reason, received.errno)
+        check(received == expected) { "Unexpected confined parent response" }
+    }
+
+    private fun closeTransfer() {
+        transfer?.close()
+        transfer = null
+    }
+
+    private fun disconnect() {
+        channel = null
+        socket?.let { SupervisorOwnedFd(it, native.fileSystem).close() }
+        socket = null
     }
 }
 

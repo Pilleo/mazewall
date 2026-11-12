@@ -11,6 +11,7 @@ public class TierEFixtureLifecycle(
     },
     private val extraCleanup: () -> Unit = {},
     private val retainOnFailure: Boolean = false,
+    private val retainOnSuccess: Boolean = false,
 ) {
     public fun run(exercise: () -> Unit) {
         runScoped(start = { null }) { exercise() }
@@ -54,7 +55,7 @@ public class TierEFixtureLifecycle(
                     settle(controller, creationLock)
                     settled = true
                 }
-                if (!settled || (retainOnFailure && primary != null)) {
+                if (!settled || retainOnSuccess || (retainOnFailure && primary != null)) {
                     attempt { owner.stopForRecovery() }
                 } else {
                     attempt { owner.close() }

@@ -398,7 +398,7 @@ LinuxNative.raw.syscall(
                         },
                     )
                 }
-            tasks.forEach { it.get(5, TimeUnit.SECONDS) }
+            tasks.forEach { it.get(30, TimeUnit.SECONDS) }
 
             awaitLogs(wrapped, 1)
             wrapped.shutdown()

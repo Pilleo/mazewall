@@ -1,13 +1,19 @@
 package io.mazewall.enforcer.internal.supervisor
 
 import io.mazewall.ffi.Layouts
+import io.mazewall.ffi.internal.HelperSecurityObservation
 import io.mazewall.ffi.memory.ManagedSegment
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.writeInt
 import io.mazewall.ffi.memory.writeLong
+import io.mazewall.ffi.networking.ConfinedDeadline
+import io.mazewall.ffi.networking.ConfinedHelperChannel
+import io.mazewall.ffi.networking.SupervisorHelperCredentials
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.socket.RealSocketManager
@@ -18,21 +24,28 @@ import java.io.IOException
 
 /** Private child entry point; receives only an already authorized snapshot and an owned SCM_RIGHTS duplicate. */
 internal object SocketHelperMain {
+    private const val CONFINED_ARGS = 3
+
     @JvmStatic
     fun main(args: Array<String>) {
-        require(args.size == 2)
+        require(args.size == 2 || args.size == CONFINED_ARGS && args[2] == "--confined-read-v1")
         SocketHelperOwner.watch(args[1].toLong())
         val channel = RealSocketManager.connect(args[0])
-        try {
+        val cleanup = SocketCleanup()
+        cleanup.attempt {
             io.mazewall.ffi.networking.SupervisorHelperCredentials
                 .verify(LinuxNative, channel, args[1].toLong())
+            if (args.size == CONFINED_ARGS) {
+                confined(channel, Pid(args[1].toInt()), LinuxNative.snapshot())
+                return@attempt
+            }
             val input = DataInputStream(System.`in`)
             val output = DataOutputStream(System.out)
             while (true) {
                 val tag = try {
                     input.readUnsignedByte()
                 } catch (_: EOFException) {
-                    return
+                    return@attempt
                 }
                 if (tag == TraceeAuthorityProtocol.OPERATION) {
                     TraceeAuthorityHelper.serve(input, output) { descriptor ->
@@ -44,8 +57,152 @@ internal object SocketHelperMain {
                 val result = receiveOperation(channel, operation)
                 sendResult(output, channel, result)
             }
-        } finally {
-            RealSocketManager.close(channel)
+        }
+        cleanup.attempt { RealSocketManager.close(channel) }
+        cleanup.rethrow()
+    }
+
+    private fun confined(
+        channel: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        parentPid: Pid,
+        native: NativeEngine,
+    ) {
+        check(!Thread.currentThread().isVirtual) { "Confined helper operation thread must be a platform thread" }
+        val observations = HelperSecurityObservation()
+        val selfPid = Pid(ProcessHandle.current().pid().toInt())
+        val startup = SocketHelperProcess.ConfinedStartup(
+            observations.observeAncestry(parentPid, Tid(parentPid.value), HelperSecurityObservation.Lineage.Bootstrap),
+            observations.observeAncestry(selfPid, native.process.gettid(), HelperSecurityObservation.Lineage.Bootstrap),
+        )
+        startup.requireCommon()
+        observations.requirePeer(SupervisorHelperCredentials.observe(native, channel), startup.parent)
+        val parent = ProcessHandle.current().parent().orElseThrow { IOException("Missing helper parent") }
+        check(parent.pid() == parentPid.value.toLong() && parent.isAlive) { "Helper parent identity changed" }
+        // ProcessHandle.isAlive reads proc; observe exit on the prestarted trusted JDK reaper instead.
+        val parentExit = parent.onExit()
+        val transport = ConfinedHelperChannel(native, channel, { false }, { !parentExit.isDone })
+
+        fun validate(manifest: ConfinedManifest) {
+                val current = observations.observeAncestry(selfPid, native.process.gettid(), HelperSecurityObservation.Lineage.Bootstrap)
+                val observedParent = observations.observeAncestry(parentPid, Tid(parentPid.value), HelperSecurityObservation.Lineage.Bootstrap)
+                 SocketHelperProcess.ConfinedStartup(observedParent, current).requireCommon()
+                 startup.child.time.requireCommon(current.time)
+                 check(current.identity == startup.child.identity && observedParent.identity == startup.parent.identity && current.ancestry.canonical == startup.child.ancestry.canonical)
+                 observations.requireSetupOwner(manifest, current)
+        }
+        ConfinedHelperConfinement(native, observations, channel.value).use { confinement ->
+            serveConfined(transport, confinement, observations, native, ::validate)
+        }
+    }
+
+    internal fun serveConfined(
+        transport: ConfinedHelperChannel,
+        confinement: ConfinedHelperConfinement,
+        observations: HelperSecurityObservation,
+        native: NativeEngine,
+        validate: (ConfinedManifest) -> Unit,
+    ) {
+        ConfinedSession(transport, confinement, observations, native, validate).serve()
+    }
+
+    private class ConfinedSession(
+        private val transport: ConfinedHelperChannel,
+        private val confinement: ConfinedHelperConfinement,
+        private val observations: HelperSecurityObservation,
+        private val native: NativeEngine,
+        private val validate: (ConfinedManifest) -> Unit,
+    ) {
+        private var state: ConfinedHelperState = ConfinedHelperState.Unsealed
+        private var localDeadline: ConfinedDeadline? = null
+        private var result: SupervisorOwnedFd? = null
+        private var binding: ConfinedBinding? = null
+        private var wireDeadline: ConfinedDeadline? = null
+        private var failureReason = ConfinedRejectReason.Malformed
+
+        private fun transition(event: ConfinedHelperEvent) {
+            val next = ConfinedHelperMachine.evaluate(state, event)
+            state = next.state
+            next.effects.forEach { effect ->
+                val cap = requireNotNull(localDeadline)
+                cap.remainingNanos(ConfinedDeadline.now(native))
+                when (effect) {
+                    is ConfinedHelperEffect.Send -> transport.sendFrame(effect.frame, cap)
+                    is ConfinedHelperEffect.Validate -> {
+                        failureReason = ConfinedRejectReason.Ancestry
+                        validate(effect.manifest)
+                        transition(ConfinedHelperEvent.SetupValidated(effect.manifest.binding, effect.deadline))
+                    }
+                    is ConfinedHelperEffect.ReceiveRoot -> {
+                        failureReason = ConfinedRejectReason.Identity
+                        confinement.adopt(effect.capability, transport.receiveDescriptor(cap))
+                        val receiving = state as ConfinedHelperState.Receiving
+                        transition(ConfinedHelperEvent.RootAdopted(receiving.manifest.binding, effect.capability.index, effect.deadline))
+                    }
+                    is ConfinedHelperEffect.Seal -> {
+                        failureReason = ConfinedRejectReason.RuntimeClosure
+                        confinement.seal(effect.manifest, cap) { validate(effect.manifest) }
+                        transition(ConfinedHelperEvent.Sealed(effect.manifest.binding, effect.deadline))
+                        localDeadline = null
+                    }
+                    is ConfinedHelperEffect.Open -> open(effect)
+                    is ConfinedHelperEffect.SendResult -> {
+                        transport.sendDescriptor(requireNotNull(result), cap)
+                        transition(ConfinedHelperEvent.ResultSent((state as ConfinedHelperState.Ready).manifest.binding, effect.id, effect.deadline))
+                    }
+                    is ConfinedHelperEffect.CommitResult -> {
+                        requireNotNull(result).close()
+                        result = null
+                        transition(ConfinedHelperEvent.ReadCompleted((state as ConfinedHelperState.Ready).manifest.binding, effect.id, effect.deadline))
+                        localDeadline = null
+                    }
+                    is ConfinedHelperEffect.Stop -> {
+                        confinement.close()
+                        transition(ConfinedHelperEvent.Stopped((state as ConfinedHelperState.Stopping).binding, effect.deadline))
+                    }
+                    is ConfinedHelperEffect.Abort -> throw effect.cause
+                }
+            }
+        }
+
+        private fun open(effect: ConfinedHelperEffect.Open) {
+            when (val opened = confinement.open(effect.request)) {
+                is SupervisorDescriptorResult.Denied -> {
+                    transition(ConfinedHelperEvent.Denied(effect.request.binding, effect.request.id, opened.errno, effect.deadline))
+                    localDeadline = null
+                }
+                is SupervisorDescriptorResult.Opened -> {
+                    result = opened.descriptor
+                    observations.observeReadable(opened.descriptor.handle, native)
+                    transition(ConfinedHelperEvent.Opened(effect.request.binding, effect.request.id, effect.deadline))
+                }
+            }
+        }
+
+        fun serve() {
+            val cleanup = SocketCleanup()
+            cleanup.attempt {
+                while (state !is ConfinedHelperState.Terminal) {
+                    val received = transport.pollFrame(localDeadline) ?: continue
+                    localDeadline = received.localDeadline
+                    if (state == ConfinedHelperState.Unsealed && received.frame is ConfinedHelperProtocol.Frame.Setup) {
+                        binding = received.frame.binding
+                        wireDeadline = received.frame.deadline
+                    } else if (state is ConfinedHelperState.Ready && (state as ConfinedHelperState.Ready).active == null) {
+                        wireDeadline = received.frame.deadline
+                    }
+                    failureReason = ConfinedRejectReason.Malformed
+                    transition(ConfinedHelperEvent.ParentFrame(received.frame))
+                }
+            }
+            val failure = cleanup.failure
+            if (failure != null && binding != null && wireDeadline != null) {
+                val rejection = ConfinedHelperRejection.classify(failure, failureReason)
+                cleanup.attempt {
+                    transport.sendFrame(ConfinedHelperProtocol.Frame.Rejected(requireNotNull(binding), rejection.reason, rejection.errno, requireNotNull(wireDeadline)), requireNotNull(localDeadline))
+                }
+            }
+            cleanup.attempt { result?.close() }
+            cleanup.rethrow()
         }
     }
 

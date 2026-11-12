@@ -145,6 +145,23 @@ public object ContainedExecutors {
         return installInternal(false, policy, scopingPolicy, environment, preparedLandlock)
     }
 
+    internal fun installOnCurrentThread(
+        policy: PolicyDefinition<*>,
+        scoping: io.mazewall.enforcer.internal.execution.FrozenStackScoping,
+        environment: InstallationEnvironment,
+        preparedLandlock: io.mazewall.landlock.PreparedLandlock?,
+    ): io.mazewall.enforcer.api.InstallationReceipt {
+        io.mazewall.enforcer.diagnostics
+            .requirePlatformThread()
+        return when (scoping) {
+            is io.mazewall.enforcer.internal.execution.FrozenStackScoping.Legacy -> installInternal(false, policy, scoping.policy, environment, preparedLandlock)
+            is io.mazewall.enforcer.internal.execution.FrozenStackScoping.Live -> {
+                augmentForScoping(policy, scoping)
+                throw UnsupportedOperationException("Live stack scoping dispatcher is not available")
+            }
+        }
+    }
+
     /** Read-only preflight. Does not install filters. */
     public fun assessOnProcess(policy: Policy<PolicyScope.ProcessWideSafe, Uncompiled>): InstallationAssessment = InstallationAssessor.assess(policy.definition, processWide = true)
 
@@ -227,16 +244,19 @@ public object ContainedExecutors {
         // A failed permanent listener cannot be repaired by policy planning or operator bypass.
         io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
             .requireReusableInstallations()
+        val capturedScoping = captureSupportedScoping(policy, scopingPolicy, environment)
+        val augmentedPolicy = prepareSpawnPolicy(policy, capturedScoping)
         val attempt = InstallationAttempt(processWide, environment, preparedLandlock)
         if (policy.lockIntelCet) attempt.cetOutcome = CetOutcome.UNCONFIRMED
         try {
             check(!processWide || !policy.lockIntelCet) { "Process-wide shadow-stack locking is unsupported; CET controls apply to the installing platform thread" }
-            val augmentedPolicy = augmentForScoping(policy, scopingPolicy)
             unsupportedPlatformReceipt(processWide, policy, attempt)?.let { return recordInstallationResult(it) }
+            val captured = requireNotNull(capturedScoping)
+            val preparedPolicy = requireNotNull(augmentedPolicy)
 
             check(attempt.platform.isLinux) { "Mazewall requires Linux for kernel-level containment." }
-            preparePreSeccompEffects(augmentedPolicy, attempt)
-            return recordInstallationResult(installLandlockThenSeccomp(processWide, policy, augmentedPolicy, scopingPolicy, attempt))
+            preparePreSeccompEffects(preparedPolicy, attempt)
+            return recordInstallationResult(installLandlockThenSeccomp(processWide, policy, preparedPolicy, captured, attempt))
         } catch (fatal: Error) {
             fatal.addSuppressed(PartialInstallationException(attempt.snapshot()))
             ContainmentRegistryEffectInterpreter.apply(ContainmentRegistryEffect.InstallationFailed(processWide, fatal))
@@ -304,13 +324,75 @@ public object ContainedExecutors {
         return receipt
     }
 
+    internal fun augmentForScoping(
+        policy: PolicyDefinition<*>,
+        scoping: io.mazewall.enforcer.internal.execution.FrozenStackScoping,
+    ): PolicyDefinition<*> =
+        when (scoping) {
+            is io.mazewall.enforcer.internal.execution.FrozenStackScoping.Legacy -> augmentForScoping(policy, scoping.policy)
+            is io.mazewall.enforcer.internal.execution.FrozenStackScoping.Live -> scoping.bootstrap.planScoping(policy)
+        }
+
     private fun augmentForScoping(
         policy: PolicyDefinition<*>,
         scopingPolicy: StacktraceScopingPolicy,
-    ): PolicyDefinition<*> =
-        policy.copy(
-            syscallActions = policy.syscallActions + scopingPolicy.handlers.keys.associateWith { SeccompAction.ACT_NOTIFY },
+    ): PolicyDefinition<*> {
+        validateScopingComposition(policy, scopingPolicy)
+        return policy.copy(
+            syscallActions = policy.syscallActions +
+                scopingPolicy.handlers.keys
+                    .mapNotNull { syscall ->
+                val action = policy.syscallActions[syscall] ?: policy.defaultAction
+                when (action) {
+                    SeccompAction.ACT_KILL_PROCESS, SeccompAction.ACT_KILL_THREAD, SeccompAction.ACT_TRAP, is SeccompAction.ACT_ERRNO -> null
+                    SeccompAction.ACT_ALLOW, SeccompAction.ACT_NOTIFY, SeccompAction.ACT_LOG, is SeccompAction.ACT_TRACE -> syscall to SeccompAction.ACT_NOTIFY
+                }
+            }.toMap(),
         )
+    }
+
+    private fun captureSupportedScoping(
+        policy: PolicyDefinition<*>,
+        scopingPolicy: StacktraceScopingPolicy,
+        environment: InstallationEnvironment,
+    ): io.mazewall.enforcer.internal.supervisor.CapturedScopingPolicy? {
+        if (!environment.platform.isSupported()) return null
+        val captured = io.mazewall.enforcer.internal.supervisor.CapturedScopingPolicy
+            .capture(scopingPolicy)
+        validateScopingComposition(policy, captured.dispatch)
+        return captured
+    }
+
+    private fun validateScopingComposition(
+        policy: PolicyDefinition<*>,
+        scopingPolicy: StacktraceScopingPolicy,
+    ) {
+        for (syscall in scopingPolicy.handlers.keys) {
+            when (policy.syscallActions[syscall] ?: policy.defaultAction) {
+                SeccompAction.ACT_LOG, is SeccompAction.ACT_TRACE ->
+                    throw IllegalArgumentException("Selected stacktrace handler cannot compose with LOG or TRACE: $syscall")
+                SeccompAction.ACT_KILL_PROCESS, SeccompAction.ACT_KILL_THREAD, SeccompAction.ACT_TRAP,
+                is SeccompAction.ACT_ERRNO, SeccompAction.ACT_ALLOW, SeccompAction.ACT_NOTIFY,
+                -> Unit
+            }
+        }
+    }
+
+    private fun prepareSpawnPolicy(
+        policy: PolicyDefinition<*>,
+        captured: io.mazewall.enforcer.internal.supervisor.CapturedScopingPolicy?,
+    ): PolicyDefinition<*>? {
+        if (captured == null) return null
+        val snapshot = policy.copy(syscallActions = java.util.Map.copyOf(policy.syscallActions))
+        return augmentForScoping(snapshot, captured.dispatch).also(::validateSpawnComposition)
+    }
+
+    private fun validateSpawnComposition(policy: PolicyDefinition<*>) {
+        val auditDefault = policy.defaultAction == SeccompAction.ACT_LOG || policy.defaultAction is SeccompAction.ACT_TRACE
+        val supervisedExec = listOf(Syscall.EXECVE, Syscall.EXECVEAT).any { policy.syscallActions[it] == SeccompAction.ACT_NOTIFY }
+        val missingSpawn = listOf(Syscall.FORK, Syscall.VFORK, Syscall.CLONE).any { it !in policy.syscallActions }
+        require(!auditDefault || !supervisedExec || !missingSpawn) { "Supervised exec cannot compose with inherited LOG or TRACE spawn action" }
+    }
 
     private fun unsupportedPlatformReceipt(
         processWide: Boolean,
@@ -347,7 +429,7 @@ public object ContainedExecutors {
         processWide: Boolean,
         requestedPolicy: PolicyDefinition<*>,
         policy: PolicyDefinition<*>,
-        scopingPolicy: StacktraceScopingPolicy,
+        scopingPolicy: io.mazewall.enforcer.internal.supervisor.CapturedScopingPolicy,
         attempt: InstallationAttempt,
     ): io.mazewall.enforcer.api.InstallationReceipt {
         val landlockApplied = when (applyLandlockIfNecessary(processWide, policy, attempt)) {
@@ -370,7 +452,7 @@ public object ContainedExecutors {
     private fun installSeccompFilter(
         processWide: Boolean,
         combinedPolicy: PolicyDefinition<*>,
-        scopingPolicy: StacktraceScopingPolicy,
+        scopingPolicy: io.mazewall.enforcer.internal.supervisor.CapturedScopingPolicy,
         landlockApplied: Boolean,
         attempt: InstallationAttempt,
     ): io.mazewall.enforcer.api.InstallationReceipt {
@@ -417,7 +499,7 @@ public object ContainedExecutors {
                         processWide = processWide,
                         requestedPolicy = combinedPolicy,
                         supervisorRegistration = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
-                            .acquireTaskSession(scopingPolicy, attempt.native),
+                            .acquireCapturedTaskSession(scopingPolicy, attempt.native),
                         landlockApplied = landlockApplied,
                         fallback = attempt.fallback,
                         progress = attempt.snapshot(),
@@ -561,7 +643,7 @@ public object ContainedExecutors {
         toInstall: PolicyDefinition<*>,
         newBlocks: Map<Syscall, SeccompAction>,
         newDefaultAction: SeccompAction,
-        scopingPolicy: StacktraceScopingPolicy,
+        scopingPolicy: io.mazewall.enforcer.internal.supervisor.CapturedScopingPolicy,
         attempt: InstallationAttempt,
     ): AutoCloseable? {
         val arch = io.mazewall.platform.syscall.Arch
@@ -578,7 +660,7 @@ public object ContainedExecutors {
                         defaultAction = newDefaultAction,
                     ),
                 )
-            val session = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller.installSupervisedFilterForThread(
+            val session = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller.installCapturedSupervisedFilterForThread(
                 toInstall,
                 scopingPolicy,
                 {

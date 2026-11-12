@@ -11,6 +11,61 @@ import kotlin.test.assertIs
 
 class ControlSessionMachineTest {
     @Test
+    fun `completion must belong to pending command and matching session`() {
+        val command = ControlCommand.Attach(1234, AttachMode.UPROBE, "/opt/agent.so", 0x1000L, 0x42, TierEEmissionMode.FULL_STREAM)
+        val state = ControlSessionState.Attaching(command)
+        val events = listOf(
+            ControlSessionEvent.AttachSucceeded(AttachedSessionInfo(9999, 0x42), command),
+            ControlSessionEvent.AttachSucceeded(AttachedSessionInfo(1234, 1), command),
+            ControlSessionEvent.AttachSucceeded(AttachedSessionInfo(1234, 0x42), command.copy()),
+            ControlSessionEvent.AttachFailed("wrong operation", command.copy()),
+        )
+        for (event in events) {
+            val transition = ControlSessionMachine.evaluate(state, event)
+            assertEquals(state, transition.state, "$event")
+            assertEquals(ControlReply.err("STATE"), assertIs<ControlSessionEffect.SendReply>(transition.effect).reply)
+        }
+    }
+
+    @Test
+    fun `terminal state absorbs commands syntax and attach completions`() {
+        val command = ControlCommand.Attach(1234, AttachMode.UPROBE, "/opt/agent.so", 0x1000L, 0x42, TierEEmissionMode.FULL_STREAM)
+        val events = listOf(
+            ControlSessionEvent.CommandReceived(command),
+            ControlSessionEvent.CommandReceived(ControlCommand.Detach),
+            ControlSessionEvent.CommandReceived(ControlCommand.Status),
+            ControlSessionEvent.CommandReceived(ControlCommand.Shutdown),
+            ControlSessionEvent.CommandReceived(ControlCommand.Unknown("unknown")),
+            ControlSessionEvent.SyntaxError(ControlReply.err("syntax")),
+            ControlSessionEvent.AttachSucceeded(AttachedSessionInfo(1234, 0x42), command),
+            ControlSessionEvent.AttachFailed("failed", command),
+        )
+        for (event in events) {
+            val transition = ControlSessionMachine.evaluate(ControlSessionState.Terminated, event)
+            assertEquals(ControlSessionState.Terminated, transition.state, "$event")
+            assertIs<ControlSessionEffect.SendReply>(transition.effect)
+            assertEquals(ControlReply.err("STATE"), transition.effect.reply)
+        }
+    }
+
+    @Test
+    fun `completion outside attaching preserves the existing state`() {
+        val command = ControlCommand.Attach(1234, AttachMode.UPROBE, "/opt/agent.so", 0x1000L, 0x42, TierEEmissionMode.FULL_STREAM)
+        val states = listOf(ControlSessionState.Idle, ControlSessionState.Attached(AttachedSessionInfo(1, 1)), ControlSessionState.Terminated)
+        val events = listOf(
+            ControlSessionEvent.AttachSucceeded(AttachedSessionInfo(1234, 0x42), command),
+            ControlSessionEvent.AttachFailed("failed", command),
+        )
+        for (state in states) {
+            for (event in events) {
+            val transition = ControlSessionMachine.evaluate(state, event)
+            assertEquals(state, transition.state, "$state $event")
+            assertIs<ControlSessionEffect.SendReply>(transition.effect)
+        }
+        }
+    }
+
+    @Test
     fun `initial state is Idle`() {
         val machine = ControlSessionMachine
         val state = ControlSessionState.Idle
@@ -57,7 +112,7 @@ class ControlSessionMachineTest {
 
         val transition = ControlSessionMachine.evaluate(
             ControlSessionState.Attaching(attachCmd),
-            ControlSessionEvent.AttachSucceeded(session),
+            ControlSessionEvent.AttachSucceeded(session, attachCmd),
         )
         assertEquals(ControlSessionState.Attached(session), transition.state)
         val effect = assertIs<ControlSessionEffect.SendReply>(transition.effect)
@@ -77,7 +132,7 @@ class ControlSessionMachineTest {
 
         val transition = ControlSessionMachine.evaluate(
             ControlSessionState.Attaching(attachCmd),
-            ControlSessionEvent.AttachFailed("permission denied"),
+            ControlSessionEvent.AttachFailed("permission denied", attachCmd),
         )
         assertEquals(ControlSessionState.Idle, transition.state)
         val effect = assertIs<ControlSessionEffect.SendReply>(transition.effect)

@@ -35,6 +35,9 @@ internal class TierECollectorLoop(
     private var previousReadinessWakeup = false
     private val receiptAges = TierEReceiptAgeAccumulator()
 
+    @Volatile
+    private var lastMetrics = snapshotMetrics()
+
     /** Drains once, delivers newly resolved observations, then applies bounded idle pacing. */
     fun pollOnce(): List<ResolvedSyscall> {
         val result = synchronized(this) {
@@ -42,7 +45,7 @@ internal class TierECollectorLoop(
             val outcome = session.pollOutcome(receiptClock)
             receiptAges.recordAll(outcome.receiptAgesNanos)
             polls++
-            if (outcome.drainedEventCount == 0) {
+            val polled = if (outcome.drainedEventCount == 0) {
                 if (previousReadinessWakeup) readinessSpuriousWakeups++
                 previousReadinessWakeup = false
                 idlePolls++
@@ -66,6 +69,8 @@ internal class TierECollectorLoop(
                 nextIdleNanos = policy.initialIdleNanos
                 PollResult(outcome.resolved, 0)
             }
+            lastMetrics = snapshotMetrics()
+            polled
         }
         if (result.resolved.isNotEmpty()) onResolved(result.resolved)
         if (result.idleDelayNanos > 0) {
@@ -84,6 +89,7 @@ internal class TierECollectorLoop(
                     }
                     TierEEventReadiness.TIMEOUT -> readinessTimeouts++
                 }
+                lastMetrics = snapshotMetrics()
             }
         }
         return result.resolved
@@ -116,8 +122,10 @@ internal class TierECollectorLoop(
         return session.finish(definitions, producerClosed).also { terminal = true }
     }
 
-    @Synchronized
-    fun metrics(): TierECollectorLoopMetrics =
+    /** Last completed poll/readiness snapshot; control must never wait for a live native drain. */
+    fun metrics(): TierECollectorLoopMetrics = lastMetrics
+
+    private fun snapshotMetrics(): TierECollectorLoopMetrics =
         TierECollectorLoopMetrics(
             polls = polls,
             activePolls = activePolls,
@@ -136,9 +144,9 @@ internal class TierECollectorLoop(
     @Synchronized
     override fun close() {
         if (!closed) {
-            closed = true
             terminal = true
             session.close()
+            closed = true
         }
     }
 

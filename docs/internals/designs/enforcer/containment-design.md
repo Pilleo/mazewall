@@ -724,6 +724,29 @@ was published. Fatal cleanup errors outrank ordinary startup failures, retaining
 as suppressed evidence; every independent release is attempted. Completed resource releases are
 not repeated. See the [startup migration guide](../api/daemon-startup-migration.md).
 
+The notification daemon retains each session's eventfd wakeup with its original connection owner.
+Admitted signal and drain operations are counted through physical exit; retirement remains Pending
+while they are active. A dispatched close with an uncertain result remains Unknown, retains its
+original owner and failure, and is never replayed. Eventfd Unknown closes admission and requests
+global shutdown. A connection descriptor with an uncertain close also remains owned and consumes
+one of the existing `maxConnections` reservations, but does not by itself close admission or stop
+other sessions; this permits later helper retirement while capacity remains. Admission reserves
+capacity before accepting or taking a direct connection, and the public `clientSockets` list is
+observational rather than admission authority. At capacity, the listener poll is disabled until
+capacity returns, without a readable-backlog spin. The daemon's supervisor exchange borrows its
+control socket; the original connection is its sole closer. See
+[`EventFdCompletionWakeup`](../../../../platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/EventFdCompletionWakeup.kt),
+[`SeccompDaemonEngine`](../../../../platform/src/main/kotlin/io/mazewall/platform/seccomp/daemon/SeccompDaemonEngine.kt),
+[`SupervisorDaemonEngine`](../../../../enforcer/src/main/kotlin/io/mazewall/enforcer/internal/supervisor/SupervisorDaemonEngine.kt)
+and the owning [eventfd](../../../../platform/src/test/kotlin/io/mazewall/platform/seccomp/daemon/EventFdCompletionWakeupTest.kt) and [supervisor daemon](../../../../enforcer/src/test/kotlin/io/mazewall/enforcer/supervisor/SupervisorDaemonEngineTest.kt) tests.
+
+The internal daemon's JVM-callable `handleConnection` descriptor remains callable, but capacity,
+cutoff or duplicate rejection now leaves the supplied socket with its caller. An unadmitted direct
+`processConnectionStep` cannot start an Active session. Callers must not infer native Live readiness
+or physical listener retirement from these controls. Eventfd construction and arena pre-return windows,
+actual arena-close failure qualification, and the separate profiler and daemon cleanup diagnostics
+remain open; see the [bounded acceptance record](../../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task-eventfd-ownership-full-build-fixed2/controller-decision.md).
+
 Transient off-heap structs use `Arena.ofConfined()` for automatic deallocation.
 The daemon's reusable notification and response buffers use process-lifetime shared
 `SegmentPool.owned(...)` pools. Each session holds generation-specific `SegmentLease`
@@ -808,6 +831,13 @@ To reinforce process-wide (Tier 1) security boundaries without breaking JVM thre
 ---
 
 ## 11. Experimental: Stacktrace-Enforced Scoping (L4 Call-Path Binding)
+
+The existing `Thread.getStackTrace` mechanism below is legacy/experimental. The
+separate [live stack scoping contract](live-stack-scoping.md) has a native core only;
+its reviewed guard, bridge and enforcement remain proposed, unimplemented and
+unqualified, and never silently fall back to that mechanism.
+Executable-memory restrictions do not make JVM stack metadata unforgeable; neither
+path is an ACE or hostile-plugin boundary in shared memory and FD space.
 
 In addition to static syscall filtering, `mazewall` supports dynamic **Stacktrace-Enforced Scoping** (using `StacktraceScopingPolicy` and `JvmStackInspector`). This binds a system call's permission check to the calling JVM execution stack trace in real time.
 
@@ -968,7 +998,7 @@ Open fast-path authorization requires a resolved path and a copied pathname. Unr
 
 Supervised `connect` imports the original socket with `pidfd_getfd` inside the authority helper and connects that same open-file description. It returns the terminal value zero, not a replacement FD. Socket type, binding, options, and status flags therefore remain attached to the original tracee descriptor. Supported address-less `accept`/`accept4` create a new descriptor and retain atomic ADDFD-with-SEND, including requested CLOEXEC behavior. Native `EINPROGRESS`, `EAGAIN`, permission errors, and timeout errno are returned unchanged; neither route changes shared file status flags or retries by creating another socket.
 
-The supervisor JVM owns one bounded `SocketHelperPool`, with four reusable independently terminable helper JVM slots and at most 64 queued operations. Internal settings `mazewall.supervisor.socketHelpers` (1–32) and `mazewall.supervisor.socketQueue` (1–4096) are validated before executor creation. Production prewarms all slots with ordinary counted jobs before announcing daemon readiness, under one five-second startup budget; failure prevents readiness and runs normal pool cleanup. Fixtures can retain lazy startup. Slots execute one operation at a time, retain clean children, and replenish failed/cancelled children only after reaping. Queue saturation releases request ownership and returns `EAGAIN`. Private mode-0700 UNIX endpoints carry owned CLOEXEC SCM_RIGHTS descriptors. Standalone socket-operation frames carry copied socket addresses (at most 128 bytes), accept flags, errno, and peer-address snapshots; no confined arena crosses the process boundary. Authority frames additionally carry the immutable notification registers so only the child performs tracee-memory reads.
+The supervisor JVM owns one bounded `SocketHelperPool`, with four reusable independently terminable helper JVM slots and at most 64 queued operations. Internal settings `mazewall.supervisor.socketHelpers` (1–32) and `mazewall.supervisor.socketQueue` (1–4096) are validated before executor creation. Production prewarms all slots with ordinary counted jobs before announcing daemon readiness, under one shared startup budget of five seconds by default; failure prevents readiness and runs normal pool cleanup. An explicit `mazewall.supervisor.prewarmTimeoutMillis` value must be ASCII decimal from 1 through 15000 milliseconds; invalid values fail before supervisor child launch or direct-daemon prewarm. The manager forwards only the validated canonical value to its supervisor JVM. This outer budget does not change the separate five-second helper connection wait, ten-second pool cleanup budget, or 30-second parent readiness wait. Fixtures can retain lazy startup. Slots execute one operation at a time, retain clean children, and replenish failed/cancelled children only after reaping. Queue saturation releases request ownership and returns `EAGAIN`. Private mode-0700 UNIX endpoints carry owned CLOEXEC SCM_RIGHTS descriptors. Standalone socket-operation frames carry copied socket addresses (at most 128 bytes), accept flags, errno, and peer-address snapshots; no confined arena crosses the process boundary. Authority frames additionally carry the immutable notification registers so only the child performs tracee-memory reads.
 
 The retained standalone-operation protocol also carries capability-relative opens. A request
 contains a copied relative UTF-8 pathname (0–4095 bytes, rejecting NUL, malformed
@@ -1017,6 +1047,151 @@ Cancellation does not undo a connect already completed by the kernel or change
 the original open-file description's flags.
 
 Before opening IPC, a helper verifies its expected direct parent and registers an independent JDK ProcessHandle exit monitor. Owner death (including SIGKILL) halts the helper on the monitor thread, releasing imported descriptors even while the operation thread is blocked in native accept/connect. A parent that died before registration fails the direct-parent check; death during registration completes the exit notification. This private helper mechanism adds no FFM layouts or downcalls.
+
+#### Private confined-read helper (B4 D1)
+
+The internal `PrestartedConfined` mode now has a separate, socket-only branch in
+the existing Pool/Session/Job/Process/Main owners. It spends one prestarted child
+on one immutable manifest binding, with one active and one queued read. A setup
+acknowledgment admits root transfer; `Ready` requires the child's actual platform
+operation thread to install Landlock, then seccomp `NO_EXEC`, and complete a health
+read. The mode has no replacement child and rejects legacy operation tags.
+
+`PreparedHelperReadPlan` binds the canonical source policy, resource/owner
+generation and independently observed ancestry. It borrows the explicit application
+directory and separately owns 1–64 reviewed runtime-file pins. Static read denials
+remain denials. Exact support digests and original names are revalidated; an explicit
+no-writer lifetime premise is required because neither pins nor repeated hashes
+make mutable bytes immutable. Application subtree grants include existing hardlinks.
+
+The channel uses nonblocking bounded frames and SCM_RIGHTS with a single I/O owner.
+Independently observed current/child time namespaces and zero offsets establish the
+common `CLOCK_MONOTONIC` domain; each operation keeps its original at-most-five-second
+deadline, possibly shortened by a local budget. Root adoption is acknowledged only
+after the forwarding duplicate is closed. Results remain quarantined until the
+upstream receipt, any relay intermediate close, helper close and matching `DONE`.
+Cancellation waits for both I/O and any claimed-result owner to quiesce before reap;
+failed quiescence/reap retains the same counted slot and original resources for retry.
+Native close failure retires its FD generation and is never retried by integer.
+
+The relay retains the received local cap across frame/descriptor effects and stage
+waits while echoing the original wire deadline. Only completed setup/read clears
+that cap. Confined worker failures publish after I/O quiescence; fatal failures
+retain primary identity even after cancellation and reach the worker's uncaught
+handler after retirement is scheduled. Transfer-duplication failures preserve typed
+native permission/errno alongside the retained original resource owners.
+
+Runtime inventory checks acquired mapped objects and reviewed exact-file identities;
+genuine read-only Linux random/urandom preopens are recognized without device grants.
+The child receives `/dev/null` stdin, discarded stdout and write-only stderr. Trusted
+GC/JIT/reaper/housekeeping threads remain outside operation-thread Landlock; existing
+FDs/mappings are not revoked. This is a controlled helper boundary, not whole-JVM ACE
+containment. The process-wide Tier 1 baseline remains required for downstream use.
+
+The [open D1 issue](../../backlog/issue-20261105-074955-139-b4-d1-implement-real-prestarted-confined-read-help.md)
+records host and isolated real-child controls, including allowed bytes/EOF, forbidden
+readable preopens and pinned reopen, actual socket backpressure, GC, owner death and
+errno-preserving close failure.
+The independent review's deadline, fatal-propagation and structured-errno findings
+have compiling RED/GREEN regressions. Final-input rootful011 passed all18 real-child
+cases with zero skips/failures and physical retirement of every acquired helper;
+the host/static gate passed. The issue remains open for the combined whole-B4 gate.
+The private D2 integration below is awaiting acceptance; listener/notification binding
+and live-stack enforcement remain subsequent gates. Ordinary defaults stay legacy.
+
+#### Private managed helper readiness and retirement (B4 D2)
+
+`SupervisorDaemonManager.prepareConfinedReadBootstrap` acquires and observes the
+daemon and its sole prestarted helper before the process baseline. The internal
+`ManagedRuntime.prepareConfinedRead` path admits one exclusive helper-bearing domain,
+registers its plan/session before SETUP, and requires all root receipts and actual
+helper Ready before worker installation. Worker ancestry and current/child time
+domains are checked again on the worker. Only the known Tier 1 delta (one seccomp
+filter, mode 2, NNP 1) is normalized; other canonical observations must match.
+
+The existing daemon accepted-connection worker relays the shared stages. Platform
+cleanup still owns the accepted socket. Cleanup reconnection waits for the old I/O
+loop and the platform's actual socket-cleanup publication; RETIRED must match the
+binding, deadline and helper PID/start captured before setup. Failed cleanup retains
+the same owners and first failure for a later bounded retry.
+
+The relay applies completed job stages before processing a parent frame. Descriptor
+delivery can precede the helper's forwarding acknowledgment; the relay retains at
+most one early receipt matching the active binding, request ID and deadline until
+that acknowledgment completes. The unchanged receiver state machine then validates
+the receipt. A receipt alone never commits or releases the intermediate descriptor;
+the original deadline, cancellation and failure cleanup remain in force.
+
+Helper-bearing drain retains the existing manager and in-flight sweep. Caller
+timeout/interruption does not cancel that sweep; a later drain retries only after
+the initial retirement thread and workers end. Support pins and original resources
+close only after authenticated physical helper retirement. Shutdown is claimed under
+the runtime gate, then joined outside it. A historical cleanup failure remains
+Incomplete even after successful release with zero live workers. Queued preparation
+cancellation settles admission at the original task's run boundary.
+
+The [D2 issue](../../backlog/issue-20261105-175119-373-b4-d2-integrate-pre-install-confined-helper-readin.md)
+records 228 passing connected host cases and rootful006's eight passing isolated
+cases (zero skips/aborts/failures), including actual repeated drain, helper loss,
+root0-before-root1 and paused result receipt. Missing/premature Ready, peer EACCES
+and time mismatch use labeled native/observation faults; the extra worker Landlock
+restriction and helper loss are real. The authorized rootful envelope began with
+NNP 1; NNP 0 transitions and unprivileged map-files access remain unqualified.
+Independent D2 review and the combined whole-B4 build are still acceptance gates.
+No-writer and no-later-namespace-mutation premises remain necessary; this private
+path grants no notification or live-stack authority.
+
+Independent review found terminal accepted-close disposal could strand retirement,
+fatal setup rollback could be downgraded, and an unobserved fatal drain sweep could
+be lost on replacement. All three now have compiling RED/GREEN regressions. Four
+additional disposable-child controls verify published prepared-resource owners:
+pre-dispatch exceptions retain their genuine tokens for retry; a dispatched close
+is terminal even on error and must not be repeated. Helper plans preserve borrowed
+application roots, operation resources reject admission after retirement starts,
+and independent Landlock/resource cleanup still runs after failure.
+
+The expanded connected selection passed268/268 enforcer tests; platform474/474 and
+profiler32/32 passed. The warning ratchet now has zero added findings. Successor
+rootful007 passed8/8 D2 cases and helper-regression-rootful001 passed18/18 D1 cases,
+zero skips/aborts/failures; both containers exited0 with no OOM and unchanged input
+checks. The first combined build failed its warning ratchet; the corrected successor
+passed that gate but failed enforcer integration (18 failures/232 tests, two skips).
+Qualification inputs remained unchanged after that build. Later shared-harness
+correction preserved timeout/interruption output by signalling acquired process
+handles rather than closing their pipes; focused tests and forced-path regression
+checks passed. Renewed rootful010/helper004 controls passed8/8 and18/18 after the
+first loaded harness bytes were verified. These are not a full-build pass.
+
+The one-worker012 full gate passed10 consumer build-logic cases but failed18/232
+integration cases. Seventeen failures came from test fixtures omitting an existing
+read-only shared runtime mapping. Fixture inventory now reviews parent private and
+non-writable shared regular-file mappings, preserving canonical identity/digest,
+support limits and the no-writer premise. It never derives authority from arbitrary
+helper mappings. Production mapping checks are unchanged. The corrected non-root
+helper/readiness selection passed27/27 with no skips/errors/failures in014.
+
+The independent socket-import failure reached native `pidfd_getfd` after policy
+admission. The earlier conditional test stopped because running-daemon baseline
+equivalence could not be established; that audit remains historical and equivalence
+is still unproven. The operator subsequently selected official `moby/profiles/seccomp`
+v0.2.4 commit `245180c51918481c0525424b3ee025d2b435d46c` as a new declared test
+baseline. The reviewed candidate adds only `ALLOW pidfd_getfd` for argument 2 equal
+to zero. Paired probes and the actual socket test passed under that candidate; the
+socket test was 1/1 with no skips, aborts or failures, and the container exited
+0/PID 0/no OOM. No library/source permission bypass or added capability was used.
+See [the scoped issue](../../backlog/issue-20261106-081057-933-investigate-owned-worker-scoped-socket-denial-in-n.md)
+for exact probe results, baseline hash and evidence. Full012 remains the last failed
+full gate, full015 has not launched, and full acceptance remains pending; no
+default-built-in or default-parallel pass is claimed.
+
+**Acquisition rollback remains a separate limitation.** These retry controls cover
+published owners, not failures before an acquisition returns an owner. In particular,
+a pre-dispatch close exception during `PreparedLandlock.prepare` rollback has no
+published runtime owner to retry. The operator retained ordinary-drain compatibility
+and explicitly deferred that broader ownership-transfer protocol to
+[its own issue](../../backlog/issue-20261106-013649-338-retain-failed-prepared-acquisition-rollback-owners.md).
+This fault path is unqualified; a failed rollback must not be described as physical
+resource retirement or successful cleanup.
 
 Descriptor ownership also covers setup before a reply can be interpreted. The imported listening socket's cleanup scope encloses accept-buffer allocation and initialization. A completed route effect is held by a single-use `SupervisorReplyHandoff` while the handler creates its reply arena and response buffer. If setup fails, the handoff disposes any unconsumed AddFd or opened secure-exec descriptor before terminal failure accounting. Transfer goes directly to the sole reply interpreter and retires the handoff; neither a failed disposal nor a post-transfer failure can close the same descriptor again. The original setup failure stays primary, with cleanup failures retained as suppressed evidence.
 

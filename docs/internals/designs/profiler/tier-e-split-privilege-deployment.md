@@ -104,6 +104,286 @@ The daemon sets the socket to owner-only `0600` by default. A cross-UID target r
 to set `TIER_E_SOCKET_GID`; the daemon then assigns that group and uses `0660`. The socket directory
 must itself be operator-owned and non-writable by unrelated identities.
 
+### Installed operator helper
+
+The installed `tier-e-target-helper` writes a v1 registration and sends an ATTACH using the existing
+modified-UTF control protocol. The operator must use the **same** operator-owned registration for
+the helper and daemon, and an operator-controlled socket and directory. V1 does not attest the
+daemon's registration mode, registration ID or artifact filename: those fields are not in ATTACH or
+its PID-only success reply. The registered daemon independently matches the wire PID, session,
+library path and offset and checks its registered incarnation. The helper checks the local file and
+live incarnation; neither a numeric PID nor a successful reply proves PID-namespace translation or
+that the target mapped the selected library. Run the helper with the collector's actual host-PID
+and filesystem visibility, and configure equivalent agent mounts explicitly.
+
+For example, on a host with JDK, an existing built agent, and operator-created trusted directories,
+the following target waits for a gate until attachment. Set absolute paths before running it. The
+collector requires root and the kernel/BPF privileges described above; the target need not have
+them. Here both processes use the same namespace and paths; cross-namespace deployments must map
+the agent and definition directories deliberately. This example is not cross-UID qualification.
+
+```sh
+(
+set -eu
+BIN=/absolute/path/to/profiler/build/install/tier-e-daemon/bin
+AGENT=/absolute/path/to/libmazewall_stack_agent.so
+ROOT=/absolute/path/to/operator-owned-run-directory
+DEFS=/absolute/path/to/target-and-collector-definition-directory
+EVIDENCE=/absolute/path/to/operator-owned-evidence-directory
+mkdir -p "$ROOT" "$DEFS" "$EVIDENCE"
+test ! -e "$ROOT/go"
+test ! -L "$ROOT/go"
+test ! -e "$ROOT/control.sock"
+test ! -L "$ROOT/control.sock"
+test ! -e "$ROOT/daemon.pid"
+test ! -L "$ROOT/daemon.pid"
+# Authenticate before starting either background process; subsequent sudo calls never prompt.
+sudo -v
+TARGET=
+DAEMON=
+cleanup() {
+  status=$?
+  trap - EXIT
+  set +e
+  if [ -n "$TARGET" ] && kill -0 "$TARGET" 2>/dev/null; then
+    if kill "$TARGET"; then
+      wait "$TARGET" 2>/dev/null || :
+    else
+      echo "Target cleanup failed; operator action required" >&2
+    fi
+  fi
+  if [ -n "$DAEMON" ] && kill -0 "$DAEMON" 2>/dev/null; then
+    if [ -s "$ROOT/daemon.pid" ]; then
+      COLLECTOR=$(sudo -n cat "$ROOT/daemon.pid")
+      case "$COLLECTOR" in
+        ''|*[!0-9]*) echo "Invalid collector PID; operator cleanup required" >&2 ;;
+        *) sudo -n kill "$COLLECTOR" || echo "Collector cleanup failed; operator action required" >&2 ;;
+      esac
+    else
+      kill "$DAEMON" 2>/dev/null || :
+      echo "Collector PID unavailable; inspect daemon.log and clean up if needed" >&2
+    fi
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
+cat > "$ROOT/GateTarget.java" <<'EOF'
+import java.nio.file.*;
+class GateTarget {
+  public static void main(String[] args) throws Exception {
+    while (!Files.exists(Path.of(args[0]))) Thread.sleep(20);
+    for (int i = 0; i < 100; i++) Files.readString(Path.of("/proc/self/status"));
+  }
+}
+EOF
+javac "$ROOT/GateTarget.java"
+java -agentpath:"$AGENT"=session=4d5a,mode=full-stream,session-bound-definitions,definitions="$DEFS/orders.mzse" \
+  -cp "$ROOT" GateTarget "$ROOT/go" &
+TARGET=$!
+"$BIN/tier-e-target-helper" register --registration-id orders --pid "$TARGET" \
+  --marker-path "$AGENT" --session-tag 4d5a --artifact-file orders.mzse --output "$ROOT/target.reg"
+sudo -n sh -c 'echo "$$" > "$1"; shift; exec "$@"' sh "$ROOT/daemon.pid" \
+  env TIER_E_SOCKET="$ROOT/control.sock" TIER_E_TARGET_REGISTRATION="$ROOT/target.reg" \
+  TIER_E_DEFINITION_ROOT="$DEFS" TIER_E_EVIDENCE_ROOT="$EVIDENCE" TIER_E_ALL_TARGET_CAPTURE=1 \
+  "$BIN/tier-e-daemon" > "$ROOT/daemon.log" 2>&1 &
+DAEMON=$!
+attempt=0
+while [ ! -S "$ROOT/control.sock" ]; do
+  if ! kill -0 "$DAEMON" 2>/dev/null || [ "$attempt" -ge 100 ]; then
+    echo "Collector failed or socket readiness timed out; see $ROOT/daemon.log" >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  sleep 0.1
+done
+if sudo -n "$BIN/tier-e-target-helper" attach --registration "$ROOT/target.reg" --socket "$ROOT/control.sock"; then
+  touch "$ROOT/go"
+else
+  echo "ATTACH failed; target gate remains closed" >&2
+  exit 1
+fi
+wait "$TARGET"
+TARGET=
+# The daemon automatically retires the registered target on exit; allow up to its 30-second artifact wait.
+sleep 31
+sudo -n cat "$EVIDENCE/orders-19802.tier-e.json"
+sudo -n cat "$EVIDENCE/orders-19802.events.jsonl"
+)
+```
+
+The example requires fresh paths: registration and event publication do not clobber existing files;
+owner-only registration staging is validated before an atomic hard link. Unsupported hard links,
+unsafe v1 values (including whitespace in the marker path), stale/exited PIDs, duplicate options,
+bad ELF, permissions, EOF, `ERR`, and malformed or nonmatching-PID replies fail. No directory
+permissions or privileges are adjusted. Socket access and evidence access are independent: defaults
+are owner-only, while `TIER_E_SOCKET_GID` and `TIER_E_EVIDENCE_GID` are explicit separate choices.
+Inspect the terminal reason, independent completeness dimensions, event counts and
+`policy_eligibility=false`; a file alone is not completeness proof. Target-exit retirement replaces
+a helper detach command (none is provided); physical retirement and failed cleanup remain distinct
+as described below. The example's exit trap attempts termination of its owned target and collector.
+The operator must verify actual process exit and physical retirement even when SIGTERM succeeds,
+not only when cleanup reports failure. Signal delivery is not exit proof. The trap never opens the
+gate after setup or ATTACH failure. This host-sudo recipe is illustrative: its syntax/failure
+branches were checked, but host sudo authentication, prompting/policy and privileged execution
+were not qualified. The configured-engine qualification below does not establish those properties.
+
+### Configured rootful installed-command qualification
+
+The 2026-11-03 A4c qualification uses the existing owned Docker fixture, not host sudo:
+
+```sh
+TIER_E_QUALIFICATION_ARTIFACTS="$PWD/build/a4c-retained" \
+MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock \
+./gradlew :profiler:rootfulContainerTest \
+  --tests '*installed all-target daemon qualifies evidence access*' --console=plain
+```
+
+Run from the repository root with the configured local rootful endpoint, native compiler/CMake,
+host `setfacl`/`getfacl`, and image `mazewall-tier-e-rootful:latest`. The existing fixture prepares
+checkout-bound native assets and `installDist`; no optional pre-existing agent property can satisfy
+this test. Missing privileges/assets/locality are not qualification. The tested image was amd64
+Temurin 25.0.5+8 on Linux 7.2.11-x64v3-xanmod1; other mappings/filesystems need their own execution.
+
+The fixture runs `TierEAllTargetWorkload` as UID/GID 20000 with capabilities dropped in its own
+PID namespace. A separate privileged collector container joins the host PID namespace; its mounts
+provide the **same agent inode**, installed distribution at `/installed`, definitions at
+`/fixture/work`, and evidence at `/fixture/evidence`. After resolving the actual host PID from
+the owned target's Docker state and checking `/proc` starttime, `NSpid` and mapped library, the
+actual collector-side command sequence is:
+
+```sh
+# Executed inside the owned collector; PID and AGENT come from the checked fixture identity.
+/installed/bin/tier-e-target-helper register --registration-id orders --pid "$PID" \
+  --marker-path "$AGENT" --session-tag 4d5a --artifact-file definitions.mzse \
+  --output /fixture/target.reg
+env TIER_E_SOCKET=/fixture/control.sock TIER_E_TARGET_REGISTRATION=/fixture/target.reg \
+  TIER_E_DEFINITION_ROOT=/fixture/work TIER_E_EVIDENCE_ROOT=/fixture/evidence \
+  TIER_E_ALL_TARGET_CAPTURE=1 TIER_E_SOCKET_GID=20002 /installed/bin/tier-e-daemon
+# Separate exec, only after daemon readiness; gate release follows successful ATTACH only.
+/installed/bin/tier-e-target-helper attach --registration /fixture/target.reg --socket /fixture/control.sock
+touch /fixture/work/first.gate
+# Wait for the independent attributed-phase oracle, then release the ambient phase.
+touch /fixture/work/second.gate
+```
+
+This is a description of commands executed by the test, not a standalone background/lifecycle
+runner. Selected-group cases additionally set `TIER_E_EVIDENCE_GID=20002` **at daemon launch**;
+default cases omit it while retaining socket GID 20002. Both final files are parsed as non-root
+UID 20003/GID 20002 in selected-group mode and denied to UID 20001/GID 20004. Default `0600`
+denies both readers. Readers have no supplementary groups, effective/permitted/bounding/inheritable/
+ambient capabilities, or user-namespace UID remapping; traversal is independently exercised.
+Inherited-default-ACL cases first prove that named UID 20001 can read a `0640` counterexample,
+then prove denial on both finals and unchanged directory defaults. Selected finals remove the
+named ACL; default finals retain an ineffective mask. Setup ACL utilities are test-only.
+
+The fixture retains complete command output, registration, JSONL/terminal/dictionary bytes,
+UID/GID/capability and permission/ACL receipts, image/runtime identity and cleanup evidence.
+It checks exactly 20 `openat` observations through each of the two independent managed paths,
+ambient rows, submitted/admitted/retained equality, zero loss/unknown-marker counts, dictionary
+digest, and target-exit lifecycle closure. `terminal_reason=COMPLETE` and complete capture/export
+do **not** imply complete attribution: these ambient captures honestly retain
+`evidence_integrity=INCOMPLETE`, `attribution_coverage=false`, and `policy_eligibility=false`.
+Wrong wire session and namespace-local PID are rejected before gates/attributed collection;
+the existing rootful stale/reuse/session-artifact negatives remain separate checks.
+The workload installs uncaught-failure handlers before starting its two platform workers. After
+both physical joins, either worker failure reaches main with both causes retained and prevents
+`attributed-complete` and `completed`. Normal execution still performs exactly 20+20 cold reads
+and the later 20 reads. This corrected workload is a successor source/build identity; historical
+samples do not acquire this stronger completion guarantee retroactively.
+Collector termination opens a pidfd **before** checking the exec-preserved process incarnation and
+the cgroup bound to the owned collector's immutable container ID. Only that pinned handle receives
+SIGTERM; mismatches/unsupported operations fail without a numeric-PID fallback. The collector uses
+the host cgroup namespace so the check is explicit. Signal delivery is followed by actual exec
+completion and host `/proc` absence checks; native FD retirement and creation closure remain separate.
+
+Every attempted daemon launch requires its recorded, validated startup identity for cleanup,
+even when the owned exec client has already exited or launch/readiness failed. Missing identity
+fails quiescence before export; client death and target stop do not prove collector stop. Cleanup
+never learns a replacement identity from an arbitrary late PID. With known identity, only verified
+daemon absence or pinned termination followed by physical absence permits export; exec-client
+retirement is checked separately afterwards. If no launch was ever attempted, daemon stop is skipped.
+
+Writer-stop failure prohibits export and recursive ownership restoration. Required dictionary,
+final-file, identity and command exports must succeed, and copied bytes are read back before
+ownership restoration. Only actual ENOENT before artifact creation is optional; permission, command,
+transport and local-write failures reject qualification. Any qualification/quiescence/export failure
+uses the existing lifecycle's `retainOnFailure=true`: close creation and stop for recovery, **retain**
+the exact containers/source tree rather than deleting the only evidence. `recovery.txt` records the
+owned names/IDs/path and actual inspect receipts, not a claim of successful deletion or physical stop.
+An operator recovering that exact sample must verify creation closure, immutable ownership and
+stopped writers, complete and verify recovery export, then explicitly retire the owned resources.
+The fixture does not auto-delete a failed sample merely because a later cleanup/export attempt worked.
+Successful qualification separately checks owned container removal and scratch absence. The original
+successful A4c samples did not qualify these fault paths; fix-round host regressions cover stop,
+export/write, fatal-folding and stale pinned-identity failures before renewed rootful acquisition.
+The issues remain open for independent review and the controller-owned combined full build.
+
+### Cheap evidence preflight and offline replay
+
+Use the Kotlin tooling checker before an expensive diagnostic or review. It requires an explicit
+absolute root and named regular-file members; it never guesses a historical schema or walks a
+tree. `schema_version: 1` manifests have `domain` and nonempty `entries`, each with `path`, `bytes`
+and lowercase `sha256`. Domains have deliberately different comparison rules:
+
+| Domain | Meaning |
+|---|---|
+| `live` | Complete bytes plus canonical absolute path, device/inode, permissions, UID/GID and mtime/ctime nanoseconds. Relocation/replacement is a mismatch. |
+| `snapshot` | Complete bytes at the named relative member beneath the supplied root. Relocation and metadata differences are allowed. |
+| `prefix` | Exactly the captured first `bytes` bytes. Later appended bytes are outside the claim; truncation or changed prefix fails. |
+
+Live entries require `canonical`, `device`, `inode`, `mode`, `uid`, `gid`, `mtime_ns`, `ctime_ns`.
+Unknown informational fields are ignored, not compared as whole objects. Missing required fields,
+duplicate members/JSON keys, unsupported versions, traversal and symlink members are refused.
+Files must be quiescent during each check. A newly captured manifest establishes a current-byte
+baseline, not historical provenance; authenticate the manifest's reference separately.
+
+```bash
+# EVIDENCE and REPORTS are absolute existing directories; REPORTS is outside EVIDENCE.
+./gradlew :profiler:tierEEvidence \
+  --args="capture snapshot '$EVIDENCE' '$REPORTS/inputs.json' \
+  work-definitions.mzse work-capture-yield.mzcy work-open-calls.diag \
+  evidence-boundary.bpfdiag evidence-ptrace-open.log \
+  evidence-orders-19802.events.jsonl evidence-orders-19802.tier-e.json"
+./gradlew :profiler:tierEEvidence \
+  --args="verify '$EVIDENCE' '$REPORTS/inputs.json' '$REPORTS/preflight.json'"
+
+./gradlew :profiler:tierEA4Replay \
+  -PtierEReplayDirectory="$EVIDENCE" -PtierEReplayTargetPid="$TARGET_PID" \
+  -PtierEReplayStartTicks="$START_TICKS" -PtierEReplayOutput="$REPORTS/replay.json"
+
+./gradlew :profiler:tierEEvidence \
+  --args="verify '$EVIDENCE' '$REPORTS/inputs.json' '$REPORTS/postflight.json'"
+```
+
+This A4-specific replay uses the existing MZSE/MZCY/native/boundary decoders, exact 20+20 cold
+selection and `classifyRetainedProduction` for registration `orders`, session `19802`. Supply the
+retained **host** PID and process start ticks explicitly. It checks bounded regular inputs and
+unchanged bytes across classification, including the final trace newline. It retains open-event
+filtering, creation-mode semantics and conservative cross-thread FD lifetime guards. It establishes
+neither writer retirement nor runtime custody; those remain the fixture's operational gates.
+
+All reports are versioned and say `qualification=false`. Identity outcomes are `VERIFIED` (exit 0),
+`MISMATCH` (1), `INVALID_MANIFEST` (2). Replay outcomes are `INCONCLUSIVE_BASELINE` (0), `INCOMPLETE`
+(1), `LOCALIZED_BOUNDARY` (1), `INVALID_EVIDENCE` (2). A clean replay does not reproduce or explain
+an intermittent missing event. Gradle reports nonzero child exits as task failure: inspect the JSON
+for the diagnostic outcome rather than calling the task failure a new runtime failure.
+
+Manifests are limited to 4096 members/8 MiB. JSON reports are limited to 64 KiB **before** exclusive
+creation; existing outputs are never replaced. Reports contain counts, input digests/references and
+at most 20 sampled reasons/IDs, with explicit truncation. Raw files stay in their original packet.
+The diagnostic's 6 MiB incremental-storage, 16 MiB trace and 64 KiB tracer-stderr limits still apply.
+The checker uses the existing tooling source set, JSON parser and JDK file APIs. Its JUnit
+regressions run in `:profiler:test`, `unitCheck` and `build`; no Python runner is needed for this
+checker. Replay itself is explicit and is not an ordinary build prerequisite.
+
+For each executable milestone, keep one owner through command settlement. Its compact handoff
+must name changed paths, exact commands and exit statuses, per-task execution state (`EXECUTED`,
+`FROM_CACHE`, `UP_TO_DATE`, `NOT_RUN`), evidence file references and the next unresolved gate.
+Use the JSON outcome separately from execution state. Review the small diff against its preserved
+dirty-checkout baseline and inspect referenced failures; do not embed raw stdout or repeatedly
+rehash an already authenticated packet without a changed input or a concrete unresolved concern.
+Keep ordinary build failure, incomplete evidence and pending research explicit in the roadmap.
+
 ## Artifact handoff and closure
 
 The target and collector share only a narrow artifact volume. They may mount it at different paths:
@@ -126,9 +406,128 @@ incarnation, session epoch, validated artifact byte length and SHA-256, terminal
 count, every verdict dimension, and `policy_eligibility=false`. Its digest is computed from the
 same bounded bytes read through the validated descriptor, not by reopening the artifact path.
 
+Evidence access is independent of socket access. With `TIER_E_EVIDENCE_GID`
+absent, both `.events.jsonl` and `.tier-e.json` are owner-only `0600`. An
+explicit decimal host GID in `0..2147483647` selects that group and exact `0640`
+for both, including incomplete/finalization-failed terminal reports. Empty,
+signed, nonnumeric and out-of-range values reject daemon startup rather than
+falling back; no socket group is implicitly reused. The operator must provide
+the intended host/container GID mapping and directory traversal permissions.
+Evidence roots must be existing non-symlink, operator-owned directories, with
+ancestors protected from unrelated writers; the daemon does not chmod/chown
+directories or establish mappings.
+
+Each owned temporary file is completely written and closed before access is
+applied. In selected-group mode the daemon first removes inherited extended
+access ACLs, then assigns the group, then sets exact permissions. `0640` alone
+is not group-only: its ACL mask can activate inherited named-user grants.
+Directory/default ACLs are untouched. ACL removal accepts only success or
+ENODATA (attribute absent); permission/unsupported errors reject publication.
+Default `0600` does not widen the inherited ACL mask. Partial/failed event
+temporaries remain unpublished and are restored to owner-only permissions;
+failure to restore is also propagated.
+
+Event publication uses same-directory atomic hard-link creation, which rejects
+an existing/racing destination (including a symlink) without replacing it.
+Filesystems lacking this operation fail closed. After the commit the temporary
+name is unlinked; an unlink failure is observable cleanup failure and can leave
+two names for the same complete, access-controlled inode, not partial output.
+Terminal reports intentionally atomically replace their final name (a symlink
+name is replaced, never followed); unsupported atomic rename fails without a
+non-atomic fallback, preserving an existing final. Publication provides atomic
+visibility, not a power-loss/directory-fsync durability guarantee. Actual
+distinct-UID daemon/default-ACL qualification for this access option was executed
+in the configured A4c fixture above; host mode/ACL assertions alone remain insufficient.
+
 A malformed, stale, symlinked, unclosed, unavailable, or PID-reused artifact is fail-closed. It
 cannot produce complete transport or lifecycle evidence. An empty ring is never producer-closure
 proof.
+
+Collection termination and physical retirement are separate. If finalization throws, the daemon
+attempts independent cleanup and retains its closing owner until the worker has joined and owned
+resources have retired. `ATTACH` cannot replace that owner; another `DETACH` or shutdown retries
+only outstanding cleanup, not finalization or evidence publication. Successful cleanup never
+upgrades failed collection. Interrupted joins preserve interruption, and cleanup aggregation keeps
+the original failure unless a fatal error takes precedence, retaining distinct suppressed failures.
+
+Direct and protocol shutdown close control admission under the service lock before cleanup.
+All subsequent commands, including `STATUS` and repeated protocol `SHUTDOWN`, reject with `ERR STATE`;
+direct shutdown remains the cleanup-retry and original-failure interface. A failed retirement cannot
+reopen admission. Reentrant shutdown during synchronous attachment construction/use explicitly fails
+with retirement pending, without closing resources still in use. The single acquisition owner adopts
+late-returned resources, stops further acquisition and retires them after the acquisition unwinds;
+failed retirement remains owned for direct shutdown retry. No asynchronous attachment registry is used.
+
+Control metrics read a safely published immutable snapshot of the last completed poll/readiness
+update, never the monitor held by an in-progress native poll. The immutable session epoch also
+requires no poll/session monitor. Thus terminal metrics and `STATUS` cannot turn a bounded worker
+join into an unbounded control wait; a blocked interruption-resistant drain keeps its source owned
+until an explicit retry can join it. Native engine cleanup and acquisition rollback use the same
+fatal-first failure fold, including an `Error` thrown by a later independent native-close seam.
+Every attempted raw FD close still clears ownership and is never retried; failed mappings remain
+owned for their existing per-mapping retry.
+
+A registered collection-finalization failure attempts exactly one terminal report with the actual registration,
+session, host PID and process incarnation: `evidence_integrity=INCOMPLETE`,
+`terminal_reason=FINALIZATION_FAILED`, zero claimed resolved syscalls, every proof dimension false,
+and `policy_eligibility=false`. It does not manufacture a profile or publish a completed
+`.events.jsonl`. Before shutdown, `STATUS` retains the failure; the triggering `DETACH`/`SHUTDOWN` replies with an
+error, and direct shutdown propagates it. A terminal-report write failure is logged and retained
+with the original error, without another report attempt on cleanup retry. An unregistered legacy
+failure logs and returns an error without inventing registered evidence.
+
+Required event-file delivery is part of finalization, not an ignorable optional
+consumer. If a successfully collected result cannot publish its event file,
+the daemon retains the actual publication exception, increments the existing
+terminal-delivery failure accounting and attempts one transport-incomplete
+terminal report with `terminal_reason=FINALIZATION_FAILED`. Successful terminal
+publication cannot turn the failed event publication into a successful control
+reply. A second terminal-publication failure is folded into the original with
+fatal-first ordering; cleanup retries never repeat either publication. If an
+already-exited/reused registration is rejected before resource acquisition,
+failed stale-identity terminal publication is likewise logged and retained with
+the attach rejection, without creating a resource owner. Fatal publication
+errors propagate by identity; ordinary failures remain observable through
+status/direct shutdown, and existing final evidence is not discarded.
+
+Host fault tests exercise the real daemon/runtime/service/session owner chain, including failed
+attachment acquisition, target exit, interrupted joins, marker detach and terminal counter failures,
+independent clock cleanup, fatal-first aggregation, and retry of the real ring reader's failed unmap.
+These tests do not establish privileged attachment or kernel qualification.
+For opt-in recovery-map collection, physical reader termination is distinct from scan failure.
+Both exclusive final-scan handoff and source close keep the reader, scanner, queue reservation and
+source/memory owner intact when the existing one-second join times out or is interrupted. A live
+reader prevents source close/unmap and overlapping exclusive scans; cleanup retry joins it before
+retirement. A terminated failed reader can retire normally while recovery diagnostics remain
+incomplete. Host faults exercise these paths with shared source memory, including daemon ownership
+and once-only failed reporting across a recovery timeout. Experimental opt-in requirements and
+kernel qualification remain unchanged.
+
+Final A1 verification on current dirty source passed the full build in 13m 27s (242 tasks: 75
+executed, 167 up-to-date), after independent Sol review and scoped re-review of the fixes and Sol
+approval of Terra's mechanical status correction. Profiler host tests discovered 1,471, executed
+1,467 and skipped four; rootful tests ran 22 without failures, errors or skips. Regular integration
+discovered 16, executed seven and skipped nine; fresh-JVM integration discovered 24, executed 19
+and skipped five. All selected results had zero failures or errors. The amd64 rootful image was
+Temurin 25.0.5+8-LTS, `sha256:8047b78d7af43aa5fa9dcfd61d5bbdcf47044e0a154221b2e8a3ba28c4fa02e1`,
+on host kernel 7.2.11-x64v3-xanmod1. The review and build logs are local scratch, not published
+receipts. This is not clean-commit or historical pinned/source acceptance, does not qualify every
+optional native/HotSpot asset, and does not explain A3's historical 71/72 failure. A1 verification
+is complete but its issue remains open for orchestrator-managed review/integration; no A2/A4
+behavior, API, performance or policy eligibility is promoted. Report-only evidence remains
+`policy_eligibility=false`.
+
+Final A2 verification on the same current dirty-source/rootful-image/kernel/JDK
+envelope passed independent A2a and A2b Sol reviews with no findings and the
+combined `MAZEWALL_DOCKER_HOST=unix:///var/run/docker.sock ./gradlew build`:
+exit 0 in 14m 7s, 242 tasks (79 executed, 163 up-to-date), local
+`a2-full-build.log`. Profiler host discovered 1,484, executed 1,480, skipped four;
+rootful executed 22 with no skips; regular integration discovered 16, executed
+seven and skipped nine; fresh-JVM discovered 24, executed 19 and skipped five.
+No failures or errors. This is not clean-commit or historical qualification;
+both A2 issues remain open for orchestrator review/integration. The current
+delayed-artifact case pass does not explain A3's historical 71/72 or qualify its
+reference lane, and no A4 functionality is claimed implemented.
 
 ### Opt-in per-syscall evidence handoff (Kubescape SBoB PoC)
 

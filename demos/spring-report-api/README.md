@@ -56,6 +56,23 @@ deployment. Do not approve a candidate simply because it was generated or hashed
 The `nativeTest` harness writes its own explicitly labelled synthetic test approval;
 that is not production-review authority. Normal `serve` never creates approval.
 
+### Startup failure ownership in an embedding JVM
+
+This sample admits one `main` attempt per application classloader. A caller embedding
+`main` can catch a failure on the same original platform thread and call
+`ReportApplication.failedStartup()`. If a handle is returned, `status()` observes the
+retained outcome and `retryRetirement(Duration)` requests eligible cleanup through the
+same original owners. Keep the handle and original application lifetime reachable
+while Pending or Unknown; a stop callback does not prove that workers or resources
+have physically retired. A failed Spring refresh may leave context closure Unknown,
+which is retained rather than replayed or called Complete. Another thread cannot use
+the handle, and the standalone CLI does not keep a failed JVM alive for recovery.
+
+The supplied runtime budget bounds the runtime retirement attempt, not the whole
+retry: unclaimed resolution-owner close has no duration. Actual Complete is required
+before the application clears its original owners. The native fixture's review remains
+synthetic test authority; an operator must independently review a real deployment.
+
 ### Adoption seam and local distributions
 
 Business code remains an ordinary interface/service with explicit transaction and

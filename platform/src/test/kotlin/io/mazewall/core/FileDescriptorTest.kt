@@ -206,8 +206,8 @@ class FileDescriptorTest {
                 },
             )
             try {
-                val failure = org.junit.jupiter.api.assertThrows<RuntimeException> {
-                    fd.use { throw RuntimeException("block failed") }
+                val failure = org.junit.jupiter.api.assertThrows<IllegalArgumentException> {
+                    fd.use { throw IllegalArgumentException("block failed") }
                 }
                 assertEquals("block failed", failure.message)
                 assertTrue(failure.suppressed.any { it.message == "injected close failure" })

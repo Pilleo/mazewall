@@ -21,6 +21,45 @@ class PreparedRetirementTest {
     @TempDir lateinit var directory: Path
 
     @Test
+    fun `release actor is authorized only during its own callback`() {
+        val entered = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+        val observed = AtomicReference<Boolean>()
+        lateinit var retirement: PreparedRetirement
+        retirement = PreparedRetirement("retirement-actor-check", {}, {
+            observed.set(retirement.isCurrentReleaseActor())
+            entered.countDown()
+            check(resume.await(3, TimeUnit.SECONDS))
+        }, { throw it })
+        assertFalse(retirement.isCurrentReleaseActor())
+        retirement.start()
+        try {
+            retirement.request()
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+            assertTrue(observed.get())
+            assertFalse(retirement.isCurrentReleaseActor())
+        } finally {
+            resume.countDown()
+            retirement.await(Deadline(Duration.ofSeconds(3)))
+        }
+        assertTrue(retirement.finished())
+        assertFalse(retirement.isCurrentReleaseActor())
+    }
+
+    @Test
+    fun `unstarted rollback authorizes only its original bootstrap during callback`() {
+        val observed = AtomicReference<Boolean>()
+        lateinit var retirement: PreparedRetirement
+        retirement = PreparedRetirement("retirement-unstarted-actor", {}, {
+            observed.set(retirement.isCurrentReleaseActor())
+        }, { throw it })
+        assertFalse(retirement.isCurrentReleaseActor())
+        retirement.releaseUnstarted()
+        assertTrue(observed.get())
+        assertFalse(retirement.isCurrentReleaseActor())
+    }
+
+    @Test
     fun `deadline retains real descriptor until physical worker and stalled validation finish despite cleanup interruption`() {
         val pin = PreparedPath.open(Files.writeString(directory.resolve("resource"), "data"), LinuxNative.snapshot())
         val workerRelease = CountDownLatch(1)

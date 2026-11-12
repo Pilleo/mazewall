@@ -79,6 +79,7 @@ internal class TierECollectorRuntime(
     private var state = TierECollectorRuntimeState.NEW
     private var terminalRequest: TierETerminalRequest? = null
     private var terminalResult: TierECollectorRuntimeResult? = null
+    private var terminalFailure: Throwable? = null
 
     @Synchronized
     fun start() {
@@ -93,6 +94,7 @@ internal class TierECollectorRuntime(
         artifact: TierEDefinitionArtifact,
         producerClosure: TierEProducerClosure,
     ): TierECollectorRuntimeResult {
+        terminalFailure?.let { throw it }
         val request = TierETerminalRequest(artifact, producerClosure)
         terminalResult?.let { existing ->
             check(terminalRequest == request) { "Tier E collector runtime already has a different terminal request" }
@@ -104,7 +106,7 @@ internal class TierECollectorRuntime(
 
         val artifactMatchesSession = artifact.expectedSessionEpoch == session.currentSessionEpoch()
         val completeLifecycle = producerClosure == TierEProducerClosure.PROVEN && artifactMatchesSession
-        val profile = service.finish(artifact.path, producerClosed = completeLifecycle)
+        val profile = finalizeOnce { service.finish(artifact.path, producerClosed = completeLifecycle) }
         val reason = when {
             !artifactMatchesSession -> TierETerminalReason.ARTIFACT_SESSION_MISMATCH
             producerClosure == TierEProducerClosure.UNPROVEN -> TierETerminalReason.PRODUCER_CLOSURE_UNPROVEN
@@ -126,7 +128,8 @@ internal class TierECollectorRuntime(
         definitions: AgentDefinitionFile.Contents,
         producerClosure: TierEProducerClosure,
     ): TierECollectorRuntimeResult {
-        val request = TierETerminalRequest(null, producerClosure)
+        terminalFailure?.let { throw it }
+        val request = TierETerminalRequest(null, producerClosure, definitions)
         terminalResult?.let { existing ->
             check(terminalRequest == request) { "Tier E collector runtime already has a different terminal request" }
             return existing
@@ -136,7 +139,7 @@ internal class TierECollectorRuntime(
         }
         val artifactMatchesSession = definitions.publication?.sessionEpoch == session.currentSessionEpoch()
         val completeLifecycle = producerClosure == TierEProducerClosure.PROVEN && artifactMatchesSession
-        val profile = service.finish(definitions, completeLifecycle)
+        val profile = finalizeOnce { service.finish(definitions, completeLifecycle) }
         val reason = when {
             !artifactMatchesSession -> TierETerminalReason.ARTIFACT_SESSION_MISMATCH
             producerClosure == TierEProducerClosure.UNPROVEN -> TierETerminalReason.PRODUCER_CLOSURE_UNPROVEN
@@ -154,10 +157,19 @@ internal class TierECollectorRuntime(
 
     @Synchronized
     override fun close() {
-        if (state == TierECollectorRuntimeState.TERMINAL) return
         service.close()
         state = TierECollectorRuntimeState.TERMINAL
     }
+
+    @Suppress("TooGenericExceptionCaught") // Retain the original outcome across physical cleanup retries.
+    private fun finalizeOnce(action: () -> TierEProfile): TierEProfile =
+        try {
+            action()
+        } catch (cause: Throwable) {
+            terminalFailure = cause
+            state = TierECollectorRuntimeState.TERMINAL
+            throw cause
+        }
 
     private companion object {
         const val DEFAULT_STOP_JOIN_MILLIS = 1_000L
@@ -173,4 +185,6 @@ private enum class TierECollectorRuntimeState {
 private data class TierETerminalRequest(
     val artifact: TierEDefinitionArtifact?,
     val producerClosure: TierEProducerClosure,
+    // Contents and its nested records already own immutable collections; share the consumed snapshot.
+    val definitions: AgentDefinitionFile.Contents? = null,
 )

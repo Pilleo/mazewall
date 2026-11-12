@@ -31,29 +31,96 @@ import java.util.HexFormat
 public class PreparedOperationResources private constructor(
     public val runtime: RuntimeProfile,
     internal val definition: PolicyDefinition<*>,
-    internal val native: RuntimeSnapshot,
-    internal val resources: PreparedResourceSet,
-    private val artifact: ImplementationArtifact,
+    private val legacyNative: RuntimeSnapshot?,
+    private val legacyResources: PreparedResourceSet?,
+    private val artifact: ImplementationArtifact?,
     private val strictRecipe: Boolean,
     private val policyJson: String,
+    private val directOwner: DirectResolutionCapture?,
+    private val directMetadata: DirectResolutionCapture.Metadata?,
 ) : AutoCloseable {
+    private constructor(
+        runtime: RuntimeProfile,
+        definition: PolicyDefinition<*>,
+        native: RuntimeSnapshot,
+        resources: PreparedResourceSet,
+        artifact: ImplementationArtifact,
+        strictRecipe: Boolean,
+        policyJson: String,
+    ) :
+        this(runtime, definition, native, resources, artifact, strictRecipe, policyJson, null, null)
+
+    private constructor(owner: DirectResolutionCapture, metadata: DirectResolutionCapture.Metadata) :
+        this(metadata.runtime, metadata.definition, null, null, null, metadata.strict, metadata.policyJson, owner, metadata) {
+        check(owner.permitsPublication(metadata))
+    }
+
+    internal val native: RuntimeSnapshot get() = checkNotNull(legacyNative) { "Direct result has no native alias" }
+    internal val resources: PreparedResourceSet get() = checkNotNull(legacyResources) { "Direct result has no resource alias" }
+
+    internal fun isDirectResult(): Boolean = directOwner != null
+
+    internal fun attachDirectPermit(
+        runtime: ManagedRuntime,
+        permit: Any,
+    ): Boolean = directOwner?.attachDirectPermit(runtime, permit, this) == true
+
+    internal fun beginDirectValidation(
+        runtime: ManagedRuntime,
+        permit: Any,
+        engine: RuntimeSnapshot,
+    ): Boolean = directOwner?.beginDirectValidation(runtime, permit, this, engine) == true
+
+    internal fun matchesDirectResources(
+        permit: Any,
+        resources: Any,
+    ): Boolean = directOwner?.matchesDirectResources(permit, this, resources) == true
+
+    internal fun requireDirectSource(
+        runtime: ManagedRuntime,
+        permit: Any,
+        resources: PreparedResourceSet,
+    ) = checkNotNull(directOwner).requireDirectSource(runtime, permit, this, resources)
+
+    internal fun allocateDirectLandlock(
+        runtime: ManagedRuntime,
+        permit: Any,
+        environment: io.mazewall.enforcer.api.InstallationEnvironment,
+    ): io.mazewall.landlock.PreparedLandlock = checkNotNull(directOwner).allocateDirectLandlock(runtime, permit, this, environment)
+
+    internal fun awaitDirectValidators(action: DirectClaimAction) = checkNotNull(directOwner).awaitDirectValidators(this, action)
+
+    internal fun retireDirect(action: DirectClaimAction) = checkNotNull(directOwner).retireDirect(this, action)
+
+    internal fun requireDirectRetirementReady(action: DirectClaimAction) = checkNotNull(directOwner).requireDirectRetirementReady(this, action)
+
+    internal fun directRetirementPending(): Boolean = directOwner?.directRetirementPending(this) == true
+
     private enum class Phase { AVAILABLE, TRANSFERRED, CLOSED }
 
     private var phase = Phase.AVAILABLE
-    public val implementationClass: Class<*> get() = artifact.type
-    public val implementationSha256: String = artifact.sha256
-    public val resourceGeneration: String = HexFormat.of().formatHex(
+    private var retirementStarted = false
+    public val implementationClass: Class<*> get() = artifact?.type ?: checkNotNull(directMetadata).implementation
+    public val implementationSha256: String = artifact?.sha256 ?: checkNotNull(directMetadata).sha256
+    public val resourceGeneration: String = directMetadata?.generation ?: HexFormat.of().formatHex(
         MessageDigest
-            .getInstance("SHA-256")
-        .digest((resources.generation + "\u0000" + artifact.generation + "\u0000" + artifact.type.name + "\u0000" + implementationSha256).toByteArray()),
+            .getInstance(
+            "SHA-256",
+        ).digest((resources.generation + "\u0000" + checkNotNull(artifact).generation + "\u0000" + implementationClass.name + "\u0000" + implementationSha256).toByteArray()),
     )
 
     /** Revalidates retained object identities and selected content snapshots without installing. */
-    @Synchronized
     public fun validate() {
-        check(phase != Phase.CLOSED) { "Prepared operation resource owner is closed" }
-        resources.validate()
-        artifact.validate()
+        val owner = directOwner
+        if (owner != null) {
+            owner.validate(this)
+        } else {
+            synchronized(this) {
+                check(!retirementStarted) { "Prepared operation resource owner is closed" }
+                resources.validate()
+                checkNotNull(artifact).validate()
+            }
+        }
     }
 
     @Synchronized
@@ -63,7 +130,8 @@ public class PreparedOperationResources private constructor(
         engine: RuntimeSnapshot,
         abi: Int,
     ) {
-        check(phase == Phase.AVAILABLE) { "Prepared operation resources have already been consumed or closed" }
+        check(directOwner == null) { "Direct result runtime claim is not available" }
+        check(phase == Phase.AVAILABLE && !retirementStarted) { "Prepared operation resources have already been consumed or closed" }
         require(runtime == policy.runtime && policyJson == policy.toJson()) { "Prepared resources do not match reviewed policy/runtime" }
         check(native.engineIdentity === engine.engineIdentity) { "Prepared resources belong to a different native engine" }
         require(
@@ -73,6 +141,30 @@ public class PreparedOperationResources private constructor(
         validateMember(binding)
         validate()
         phase = Phase.TRANSFERRED
+    }
+
+    internal fun claimDirect(
+        runtimeOwner: ManagedRuntime,
+        permit: Any,
+        binding: OperationBinding,
+        policy: CanonicalPolicyArtifact.Worker,
+        engine: RuntimeSnapshot,
+        abi: Int,
+    ) {
+        val owner = checkNotNull(directOwner)
+        owner.claimDirect(runtimeOwner, permit, this, binding, policy, engine, abi)
+    }
+
+    internal fun validateDirectClaim(
+        binding: OperationBinding,
+        policy: CanonicalPolicyArtifact.Worker,
+        abi: Int,
+    ) {
+        require(runtime == policy.runtime && policyJson == policy.toJson()) { "Prepared resources do not match reviewed policy/runtime" }
+        require(
+            binding.implementationSha256 == implementationSha256 && binding.resourceGeneration == resourceGeneration,
+        ) { "Reviewed implementation/resource generation does not match actual acquisitions" }
+        if (strictRecipe || definition.allowedFsWritePaths.isNotEmpty()) require(abi >= TRUNCATE_ABI) { "Read-only/read-write recipes require Landlock ABI 3+ for truncate coverage" }
     }
 
     private fun validateMember(binding: OperationBinding) {
@@ -95,19 +187,31 @@ public class PreparedOperationResources private constructor(
         ) {
             "Reviewed JVM method descriptor does not resolve on actual implementation"
         }
-        artifact.requireMemberOrigin(method.declaringClass)
+        checkNotNull(artifact).requireMemberOrigin(method.declaringClass)
     }
 
-    @Synchronized
     override fun close() {
-        if (phase == Phase.AVAILABLE) retire()
+        val owner = directOwner
+        if (owner != null) {
+            when (val outcome = owner.retire()) {
+                is DirectResolutionCapture.Retirement.Complete -> Unit
+                is DirectResolutionCapture.Retirement.Pending -> throw DirectPendingException()
+                is DirectResolutionCapture.Retirement.Unknown -> throw DirectUnknownException(outcome.history)
+                DirectResolutionCapture.Retirement.Transferred -> Unit
+            }
+        } else {
+            synchronized(this) { if (phase == Phase.AVAILABLE) retireLegacy() }
+        }
     }
 
-    @Synchronized
-    @Suppress("TooGenericExceptionCaught") // release every acquisition and report the original cleanup failure
     internal fun retire() {
+        if (directOwner != null) close() else synchronized(this) { retireLegacy() }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // release every acquisition and report the original cleanup failure
+    private fun retireLegacy() {
         if (phase == Phase.CLOSED) return
-        phase = Phase.CLOSED
+        retirementStarted = true
         var failure: Throwable? = null
         try {
             resources.close()
@@ -115,15 +219,21 @@ public class PreparedOperationResources private constructor(
             failure = problem
         }
         try {
-            artifact.close()
+            checkNotNull(artifact).close()
         } catch (problem: Throwable) {
             failure = CleanupFailures.merge(failure, problem)
         }
         failure?.let { throw it }
+        phase = Phase.CLOSED
     }
 
     public companion object {
         private const val TRUNCATE_ABI = 3
+
+        internal fun direct(
+            owner: DirectResolutionCapture,
+            metadata: DirectResolutionCapture.Metadata,
+        ): PreparedOperationResources = PreparedOperationResources(owner, metadata)
 
         /**
          * Resolve exact grants and an ordinary/Boot finished JAR or explicit exploded tree (256 MiB).

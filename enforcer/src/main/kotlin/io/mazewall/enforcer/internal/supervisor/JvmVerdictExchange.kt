@@ -45,11 +45,20 @@ internal sealed interface JvmExchangeResult {
 }
 
 /** The existing fixed-size JVM protocol, with one deadline and no kernel-reply capability. */
+internal enum class ControlSocketOwnership { Owned, Borrowed }
+
 internal class JvmVerdictExchange(
     private val engine: NativeEngine,
     private val socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val sockets: SocketManager,
+    private val ownership: ControlSocketOwnership,
 ) {
+    constructor(
+        engine: NativeEngine,
+        socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        sockets: SocketManager,
+    ) : this(engine, socket, sockets, ControlSocketOwnership.Owned)
+
     context(arena: NativeArena) fun begin(
         request: JvmVerdictRequest,
         deadline: Deadline,
@@ -160,7 +169,7 @@ internal class JvmVerdictExchange(
         }
 
     fun close() {
-        if (socket.isLiveForIo()) sockets.close(socket)
+        if (ownership == ControlSocketOwnership.Owned && socket.isLiveForIo()) sockets.close(socket)
     }
 
     private companion object {

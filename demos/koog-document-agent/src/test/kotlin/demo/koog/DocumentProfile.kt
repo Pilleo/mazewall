@@ -7,7 +7,7 @@ import io.mazewall.enforcer.api.OperationBinding
 import io.mazewall.enforcer.api.OperationPolicyDocument
 import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.WorkerPolicyBuilder
-import io.mazewall.enforcer.api.execution.PreparedOperationResources
+import io.mazewall.enforcer.api.execution.PreparedResolutionOwner
 import io.mazewall.profiler.api.MazewallProfiler
 import io.mazewall.profiler.api.ProfileOptions
 import io.mazewall.profiler.api.ProfileStrategy
@@ -28,16 +28,18 @@ object DocumentProfile {
                 println("PROFILE_DOCUMENT ${result.toProfileDocumentJson()}")
                 // The existing measured-coverage gate throws before any candidate when collection is incomplete.
                 val policy = result.toPolicy(WorkerPolicyBuilder.denyList(runtime).allowJvmClasspath().build(), path.parent)
-                PreparedOperationResources.resolve(runtime, policy, DocumentReader::class.java, setOf(path)).use { resources ->
-                    val binding = OperationBinding(
-                        "read_document",
-                        OperationAdapter.CALLABLE,
-                        resources.implementationSha256,
-                        resources.resourceGeneration,
-                        mapOf("entryPoint" to "readBoundedDocument(Ljava/nio/file/Path;)Ljava/lang/String;"),
-                    )
-                    println("CANDIDATE_DOCUMENT " + OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(runtime, policy), emptySet(), emptyMap()).toJson())
-                    println("REVIEW_REQUIRED measured named reader only; no review authority or installed enforcement")
+                PreparedResolutionOwner.create().use { owner ->
+                    owner.resolve(runtime, policy, DocumentReader::class.java, setOf(path)).use { resources ->
+                        val binding = OperationBinding(
+                            "read_document",
+                            OperationAdapter.CALLABLE,
+                            resources.implementationSha256,
+                            resources.resourceGeneration,
+                            mapOf("entryPoint" to "readBoundedDocument(Ljava/nio/file/Path;)Ljava/lang/String;"),
+                        )
+                        println("CANDIDATE_DOCUMENT " + OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(runtime, policy), emptySet(), emptyMap()).toJson())
+                        println("REVIEW_REQUIRED measured named reader only; no review authority or installed enforcement")
+                    }
                 }
             }
         } finally {

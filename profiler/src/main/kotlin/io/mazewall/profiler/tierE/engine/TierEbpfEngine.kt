@@ -1,6 +1,7 @@
 package io.mazewall.profiler.tierE.engine
 
 import io.mazewall.ffi.memory.ConfinedSegment
+import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
@@ -38,7 +39,69 @@ import java.nio.file.Path
  */
 internal class TierEbpfEngine(
     private val native: RawSyscallOperations,
+    private val boundaryDiagnostics: BoundaryDiagnosticConfig? = null,
+    private val boundaryMapInfo: ((Int) -> String)? = null,
+    private val loadFailureEvidence: (TierEBpfProgramLoadFailureEvidence.Capture) -> Unit = TierEBpfProgramLoadFailureEvidence::write,
 ) : AutoCloseable {
+    internal val boundaryDiagnosticsEnabled: Boolean get() = boundaryDiagnostics != null
+
+    internal fun boundaryControlReporter(
+        installation: Long,
+        publish: (String) -> Unit,
+    ): () -> Unit {
+        require(boundaryDiagnosticsEnabled && installation > 0)
+        synchronized(lifecycleLock) {
+            check(lifecycle == Lifecycle.DETACHED || lifecycle == Lifecycle.CLOSED)
+            boundaryInstallation = installation
+        }
+        return {
+            val line = synchronized(lifecycleLock) {
+                val installed = requireInstalled()
+                check(installed.boundaryInitialized && installed.boundaryInstallation == installation) { "boundary installation identity unavailable" }
+                val control = decodeLiveBoundaryControl(readBoundaryControl(installed))
+                installed.boundaryOrdinal = Math.incrementExact(installed.boundaryOrdinal)
+                boundaryControlReceipt(installation, installed.boundaryOrdinal, installed.boundaryTarget, installed.boundarySession, installed.boundaryAllocatedBytes, control)
+            }
+            // The publisher must never hold FD lifetime protection, even if stdout blocks or fails.
+            publish(line)
+        }
+    }
+
+    private fun readBoundaryControl(installed: Resources): ByteArray =
+        Arena.ofConfined().use { arena ->
+            val key = arena.allocate(ValueLayout.JAVA_INT)
+            val value = arena.allocate(BoundaryLayout.CONTROL_BYTES.toLong(), ValueLayout.JAVA_LONG.byteAlignment())
+            val attr = arena.allocate(BoundaryLayout.LOOKUP_ATTR_BYTES.toLong(), ValueLayout.JAVA_LONG.byteAlignment())
+            attr.set(ValueLayout.JAVA_INT, 0, requireNotNull(installed.boundaryControlFd).value)
+            attr.set(ValueLayout.ADDRESS, BoundaryLayout.LOOKUP_KEY_ADDRESS, key)
+            attr.set(ValueLayout.ADDRESS, BoundaryLayout.LOOKUP_VALUE_ADDRESS, value)
+            bpfCall(BPF_MAP_LOOKUP_ELEM, attr, BoundaryLayout.LOOKUP_ATTR_BYTES.toLong())
+            value.toArray(ValueLayout.JAVA_BYTE)
+        }
+
+    internal fun exportBoundaryDiagnostics(
+        producerClosed: Boolean,
+        quiescent: Boolean,
+    ) {
+        val config = boundaryDiagnostics ?: return
+        val installed = requireInstalled()
+        Arena.ofConfined().use { arena ->
+            val key = arena.allocate(ValueLayout.JAVA_INT)
+            val value = arena.allocate(BoundaryLayout.CONTROL_BYTES.toLong(), ValueLayout.JAVA_LONG.byteAlignment())
+            val attr = arena.allocate(BoundaryLayout.LOOKUP_ATTR_BYTES.toLong(), ValueLayout.JAVA_LONG.byteAlignment())
+            attr.set(ValueLayout.ADDRESS, BoundaryLayout.LOOKUP_KEY_ADDRESS, key)
+            attr.set(ValueLayout.ADDRESS, BoundaryLayout.LOOKUP_VALUE_ADDRESS, value)
+            streamBoundaryDiagnostics(config.output, installed.boundarySession.toLong(), installed.boundaryTarget.toLong(), producerClosed, quiescent, { control, index, buffer ->
+                key.set(ValueLayout.JAVA_INT, 0, index)
+                val fd = if (control) requireNotNull(installed.boundaryControlFd) else requireNotNull(installed.boundaryRecordsFd)
+                attr.set(ValueLayout.JAVA_INT, 0, fd.value)
+                value.fill(0)
+                bpfCall(BPF_MAP_LOOKUP_ELEM, attr, BoundaryLayout.LOOKUP_ATTR_BYTES.toLong())
+                buffer.put(value.asByteBuffer().limit(if (control) BoundaryLayout.CONTROL_BYTES else BoundaryLayout.RECORD_BYTES))
+            })
+        }
+    }
+
     internal data class RawSysEnterAuditCount(
         val openat: Long,
         val openat2: Long,
@@ -287,6 +350,7 @@ internal class TierEbpfEngine(
     private var lifecycle = Lifecycle.DETACHED
     private var resources: Resources? = null
     private var options: TierEOptions = TierEOptions()
+    private var boundaryInstallation = 0L
 
     public fun install(targetTgid: Int) {
         install(targetTgid, 1)
@@ -316,6 +380,29 @@ internal class TierEbpfEngine(
                 sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
             check(!options.benchmarkInvocationIdWitness || installed.preGateAuditEnabled) {
                 "invocation-ID witness requires paired direct raw/main tracepoint programs"
+            }
+            if (boundaryDiagnostics != null) {
+                require(
+                    options.allTargetCapture &&
+                    options.markerVersion == MarkerVersion.V1 &&
+                    options.emissionMode == TierEEmissionMode.FULL_STREAM &&
+                    options.coverageRecoveryMode == CoverageRecoveryMode.DISABLED &&
+                    !options.benchmarkPhases &&
+                    sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT,
+                ) {
+                    "boundary diagnostics require compatible direct-raw v1 all-target capture"
+                }
+                installed.boundaryTarget = targetTgid
+                installed.boundarySession = sessionTag
+                installed.boundaryRecordsFd = createMap(MAP_ARRAY, 4, 112, 32768)
+                installed.boundaryControlFd = createMap(MAP_ARRAY, 4, 128, 1)
+                require(readBoundaryControl(installed).all { it == 0.toByte() }) { "boundary control was not initialized to zero before attachment" }
+                installed.boundaryInitialized = true
+                installed.boundaryInstallation = boundaryInstallation
+                installed.boundaryAllocatedBytes = boundaryAllocatedBytes(
+                    boundaryMapInfo?.invoke(requireNotNull(installed.boundaryRecordsFd).value) ?: boundaryFdInfo(requireNotNull(installed.boundaryRecordsFd)),
+                    boundaryMapInfo?.invoke(requireNotNull(installed.boundaryControlFd).value) ?: boundaryFdInfo(requireNotNull(installed.boundaryControlFd)),
+                )
             }
             installed.invocationBtfFd = loadBtf(InvocationStateBtf.load())
             val taskStorageV2 = options.markerVersion == MarkerVersion.V2
@@ -424,10 +511,15 @@ internal class TierEbpfEngine(
             }
             installed.markerProgFd =
                 loadProg(
-                buildMarkerProgram(options),
-                listOf(installed.requireInvocationStorageFd().value, installed.requireLossFd().value, installed.requireSessionFd().value),
+                if (boundaryDiagnostics == null) buildMarkerProgram(options) else TierEBpfProgramBuilder.buildBoundaryDiagnosticMarkerProgram(options, targetTgid),
+                listOf(installed.requireInvocationStorageFd().value, installed.requireLossFd().value, installed.requireSessionFd().value) +
+                    if (boundaryDiagnostics == null) emptyList() else listOf(requireNotNull(installed.boundaryRecordsFd).value, requireNotNull(installed.boundaryControlFd).value),
                 PROG_KPROBE,
                 "tier_e_marker",
+                installed = installed,
+                loadOrdinal = 1,
+                backend = sysEnterAttachmentBackend,
+                identitySink = if (boundaryDiagnostics == null) null else ({ identity: TierEInstalledProgramIdentity -> installed.boundaryMarkerIdentity = identity }),
             )
             installed.execProgFd =
                 loadProg(
@@ -435,10 +527,15 @@ internal class TierEbpfEngine(
                     listOf(installed.requireInvocationStorageFd().value, -1, installed.requireSessionFd().value),
                     PROG_RAW_TRACEPOINT,
                     "tier_e_exec",
+                    backend = sysEnterAttachmentBackend,
+                    installed = installed,
+                    loadOrdinal = 2,
                 )
             if (!options.benchmarkSysEnterAttachmentShape.isAuditOnly()) {
                 installed.progFd = loadProg(
-                    if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
+                    if (boundaryDiagnostics != null) {
+                        TierEBpfProgramBuilder.buildBoundaryDiagnosticSysEnterProgram(options, targetTgid)
+                    } else if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         if (installed.preGateAuditEnabled) {
                             TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options, targetTgid)
                         } else {
@@ -460,13 +557,16 @@ internal class TierEbpfEngine(
                         installed.earlyTargetOpenatFd?.value ?: -1,
                         installed.preGateAuditFd?.value ?: -1,
                         installed.invocationWitnessFd?.value ?: -1,
-                    ),
+                    ) +
+                        if (boundaryDiagnostics == null) emptyList() else listOf(requireNotNull(installed.boundaryRecordsFd).value, requireNotNull(installed.boundaryControlFd).value),
                     if (sysEnterAttachmentBackend == TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT) {
                         PROG_RAW_TRACEPOINT
                     } else {
                         PROG_TRACEPOINT
                     },
                     "tier_e_syscall",
+                    installed = installed,
+                    loadOrdinal = 3,
                     backend = sysEnterAttachmentBackend,
                     identitySink = { installed.mainProgramIdentity = it },
                 )
@@ -511,6 +611,8 @@ internal class TierEbpfEngine(
                         PROG_TRACEPOINT
                     },
                     "tier_e_audit",
+                    installed = installed,
+                    loadOrdinal = if (installed.mainSysEnterProgramAttached) 4 else 3,
                     backend = sysEnterAttachmentBackend,
                     identitySink = { installed.auditProgramIdentity = it },
                 )
@@ -523,13 +625,14 @@ internal class TierEbpfEngine(
                 lifecycle = Lifecycle.ATTACHED
             }
         } catch (failure: Throwable) {
-            try {
+            val outcome = try {
                 closeResources(installed)
+                failure
             } catch (cleanupFailure: Throwable) {
-                failure.addSuppressed(cleanupFailure)
+                CleanupFailures.merge(failure, cleanupFailure)
             }
             synchronized(lifecycleLock) { lifecycle = Lifecycle.DETACHED }
-            throw failure
+            throw outcome
         }
     }
 
@@ -921,7 +1024,35 @@ internal class TierEbpfEngine(
     }
 
     /** Separate from marker attachment: new target sys_enter handlers cannot publish after disable. */
-    public fun enableCaptureAdmission() = setCaptureAdmission(true)
+    public fun enableCaptureAdmission() {
+        setCaptureAdmission(true)
+        if (boundaryDiagnostics != null) {
+            val installed = requireInstalled()
+
+            fun id(fd: BpfFd?): Int =
+                when (val info = TierEBpfProgramInfoReader.read(native, requireNotNull(fd).value)) {
+                is BpfProgramExecutionEvidence.Available -> info.programId
+                is BpfProgramExecutionEvidence.IdentityOnly -> info.programId
+                is BpfProgramExecutionEvidence.Unavailable -> error("boundary program identity unavailable: ${info.reason}")
+                BpfProgramExecutionEvidence.NotAttached -> error("boundary program is not attached")
+            }
+            check(installed.markerPerfFds.isNotEmpty() && installed.syscallRawTracepointFd != null)
+            System.out.println(
+                "tier-e-boundary-ready: target=${installed.boundaryTarget} epoch=${installed.boundarySession} " +
+                "capacity=32768 record_bytes=112 control_bytes=128 allocated_bytes=${installed.boundaryAllocatedBytes} " +
+                "combined_storage_bound=${BoundaryLayout.INITIAL_STORAGE_BYTES + installed.boundaryAllocatedBytes - BoundaryLayout.MAP_PAYLOAD_BYTES} bookkeeping_bound=65536 " +
+                "main_id=${id(installed.progFd)} main_sha256=${requireNotNull(installed.mainProgramIdentity).sha256} " +
+                "marker_id=${id(installed.markerProgFd)} marker_sha256=${requireNotNull(installed.boundaryMarkerIdentity).sha256}",
+            )
+        }
+    }
+
+    private fun boundaryFdInfo(fd: BpfFd): String =
+        Files.newInputStream(Path.of("/proc/self/fdinfo/${fd.value}"), java.nio.file.LinkOption.NOFOLLOW_LINKS).use { input ->
+        val bytes = input.readNBytes(4097)
+        require(bytes.size <= 4096) { "diagnostic fdinfo exceeds bound" }
+        bytes.toString(Charsets.US_ASCII)
+    }
 
     public fun disableCaptureAdmission() = setCaptureAdmission(false)
 
@@ -1119,7 +1250,7 @@ internal class TierEbpfEngine(
             try {
                 closeOwned(fd)
             } catch (failure: Throwable) {
-                cleanupFailure?.addSuppressed(failure) ?: run { cleanupFailure = failure }
+                cleanupFailure = CleanupFailures.merge(cleanupFailure, failure)
             } finally {
                 // Never retry close(2): on Linux an error may still mean the
                 // descriptor was released and subsequently reused.
@@ -1142,6 +1273,8 @@ internal class TierEbpfEngine(
         close(installed.rawSysEnterAuditProgFd) { installed.rawSysEnterAuditProgFd = null }
         close(installed.markerProgFd) { installed.markerProgFd = null }
         close(installed.execProgFd) { installed.execProgFd = null }
+        close(installed.boundaryRecordsFd) { installed.boundaryRecordsFd = null }
+        close(installed.boundaryControlFd) { installed.boundaryControlFd = null }
         close(installed.ringFd) { installed.ringFd = null }
         close(installed.lossFd) { installed.lossFd = null }
         close(installed.contextMetricFd) { installed.contextMetricFd = null }
@@ -1243,21 +1376,60 @@ internal class TierEbpfEngine(
         mapFds: List<Int>,
         programType: Int,
         programName: String,
+        installed: Resources,
+        loadOrdinal: Int,
         backend: TierESysEnterAttachmentBackend? = null,
         identitySink: ((TierEInstalledProgramIdentity) -> Unit)? = null,
     ): BpfFd {
         return Arena.ofConfined().use {
-            val request = BpfProgLoadRequestEncoder.encode(it, program, mapFds, programType, programName)
+            val request = BpfProgLoadRequestEncoder.encode(it, program, mapFds, programType, programName, boundaryDiagnosticsEnabled)
             identitySink?.invoke(TierEInstalledProgramIdentity.from(programName, requireNotNull(backend), request.instructions))
-            when (val result = bpfResult(BPF_PROG_LOAD, request.attr, BpfProgLoadLayout.SIZE)) {
+            when (val result = bpfResult(BPF_PROG_LOAD, request.attr, request.attr.byteSize())) {
                 is SyscallResult.Success -> result.recordDescriptorAcquisition().getFdOrThrow("BPF_PROG_LOAD", FileDescriptorRole.Bpf)
                 is SyscallResult.Error -> {
+                    if (boundaryDiagnosticsEnabled) {
+                        val failure = IllegalStateException(
+                            "BPF_PROG_LOAD failed: program=$programName ordinal=$loadOrdinal; $result; verifier capture is bounded/incomplete",
+                        )
+                        throw captureLoadFailure(failure, request, installed, loadOrdinal, programName, programType, requireNotNull(backend), result.errno, result.rawValue)
+                    }
                     val log = request.verifierLog.getString(0).trim()
                     val diagnostic = if (log.isEmpty()) "no verifier log" else log
                     throw IllegalStateException("BPF_PROG_LOAD failed: $result; verifier: $diagnostic")
                 }
             }
         }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // evidence must not replace the native error except with the identical fatal Error
+    private fun captureLoadFailure(
+        failure: Throwable,
+        request: BpfProgLoadRequestEncoder.Request,
+        installed: Resources,
+        ordinal: Int,
+        name: String,
+        type: Int,
+        backend: TierESysEnterAttachmentBackend,
+        errno: Int,
+        raw: Long,
+    ): Throwable = try {
+        loadFailureEvidence(
+            TierEBpfProgramLoadFailureEvidence.Capture(
+                request,
+                installed.boundaryInstallation,
+                installed.boundaryTarget,
+                installed.boundarySession,
+                ordinal,
+                name,
+                type,
+                backend,
+                errno,
+                raw,
+            ),
+        )
+        failure
+    } catch (evidenceFailure: Throwable) {
+        CleanupFailures.merge(failure, evidenceFailure)
     }
 
     private fun attachSysEnter(
@@ -1428,6 +1600,15 @@ internal class TierEbpfEngine(
 
 /** The complete FD ownership set for one installation, unpublished until acquisition succeeds. */
 private class Resources {
+    var boundaryInitialized = false
+    var boundaryInstallation = 0L
+    var boundaryOrdinal = 0L
+    var boundaryRecordsFd: BpfFd? = null
+    var boundaryControlFd: BpfFd? = null
+    var boundaryMarkerIdentity: TierEInstalledProgramIdentity? = null
+    var boundaryTarget: Int = 0
+    var boundarySession: Int = 0
+    var boundaryAllocatedBytes: Long = 0
     var invocationStorageFd: BpfFd? = null
     var invocationBtfFd: BpfFd? = null
     var ringFd: BpfFd? = null
@@ -1507,6 +1688,8 @@ private typealias BpfFd = FileDescriptor<FileDescriptorRole.Bpf, FdState.Open, F
  */
 internal object BpfProgLoadLayout {
     const val SIZE: Long = 104
+    const val DIAGNOSTIC_SIZE: Long = 144
+    const val LOG_TRUE_SIZE: Long = 140
     const val PROGRAM_TYPE: Long = 0
     const val INSTRUCTION_COUNT: Long = 4
     const val INSTRUCTIONS: Long = 8

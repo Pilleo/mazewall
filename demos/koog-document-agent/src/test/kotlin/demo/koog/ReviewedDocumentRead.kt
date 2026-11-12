@@ -10,7 +10,7 @@ import io.mazewall.enforcer.api.RuntimeProfile
 import io.mazewall.enforcer.api.TrustedPolicyReview
 import io.mazewall.enforcer.api.execution.DomainLimits
 import io.mazewall.enforcer.api.execution.ManagedRuntime
-import io.mazewall.enforcer.api.execution.PreparedOperationResources
+import io.mazewall.enforcer.api.execution.PreparedResolutionOwner
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.file.Files
@@ -41,26 +41,28 @@ object ReviewedDocumentRead {
         require(artifact.document.policy.runtime == RuntimeProfile.HOTSPOT_JIT)
         val policy = (artifact.document.policy as CanonicalPolicyArtifact.Worker).policy
         val expected = readBoundedDocument(path)
-        PreparedOperationResources.resolve(RuntimeProfile.HOTSPOT_JIT, policy, DocumentReader::class.java, setOf(path)).use { resources ->
-            val budget = Duration.ofSeconds(10)
-            lateinit var worker: Thread
-            ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, budget, budget).use { runtime ->
-                val domain = runtime.prepare(artifact, DomainLimits(1, 4), resources)
-                val result = runtime
-                    .submit(
-                    domain,
-                    Callable {
-                    worker = Thread.currentThread()
-                    readBoundedDocument(path)
-                },
-                ).result()
-                    .toCompletableFuture()
-                    .get(10, TimeUnit.SECONDS)
-                check(result == expected)
+        PreparedResolutionOwner.create().use { owner ->
+            owner.resolve(RuntimeProfile.HOTSPOT_JIT, policy, DocumentReader::class.java, setOf(path)).use { resources ->
+                val budget = Duration.ofSeconds(10)
+                lateinit var worker: Thread
+                ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, budget, budget).use { runtime ->
+                    val domain = runtime.prepare(artifact, DomainLimits(1, 4), resources)
+                    val result = runtime
+                        .submit(
+                        domain,
+                        Callable {
+                        worker = Thread.currentThread()
+                        readBoundedDocument(path)
+                    },
+                    ).result()
+                        .toCompletableFuture()
+                        .get(10, TimeUnit.SECONDS)
+                    check(result == expected)
+                }
+                worker.join(5000)
+                check(!worker.isAlive && !worker.isVirtual)
+                println("REVIEWED_READ actual fixed reviewed policy, matching content, physically retired worker; no automatic approval")
             }
-            worker.join(5000)
-            check(!worker.isAlive && !worker.isVirtual)
-            println("REVIEWED_READ actual fixed reviewed policy, matching content, physically retired worker; no automatic approval")
         }
     }
 

@@ -81,7 +81,8 @@ object IsolatedProcessTester {
         }
 
         override fun destroy(process: Process) {
-            process.destroy()
+            // Process.destroy closes output pipes before their owners can drain buffered evidence.
+            process.toHandle().destroy()
         }
 
         override fun destroy(handle: ProcessHandle) {
@@ -89,7 +90,7 @@ object IsolatedProcessTester {
         }
 
         override fun destroyForcibly(process: Process) {
-            process.destroyForcibly()
+            process.toHandle().destroyForcibly()
         }
 
         override fun destroyForcibly(handle: ProcessHandle) {

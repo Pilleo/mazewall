@@ -27,20 +27,33 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 /** Per-connection USER_NOTIF handler: issues kernel CONTINUE/EPERM/ADDFD verdicts. Coordinates one reducer/effect lifecycle per notification, including deferred socket replies. */
-internal class SupervisorSessionHandler(
+internal class SupervisorSessionHandler internal constructor(
     private val socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
     private val listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
-    engine: NativeEngine = LinuxNative,
-    socketManager: SocketManager = RealSocketManager,
-    private val preparation: SupervisorRoutePreparation = SupervisorRoutePreparation(),
-    private val replyArena: () -> NativeArena = NativeArena::ofConfined,
-    socketHelpers: SocketHelperPool = SupervisorSocketHelpers.pool,
-    admission: SupervisorAdmission = SupervisorSocketHelpers.admission,
-    authorityRoots: List<String>? = null,
+    engine: NativeEngine,
+    socketManager: SocketManager,
+    private val preparation: SupervisorRoutePreparation,
+    private val replyArena: () -> NativeArena,
+    socketHelpers: SocketHelperPool,
+    admission: SupervisorAdmission,
+    authorityRoots: List<String>?,
+    ownership: ControlSocketOwnership,
 ) : SeccompNotifHandler,
     AutoCloseable {
+    constructor(
+        socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        engine: NativeEngine = LinuxNative,
+        socketManager: SocketManager = RealSocketManager,
+        preparation: SupervisorRoutePreparation = SupervisorRoutePreparation(),
+        replyArena: () -> NativeArena = NativeArena::ofConfined,
+        socketHelpers: SocketHelperPool = SupervisorSocketHelpers.pool,
+        admission: SupervisorAdmission = SupervisorSocketHelpers.admission,
+        authorityRoots: List<String>? = null,
+    ) : this(socketFd, listenerFd, engine, socketManager, preparation, replyArena, socketHelpers, admission, authorityRoots, ControlSocketOwnership.Owned)
+
     private val reader = NotificationReader(engine, logger)
-    private val exchange = JvmVerdictExchange(engine, socketFd, socketManager)
+    private val exchange = JvmVerdictExchange(engine, socketFd, socketManager, ownership)
     private val descriptors = TraceeDescriptorImporter(engine)
     private val routes = SupervisorRouteDispatcher(engine, descriptors, socketHelpers)
     private val replies = SupervisorReplyInterpreter(engine, listenerFd, SupervisorExecRewriteExchange(engine, socketFd), descriptors)

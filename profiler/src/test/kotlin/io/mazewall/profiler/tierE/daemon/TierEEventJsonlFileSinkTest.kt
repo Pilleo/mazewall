@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.daemon
 
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.profiler.internal.attribution.AttributionStatus
 import io.mazewall.profiler.internal.attribution.InvocationId
 import io.mazewall.profiler.internal.attribution.ManagedFrame
@@ -25,8 +26,97 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 
+@EnabledIfLinuxAndSupported
 class TierEEventJsonlFileSinkTest {
     private val target = TierERegisteredTarget("orders", 123, 0x4d5a, 99, Path.of("/agent.so"), 10, "orders.mzse")
+
+    @Test
+    fun `default and selected access are applied to complete event bytes`() {
+        for (selected in listOf(false, true)) {
+            val root = Files.createTempDirectory("tier-e-event-access-")
+            try {
+                val gid = Files.getAttribute(root, "unix:gid") as Int
+                val selectedGid = selectedEvidenceTestGid(root)
+                val access = TierEEvidenceFileAccess(if (selected) selectedGid else null)
+                val file = TierEEventJsonlFileSink(root, access = access, prepareTemporary = { temporary ->
+                    assertTrue(Files.readAllLines(temporary).last().contains("\"type\":\"terminal\""))
+                    access.apply(temporary)
+                }).publish(target, TierEProfile(emptyList(), SessionIntegrity()), TierETerminalReason.COMPLETE)
+                assertEquals(
+                    if (selected) "rw-r-----" else "rw-------",
+                    java.nio.file.attribute.PosixFilePermissions
+                    .toString(Files.getPosixFilePermissions(file)),
+                )
+                assertEquals(if (selected) selectedGid else gid, Files.getAttribute(file, "unix:gid"))
+            } finally {
+                root.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `racing file or symlink destination is never overwritten`() {
+        for (symlink in listOf(false, true)) {
+            val root = Files.createTempDirectory("tier-e-event-race-")
+            try {
+                val final = root.resolve("orders-19802.events.jsonl")
+                val sentinel = Files.writeString(root.resolve("sentinel"), "untouched")
+                val access = TierEEvidenceFileAccess()
+                val sink = TierEEventJsonlFileSink(root, prepareTemporary = { temporary ->
+                    access.apply(temporary)
+                    val racer = Thread {
+                        if (symlink) Files.createSymbolicLink(final, sentinel) else Files.writeString(final, "racer")
+                    }
+                    racer.start()
+                    racer.join()
+                })
+                assertThrows(java.nio.file.FileAlreadyExistsException::class.java) {
+                    sink.publish(target, TierEProfile(emptyList(), SessionIntegrity()), TierETerminalReason.COMPLETE)
+                }
+                assertEquals(if (symlink) "untouched" else "racer", Files.readString(final))
+                assertEquals("untouched", Files.readString(sentinel))
+                assertEquals(symlink, Files.isSymbolicLink(final))
+            } finally {
+                root.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `attribute and publication faults leave no final and owner only temporary`() {
+        for (fault in listOf("group", "mode", "publication")) {
+            val root = Files.createTempDirectory("tier-e-event-fault-")
+            try {
+                val access = TierEEvidenceFileAccess(Files.getAttribute(root, "unix:gid") as Int)
+                val failure = java.io.IOException(fault)
+                val sink = TierEEventJsonlFileSink(root, prepareTemporary = { file ->
+                    when (fault) {
+                        "group" -> access.apply(file, setGroup = { _, _ -> throw failure })
+                        "mode" -> access.apply(file, setMode = { _, _ -> throw failure })
+                        else -> access.apply(file)
+                    }
+                }, publishTemporary = { _, _ -> throw failure })
+                assertEquals(
+                    failure,
+                    assertThrows(java.io.IOException::class.java) {
+                    sink.publish(target, TierEProfile(emptyList(), SessionIntegrity()), TierETerminalReason.COMPLETE)
+                },
+                )
+                assertFalse(Files.exists(root.resolve("orders-19802.events.jsonl")))
+                Files.list(root).use { files ->
+                    files.forEach {
+                        assertEquals(
+                            "rw-------",
+                            java.nio.file.attribute.PosixFilePermissions
+                        .toString(Files.getPosixFilePermissions(it)),
+                        )
+                    }
+                }
+            } finally {
+                root.toFile().deleteRecursively()
+            }
+        }
+    }
 
     @Test
     fun `completed artifact retains repeated syscall rows and unknown attribution independently of transport`() {

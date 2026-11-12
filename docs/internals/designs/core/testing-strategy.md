@@ -721,8 +721,12 @@ an unmatched explicit filter is not treated as successful execution.
 The shared isolated-process harness cleans up after successful parent exits as
 well as timeout, interruption and failure. It retains observed descendant handles,
 terminates descendants before the parent and reaps with bounded waits, preserving
-interruption and suppressed cleanup errors. Its process-tree observations cannot
-prove discovery of a child that forks and reparents entirely between observations;
+interruption and suppressed cleanup errors. Signals use the acquired process handle
+without closing its output pipes; consumer stream owners drain and close those
+pipes separately, including after timeout or interruption. A delayed-reader timeout
+regression verifies retained stdout/stderr and unrelated-process survival after
+physical retirement. Its process-tree observations cannot prove discovery of a
+child that forks and reparents entirely between observations;
 this is a cooperative test harness, not an arbitrary-process containment boundary.
 
 ## Build and evidence gates

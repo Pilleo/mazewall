@@ -20,6 +20,9 @@ internal class PreparedRetirement(
     private val requested = CountDownLatch(1)
 
     private val publication = AtomicReference<PreparedRetirementOutcome?>()
+
+    @Volatile
+    private var releasing = false
     private val thread = Thread
         .ofPlatform()
         .name(name)
@@ -41,6 +44,25 @@ internal class PreparedRetirement(
 
     fun live(): Boolean = thread.isAlive
 
+    /** Identifies the original actor only while it is executing the reserved release callback. */
+    fun isCurrentReleaseActor(): Boolean =
+        releasing &&
+            (
+                Thread.currentThread() === thread ||
+                (Thread.currentThread() === bootstrap && thread.state == Thread.State.NEW)
+            )
+
+    private fun releaseOnOriginalActor() {
+        check(Thread.currentThread() === thread || (Thread.currentThread() === bootstrap && thread.state == Thread.State.NEW))
+        check(!releasing)
+        releasing = true
+        try {
+            release()
+        } finally {
+            releasing = false
+        }
+    }
+
     /** A failed native thread start has not acquired a live thread; bootstrap retains rollback. */
     @Suppress("TooGenericExceptionCaught") // start rollback keeps original/fatal cleanup identity
     fun releaseUnstarted() {
@@ -48,12 +70,13 @@ internal class PreparedRetirement(
             request()
             return
         }
+        check(Thread.currentThread() === bootstrap && publication.get() == null && !releasing)
         var attempted = false
         var problem: Throwable? = null
         try {
             awaitWorkers()
             attempted = true
-            release()
+            releaseOnOriginalActor()
         } catch (failure: Throwable) {
             problem = failure
             recordFailure(failure)
@@ -78,7 +101,7 @@ internal class PreparedRetirement(
             }
             awaitWorkers()
             attempted = true
-            release()
+            releaseOnOriginalActor()
         } catch (fatal: Error) {
             problem = fatal
             recordFailure(fatal)

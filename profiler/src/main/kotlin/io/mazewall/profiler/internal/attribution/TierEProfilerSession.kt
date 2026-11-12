@@ -2,6 +2,7 @@
 
 package io.mazewall.profiler.internal.attribution
 
+import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.profiler.tierE.TierERetainedStateBudget
 import io.mazewall.profiler.tierE.daemon.UsdtProbeNote
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
@@ -79,6 +80,11 @@ internal interface TierEEventSource : AutoCloseable {
 
     /** Waits for handlers admitted before marker detachment to leave the kernel program. */
     fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean = false
+
+    fun exportBoundaryDiagnostics(
+        producerClosed: Boolean,
+        quiescent: Boolean,
+    ) {}
 }
 
 private class NativeTierEEventSource(
@@ -152,6 +158,11 @@ private class NativeTierEEventSource(
     override fun readLastMarkerPidTgid(): Long = engine.readLastMarkerPidTgid()
 
     override fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean = engine.awaitSysEnterQuiescence(timeoutNanos)
+
+    override fun exportBoundaryDiagnostics(
+        producerClosed: Boolean,
+        quiescent: Boolean,
+    ) = engine.exportBoundaryDiagnostics(producerClosed, quiescent)
 
     override fun close() = engine.close()
 }
@@ -268,6 +279,7 @@ internal class TierEProfilerSession internal constructor(
     private var reportedAmbientInactive = 0L
     private var state: TierESessionState = TierESessionState.Collecting
     private var sourceClosed = false
+    private var terminalFailure: Throwable? = null
     private var lifecycle: TierESessionLifecycleState = TierESessionLifecycleState.RUNNING
     private var liveDefinitionFile: Path? = null
     private var nativeLiveSnapshotConsumer: TierENativeLiveSnapshotConsumer? = null
@@ -695,7 +707,7 @@ internal class TierEProfilerSession internal constructor(
         return if (scanner == null) {
             emptyList()
         } else {
-            if (recoveryReader?.stopAndJoin() != true) recoveryFinalScanComplete = false
+            if (recoveryReader == null) recoveryFinalScanComplete = false else stopRecoveryReader()
             pollRecovery()
             recoveryReader = null
             if (recoveryQueueReserved) {
@@ -757,7 +769,7 @@ internal class TierEProfilerSession internal constructor(
         val resolved = ArrayList<ResolvedSyscall>(events.size)
         for (event in events) {
             val conversionAllocationBefore = allocationBeforePhase()
-            val observation = event.toAttribution()
+            val observation = event.toAttribution(taskIdentityFor(event.tid.toInt()), options.ownedArgumentStorage)
             val conversionAllocated = allocationDelta(conversionAllocationBefore)
             if (conversionAllocated != TierEAllocationCounters.UNAVAILABLE) observationConversionAllocatedBytes += conversionAllocated
             val resolutionAllocationBefore = allocationBeforePhase()
@@ -869,7 +881,6 @@ internal class TierEProfilerSession internal constructor(
     internal fun captureProfile(): TierECaptureProfile = options.captureProfile
 
     /** Typed identity used to reject a definition artifact from another live session. */
-    @Synchronized
     internal fun currentSessionEpoch(): SessionEpoch = sessionEpoch
 
     /** Collector ownership may start only while this session can still accept owned ring records. */
@@ -934,20 +945,41 @@ internal class TierEProfilerSession internal constructor(
         if (state == TierESessionState.Closed) return
         lifecycle = TierESessionLifecycleState.CLOSING
         try {
-            closeSource()
-            closeRecoveryClock()
+            retireSessionResources(::closeSource, ::closeRecoveryClock)
             state = TierESessionState.Closed
         } finally {
             lifecycle = TierESessionLifecycleState.DEAD
         }
     }
 
+    @Suppress("TooGenericExceptionCaught") // Finalization failure is immutable; cleanup cannot turn it into success.
     private fun finishCollecting(
+        producerClosed: Boolean,
+        definitionSupplier: (Set<InvocationId>?) -> AgentDefinitionFile.Contents,
+    ): TierEProfile {
+        terminalFailure?.let { throw it }
+        check(lifecycle != TierESessionLifecycleState.DEAD) { "Tier E profiler session is dead" }
+        return try {
+            finishCollectingOnce(producerClosed, definitionSupplier)
+        } catch (cause: Throwable) {
+            failFinalization(cause)
+        }
+    }
+
+    private fun failFinalization(cause: Throwable): Nothing {
+        terminalFailure = cause
+        lifecycle = TierESessionLifecycleState.DEAD
+        if (cause is InterruptedException) Thread.currentThread().interrupt()
+        throw cause
+    }
+
+    private fun finishCollectingOnce(
         producerClosed: Boolean,
         definitionSupplier: (Set<InvocationId>?) -> AgentDefinitionFile.Contents,
     ): TierEProfile {
         lifecycle = TierESessionLifecycleState.CLOSING
         val quiescent = quiesceAndDrain(producerClosed)
+        source.exportBoundaryDiagnostics(producerClosed, quiescent)
         val recoveryRaw = if (producerClosed && quiescent) {
             finishRecoveryScan()
         } else {
@@ -980,9 +1012,9 @@ internal class TierEProfilerSession internal constructor(
             ),
             recoveredCoverage,
         )
+        closeRecoveryClock()
         state = TierESessionState.Finished(profile)
         lifecycle = TierESessionLifecycleState.DEAD
-        closeRecoveryClock()
         return profile
     }
 
@@ -1097,8 +1129,8 @@ internal class TierEProfilerSession internal constructor(
 
     private fun closeSource() {
         if (sourceClosed) return
-        recoveryReader?.let { reader ->
-            if (!reader.stopAndJoin()) recoveryScanError = true
+        recoveryReader?.let {
+            stopRecoveryReader()
             recoveryReader = null
             recoveryScanner = null
         }
@@ -1110,10 +1142,17 @@ internal class TierEProfilerSession internal constructor(
         sourceClosed = true
     }
 
+    private fun stopRecoveryReader() {
+        requireNotNull(recoveryReader).stopForRetirement {
+            recoveryScanError = true
+            recoveryFinalScanComplete = false
+        }
+    }
+
     private fun closeRecoveryClock() {
         if (recoveryClockClosed) return
-        recoveryClockClosed = true
         (recoveryReceiptClock as? AutoCloseable)?.close()
+        recoveryClockClosed = true
     }
 
     private fun readDefinitions(
@@ -1200,45 +1239,6 @@ internal class TierEProfilerSession internal constructor(
         check(lifecycle != TierESessionLifecycleState.DEAD) { "Tier E profiler session is dead" }
     }
 
-    private fun SyscallInvocationEvent.toAttribution(): SyscallAttribution {
-        val invalidFlags = flags and SyscallInvocationEvent.FLAG_ARGUMENT_READ_FAILED
-        val task = taskIdentityFor(tid.toInt())
-        val active = invocationId
-            .takeIf { it != 0uL }
-            ?.toLong()
-            ?.takeIf { it > 0 }
-            ?.let(::InvocationId)
-        val status = when {
-            invalidFlags != 0 -> AttributionStatus.KERNEL_CAPTURE_FAILED
-            active == null -> AttributionStatus.NO_ACTIVE_INVOCATION
-            else -> AttributionStatus.PENDING_DICTIONARY
-        }
-        if (!options.ownedArgumentStorage) {
-            return SyscallAttribution(
-                task = task,
-                taskSequence = sequence.toLong().takeIf { it > 0 } ?: ktimeNs.toLong(),
-                syscallNumber = syscallNr,
-                args = args.map(ULong::toLong),
-                invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
-                attributionStatus = status,
-                captureFlags = flags,
-                kernelTimestampNanos = ktimeNs,
-                hostTgid = tgid,
-            )
-        }
-        return SyscallAttribution.fromOwnedArguments(
-            task = task,
-            taskSequence = sequence.toLong().takeIf { it > 0 } ?: ktimeNs.toLong(),
-            syscallNumber = syscallNr,
-            ownedArgs = takeOwnedArguments(),
-            invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
-            attributionStatus = status,
-            captureFlags = flags,
-            kernelTimestampNanos = ktimeNs,
-            hostTgid = tgid,
-        )
-    }
-
     private companion object {
         private val NEXT_SESSION_EPOCH = AtomicLong()
         private const val TERMINAL_QUIESCENCE_TIMEOUT_NANOS = 1_000_000_000L
@@ -1256,6 +1256,47 @@ internal class TierEProfilerSession internal constructor(
             if (options.taskIdentityMode == TierETaskIdentityMode.REUSE_CONSECUTIVE) lastTaskIdentity = identity
         }
     }
+}
+
+private fun SyscallInvocationEvent.toAttribution(
+    task: TaskIdentity,
+    ownedArgumentStorage: Boolean,
+): SyscallAttribution {
+    val invalidFlags = flags and SyscallInvocationEvent.FLAG_ARGUMENT_READ_FAILED
+    val active = invocationId
+        .takeIf { it != 0uL }
+        ?.toLong()
+        ?.takeIf { it > 0 }
+        ?.let(::InvocationId)
+    val status = when {
+        invalidFlags != 0 -> AttributionStatus.KERNEL_CAPTURE_FAILED
+        active == null -> AttributionStatus.NO_ACTIVE_INVOCATION
+        else -> AttributionStatus.PENDING_DICTIONARY
+    }
+    if (!ownedArgumentStorage) {
+        return SyscallAttribution(
+            task = task,
+            taskSequence = sequence.toLong().takeIf { it > 0 } ?: ktimeNs.toLong(),
+            syscallNumber = syscallNr,
+            args = args.map(ULong::toLong),
+            invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
+            attributionStatus = status,
+            captureFlags = flags,
+            kernelTimestampNanos = ktimeNs,
+            hostTgid = tgid,
+        )
+    }
+    return SyscallAttribution.fromOwnedArguments(
+        task = task,
+        taskSequence = sequence.toLong().takeIf { it > 0 } ?: ktimeNs.toLong(),
+        syscallNumber = syscallNr,
+        ownedArgs = takeOwnedArguments(),
+        invocationId = active.takeIf { status == AttributionStatus.PENDING_DICTIONARY },
+        attributionStatus = status,
+        captureFlags = flags,
+        kernelTimestampNanos = ktimeNs,
+        hostTgid = tgid,
+    )
 }
 
 internal class TierEProfile(
@@ -1325,6 +1366,37 @@ internal data class TierECollectorPoll(
     val drainedEventCount: Int,
     val receiptAgesNanos: LongArray = LongArray(0),
 )
+
+@Suppress("TooGenericExceptionCaught") // Attempt independent retirement, preserving fatal identity and interruption.
+private fun retireSessionResources(closeSource: () -> Unit, closeClock: () -> Unit) {
+    var failure: Throwable? = null
+    var interrupted = Thread.interrupted()
+    for (release in listOf(closeSource, closeClock)) {
+        try {
+            release()
+        } catch (cause: InterruptedException) {
+            interrupted = true
+            failure = CleanupFailures.merge(failure, cause)
+        } catch (cause: Throwable) {
+            failure = CleanupFailures.merge(failure, cause)
+        }
+        interrupted = Thread.interrupted() || interrupted
+    }
+    if (interrupted) Thread.currentThread().interrupt()
+    failure?.let { throw it }
+}
+
+private fun TierERecoveryReader.stopForRetirement(onIncomplete: () -> Unit) {
+    val termination = stopAndJoin()
+    if (failed) onIncomplete()
+    when (termination) {
+        TierERecoveryReaderTermination.TERMINATED -> Unit
+        TierERecoveryReaderTermination.STILL_RUNNING -> {
+            onIncomplete()
+            error("Tier E recovery reader has not retired")
+        }
+    }
+}
 
 internal data class TierERingDrainPhaseMetrics(
     val scanNanos: Long = 0,

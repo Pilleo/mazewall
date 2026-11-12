@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 206 | *Total Resolved Issues:* 717
+*Total Active Issues:* 270 | *Total Resolved Issues:* 719
 
-Active status detail: 205 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 269 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,72 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261112-063058-038](issue-20261112-063058-038-preserve-expected-ffm-handle-shape-when-a-libc-sym.md) | Preserve expected FFM handle shape when a libc symbol is missing | high | core |
+| [issue-20261112-051312-407](issue-20261112-051312-407-preserve-supervisor-startup-failure-when-helper-sh.md) | Preserve supervisor startup failure when helper shutdown also fails | high | core |
+| [issue-20261111-230615-569](issue-20261111-230615-569-bind-checked-stack-association-to-canonical-runtim.md) | Bind checked stack association to canonical runtime owner | high | core |
+| [issue-20261111-224650-335](issue-20261111-224650-335-revalidate-checked-native-stack-association-at-pro.md) | Revalidate checked native stack association at producer use | high | core |
+| [issue-20261111-204426-270](issue-20261111-204426-270-bind-checked-live-bootstrap-to-original-request-an.md) | Bind checked live bootstrap to original request and runtime references | high | core |
+| [issue-20261111-185936-203](issue-20261111-185936-203-preserve-confined-child-cleanup-when-ptracer-bookk.md) | Preserve confined child cleanup when ptracer bookkeeping throws | high | core |
+| [issue-20261109-200553-461](issue-20261109-200553-461-hide-jvm-visible-mutable-runtime-authority-before-.md) | Hide JVM-visible mutable runtime authority before reporting retirement | high | core |
+| [issue-20261109-192741-507](issue-20261109-192741-507-reject-process-wide-act-notify-before-supervisor-a.md) | Reject process-wide ACT_NOTIFY before supervisor acquisition | high | core |
+| [issue-20261109-110052-812](issue-20261109-110052-812-preserve-prepared-resource-close-failures-across-r.md) | Preserve prepared resource close failures across repeat calls | high | core |
+| [issue-20261109-063230-677](issue-20261109-063230-677-retain-eventfd-completion-wakeup-ownership-after-c.md) | Retain eventfd completion wakeup ownership after close failure | high | platform |
+| [issue-20261109-054828-051](issue-20261109-054828-051-investigate-socket-helper-prewarm-cleanup-timeout-.md) | Investigate socket helper prewarm cleanup timeout during process spawn | high | enforcer |
+| [issue-20261108-190054-405](issue-20261108-190054-405-t4-coordinate-versioned-native-projection-parsing-.md) | T4 coordinate versioned native projection parsing and qualification | high | core |
+| [issue-20261108-141806-423](issue-20261108-141806-423-t4-validate-exact-managed-final-jar-layout.md) | T4 validate exact managed final jar layout | high | core |
+| [issue-20261108-141254-842](issue-20261108-141254-842-b5-d4-bind-captured-engine-confined-helper-authori.md) | B5 D4 bind captured-engine confined helper authority | high | core |
+| [issue-20261108-114247-892](issue-20261108-114247-892-retain-validated-live-worker-and-task-receipts-bef.md) | Retain validated live worker and task receipts before wrapping | high | core |
+| [issue-20261108-113622-885](issue-20261108-113622-885-b5-d4-bind-owned-worker-task-lifecycle-and-guarded.md) | B5 D4 bind owned worker task lifecycle and guarded preinstall | high | core |
+| [issue-20261108-113441-869](issue-20261108-113441-869-investigate-supervisor-daemon-ebadf-during-session.md) | Investigate supervisor daemon EBADF during session cleanup | high | core |
+| [issue-20261108-053553-856](issue-20261108-053553-856-b5-d3-carry-frozen-scoping-and-constrain-reviewed-.md) | B5 D3 carry frozen scoping and constrain reviewed routes | high | core |
+| [issue-20261108-003528-013](issue-20261108-003528-013-b5-d2-claim-captured-scoping-into-a-guarded-domain.md) | B5 D2 claim captured scoping into a guarded domain | high | core |
+| [issue-20261107-200628-759](issue-20261107-200628-759-b5-d1-retain-counted-owner-during-live-capture.md) | B5 D1 retain counted owner during live capture | high | core |
+| [issue-20261107-145307-348](issue-20261107-145307-348-b5-d1-preserve-captured-runtime-in-live-stack-boot.md) | B5 D1 preserve captured runtime in live stack bootstrap | high | core |
+| [issue-20261107-041207-913](issue-20261107-041207-913-remove-spotbugs-auxiliary-classpath-truncation-wor.md) | Remove SpotBugs auxiliary classpath truncation workaround when upstream is fixed | high | core |
+| [issue-20261106-235010-249](issue-20261106-235010-249-preserve-valid-confined-relay-receipts-during-forw.md) | Preserve valid confined relay receipts during forwarding completion | high | enforcer |
+| [issue-20261106-220434-334](issue-20261106-220434-334-synchronize-process-broker-integration-race-tests.md) | Synchronize process broker integration race tests | high | core |
+| [issue-20261106-212018-313](issue-20261106-212018-313-restore-profiler-full-gate-fixture-compatibility.md) | Restore profiler full gate fixture compatibility | high | profiler |
+| [issue-20261106-161141-509](issue-20261106-161141-509-diagnose-wrapped-profiler-concurrent-read-future-t.md) | Diagnose wrapped profiler concurrent-read future timeout | high | profiler |
+| [issue-20261106-081057-933](issue-20261106-081057-933-investigate-owned-worker-scoped-socket-denial-in-n.md) | Investigate owned-worker scoped socket denial in non-root checkpoint profile | high | core |
+| [issue-20261106-081044-009](issue-20261106-081044-009-qualify-reviewed-helper-runtime-closure-for-read-o.md) | Qualify reviewed helper runtime closure for read-only shared gconv mappings | high | core |
+| [issue-20261106-035256-415](issue-20261106-035256-415-investigate-timed-out-consumer-stderr-loss-before-.md) | Investigate timed-out consumer stderr loss before evidence drain | high | core |
+| [issue-20261106-021835-047](issue-20261106-021835-047-assert-installed-no-new-privileges-state-in-confin.md) | Assert installed no-new-privileges state in confined ancestry characterization | high | core |
+| [issue-20261106-013649-338](issue-20261106-013649-338-retain-failed-prepared-acquisition-rollback-owners.md) | Retain failed prepared acquisition rollback owners for explicit retry | high | core |
+| [issue-20261105-223351-669](issue-20261105-223351-669-preserve-prepared-resource-ownership-on-predispatc.md) | Preserve prepared resource ownership on predispatch close exceptions | high | core |
+| [issue-20261105-213712-210](issue-20261105-213712-210-retain-unobserved-confined-drain-sweep-fatal-failu.md) | Retain unobserved confined drain sweep fatal failures before replacement | high | core |
+| [issue-20261105-213711-928](issue-20261105-213711-928-preserve-fatal-rollback-identity-after-ordinary-co.md) | Preserve fatal rollback identity after ordinary confined helper setup failure | high | core |
+| [issue-20261105-213711-642](issue-20261105-213711-642-retire-confined-conversation-after-terminal-accept.md) | Retire confined conversation after terminal accepted socket close failure | high | core |
+| [issue-20261105-204738-628](issue-20261105-204738-628-release-confined-runtime-admission-after-queued-pr.md) | Release confined runtime admission after queued preparation cancellation | high | core |
+| [issue-20261105-202208-836](issue-20261105-202208-836-preserve-native-permission-errno-in-confined-helpe.md) | Preserve native permission errno in confined helper peer authentication | high | core |
+| [issue-20261105-191554-457](issue-20261105-191554-457-preserve-queued-confined-helper-final-frames-acros.md) | Preserve queued confined helper final frames across peer hangup | high | enforcer |
+| [issue-20261105-175119-373](issue-20261105-175119-373-b4-d2-integrate-pre-install-confined-helper-readin.md) | Integrate pre-install confined helper readiness and retryable runtime retirement | high | enforcer |
+| [issue-20261105-093623-732](issue-20261105-093623-732-retain-failure-cause-in-portal-bounded-startup-dea.md) | Retain failure cause in portal bounded startup deadline fixture | high | portal |
+| Archived [issue-20261105-084623-741](resolved/issue-20261105-084623-741-maintain-tier-e-evidence-preflight-and-offline-dia.md) | Maintain Tier E evidence preflight and offline diagnostic replay | high | profiler |
+| [issue-20261105-075010-660](issue-20261105-075010-660-investigate-tier-e-diagnostic-shared-fd-generation.md) | Investigate diagnostic shared-FD generation ambiguity across overlapping close/open | medium | profiler |
+| [issue-20261105-074955-139](issue-20261105-074955-139-b4-d1-implement-real-prestarted-confined-read-help.md) | Implement real prestarted confined read helper with staged ownership | high | enforcer |
+| Archived [issue-20261105-070311-459](resolved/issue-20261105-070311-459-propagate-all-target-workload-worker-failures-befo.md) | Propagate all-target workload worker failures before completion markers | medium | profiler |
+| [issue-20261105-070301-281](issue-20261105-070301-281-align-authorized-accept-routes-with-authority-help.md) | Align authorized accept routes with authority helper execution | medium | enforcer |
+| [issue-20261105-070253-578](issue-20261105-070253-578-preserve-atomic-fd-injection-notification-gone-and.md) | Preserve atomic FD injection notification-gone and errno outcomes | medium | enforcer |
+| [issue-20261105-055732-509](issue-20261105-055732-509-preserve-static-syscall-denials-when-adding-scopin.md) | Preserve static syscall denials when adding scoping notifications | high | enforcer |
+| [issue-20261105-003742-653](issue-20261105-003742-653-b4-discriminate-owned-o-path-proc-fd-regular-file-.md) | Discriminate owned O_PATH/proc-FD regular-file reopen under Landlock | medium | enforcer |
+| [issue-20261104-122636-957](issue-20261104-122636-957-establish-safe-java-reentry-handling-for-live-nati.md) | Establish safe Java reentry handling for live native open snapshots | high | profiler |
+| [issue-20261104-104503-150](issue-20261104-104503-150-investigate-capture-yield-contention-loss-in-cold-.md) | Investigate capture-yield contention loss in cold Tier E diagnostics | medium | profiler |
+| [issue-20261104-101631-824](issue-20261104-101631-824-join-tier-e-calls-to-the-final-observed-marker-sta.md) | Join Tier E calls to the final observed marker state | medium | profiler |
+| [issue-20261104-101647-045](issue-20261104-101647-045-investigate-per-cpu-tier-e-uprobe-bpf-execution-fa.md) | Investigate per-CPU Tier E uprobe BPF execution fanout | medium | profiler |
+| [issue-20261104-095518-684](issue-20261104-095518-684-reconcile-tier-e-ambient-counters-with-inactive-ev.md) | Reconcile Tier E ambient counters with inactive event semantics | medium | profiler |
+| [issue-20261104-095502-774](issue-20261104-095502-774-compare-tier-e-open-creation-modes-only-when-seman.md) | Compare Tier E open creation modes only when semantically used | medium | profiler |
+| [issue-20261104-093857-197](issue-20261104-093857-197-read-private-tier-e-workload-receipts-through-thei.md) | Read private Tier E workload receipts through their collector | medium | profiler |
+| [issue-20261104-092359-647](issue-20261104-092359-647-record-tier-e-lsm-fingerprints-on-kernels-without-.md) | Record Tier E LSM fingerprints on kernels without process labels | medium | profiler |
+| [issue-20261104-084957-941](issue-20261104-084957-941-validate-tier-e-mapped-fingerprints-across-filesys.md) | Validate Tier E mapped fingerprints across filesystem device domains | medium | profiler |
+| [issue-20261104-061917-747](issue-20261104-061917-747-fix-tier-e-diagnostic-configuration-cache-serializ.md) | Fix Tier E diagnostic configuration cache serialization | medium | profiler |
+| [issue-20261104-061908-412](issue-20261104-061908-412-fix-diagnostic-target-registration-retention-colli.md) | Fix diagnostic target registration retention collision | medium | profiler |
+| [issue-20261104-082104-029](issue-20261104-082104-029-avoid-verbose-verifier-log-exhaustion-in-tier-e-di.md) | Avoid verbose verifier log exhaustion in Tier E diagnostics | medium | profiler |
+| [issue-20261104-061859-942](issue-20261104-061859-942-retain-attributable-bpf-program-load-failure-evide.md) | Retain attributable BPF program load failure evidence | medium | profiler |
+| [issue-20261103-190440-355](issue-20261103-190440-355-investigate-retained-all-target-19-of-20-loadtempl.md) | Investigate retained all-target 19-of-20 loadTemplate attribution | medium | profiler |
+| [issue-20261103-152002-779](issue-20261103-152002-779-preserve-process-observation-errors-and-watcher-re.md) | Preserve process observation errors and watcher retirement | high | profiler |
+| [issue-20261103-134641-217](issue-20261103-134641-217-package-tier-e-target-registration-and-attach-help.md) | Package Tier E target registration and attach helper | medium | profiler |
+| [issue-20261103-134635-250](issue-20261103-134635-250-enable-opt-in-tier-e-evidence-group-access-and-ato.md) | Enable opt-in Tier E evidence group access and atomic publication | medium | profiler |
+| [issue-20261103-085251-359](issue-20261103-085251-359-provide-live-pre-call-stack-context-before-user-no.md) | Provide live pre-call stack context before USER_NOTIF authorization | high | core |
 | [issue-20261101-164416-960](issue-20261101-164416-960-upgrade-gradle-9-8-2-and-qualify-build-compatibili.md) | Upgrade Gradle 9.8.2 and qualify build compatibility | high | build |
 | [issue-20261101-142339-773](issue-20261101-142339-773-qualify-kernel-uapi-watcher-input.md) | Qualify kernel UAPI watcher input | high | ci |
 | [issue-20261031-143810-764](issue-20261031-143810-764-fix-cold-spring-verification-and-reduce-ci-cache-c.md) | Fix cold Spring verification and reduce CI cache churn | high | core |

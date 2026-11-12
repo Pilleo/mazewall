@@ -5,9 +5,12 @@ import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.enforcer.api.MockNativeMemory
 import io.mazewall.enforcer.api.MockNativeNetworking
 import io.mazewall.ffi.NativeConstants
+import io.mazewall.ffi.internal.HelperSecurityObservation
 import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.memory.NativeArena
 import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.ffi.networking.ConfinedDeadline
+import io.mazewall.ffi.networking.ConfinedHelperChannel
 import io.mazewall.platform.fd.*
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
@@ -29,16 +32,166 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.api.parallel.Isolated
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 @Isolated
 class SupervisorDaemonEngineTest {
+    @Test
+    fun `daemon supervisor recycle leaves original control close to connection owner`() = controlSocketRetirement(false)
+
+    @Test
+    fun `daemon retains unknown original control after actual close without closing reused socket`() = controlSocketRetirement(true)
+
+    private fun controlSocketRetirement(unknown: Boolean) {
+        val real = LinuxNative.snapshot()
+        val socket = real.networking.socket(1, 1 or NativeConstants.SOCK_CLOEXEC, 0).getFdOrThrow("actual daemon control socket", FileDescriptorRole.UnixSocket)
+        val listener = NativeArena.ofConfined().use { arena ->
+            real.fileSystem.open(arena.allocateFrom("/dev/null"), OpenFlags.RDONLY).getFdOrThrow("actual mock listener", FileDescriptorRole.SeccompNotif)
+        }
+        val closes = AtomicInteger()
+        val replacement = AtomicReference<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>?>()
+        var polls = 0
+        val engine = object : NativeEngine by real {
+            override val raw = object : RawSyscallOperations by real.raw {
+                override fun poll(
+                    fds: io.mazewall.ffi.memory.ManagedSegment,
+                    nfds: Long,
+                    timeout: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> =
+                    if (++polls <= 2) LinuxNative.SyscallResult.Success(1L) else LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
+            }
+            override val memory = object : NativeMemory by real.memory {
+                override fun write(
+                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                    buf: io.mazewall.ffi.memory.ManagedSegment,
+                    count: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> = if (fd === socket) LinuxNative.SyscallResult.Success(count) else real.memory.write(fd, buf, count)
+            }
+        }
+        val sockets = object : SocketManager by RealSocketManager.capture(real) {
+            override fun recvDescriptor(socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>) = listener
+
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+                if (fd === socket) closes.incrementAndGet()
+                RealSocketManager.capture(real).close(fd)
+                if (fd === socket && unknown) {
+                    replacement.set(real.networking.socket(1, 1 or NativeConstants.SOCK_CLOEXEC, 0).getFdOrThrow("reused socket", FileDescriptorRole.UnixSocket))
+                    throw NativeCloseFailure("close succeeded but result is unknown")
+                }
+            }
+        }
+        val daemon = SupervisorDaemonEngine("/unused/control-owner.sock", engine, sockets)
+        try {
+            daemon.handleConnection(socket)
+            assertEquals(1, closes.get(), "the actual outer connection must close its original socket once")
+            kotlin.test.assertFalse(socket.isLiveForIo())
+            if (unknown) {
+                val newer = checkNotNull(replacement.get())
+                assertEquals(socket.value, newer.value)
+                val delegate = SupervisorDaemonEngine::class.java
+                    .getDeclaredField("delegate")
+                    .apply { isAccessible = true }
+                    .get(daemon) as io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
+                kotlin.test.assertIs<io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome.Incomplete>(delegate.retryCleanup())
+                assertEquals(1, closes.get())
+                assertTrue(newer.isLiveForIo())
+            }
+        } finally {
+            replacement.get()?.let { if (it.isLiveForIo()) it.close(real.fileSystem) }
+            if (socket.isLiveForIo()) socket.close(real.fileSystem)
+            if (listener.isLiveForIo()) listener.close(real.fileSystem)
+        }
+    }
+
+    @TempDir
+    lateinit var directory: Path
+
+    @Test
+    fun `private daemon routes authenticated retirement through its prewarmed control before listener receive`() {
+        val native = LinuxNative.snapshot()
+        val pid = Pid(ProcessHandle.current().pid().toInt())
+        val observed = HelperSecurityObservation().observeAncestry(pid, native.process.gettid(), HelperSecurityObservation.Lineage.Bootstrap)
+        var starts = 0
+        val reaps = AtomicInteger()
+        val child = ProcessIdentity(Pid(7001), 91)
+        val helpers = SocketHelperPool(PoolProvisioning.PrestartedConfined) {
+            starts++
+            object : SocketHelper {
+                override val confinedIdentity = child
+
+                override fun execute(
+                    operation: SocketOperation,
+                    socket: SupervisorOwnedFd,
+                ): SocketHelperResult = error("Legacy work")
+
+                override fun close() {
+                    reaps.incrementAndGet()
+                }
+            }
+        }
+        val closed = LinkedBlockingQueue<Int>()
+        val listenerReads = AtomicInteger()
+        val sockets = object : SocketManager by RealSocketManager {
+            override fun createUnixServer(socketPath: String): FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned> {
+                assertEquals(1, starts, "Helper prewarm must precede sentinel/listening")
+                return RealSocketManager.createUnixServer(socketPath)
+            }
+
+            override fun recvDescriptor(
+                socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership>,
+            ): FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>? {
+                listenerReads.incrementAndGet()
+                return null
+            }
+
+            override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>) {
+                RealSocketManager.close(fd)
+                closed.add(fd.value)
+            }
+        }
+        val path = directory.resolve("daemon.sock").toString()
+        val daemon = SupervisorDaemonEngine(path, native, sockets, helpers, SocketHelperProcess.ConfinedStartup(observed, observed))
+        val finished = java.util.concurrent.CompletableFuture<Unit>()
+        val thread = Thread.ofPlatform().start {
+            try {
+                daemon.run()
+                finished.complete(Unit)
+            } catch (failure: Throwable) {
+                finished.completeExceptionally(failure)
+            }
+        }
+        try {
+            val binding = ConfinedHelperTestData.manifest().binding.let { it.copy(owner = it.owner.copy(ownerPid = pid, ownerStartTicks = observed.identity.startTimeTicks)) }
+            repeat(2) {
+                val socket = RealSocketManager.connect(path)
+                SupervisorOwnedFd(socket, native.fileSystem).use {
+                    val channel = ConfinedHelperChannel(native, socket, { false }, { true })
+                    val deadline = ConfinedDeadline.mint(native) { 5_000_000_000 }
+                    channel.send(byteArrayOf(0xe4.toByte()), deadline)
+                    channel.sendFrame(ConfinedHelperProtocol.Frame.Control(ConfinedHelperProtocol.ControlTag.Retire, binding, deadline))
+                    assertEquals(ConfinedHelperProtocol.Frame.Retired(binding, StopReason.Normal, child.pid, child.startTimeTicks, deadline), channel.receiveFrame(deadline).frame)
+                    assertNotNull(closed.poll(2, TimeUnit.SECONDS), "Platform accepted socket owner must close control connection")
+                }
+            }
+            assertEquals(0, listenerReads.get())
+            assertEquals(1, reaps.get())
+        } finally {
+            daemon.triggerGlobalShutdown("confined test")
+            thread.join(10_000)
+            kotlin.test.assertFalse(thread.isAlive)
+            finished.get(1, TimeUnit.SECONDS)
+        }
+    }
+
     @Test
     fun `processConnectionStep retries on EINTR during ACK write`() {
         val originalEngine = LinuxNative.engineIdentity

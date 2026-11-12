@@ -14,12 +14,16 @@ internal class ImplementationArtifact private constructor(
     private val tree: ExplodedArtifact?,
     private val inputs: List<String>,
 ) : AutoCloseable {
-    val generation: String = listOf(path.identity, origin.nestedEntry.orEmpty(), tree?.generation.orEmpty(), inputs.joinToString("\n")).joinToString("\u0000")
+    val generation: String = generationDirect(path.identity, origin.nestedEntry, tree?.generation, inputs)
 
     fun validate() {
+        if (tree == null) {
+            validateFlat(type, path, sha256, origin, inputs)
+            return
+        }
         path.validate()
         requireBudget(path)
-        if (tree != null) tree.validate() else check(ArtifactBytes.digest(path.descriptorPath()) == sha256) { "Prepared implementation bytes changed: ${path.requested}" }
+        tree.validate()
         origin.validate(type, path)
         check(origin.loaderInputs(type) == inputs) { "Selected classloader inputs changed" }
         validateSelectedBytes(type)
@@ -37,7 +41,7 @@ internal class ImplementationArtifact private constructor(
             origin.boot -> BootArtifact.selectedBytes(selected, origin, path)
             else -> DeploymentOrigin.ordinaryBytes(selected, path)
         }
-        require(pinned.contentEquals(DeploymentOrigin.selectedBytes(selected))) { "Selected loader resource bytes disagree with pinned deployment" }
+        requireSelectedBytes(selected, pinned)
     }
 
     @Suppress("TooGenericExceptionCaught") // all genuine tree/container acquisitions receive a release attempt
@@ -57,6 +61,88 @@ internal class ImplementationArtifact private constructor(
     }
 
     companion object {
+        private fun generationDirect(
+            identity: String,
+            nested: String?,
+            tree: String?,
+            inputs: List<String>,
+        ): String = listOf(identity, nested.orEmpty(), tree.orEmpty(), inputs.joinToString("\n")).joinToString("\u0000")
+
+        internal fun metadataDirect(
+            type: Class<*>,
+            path: PreparedPath,
+            entries: Map<String, PreparedPath>?,
+        ): Pair<String, String> {
+            val origin = DeploymentOrigin.of(type)
+            val digest = if (entries == null) ArtifactBytes.digest(path.descriptorPath()) else ExplodedArtifact.verifyDirect(path, entries, type.name.replace('.', '/') + ".class").first
+            val tree = entries?.let { ExplodedArtifact.generationDirect(it) }
+            return digest to generationDirect(path.identity, origin.nestedEntry, tree, origin.loaderInputs(type))
+        }
+
+        private fun validateFlat(
+            type: Class<*>,
+            path: PreparedPath,
+            sha256: String,
+            origin: DeploymentOrigin,
+            inputs: List<String>,
+        ) {
+            path.validate()
+            requireBudget(path)
+            check(ArtifactBytes.digest(path.descriptorPath()) == sha256) { "Prepared implementation bytes changed: ${path.requested}" }
+            origin.validate(type, path)
+            check(origin.loaderInputs(type) == inputs) { "Selected classloader inputs changed" }
+            val pinned = if (origin.boot) BootArtifact.selectedBytes(type, origin, path) else DeploymentOrigin.ordinaryBytes(type, path)
+            requireSelectedBytes(type, pinned)
+        }
+
+        private fun requireSelectedBytes(
+            selected: Class<*>,
+            pinned: ByteArray,
+        ) {
+            require(pinned.contentEquals(DeploymentOrigin.selectedBytes(selected))) { "Selected loader resource bytes disagree with pinned deployment" }
+        }
+
+        internal fun validateRootDirect(
+            type: Class<*>,
+            path: PreparedPath,
+        ) {
+            require(
+                path.directory ||
+                path.resolved.fileName
+                .toString()
+                .endsWith(".jar"),
+            )
+            requireBudget(path)
+            DeploymentOrigin.of(type).validate(type, path)
+        }
+
+        internal fun verifyDirect(
+            type: Class<*>,
+            path: PreparedPath,
+            entries: Map<String, PreparedPath>?,
+        ) {
+            val origin = DeploymentOrigin.of(type)
+            require(
+                path.directory ||
+                path.resolved.fileName
+                .toString()
+                .endsWith(".jar"),
+            )
+            requireBudget(path)
+            origin.validate(type, path)
+            val inputs = origin.loaderInputs(type)
+            if (entries == null) {
+                val digest = ArtifactBytes.digest(path.descriptorPath())
+                validateFlat(type, path, digest, origin, inputs)
+            } else {
+                path.validate()
+                val (_, pinned) = ExplodedArtifact.verifyDirect(path, entries, type.name.replace('.', '/') + ".class")
+                origin.validate(type, path)
+                check(origin.loaderInputs(type) == inputs)
+                requireSelectedBytes(type, pinned)
+            }
+        }
+
         @Suppress("TooGenericExceptionCaught") // rollback cannot erase a fatal original/cleanup outcome
         fun resolve(
             type: Class<*>,

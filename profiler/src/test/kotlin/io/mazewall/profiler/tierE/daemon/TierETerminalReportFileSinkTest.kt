@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.daemon
 
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.profiler.internal.attribution.AttributionStatus
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
 import io.mazewall.profiler.internal.attribution.InvocationId
@@ -16,7 +17,90 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
+@EnabledIfLinuxAndSupported
 class TierETerminalReportFileSinkTest {
+    @Test
+    fun `default and selected access apply after complete terminal write`() {
+        for (selected in listOf(false, true)) {
+            val root = Files.createTempDirectory("tier-e-report-access-")
+            try {
+                val gid = Files.getAttribute(root, "unix:gid") as Int
+                val selectedGid = selectedEvidenceTestGid(root)
+                val access = TierEEvidenceFileAccess(if (selected) selectedGid else null)
+                TierETerminalReportFileSink(root, access, prepareTemporary = { file ->
+                    assertEquals(report("orders").toJson(), Files.readString(file))
+                    access.apply(file)
+                }).accept(report("orders"))
+                val file = root.resolve("orders-19802.tier-e.json")
+                assertEquals(if (selected) selectedGid else gid, Files.getAttribute(file, "unix:gid"))
+                assertEquals(
+                    if (selected) "rw-r-----" else "rw-------",
+                    java.nio.file.attribute.PosixFilePermissions
+                    .toString(Files.getPosixFilePermissions(file)),
+                )
+            } finally {
+                root.toFile().deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun `group mode and atomic publication failures preserve existing final or absence`() {
+        for (existing in listOf(false, true)) {
+            for (fault in listOf("group", "mode", "publication")) {
+                val root = Files.createTempDirectory("tier-e-report-fault-")
+                try {
+                    val final = root.resolve("orders-19802.tier-e.json")
+                    if (existing) Files.writeString(final, "original")
+                    val access = TierEEvidenceFileAccess(Files.getAttribute(root, "unix:gid") as Int)
+                    val failure = java.io.IOException(fault)
+                    val sink = TierETerminalReportFileSink(root, prepareTemporary = { file ->
+                        when (fault) {
+                            "group" -> access.apply(file, setGroup = { _, _ -> throw failure })
+                            "mode" -> access.apply(file, setMode = { _, _ -> throw failure })
+                            else -> access.apply(file)
+                        }
+                    }, replaceTemporary = { _, _ -> throw failure })
+                    assertEquals(failure, assertFailsWith<java.io.IOException> { sink.accept(report("orders")) })
+                    assertEquals(existing, Files.exists(final))
+                    if (existing) assertEquals("original", Files.readString(final))
+                } finally {
+                    root.toFile().deleteRecursively()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `terminal replaces a symlink itself without touching its referent`() {
+        val root = Files.createTempDirectory("tier-e-report-symlink-")
+        try {
+            val sentinel = Files.writeString(root.resolve("sentinel"), "untouched")
+            val final = root.resolve("orders-19802.tier-e.json")
+            Files.createSymbolicLink(final, sentinel)
+            TierETerminalReportFileSink(root).accept(report("orders"))
+            assertEquals(false, Files.isSymbolicLink(final))
+            assertEquals(report("orders").toJson(), Files.readString(final))
+            assertEquals("untouched", Files.readString(sentinel))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `unsupported atomic replacement never falls back and keeps existing bytes`() {
+        val root = Files.createTempDirectory("tier-e-atomic-unsupported-")
+        try {
+            val final = Files.writeString(root.resolve("orders-19802.tier-e.json"), "original")
+            val failure = java.nio.file.AtomicMoveNotSupportedException("temporary", final.toString(), "injected")
+            val sink = TierETerminalReportFileSink(root, replaceTemporary = { _, _ -> throw failure })
+            assertEquals(failure, assertFailsWith<java.nio.file.AtomicMoveNotSupportedException> { sink.accept(report("orders")) })
+            assertEquals("original", Files.readString(final))
+        } finally {
+            root.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `resolved count excludes unresolved retained observations`() {
         val observation = SyscallAttribution(

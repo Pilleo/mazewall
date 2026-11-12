@@ -1090,6 +1090,7 @@ public final class io/mazewall/enforcer/api/execution/ManagedRuntime : java/lang
 	public static final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
 	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;Lio/mazewall/enforcer/api/StacktraceScopingPolicy;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
+	public final fun prepare (Lio/mazewall/enforcer/api/Policy;Lio/mazewall/enforcer/api/execution/DomainLimits;Lio/mazewall/enforcer/api/execution/PreparedStackScoping;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun prepare (Lio/mazewall/enforcer/api/ReviewedOperationArtifact;Lio/mazewall/enforcer/api/execution/DomainLimits;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun prepare (Lio/mazewall/enforcer/api/ReviewedOperationArtifact;Lio/mazewall/enforcer/api/execution/DomainLimits;Lio/mazewall/enforcer/api/execution/PreparedOperationResources;)Lio/mazewall/enforcer/api/execution/InProcessDomain;
 	public final fun submit (Lio/mazewall/enforcer/api/execution/InProcessDomain;Ljava/util/concurrent/Callable;)Lio/mazewall/enforcer/api/execution/InvocationHandle;
@@ -1097,6 +1098,77 @@ public final class io/mazewall/enforcer/api/execution/ManagedRuntime : java/lang
 
 public final class io/mazewall/enforcer/api/execution/ManagedRuntime$Companion {
 	public final fun open (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionOwner : java/lang/AutoCloseable {
+	public static final field Companion Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionOwner$Companion;
+	public fun close ()V
+	public static final fun create ()Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionOwner;
+	public final fun ownsRuntime (Lio/mazewall/enforcer/api/execution/ManagedRuntime;)Z
+	public final fun retire (Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus;
+	public final fun start (Ljava/time/Duration;Ljava/time/Duration;)Lio/mazewall/enforcer/api/execution/ManagedRuntime;
+	public final fun status ()Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionOwner$Companion {
+	public final fun create ()Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionOwner;
+}
+
+public abstract interface class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus {
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Active : io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus {
+	public static final field INSTANCE Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Active;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Complete : io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Complete;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Complete;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Complete;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHistory ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$NotStarted : io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus {
+	public static final field INSTANCE Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$NotStarted;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Pending : io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Pending;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Pending;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Pending;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHistory ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Starting : io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus {
+	public static final field INSTANCE Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Starting;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Unknown : io/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Unknown;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Unknown;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Unknown;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHistory ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class io/mazewall/enforcer/api/execution/PreparedOperationResources : java/lang/AutoCloseable {
@@ -1112,6 +1184,87 @@ public final class io/mazewall/enforcer/api/execution/PreparedOperationResources
 
 public final class io/mazewall/enforcer/api/execution/PreparedOperationResources$Companion {
 	public final fun resolve (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/lang/Class;Ljava/util/Set;)Lio/mazewall/enforcer/api/execution/PreparedOperationResources;
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedResolutionOwner : java/lang/AutoCloseable {
+	public static final field Companion Lio/mazewall/enforcer/api/execution/PreparedResolutionOwner$Companion;
+	public fun close ()V
+	public static final fun create ()Lio/mazewall/enforcer/api/execution/PreparedResolutionOwner;
+	public final fun resolve (Lio/mazewall/enforcer/api/RuntimeProfile;Lio/mazewall/enforcer/api/Policy;Ljava/lang/Class;Ljava/util/Set;)Lio/mazewall/enforcer/api/execution/PreparedOperationResources;
+	public final fun retirement ()Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement;
+	public final fun retryRetirement ()Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement;
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedResolutionOwner$Companion {
+	public final fun create ()Lio/mazewall/enforcer/api/execution/PreparedResolutionOwner;
+}
+
+public abstract class io/mazewall/enforcer/api/execution/PreparedResolutionPendingException : java/lang/IllegalStateException {
+}
+
+public abstract interface class io/mazewall/enforcer/api/execution/PreparedResolutionRetirement {
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Complete : io/mazewall/enforcer/api/execution/PreparedResolutionRetirement {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Complete;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Complete;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Complete;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHistory ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Pending : io/mazewall/enforcer/api/execution/PreparedResolutionRetirement {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Pending;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Pending;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Pending;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHistory ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Transferred : io/mazewall/enforcer/api/execution/PreparedResolutionRetirement {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Transferred;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Transferred;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Transferred;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHistory ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Unknown : io/mazewall/enforcer/api/execution/PreparedResolutionRetirement {
+	public fun <init> (Ljava/lang/Throwable;)V
+	public final fun component1 ()Ljava/lang/Throwable;
+	public final fun copy (Ljava/lang/Throwable;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Unknown;
+	public static synthetic fun copy$default (Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Unknown;Ljava/lang/Throwable;ILjava/lang/Object;)Lio/mazewall/enforcer/api/execution/PreparedResolutionRetirement$Unknown;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHistory ()Ljava/lang/Throwable;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract class io/mazewall/enforcer/api/execution/PreparedResolutionUnknownException : java/lang/IllegalStateException {
+	public synthetic fun <init> (Ljava/lang/Throwable;Lkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class io/mazewall/enforcer/api/execution/PreparedStackScoping : java/lang/AutoCloseable {
+	public fun close ()V
+}
+
+public final class io/mazewall/enforcer/api/execution/RuntimeAcquisitionPendingException : java/lang/IllegalStateException {
+	public fun <init> (Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Pending;)V
+	public final fun getStatus ()Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Pending;
+}
+
+public final class io/mazewall/enforcer/api/execution/RuntimeAcquisitionUnknownException : java/lang/IllegalStateException {
+	public fun <init> (Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Unknown;)V
+	public final fun getStatus ()Lio/mazewall/enforcer/api/execution/ManagedRuntimeAcquisitionStatus$Unknown;
 }
 
 public final class io/mazewall/enforcer/diagnostics/ContainmentDiagnostic {

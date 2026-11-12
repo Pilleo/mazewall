@@ -32,6 +32,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 @Isolated
@@ -377,6 +378,7 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
             val execution = runCatching {
                 when (args[0]) {
                     "scoping" -> fixture.`test supervised openat allows or denies based on JVM stack trace scoping policy`()
+                    "managed-legacy-session" -> fixture.`managed legacy worker reuses the exact captured supervised session policy`()
                     "fast-path" -> fixture.`test daemon fast-path allows reads inside java home even from evil context`()
                     "stuck" -> {
                         val files = args.drop(2)
@@ -398,6 +400,94 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
                 System.exit(2)
             }
             System.exit(0)
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `managed legacy worker reuses the exact captured supervised session policy`() {
+        if (!disposableChild) {
+            val outcome = ProxyDiagnosticJvm.run("managed-legacy-session")
+            outcome.failure?.let { throw it }
+            assertTrue(outcome.lines.any { it == "MANAGED_LEGACY_WORKER_DAEMON_EXITED_LISTENER_UNCONFIRMED" })
+            return
+        }
+        val manager = io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
+            .getInstance()
+        val supervisor = manager.getOrSpawnSharedDaemon()
+        val timeout = java.time.Duration.ofSeconds(15)
+        val runtime = io.mazewall.enforcer.api.execution.ManagedRuntime
+            .open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout)
+        try {
+            val handlers = mutableMapOf<Syscall, ScopingHandler>(Syscall.CONNECT to { _, _, _ -> true })
+            val supplied = object : StacktraceScopingPolicy {
+                override val handlers: Map<Syscall, ScopingHandler> = handlers
+            }
+            val policy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).build()
+            val domain = runtime.prepare(
+                policy,
+                io.mazewall.enforcer.api.execution
+                .DomainLimits(1, 2),
+                    supplied,
+            )
+            handlers.clear()
+            val resource = domain.javaClass.getDeclaredField("resource").let {
+                it.isAccessible = true
+                it.get(domain)
+            }
+            val frozen = resource.javaClass.getDeclaredField("scoping").let {
+                it.isAccessible = true
+                it.get(resource) as io.mazewall.enforcer.internal.execution.FrozenStackScoping.Legacy
+            }
+            assertTrue(frozen.policy.handlers.containsKey(Syscall.CONNECT))
+            val environment = runtime.javaClass.getDeclaredField("environment").let {
+                it.isAccessible = true
+                it.get(runtime) as InstallationEnvironment
+            }
+            val installations = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller::class.java.getDeclaredField("installations").let {
+                it.isAccessible = true
+                it.get(null) as ThreadLocal<*>
+            }
+            val captured = AtomicReference<Any>()
+            val firstWorker = AtomicReference<Thread>()
+            repeat(2) {
+                val handle = runtime.submit(
+                    domain,
+                    java.util.concurrent.Callable {
+                    val observed = io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.scoping
+                    assertSame(frozen, observed)
+                    val owners = installations.get() as List<*>
+                    assertEquals(1, owners.size)
+                    val owner = checkNotNull(owners.single())
+                    val policyField = owner.javaClass.getDeclaredField("capturedScoping").apply { isAccessible = true }
+                    val capturedPolicy = policyField.get(owner) as io.mazewall.enforcer.internal.supervisor.CapturedScopingPolicy
+                    assertSame(frozen.policy, capturedPolicy.original)
+                    assertSame(frozen.policy.handlers[Syscall.CONNECT], capturedPolicy.dispatch.handlers[Syscall.CONNECT])
+                    if (captured.get() == null) captured.set(owner) else assertSame(captured.get(), owner)
+                    val current = Thread.currentThread()
+                    if (firstWorker.get() == null) firstWorker.set(current) else assertSame(firstWorker.get(), current)
+                    io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+                        .acquireTaskSession(frozen.policy, environment.native)
+                        .close()
+                },
+                )
+                handle.result().toCompletableFuture().get(15, TimeUnit.SECONDS)
+            }
+            assertIs<io.mazewall.enforcer.api.execution.DrainReport.Complete>(runtime.drain(timeout))
+            val worker = checkNotNull(firstWorker.get())
+            assertFalse(worker.isAlive)
+            val owner = checkNotNull(captured.get())
+            val retired = owner.javaClass.getDeclaredField("retired").apply { isAccessible = true }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (!synchronized(owner) { retired.getBoolean(owner) } && System.nanoTime() < deadline) Thread.yield()
+            assertTrue(synchronized(owner) { retired.getBoolean(owner) }, "actual supervisor lifetime did not reach closed state")
+            manager.stop()
+            assertTrue(supervisor.daemonProcess.waitFor(10, TimeUnit.SECONDS), "actual supervisor process did not exit")
+            assertFalse(supervisor.daemonProcess.isAlive)
+            println("MANAGED_LEGACY_WORKER_DAEMON_EXITED_LISTENER_UNCONFIRMED")
+        } finally {
+            runtime.drain(timeout)
+            manager.stop()
         }
     }
 
@@ -467,6 +557,7 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         val policy = ProcessPolicyBuilder
             .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.PURE_COMPUTE_UNSAFE)
+            .allow(Syscall.OPEN, Syscall.OPENAT)
             .build()
 
         val ownedExecutor = OwnedReadExecutor()
@@ -549,6 +640,7 @@ class SupervisorProxyIntegrationTest : BaseIntegrationTest() {
         val policy = ProcessPolicyBuilder
             .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.PURE_COMPUTE_UNSAFE)
+            .allow(Syscall.OPEN, Syscall.OPENAT)
             .build()
 
         val ownedExecutor = OwnedReadExecutor()

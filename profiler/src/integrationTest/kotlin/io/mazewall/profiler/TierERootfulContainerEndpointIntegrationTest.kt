@@ -41,6 +41,14 @@ class TierERootfulContainerEndpointIntegrationTest {
         val configuration: TierERunConfiguration,
     )
 
+    private fun qualificationDirectory(
+        scratch: Path,
+        scenario: String,
+    ): Path =
+        System.getenv("TIER_E_QUALIFICATION_ARTIFACTS")?.takeIf(String::isNotBlank)?.let {
+            Files.createDirectories(Path.of(it).resolve("a4c-$scenario-${UUID.randomUUID()}"))
+        } ?: scratch
+
     private fun prepareFixture(endpoint: ContainerEndpoint): PreparedFixture {
         val root = generateSequence(Path.of("").toAbsolutePath()) { it.parent }
             .first { Files.exists(it.resolve("gradlew")) }
@@ -184,6 +192,23 @@ class TierERootfulContainerEndpointIntegrationTest {
         assertTrue(Files.readString(destination.resolve("verdict.env")).contains("policy_eligibility=false"))
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = ["group", "group-acl", "default", "default-acl"])
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    fun `installed all-target daemon qualifies evidence access`(
+        scenario: String,
+        endpoint: ContainerEndpoint,
+    ) {
+        val prepared = prepareFixture(endpoint)
+        io.mazewall.profiler.api.TierEAllTargetDaemonIntegrationTest().runInstalled(
+            endpoint,
+            prepared.root,
+            prepared.native,
+            prepared.image,
+            scenario,
+        )
+    }
+
     @Test
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
     fun `Kotlin owned coverage baseline runs without agent or collector`(
@@ -237,8 +262,9 @@ class TierERootfulContainerEndpointIntegrationTest {
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
     fun `Kotlin owned stale identity is rejected before workload attribution`(
         endpoint: ContainerEndpoint,
-        @TempDir destination: Path,
+        @TempDir scratch: Path,
     ) {
+        val destination = qualificationDirectory(scratch, "stale")
         assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
         val prepared = prepareFixture(endpoint)
         val stale = prepared.configuration.copy(scenario = prepared.configuration.scenario.copy(identityCase = "stale"))
@@ -252,8 +278,9 @@ class TierERootfulContainerEndpointIntegrationTest {
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
     fun `Kotlin owned simulated PID reuse closes the session incomplete`(
         endpoint: ContainerEndpoint,
-        @TempDir destination: Path,
+        @TempDir scratch: Path,
     ) {
+        val destination = qualificationDirectory(scratch, "simulated-reuse")
         assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
         val prepared = prepareFixture(endpoint)
         val reused = prepared.configuration.copy(
@@ -342,8 +369,9 @@ class TierERootfulContainerEndpointIntegrationTest {
     fun `Kotlin owned negative artifact keeps terminal incomplete`(
         scenario: String,
         endpoint: ContainerEndpoint,
-        @TempDir destination: Path,
+        @TempDir scratch: Path,
     ) {
+        val destination = qualificationDirectory(scratch, "artifact-$scenario")
         assumeTrue(endpoint.resolvedUri?.startsWith("unix://") == true)
         val prepared = prepareFixture(endpoint)
         val negative = prepared.configuration.copy(

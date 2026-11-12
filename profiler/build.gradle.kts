@@ -1,6 +1,11 @@
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.internal.project.ProjectInternal
+import org.gradle.api.internal.tasks.DefaultTaskDependency
+import org.gradle.api.internal.tasks.TaskResolver
+import org.gradle.api.provider.MapProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
@@ -8,7 +13,10 @@ import org.gradle.process.ExecOperations
 import java.math.BigDecimal
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Files
+import java.nio.file.LinkOption
 import javax.inject.Inject
+import javax.xml.parsers.DocumentBuilderFactory
 
 abstract class GenerateInvocationStateBtf
     @Inject
@@ -127,6 +135,56 @@ abstract class GenerateInvocationStateBtf
         }
     }
 
+abstract class VerifyTierEA4DiagnosticWiring : DefaultTask() {
+    @get:Input abstract val modelFacts: MapProperty<String, List<String>>
+
+    @TaskAction
+    fun verify() {
+        val facts = modelFacts.get()
+        val diagnostic = ":profiler:tierEMissingOpenDiagnostic"
+        val diagnosticClass = "io.mazewall.profiler.TierEMissingOpenDiscriminatorIntegrationTest"
+        val tag = "tier-e-a4-boundary-diagnostic"
+        for ((key, paths) in facts.filterKeys { it.startsWith("edges:") }) {
+            logger.info("A4 model edges ${key.removePrefix("edges:")}: $paths")
+        }
+        for (owner in listOf("", ":profiler")) {
+            for (name in listOf("check", "build", "unitCheck", "kernelCheck")) {
+                val root = "$owner:$name"
+                val closure = facts.getValue("gate:$root")
+                check(diagnostic !in closure) { "$root transitively reaches $diagnostic" }
+                logger.lifecycle("A4 model: $root excludes diagnostic (${closure.size} reachable tasks)")
+                logger.info("A4 model closure $root: $closure")
+            }
+        }
+        val closure = facts.getValue("diagnosticDependencies")
+        check(":profiler:integrationTestClasses" in closure) { "Diagnostic must compile integration tests" }
+        check(":profiler:testClasses" in closure) { "Diagnostic must compile shared test support" }
+        val compilationTasks = facts.getValue("compilationTasks").toSet()
+        check(closure.all { it in compilationTasks }) {
+            "Diagnostic has non-compilation dependencies: ${closure.filterNot { it in compilationTasks }}"
+        }
+        logger.lifecycle("A4 model: compilation-only diagnostic closure: $closure")
+        check(facts.getValue("friendPaths").containsAll(facts.getValue("sharedOutputs"))) {
+            "Integration compilation must retain main/test internal access"
+        }
+        logger.info("A4 model: integration friend paths: ${facts.getValue("friendPaths")}")
+        for (test in facts.getValue("otherTests")) {
+            check("$diagnosticClass*" in facts.getValue("excludes:$test")) { "$test must exclude the A4 diagnostic class" }
+            check(tag in facts.getValue("excludedTags:$test")) { "$test must exclude the A4 tag" }
+            check(facts.getValue("optIns:$test") == listOf("", "")) { "$test must clear both A4 opt-ins" }
+        }
+        check(facts.getValue("includePatterns") == listOf("$diagnosticClass.captureOneOwnedGroupArm"))
+        check(facts.getValue("excludePatterns").isEmpty())
+        check(facts.getValue("includeTags") == listOf(tag))
+        check(facts.getValue("excludeTags").isEmpty())
+        check(facts.getValue("execution") == listOf("true", "1", "false"))
+        check(facts.getValue("forwardedEnvironment") == facts.getValue("currentEnvironment"))
+        logger.info("A4 model: forwarded environment: ${facts.getValue("environmentNames").zip(facts.getValue("forwardedEnvironment")).toMap()}")
+        check(facts.getValue("blankEnvironment") == listOf("", "", ""))
+        logger.lifecycle("A4 model: exact method/tag and isolated environments verified")
+    }
+}
+
 plugins {
     id("mazewall.quality-conventions")
     application
@@ -240,6 +298,20 @@ sourceSets {
     }
 }
 
+tasks.named<ProcessResources>("processTestResources") {
+    from(rootProject.file("profiler-native/tests/TierEAllTargetWorkload.java")) { into("tierE") }
+}
+
+tasks.register<JavaExec>("tierEA4Replay") {
+    group = "verification"
+    description = "Read-only A4 retained data-plane replay; never runtime qualification"
+    dependsOn("testClasses")
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("io.mazewall.profiler.testing.tierE.TierEA4DiagnosticReplay")
+    val replayArguments = listOf("tierEReplayDirectory", "tierEReplayTargetPid", "tierEReplayStartTicks", "tierEReplayOutput").map { providers.gradleProperty(it) }
+    argumentProviders.add(CommandLineArgumentProvider { replayArguments.map { it.get() } })
+}
+
 // Developer-only verification utilities are not part of the published profiler
 // jar. Ordinary Kotlin unit tests can exercise them without Docker/Podman.
 val toolingSourceSet =
@@ -259,6 +331,13 @@ sourceSets.named("integrationTest") {
 }
 configurations.named("toolingImplementation") {
     extendsFrom(configurations.implementation.get())
+}
+
+tasks.register<JavaExec>("tierEEvidence") {
+    group = "verification"
+    description = "Capture or verify versioned Tier E file identities using Kotlin"
+    classpath = toolingSourceSet.runtimeClasspath
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEEvidence")
 }
 
 tasks.register<JavaExec>("policyDiff") {
@@ -661,10 +740,27 @@ val tierEToolsStartScripts =
                 .asFile
     }
 
+val tierETargetHelperStartScripts =
+    tasks.register<org.gradle.jvm.application.tasks.CreateStartScripts>("tierETargetHelperStartScripts") {
+        applicationName = "tier-e-target-helper"
+        mainClass.set("io.mazewall.profiler.tierE.daemon.TierETargetHelperKt")
+        classpath = files(tasks.named("jar"), configurations.runtimeClasspath)
+        defaultJvmOpts = application.applicationDefaultJvmArgs
+        outputDir =
+            layout.buildDirectory
+                .dir("tier-e-target-helper-scripts")
+                .get()
+                .asFile
+    }
+
 distributions.main {
     contents {
         from(tierEToolingJar) { into("lib") }
         from(tierEToolsStartScripts) {
+            into("bin")
+            filePermissions { unix("rwxr-xr-x") }
+        }
+        from(tierETargetHelperStartScripts) {
             into("bin")
             filePermissions { unix("rwxr-xr-x") }
         }
@@ -703,6 +799,17 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
     associateWith(kotlinCompilations.getByName("tooling"))
 }
+tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileIntegrationTestKotlin") {
+    dependsOn("testClasses")
+    friendPaths.from(
+        sourceSets.main
+            .get()
+            .output.classesDirs,
+        sourceSets.test
+            .get()
+            .output.classesDirs,
+    )
+}
 kotlinCompilations.named("test") {
     associateWith(kotlinCompilations.getByName("tooling"))
 }
@@ -722,6 +829,193 @@ fun Test.configureIntegrationSourceSet() {
     group = "verification"
     testClassesDirs = sourceSets["integrationTest"].output.classesDirs
     classpath = sourceSets["integrationTest"].runtimeClasspath
+}
+
+val a4Class = "io.mazewall.profiler.TierEMissingOpenDiscriminatorIntegrationTest"
+val a4Tag = "tier-e-a4-boundary-diagnostic"
+val a4Method = "$a4Class.captureOneOwnedGroupArm"
+val a4Environment =
+    listOf(
+        "TIER_E_A4_DIAGNOSTIC_ARM",
+        "TIER_E_CONTAINER_ENGINE",
+        "MAZEWALL_DOCKER_HOST",
+        "TIER_E_DOCKER_IMAGE",
+        "TIER_E_QUALIFICATION_ARTIFACTS",
+        "TIER_E_SPLIT_NATIVE_BUILD_DIR",
+    )
+
+rootProject.allprojects {
+    tasks.withType<Test>().configureEach {
+        if (path != ":profiler:tierEMissingOpenDiagnostic") {
+            filter.excludeTestsMatching("$a4Class*")
+            useJUnitPlatform { excludeTags(a4Tag) }
+            environment("TIER_E_A4_DIAGNOSTIC_ARM", "")
+            environment("TIER_E_TEST_BOUNDARY_DIAGNOSTICS", "")
+        }
+    }
+}
+
+tasks.register<Test>("tierEMissingOpenDiagnostic") {
+    configureIntegrationSourceSet()
+    description = "Explicit single owned A4 boundary diagnostic; requires prebuilt inputs"
+    // Do not inherit the global Test health-cleanup dependency; this arm only compiles inputs.
+    setDependsOn(listOf("integrationTestClasses"))
+    // Generic failure triage is not part of the owned diagnostic evidence path.
+    setFinalizedBy(emptyList<Any>())
+    notCompatibleWithConfigurationCache("Revalidates current operator readiness and fresh evidence paths")
+    maxParallelForks = 1
+    filter {
+        includeTestsMatching(a4Method)
+        isFailOnNoMatchingTests = true
+    }
+    useJUnitPlatform { includeTags(a4Tag) }
+    for (name in a4Environment) environment(name, providers.environmentVariable(name).orElse("").get())
+    environment("DOCKER_HOST", "")
+    environment("CONTAINER_HOST", "")
+    environment("TIER_E_TEST_BOUNDARY_DIAGNOSTICS", "")
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+    val diagnosticOptIn = providers.gradleProperty("tierEA4Diagnostic")
+    val diagnosticArm = providers.environmentVariable("TIER_E_A4_DIAGNOSTIC_ARM")
+    val containerEngine = providers.environmentVariable("TIER_E_CONTAINER_ENGINE")
+    val dockerHost = providers.environmentVariable("MAZEWALL_DOCKER_HOST")
+    val dockerImage = providers.environmentVariable("TIER_E_DOCKER_IMAGE")
+    val nativeDirectory = providers.environmentVariable("TIER_E_SPLIT_NATIVE_BUILD_DIR")
+    val artifactDirectory = providers.environmentVariable("TIER_E_QUALIFICATION_ARTIFACTS")
+    val profilerDirectory = project.layout.projectDirectory.asFile
+    val xmlLocation = reports.junitXml.outputLocation
+    val expectedClass = a4Class
+    doFirst {
+        require(diagnosticOptIn.orNull == "true") { "Pass -PtierEA4Diagnostic=true" }
+        require(diagnosticArm.orNull == "1") { "Set TIER_E_A4_DIAGNOSTIC_ARM=1" }
+        require(containerEngine.orNull == "docker") { "Explicit docker engine required" }
+        require(dockerHost.orNull == "unix:///var/run/docker.sock") { "Explicit rootful Docker socket required" }
+        require(!dockerImage.orNull.isNullOrBlank()) { "Explicit image required" }
+        val native = nativeDirectory.orNull
+        require(!native.isNullOrBlank() && profilerDirectory.resolve(native).isDirectory) { "Explicit prebuilt native directory required" }
+        val artifacts = artifactDirectory.orNull
+        require(!artifacts.isNullOrBlank()) { "Explicit fresh artifact directory required" }
+        val artifactFile = profilerDirectory.resolve(artifacts)
+        val path = artifactFile.toPath()
+        require(
+            !Files.exists(path, LinkOption.NOFOLLOW_LINKS) ||
+                (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) && artifactFile.list()?.isEmpty() == true),
+        ) {
+            "Artifact directory must be fresh and empty"
+        }
+    }
+    doLast {
+        val xmlDir =
+            xmlLocation
+                .get()
+                .asFile
+        val xmlFiles =
+            xmlDir.listFiles { f -> f.name.startsWith("TEST-") && f.extension == "xml" }.orEmpty()
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        val cases =
+            xmlFiles.flatMap { xml ->
+                val nodes = factory.newDocumentBuilder().parse(xml).getElementsByTagName("testcase")
+                (0 until nodes.length).map { nodes.item(it) as org.w3c.dom.Element }
+            }
+        check(
+            cases.size == 1 &&
+                cases.single().getElementsByTagName("skipped").length == 0 &&
+                cases.single().getAttribute("classname") == expectedClass &&
+                cases.single().getAttribute("name") == "captureOneOwnedGroupArm()",
+        ) {
+            "A4 diagnostic requires exactly one executed, unskipped test"
+        }
+    }
+}
+
+val verifyTierEA4DiagnosticWiring =
+    tasks.register<VerifyTierEA4DiagnosticWiring>("verifyTierEA4DiagnosticWiring") {
+        group = "verification"
+    }
+
+// Graph readiness follows all project/convention callbacks; only scalar inputs survive cache storage.
+gradle.taskGraph.whenReady {
+    val verifier = verifyTierEA4DiagnosticWiring.get()
+    if (hasTask(verifier)) {
+        val diagnostic = tasks.named<Test>("tierEMissingOpenDiagnostic").get()
+        val facts = linkedMapOf<String, List<String>>()
+
+        fun dependencies(task: Task): Set<Task> =
+            (task.project as ProjectInternal).owner.fromMutableState {
+                // Gradle 9.8's cross-project string resolver re-enters the build lifecycle lock.
+                // Reuse its notation engine and inferred inputs, resolving paths in the configured model.
+                val copy =
+                    DefaultTaskDependency(
+                        TaskResolver { path ->
+                            task.project.tasks.getByPath(path.path)
+                        },
+                        null,
+                    )
+                copy.setValues(task.dependsOn + (task.finalizedBy as DefaultTaskDependency).mutableValues)
+                copy.add(task.inputs)
+                copy.getDependencies(task).also { resolved ->
+                    facts["edges:${task.path}"] = resolved.map { it.path }.sorted()
+                }
+            }
+        val edges = mutableMapOf<Task, Set<Task>>()
+
+        fun reachable(root: Task): Set<Task> {
+            val seen = linkedSetOf<Task>()
+            val pending = ArrayDeque<Task>()
+            pending.add(root)
+            while (pending.isNotEmpty()) {
+                val task = pending.removeFirst()
+                if (seen.add(task)) pending.addAll(edges.getOrPut(task) { dependencies(task) })
+            }
+            return seen
+        }
+        for (owner in listOf(rootProject, project)) {
+            for (name in listOf("check", "build", "unitCheck", "kernelCheck")) {
+                val root = owner.tasks.getByName(name)
+                val closure = reachable(root)
+                facts["gate:${root.path}"] = closure.map { it.path }.sorted()
+            }
+        }
+        val compilationTasks =
+            rootProject.allprojects
+                .flatMap { owner ->
+                    val sources = owner.extensions.findByType<SourceSetContainer>()
+                    val names =
+                        sources.orEmpty().flatMap { source ->
+                            listOf(source.classesTaskName, source.compileJavaTaskName, source.getCompileTaskName("kotlin"), source.processResourcesTaskName)
+                        } +
+                            listOf("jar", "checkKotlinGradlePluginConfigurationErrors")
+                    names.mapNotNull { owner.tasks.findByName(it) }
+                }.toSet() +
+                generateInvocationStateBtf.get()
+        val closure = reachable(diagnostic) - diagnostic
+        facts["compilationTasks"] = compilationTasks.map { it.path }.sorted()
+        facts["diagnosticDependencies"] = closure.map { it.path }.sorted()
+        val integrationCompile = tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileIntegrationTestKotlin").get()
+        val friends = integrationCompile.friendPaths.files
+        val sharedOutputs = sourceSets["main"].output.classesDirs.files + sourceSets["test"].output.classesDirs.files
+        facts["friendPaths"] = friends.map { it.path }.sorted()
+        facts["sharedOutputs"] = sharedOutputs.map { it.path }.sorted()
+        val otherTests = rootProject.allprojects.flatMap { it.tasks.withType<Test>() }.filter { it != diagnostic }
+        facts["otherTests"] = otherTests.map { it.path }.sorted()
+        for (test in otherTests) {
+            facts["excludes:${test.path}"] = test.filter.excludePatterns.sorted()
+            facts["excludedTags:${test.path}"] = (test.options as org.gradle.api.tasks.testing.junitplatform.JUnitPlatformOptions).excludeTags.sorted()
+            facts["optIns:${test.path}"] = listOf("TIER_E_A4_DIAGNOSTIC_ARM", "TIER_E_TEST_BOUNDARY_DIAGNOSTICS").map { test.environment[it].toString() }
+        }
+        facts["includePatterns"] = diagnostic.filter.includePatterns.sorted()
+        facts["excludePatterns"] = diagnostic.filter.excludePatterns.sorted()
+        facts["includeTags"] = (diagnostic.options as org.gradle.api.tasks.testing.junitplatform.JUnitPlatformOptions).includeTags.sorted()
+        facts["excludeTags"] = (diagnostic.options as org.gradle.api.tasks.testing.junitplatform.JUnitPlatformOptions).excludeTags.sorted()
+        facts["execution"] = listOf(diagnostic.filter.isFailOnNoMatchingTests.toString(), diagnostic.maxParallelForks.toString(), diagnostic.ignoreFailures.toString())
+        facts["environmentNames"] = a4Environment.toList()
+        facts["forwardedEnvironment"] = a4Environment.map { diagnostic.environment[it].toString() }
+        facts["currentEnvironment"] = a4Environment.map { providers.environmentVariable(it).orElse("").get() }
+        facts["blankEnvironment"] = listOf("DOCKER_HOST", "CONTAINER_HOST", "TIER_E_TEST_BOUNDARY_DIAGNOSTICS").map { diagnostic.environment[it].toString() }
+        verifier.modelFacts.set(facts)
+        verifier.modelFacts.finalizeValue()
+    }
 }
 
 val integrationTest =
@@ -760,6 +1054,17 @@ val rootfulContainerTest =
                 }
             environment(name, selected)
         }
+        environment(
+            "TIER_E_QUALIFICATION_ARTIFACTS",
+            providers
+                .environmentVariable("TIER_E_QUALIFICATION_ARTIFACTS")
+                .orElse(
+                    layout.buildDirectory
+                        .dir("tier-e-installed-qualification")
+                        .get()
+                        .asFile.absolutePath,
+                ).get(),
+        )
         outputs.upToDateWhen { false }
         outputs.cacheIf { false }
         maxParallelForks = 1
@@ -793,7 +1098,13 @@ integrationTestFreshJvm.configure {
 }
 
 tasks.check {
-    dependsOn(integrationTest, integrationTestFreshJvm)
+    // The root convention includes every Test; keep all ordinary tests but not this opt-in arm.
+    setDependsOn(
+        dependsOn.map { dependency ->
+            if (dependency is TaskCollection<*>) dependency.matching { it.name != "tierEMissingOpenDiagnostic" } else dependency
+        },
+    )
+    dependsOn(integrationTest, integrationTestFreshJvm, "verifyTierEA4DiagnosticWiring")
 }
 
 tasks.test {

@@ -164,6 +164,53 @@ final class RootVerificationFunctionalTest {
             }
             Path leafBuild = fixture.resolve("integrations/spring/java-leaf/build.gradle.kts");
             String passingBuild = Files.readString(leafBuild);
+            try {
+                Files.writeString(leafBuild, passingBuild + """
+                    val regressionClasspath = configurations.named("testRuntimeClasspath")
+                    tasks.register("writeExpectedAuxClasspath") {
+                        val paths = regressionClasspath.get()
+                        doLast { layout.buildDirectory.file("expected-auxclasspath.txt").get().asFile.writeText(paths.files.joinToString("\\n") { it.absolutePath }) }
+                    }
+                    tasks.named<com.github.spotbugs.snom.SpotBugsTask>("spotbugsMain") {
+                        (javaClass.getMethod("getAuxclasspathFile").invoke(this) as org.gradle.api.file.RegularFileProperty)
+                            .set(layout.buildDirectory.file("custom-auxclasspath.txt"))
+                        auxClassPaths.setFrom(regressionClasspath)
+                        dependsOn("writeExpectedAuxClasspath")
+                    }
+                    """);
+                Path aux = fixture.resolve("integrations/spring/java-leaf/build/custom-auxclasspath.txt");
+                Files.writeString(aux, "/stale/valid-looking.jar\n".repeat(2000) + "STALE_TAIL");
+                BuildResult rerun = run(fixture, false, ":integrations:spring:java-leaf:spotbugsMain", "--rerun");
+                outcome(rerun, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.SUCCESS);
+                VerifySpotBugsReport.validate(fixture.resolve("integrations/spring/java-leaf/build/reports/spotbugs/main.xml"));
+                String expected = Files.readString(fixture.resolve("integrations/spring/java-leaf/build/expected-auxclasspath.txt"));
+                String actual = Files.readString(aux);
+                if (expected.isEmpty() || !actual.equals(expected)) {
+                    throw new AssertionError("Auxclasspath differs: expected bytes=" + expected.length()
+                        + ", actual bytes=" + actual.length() + ", stale tail=" + actual.contains("STALE_TAIL")
+                        + ", fixture=" + fixture);
+                }
+                System.out.println("Auxclasspath regression: expected=" + expected.length() + ", actual=" + actual.length()
+                    + ", stale tail=" + actual.contains("STALE_TAIL"));
+                Files.writeString(leafBuild, passingBuild + """
+                    tasks.named<com.github.spotbugs.snom.SpotBugsTask>("spotbugsMain") {
+                        (javaClass.getMethod("getAuxclasspathFile").invoke(this) as org.gradle.api.file.RegularFileProperty)
+                            .set(layout.buildDirectory.file("custom-auxclasspath.txt"))
+                        auxClassPaths.setFrom(configurations.named("testRuntimeClasspath"))
+                    }
+                    """);
+                for (String marker : List.of("Configuration cache entry stored.", "Reusing configuration cache.")) {
+                    Files.writeString(aux, "/stale/valid-looking.jar\n".repeat(2000) + "STALE_TAIL");
+                    BuildResult cached = run(fixture, false, ":integrations:spring:java-leaf:spotbugsMain", "--rerun", "--configuration-cache");
+                    outcome(cached, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.SUCCESS);
+                    contains(cached, marker);
+                    String rewritten = Files.readString(aux);
+                    if (!rewritten.equals(expected)) throw new AssertionError("Cached auxclasspath differs: " + fixture);
+                    System.out.println("Cached auxclasspath regression: " + marker + " bytes=" + rewritten.length());
+                }
+            } finally {
+                Files.writeString(leafBuild, passingBuild);
+            }
             Files.writeString(leafBuild, """
                 tasks.named<org.gradle.testing.jacoco.tasks.JacocoCoverageVerification>("jacocoKernelCoverageVerification") {
                     violationRules { rule { limit { minimum = "0.99".toBigDecimal() } } }
@@ -653,7 +700,8 @@ final class RootVerificationFunctionalTest {
 
     private static BuildResult run(Path fixture, boolean fail, String... tasks) throws java.net.URISyntaxException {
         var arguments = new java.util.ArrayList<>(List.of(tasks));
-        arguments.addAll(List.of("--no-configuration-cache", "--max-workers=2", "--stacktrace"));
+        arguments.addAll(List.of("--offline", "--max-workers=2", "--stacktrace"));
+        if (!arguments.contains("--configuration-cache")) arguments.add("--no-configuration-cache");
         var pluginClasspath = List.of(
                 classpathEntry(SpotBugsToolchainPlugin.class),
                 classpathEntry(com.github.spotbugs.snom.SpotBugsTask.class),
