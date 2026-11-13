@@ -66,6 +66,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -81,6 +82,8 @@ class ConfinedHelperRuntimeDrainTest {
     private val timeout = Duration.ofSeconds(5)
     private val installs = AtomicInteger()
     private var beforeNative: (Long) -> Unit = {}
+    private var beforePeerCredentials: () -> Unit = {}
+    private var beforeConnect: () -> Unit = {}
     private lateinit var previousNative: NativeEngine
     private val injectOwnedCloseError = java.util.concurrent.atomic
         .AtomicBoolean()
@@ -126,6 +129,7 @@ class ConfinedHelperRuntimeDrainTest {
                 a6: NativeArg,
             ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                 beforeNative(nr)
+                if (nr == Arch.current().getsockopt.toLong() && a2.asLong == 1L && a3.asLong == 17L) beforePeerCredentials()
                 return when (nr) {
                 Arch.current().seccompSyscallNumber.toLong() -> {
                     installs.incrementAndGet()
@@ -146,6 +150,16 @@ class ConfinedHelperRuntimeDrainTest {
         }
         LinuxNative.setEngine(object : NativeEngine by real {
             override val raw = raw
+            override val networking = object : io.mazewall.platform.native.NativeNetworking by real.networking {
+                override fun connect(
+                    sockfd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership>,
+                    addr: ManagedSegment,
+                    addrlen: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    beforeConnect()
+                    return real.networking.connect(sockfd, addr, addrlen)
+                }
+            }
             override val fileSystem = object : io.mazewall.platform.native.NativeFileSystem by real.fileSystem {
                 override fun open(
                     path: ManagedSegment,
@@ -401,7 +415,13 @@ class ConfinedHelperRuntimeDrainTest {
             fixture.directory = Path.of(args[0])
             try {
                 fixture.nativeBoundary()
-                fixture.failedSupportCloseProbe(args[1])
+                when {
+                    args[1] == "worker_refused" -> fixture.refusedWorkerRegistrationProbe(false)
+                    args[1] == "worker_wrong_identity" -> fixture.refusedWorkerRegistrationProbe(true)
+                    args[1].startsWith("worker_retire_") -> fixture.workerRetirementIncompleteProbe(args[1])
+                    args[1].startsWith("live_session") -> fixture.liveSessionRetirementProbe(args[1])
+                    else -> fixture.failedSupportCloseProbe(args[1])
+                }
                 kotlin.system.exitProcess(0)
             } catch (failure: Throwable) {
                 failure.printStackTrace()
@@ -409,6 +429,756 @@ class ConfinedHelperRuntimeDrainTest {
             }
         }
     }
+
+    @Test
+    fun `transferred live plan reaches exact Ready before B6 refusal`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            // The relay and capture are synthetic; this proves the domain/session protocol only.
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                val first = CompletableFuture.anyOf(fixture.endpoint.firstAccepted, outcome).get(5, TimeUnit.SECONDS)
+                assertFalse(first is Throwable, "B6 refused before helper SETUP: $first")
+                val deadline = ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 }
+                val helper = fixture.relay.helper
+                val setup = assertIs<Frame.Setup>(helper.receiveFrame(deadline).frame)
+                assertEquals(1, installs.get())
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.SetupAccepted, setup.binding, setup.deadline))
+                setup.manifest.capabilities.forEachIndexed { index, capability ->
+                    assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Offer, setup.binding, index, setup.deadline), helper.receiveFrame(deadline).frame)
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Expected, setup.binding, index, setup.deadline))
+                    helper.receiveDescriptor(deadline).use { assertEquals(capability.identity, fixture.relay.observations.observeRoot(it.handle)) }
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Received, setup.binding, index, setup.deadline))
+                }
+                assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Complete, setup.binding, 2, setup.deadline), helper.receiveFrame(deadline).frame)
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.Ready, setup.binding, setup.deadline))
+                assertIs<UnsupportedOperationException>(outcome.get(5, TimeUnit.SECONDS))
+                assertEquals(1, recording.registerCalls.get(), "exact Ready must reach current-worker registration")
+                assertEquals(0, recording.beginCalls.get())
+                assertEquals(1, installs.get(), "B6 refusal must precede worker restrictions")
+                fixture.runtime.drain(timeout)
+                assertEquals(1, recording.workerRetireCalls.get())
+                assertFalse(recording.workerThread.get().isAlive)
+                assertTrue(recording.lifecycle.indexOf("worker") < recording.lifecycle.indexOf("installation"))
+                assertEquals(1, fixture.relay.reaps.get())
+            } finally {
+                caller.join(6000)
+                assertFalse(caller.isAlive)
+            }
+        }
+
+    @Test
+    fun `reserved live registration remains counted across drain until worker joins`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            recording.beforeRegister = {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                completeLiveRelaySetup(fixture)
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                assertEquals(1, recording.registerCalls.get())
+                assertEquals(0, recording.workerRetireCalls.get())
+                assertEquals(0, recording.retireCalls.get())
+                assertEquals(0, fixture.relay.reaps.get())
+                fixture.resources.validate()
+                assertEquals(1, installs.get())
+            } finally {
+                release.countDown()
+                caller.join(6000)
+            }
+            assertFalse(caller.isAlive)
+            assertNotNull(outcome.get(1, TimeUnit.SECONDS))
+            fixture.runtime.drain(timeout)
+            assertEquals(1, recording.workerRetireCalls.get())
+            assertFalse(recording.workerThread.get().isAlive)
+            assertTrue(recording.lifecycle.indexOf("worker") < recording.lifecycle.indexOf("installation"))
+            assertEquals(1, fixture.relay.reaps.get())
+        }
+
+    private fun completeLiveRelaySetup(fixture: RuntimeFixture) {
+        val deadline = ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 }
+        val helper = fixture.relay.helper
+        val setup = assertIs<Frame.Setup>(helper.receiveFrame(deadline).frame)
+        helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.SetupAccepted, setup.binding, setup.deadline))
+        setup.manifest.capabilities.forEachIndexed { index, capability ->
+            assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Offer, setup.binding, index, setup.deadline), helper.receiveFrame(deadline).frame)
+            helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Expected, setup.binding, index, setup.deadline))
+            helper.receiveDescriptor(deadline).use { assertEquals(capability.identity, fixture.relay.observations.observeRoot(it.handle)) }
+            helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Received, setup.binding, index, setup.deadline))
+        }
+        assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Complete, setup.binding, 2, setup.deadline), helper.receiveFrame(deadline).frame)
+        helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.Ready, setup.binding, setup.deadline))
+    }
+
+    @Test
+    fun `drain before live worker prestart prevents registration`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val checks = AtomicInteger()
+            beforePeerCredentials = {
+                if (Thread.currentThread() === fixture.managerThread && checks.incrementAndGet() == 2) {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+            }
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                completeLiveRelaySetup(fixture)
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                assertEquals(0, recording.registerCalls.get())
+                assertEquals(0, recording.retireCalls.get())
+                fixture.resources.validate()
+                assertEquals(1, installs.get())
+            } finally {
+                beforePeerCredentials = {}
+                release.countDown()
+                caller.join(6000)
+            }
+            assertFalse(caller.isAlive)
+            assertNotNull(outcome.get(1, TimeUnit.SECONDS))
+            fixture.runtime.drain(timeout)
+            assertEquals(0, recording.registerCalls.get())
+            assertEquals(0, recording.workerRetireCalls.get())
+            assertEquals(1, installs.get())
+        }
+
+    @Test
+    fun `refused live registration retains ambiguous receipt without invented worker`() = runSupportCloseProbe("worker_refused")
+
+    @Test
+    fun `wrong recovered live worker identity retains originals without retirement`() = runSupportCloseProbe("worker_wrong_identity")
+
+    private fun refusedWorkerRegistrationProbe(wrongIdentity: Boolean) =
+        withRuntime { fixture ->
+            skipFixtureResourceClose = true
+            val recording = RecordingCapture(completeCapture = true)
+            recording.refuseRegister.set(!wrongIdentity)
+            recording.wrongWorkerTid.set(wrongIdentity)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                completeLiveRelaySetup(fixture)
+                assertNotNull(outcome.get(5, TimeUnit.SECONDS))
+                val first = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                val failure = assertNotNull(first.cleanupFailure)
+                assertEquals(1, recording.registerCalls.get())
+                if (wrongIdentity) assertNotNull(recording.workerOwner.get()) else assertNull(recording.workerOwner.get())
+                assertEquals(1, recording.recoverWorkerCalls.get())
+                assertEquals(0, recording.workerRetireCalls.get())
+                assertFalse(recording.lifecycle.contains("installation"))
+                assertEquals(0, fixture.relay.reaps.get())
+                fixture.resources.validate()
+                val second = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                assertSame(failure, second.cleanupFailure)
+                assertEquals(1, recording.registerCalls.get())
+                assertEquals(1, recording.recoverWorkerCalls.get())
+                assertEquals(0, recording.workerRetireCalls.get())
+                assertEquals(1, installs.get())
+            } finally {
+                caller.join(6000)
+                assertFalse(caller.isAlive)
+            }
+        }
+
+    @Test
+    fun `pending live worker retirement retains installation and originals without replay`() = runSupportCloseProbe("worker_retire_pending")
+
+    @Test
+    fun `refused live worker retirement retains installation and originals without replay`() = runSupportCloseProbe("worker_retire_refused")
+
+    private fun workerRetirementIncompleteProbe(mode: String) =
+        withRuntime { fixture ->
+            skipFixtureResourceClose = true
+            val recording = RecordingCapture(completeCapture = true)
+            recording.workerRetirement.set(
+                if (mode == "worker_retire_pending") {
+                    io.mazewall.platform.native.LiveCompletion
+                        .Pending(io.mazewall.platform.native.LivePendingReason.NotPhysicallyRetired)
+                } else {
+                    recording.refusedOutcome
+                },
+            )
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                completeLiveRelaySetup(fixture)
+                assertIs<UnsupportedOperationException>(outcome.get(5, TimeUnit.SECONDS))
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                assertEquals(1, recording.registerCalls.get())
+                assertEquals(1, recording.workerRetireCalls.get())
+                assertFalse(recording.workerThread.get().isAlive)
+                assertFalse(recording.lifecycle.contains("installation"))
+                assertEquals(0, fixture.relay.reaps.get())
+                fixture.resources.validate()
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                assertEquals(1, recording.workerRetireCalls.get())
+                assertEquals(0, fixture.relay.reaps.get())
+                fixture.resources.validate()
+            } finally {
+                caller.join(6000)
+                assertFalse(caller.isAlive)
+            }
+        }
+
+    @Test
+    fun `fatal live registration after attachment recovers exact worker after join`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val fatal = AssertionError("controlled post-attachment failure")
+            recording.afterRegisterFailure.set(fatal)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                completeLiveRelaySetup(fixture)
+                assertSame(fatal, outcome.get(5, TimeUnit.SECONDS))
+                fixture.runtime.drain(timeout)
+                assertEquals(1, recording.registerCalls.get())
+                assertNotNull(recording.workerOwner.get())
+                assertEquals(1, recording.recoverWorkerCalls.get())
+                assertEquals(1, recording.workerRetireCalls.get())
+                assertFalse(recording.workerThread.get().isAlive)
+                assertTrue(recording.lifecycle.indexOf("worker") < recording.lifecycle.indexOf("installation"))
+                assertEquals(1, fixture.relay.reaps.get())
+                assertEquals(1, installs.get())
+            } finally {
+                caller.join(6000)
+                assertFalse(caller.isAlive)
+            }
+        }
+
+    @Test
+    fun `transferred live plan rejects Ready for another binding before worker startup`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                val deadline = ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 }
+                val helper = fixture.relay.helper
+                val setup = assertIs<Frame.Setup>(helper.receiveFrame(deadline).frame)
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.SetupAccepted, setup.binding, setup.deadline))
+                setup.manifest.capabilities.forEachIndexed { index, capability ->
+                    assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Offer, setup.binding, index, setup.deadline), helper.receiveFrame(deadline).frame)
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Expected, setup.binding, index, setup.deadline))
+                    helper.receiveDescriptor(deadline).use { assertEquals(capability.identity, fixture.relay.observations.observeRoot(it.handle)) }
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Received, setup.binding, index, setup.deadline))
+                }
+                assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Complete, setup.binding, 2, setup.deadline), helper.receiveFrame(deadline).frame)
+                val wrong = setup.binding.copy(manifestDigest = "0".repeat(64))
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.Ready, wrong, setup.deadline))
+                assertIs<io.mazewall.enforcer.internal.supervisor.ConfinedHelperRejection>(outcome.get(5, TimeUnit.SECONDS))
+                assertEquals(1, installs.get(), "wrong Ready must not start a worker")
+            } finally {
+                caller.join(6000)
+                assertFalse(caller.isAlive)
+            }
+        }
+
+    @Test
+    fun `live Ready revalidation failure quarantines session before worker startup`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val peerChecks = AtomicInteger()
+            val failure = IllegalStateException("controlled Ready peer revalidation failure")
+            val reapEntered = CountDownLatch(1)
+            val releaseReap = CountDownLatch(1)
+            fixture.relay.beforeReap = {
+                reapEntered.countDown()
+                check(releaseReap.await(10, TimeUnit.SECONDS))
+            }
+            supportOpenPath.set(
+                fixture.support
+                    .single()
+                    .path
+                    .toRealPath()
+                    .toString(),
+            )
+            beforePeerCredentials = {
+                if (Thread.currentThread() === fixture.managerThread && peerChecks.incrementAndGet() == 2) throw failure
+            }
+            val outcome = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                val deadline = ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 }
+                val helper = fixture.relay.helper
+                val setup = assertIs<Frame.Setup>(helper.receiveFrame(deadline).frame)
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.SetupAccepted, setup.binding, setup.deadline))
+                setup.manifest.capabilities.forEachIndexed { index, capability ->
+                    assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Offer, setup.binding, index, setup.deadline), helper.receiveFrame(deadline).frame)
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Expected, setup.binding, index, setup.deadline))
+                    helper.receiveDescriptor(deadline).use { assertEquals(capability.identity, fixture.relay.observations.observeRoot(it.handle)) }
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Received, setup.binding, index, setup.deadline))
+                }
+                assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Complete, setup.binding, 2, setup.deadline), helper.receiveFrame(deadline).frame)
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.Ready, setup.binding, setup.deadline))
+                val rejected = assertIs<io.mazewall.enforcer.internal.supervisor.ConfinedHelperRejection>(outcome.get(5, TimeUnit.SECONDS))
+                assertSame(failure, rejected.cause)
+                assertEquals(2, peerChecks.get())
+                assertEquals(1, installs.get())
+                assertTrue(reapEntered.await(5, TimeUnit.SECONDS))
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                assertEquals(0, supportCloseCalls.get())
+                fixture.resources.validate()
+            } finally {
+                beforePeerCredentials = {}
+                releaseReap.countDown()
+                caller.join(6000)
+                assertFalse(caller.isAlive)
+            }
+            fixture.runtime.drain(timeout)
+            assertEquals(1, fixture.relay.reaps.get())
+            assertEquals(1, supportCloseCalls.get())
+        }
+
+    @Test
+    fun `transferred live setup remains counted while connect is blocked`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val outcome = CompletableFuture<Throwable?>()
+            val reapEntered = CountDownLatch(1)
+            val releaseReap = CountDownLatch(1)
+            fixture.relay.beforeReap = {
+                reapEntered.countDown()
+                check(releaseReap.await(10, TimeUnit.SECONDS))
+            }
+            supportOpenPath.set(
+                fixture.support
+                    .single()
+                    .path
+                    .toRealPath()
+                    .toString(),
+            )
+            beforeConnect = {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        fixture.runtime.prepare(
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                assertEquals(0, supportCloseCalls.get())
+                assertEquals(0, recording.retireCalls.get())
+                fixture.resources.validate()
+                assertEquals(1, installs.get())
+            } finally {
+                beforeConnect = {}
+                release.countDown()
+                caller.join(6000)
+            }
+            assertFalse(caller.isAlive)
+            assertNotNull(outcome.get(1, TimeUnit.SECONDS))
+            val failure: Throwable
+            try {
+                assertTrue(reapEntered.await(5, TimeUnit.SECONDS))
+                val first = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                failure = assertNotNull(first.cleanupFailure)
+                assertEquals(0, supportCloseCalls.get())
+                fixture.resources.validate()
+                assertEquals(1, fixture.relay.reaps.get())
+            } finally {
+                releaseReap.countDown()
+            }
+            val second = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+            assertSame(failure, second.cleanupFailure)
+            assertEquals(1, fixture.relay.reaps.get())
+            assertEquals(1, supportCloseCalls.get())
+            assertFails { fixture.resources.validate() }
+            fixture.runtime.drain(timeout)
+            assertEquals(1, fixture.relay.reaps.get())
+            assertEquals(1, supportCloseCalls.get())
+        }
+
+    @Test
+    fun `drain after live commit retains helper session before refusing connection`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val committed = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val domainRef = AtomicReference<io.mazewall.enforcer.internal.execution.OwnedDomain>()
+            val result = CompletableFuture<Throwable?>()
+            val connects = AtomicInteger()
+            supportOpenPath.set(
+                fixture.support
+                    .single()
+                    .path
+                    .toRealPath()
+                    .toString(),
+            )
+            beforeConnect = { connects.incrementAndGet() }
+            val caller = Thread.ofPlatform().start {
+                result.complete(
+                    runCatching {
+                        scopingMethod().invoke(
+                            fixture.runtime,
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                            scopingEffects(afterDomainCommit = {
+                                val state = runtimeState(fixture.runtime)
+                                    .javaClass
+                                    .getDeclaredField("scopingPreparation")
+                                    .apply { isAccessible = true }
+                                    .get(runtimeState(fixture.runtime)) as io.mazewall.enforcer.internal.execution.ScopingPreparation
+                                domainRef.set(assertIs<io.mazewall.enforcer.internal.execution.ScopingPreparation.State.DomainOwned>(state.state).domain)
+                                committed.countDown()
+                                check(release.await(5, TimeUnit.SECONDS))
+                            }),
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                assertTrue(committed.await(5, TimeUnit.SECONDS))
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                assertEquals(0, connects.get())
+                assertEquals(0, supportCloseCalls.get())
+                assertEquals(0, recording.retireCalls.get())
+                fixture.resources.validate()
+            } finally {
+                release.countDown()
+                caller.join(6000)
+                beforeConnect = {}
+            }
+            assertFalse(caller.isAlive)
+            assertNotNull(result.get(1, TimeUnit.SECONDS))
+            val session = domainRef
+                .get()
+                .javaClass
+                .getDeclaredField("helperSession")
+                .apply { isAccessible = true }
+                .get(domainRef.get())
+            assertNotNull(session, "session must be retained before the phase refusal")
+            assertEquals(1, installs.get())
+        }
+
+    @Test
+    fun `live committed callback failure settles helper preparation obligation`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val failure = IllegalStateException("controlled postcommit failure")
+            val thrown = assertFailsWith<java.lang.reflect.InvocationTargetException> {
+                scopingMethod().invoke(
+                    fixture.runtime,
+                    (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                    DomainLimits(1, 1),
+                    ready.value,
+                    scopingEffects(afterDomainCommit = { throw failure }),
+                )
+            }
+            assertSame(failure, thrown.targetException)
+            fixture.runtime.drain(timeout)
+            assertFalse(fixture.managerThread.isAlive)
+            assertEquals(0, fixture.relay.reaps.get())
+        }
+
+    @Test
+    fun `live session retirement completes before helper pins and originals`() = runSupportCloseProbe("live_session")
+
+    @Test
+    fun `live session retirement failure remains counted without retry`() = runSupportCloseProbe("live_session_failure")
+
+    private fun liveSessionRetirementProbe(mode: String) =
+        withRuntime { fixture ->
+            skipFixtureResourceClose = true
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(captureSynthetic(fixture.runtime, fixture.reviewed, fixture.resources, recording) {})
+            val association = runtimeState(fixture.runtime).javaClass.getDeclaredField("scopingPreparation").let {
+                it.isAccessible = true
+                it.get(runtimeState(fixture.runtime)) as io.mazewall.enforcer.internal.execution.ScopingPreparation
+            }
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val outcome = CompletableFuture<Throwable?>()
+            val supportPath = fixture.support
+                .single()
+                .path
+                .toRealPath()
+            supportOpenPath.set(supportPath.toString())
+            val failing = mode == "live_session_failure"
+            fixture.relay.failReap.set(failing)
+            fixture.relay.beforeReap = {
+                entered.countDown()
+                if (!failing) check(release.await(10, TimeUnit.SECONDS))
+            }
+            val caller = Thread.ofPlatform().start {
+                outcome.complete(
+                    runCatching {
+                        scopingMethod().invoke(
+                            fixture.runtime,
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                            scopingEffects(afterDomainCommit = {
+                                val domain = assertIs<io.mazewall.enforcer.internal.execution.ScopingPreparation.State.DomainOwned>(association.state).domain
+                                val plan = domain.javaClass.getDeclaredField("helperPlan").let {
+                                    it.isAccessible = true
+                                    it.get(domain) as PreparedHelperReadPlan
+                                }
+                                val prepared = io.mazewall.enforcer.internal.supervisor.SupervisorInstaller.prepareConfinedHelper(
+                                    plan,
+                                    fixture.endpoint.context,
+                                    fixture.resources.native,
+                                    ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 },
+                                    retain = { session ->
+                                        domain.javaClass
+                                            .getDeclaredField("helperSession")
+                                            .apply { isAccessible = true }
+                                            .set(domain, session)
+                                    },
+                                    observations = observations(parent = true),
+                                )
+                                assertIs<io.mazewall.enforcer.internal.supervisor.ConfinedHelperPreparation.Ready>(prepared)
+                            }),
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                val deadline = ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 }
+                val helper = fixture.relay.helper
+                val setup = assertIs<Frame.Setup>(helper.receiveFrame(deadline).frame)
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.SetupAccepted, setup.binding, setup.deadline))
+                setup.manifest.capabilities.forEachIndexed { index, capability ->
+                    assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Offer, setup.binding, index, setup.deadline), helper.receiveFrame(deadline).frame)
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Expected, setup.binding, index, setup.deadline))
+                    helper.receiveDescriptor(deadline).use { assertEquals(capability.identity, fixture.relay.observations.observeRoot(it.handle)) }
+                    helper.sendFrame(Frame.Root(ConfinedHelperProtocol.RootTag.Received, setup.binding, index, setup.deadline))
+                }
+                assertEquals(Frame.Root(ConfinedHelperProtocol.RootTag.Complete, setup.binding, 2, setup.deadline), helper.receiveFrame(deadline).frame)
+                helper.sendFrame(Frame.Control(ConfinedHelperProtocol.ControlTag.Ready, setup.binding, setup.deadline))
+                assertTrue(entered.await(5, TimeUnit.SECONDS), "live session retirement must begin before support pins close")
+                if (failing) {
+                    val first = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                    val failure = assertNotNull(first.cleanupFailure)
+                    assertEquals(1, fixture.relay.reaps.get())
+                    assertEquals(0, supportCloseCalls.get())
+                    fixture.resources.validate()
+                    val second = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                    assertSame(failure, second.cleanupFailure)
+                    assertEquals(1, fixture.relay.reaps.get())
+                    assertEquals(0, supportCloseCalls.get())
+                    fixture.resources.validate()
+                } else {
+                    assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                    assertEquals(0, supportCloseCalls.get())
+                    fixture.resources.validate()
+                }
+            } finally {
+                release.countDown()
+                caller.join(6000)
+            }
+            assertFalse(caller.isAlive)
+            assertIs<java.lang.reflect.InvocationTargetException>(outcome.get(2, TimeUnit.SECONDS))
+            if (!failing) {
+                fixture.runtime.drain(timeout)
+                assertEquals(1, supportCloseCalls.get())
+                assertEquals(1, fixture.relay.reaps.get())
+                assertFails { fixture.resources.validate() }
+            }
+        }
 
     @Test
     fun `failed support pin close remains counted and retains original resources`() = runSupportCloseProbe("error")

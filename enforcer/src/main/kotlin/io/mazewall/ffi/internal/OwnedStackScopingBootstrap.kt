@@ -122,6 +122,18 @@ internal class CheckedBootstrapAssociation(
     private val snapshot: io.mazewall.platform.native.RuntimeSnapshot,
     internal val helperBaseline: HelperSecurityObservation.Observation?,
 ) {
+    internal var helperContext: io.mazewall.enforcer.internal.supervisor.SupervisorContext? = null
+        private set
+
+    internal fun bindHelperContext(
+        owner: io.mazewall.enforcer.api.execution.ManagedRuntime.CanonicalAcquisition,
+        context: io.mazewall.enforcer.internal.supervisor.SupervisorContext,
+    ) {
+        owner.requireHelperContext(this, context)
+        check(request.helperSupport != null && helperContext == null)
+        helperContext = context
+    }
+
     internal val helperAdmission: TrustedHelperAdmission? = request.helperSupport?.let { support ->
         TrustedHelperAdmission.fromChecked(support, checkNotNull(helperBaseline))
     }
@@ -193,6 +205,7 @@ private class CaptureInputs(
     val definition = worker.policy.definition.frozenCopy()
     val canonicalJson = worker.toJson()
     var helperAdmission: TrustedHelperAdmission? = null
+    var helperContext: io.mazewall.enforcer.internal.supervisor.SupervisorContext? = null
     val routes: Set<io.mazewall.platform.syscall.Syscall> = identity
         .routeSubset()
         .map { route ->
@@ -216,6 +229,7 @@ internal class OwnedStackScopingBootstrap private constructor(
     internal val limits: DomainLimits get() = inputs.limits
     internal val resources: PreparedOperationResources get() = inputs.resources
     internal val helperAdmission: TrustedHelperAdmission? = inputs.helperAdmission
+    internal val helperContext: io.mazewall.enforcer.internal.supervisor.SupervisorContext? = inputs.helperContext
     internal val canonicalJson: String get() = inputs.canonicalJson
 
     internal fun matchesClaim(
@@ -250,6 +264,11 @@ internal class OwnedStackScopingBootstrap private constructor(
     }
 
     internal fun ownsRetainedShell(shell: io.mazewall.landlock.PreparedLandlock): Boolean = shell.matchesRetained(inputs.resources.resources, preparation.environment)
+
+    internal fun reserveLiveWorker(
+        domain: io.mazewall.enforcer.internal.execution.OwnedDomain,
+        slot: io.mazewall.enforcer.internal.execution.LiveWorkerSlot,
+    ) = runtime.liveWorkerAdmission.reserve(preparation, this, domain, slot)
 
     internal fun close() = runtime.closeScopingPreparation(preparation)
 
@@ -313,6 +332,7 @@ internal class OwnedStackScopingBootstrap private constructor(
                 require(resources.runtime == runtime.runtime) { "Resource runtime differs from owner" }
                 require(resources.native.engineIdentity === preparation.environment.native.engineIdentity) { "Resources belong to a different native runtime" }
                 inputs.helperAdmission = checkNotNull(runtime.checkedOperations).helperAdmission()
+                inputs.helperContext = checkNotNull(runtime.checkedOperations).helperContext()
                 val reserved = when (
                     val result = checkNotNull(
                         runtime.checkedOperations,

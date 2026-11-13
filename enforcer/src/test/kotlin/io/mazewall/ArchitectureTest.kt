@@ -598,6 +598,12 @@ class ArchitectureTest {
                             "retire" ->
                                 item.rawReturnType.name == "io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionStatus" &&
                                 parameters == listOf("java.time.Duration")
+                            // Helper startup owns rollback failures before they escape to the caller.
+                            "startHelper" ->
+                                item.rawReturnType.name == "io.mazewall.enforcer.internal.supervisor.SupervisorContext" &&
+                                parameters == listOf("io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager")
+                            // Helper stop records unknown before returning or propagating a fatal failure.
+                            "retireStartedHelper" -> item.rawReturnType.name == "void" && parameters.isEmpty()
                             "mergeHistory" -> item.rawReturnType.name == "void" && parameters.isEmpty()
                             else -> false
                         }

@@ -80,6 +80,48 @@ internal class HelperSecurityObservation(
         }
     }
 
+    internal data class RetirementView(
+        val owner: ProcessIdentity,
+        val pidNamespace: String,
+        val procKey: String,
+        val mountInfo: String,
+    )
+
+    internal fun captureRetirementView(owner: Observation): RetirementView {
+        val pidNamespace = owner.ancestry.canonical
+            .lineSequence()
+            .single { it.startsWith("pidNs=") }
+            .substringAfter('=')
+        val mountInfo = text(Path.of("/proc/self/mountinfo"), MOUNT_LIMIT)
+        val proc = mountInfo.lineSequence().single { it.split(' ').getOrNull(4) == "/proc" }
+        check(proc.substringAfter(" - ").startsWith("proc ") && !proc.contains("hidepid=")) { "Proc visibility is uncertain" }
+        val view = RetirementView(owner.identity, pidNamespace, namespaceKey(Path.of("/proc")), mountInfo)
+        requireRetirementView(view)
+        return view
+    }
+
+    private fun requireRetirementView(view: RetirementView) {
+        check(namespaceKey(Path.of("/proc")) == view.procKey) { "Proc view changed" }
+        check(text(Path.of("/proc/self/mountinfo"), MOUNT_LIMIT) == view.mountInfo) { "Proc mount view changed" }
+        check(namespaceKey(Path.of("/proc/self/ns/pid")) == view.pidNamespace) { "PID namespace changed" }
+        val stat = text(Path.of("/proc/self/stat"), STATUS_LIMIT)
+        check(parseProcessIdentity(view.owner.pid, stat) == view.owner) { "Proc owner identity changed" }
+    }
+
+    internal fun requireRetiredHelper(
+        view: RetirementView,
+        helper: Observation,
+    ) {
+        requireRetirementView(view)
+        val current = try {
+            processIdentity(helper.identity.pid)
+        } catch (_: java.nio.file.NoSuchFileException) {
+            null
+        }
+        requireRetirementView(view)
+        check(current != helper.identity) { "Original confined helper has not retired" }
+    }
+
     fun requireSetupOwner(
         manifest: ConfinedManifest,
         bootstrap: Observation,
@@ -339,6 +381,20 @@ internal class HelperSecurityObservation(
     private fun processIdentity(pid: Pid): ProcessIdentity {
         // Read outside the legacy resolver so permission/I/O errors retain their exact cause.
         val stat = text(Path.of("/proc/${pid.value}/stat"), STATUS_LIMIT)
+        return parseProcessIdentity(pid, stat)
+    }
+
+    private fun parseProcessIdentity(
+        pid: Pid,
+        stat: String,
+    ): ProcessIdentity {
+        val close = stat.lastIndexOf(')')
+        require(close > 0) { "Malformed helper process stat" }
+        val fields = stat.substring(close + 1).trim().split(WHITESPACE)
+        require(fields.size >= STAT_FIELDS_THROUGH_START && fields[0] in setOf("R", "S", "D", "Z", "T", "t", "X", "x", "K", "W", "P", "I", "N")) {
+            "Malformed helper process state"
+        }
+        require(fields.subList(1, STAT_FIELDS_THROUGH_START).all { it.toLongOrNull() != null }) { "Malformed helper process stat fields" }
         return requireNotNull(ProcProcessIdentityResolver { stat }.resolve(pid)) { "Malformed helper process identity" }
             .also { require(it.startTimeTicks > 0) }
     }
@@ -397,6 +453,7 @@ internal class HelperSecurityObservation(
 
     private companion object {
         const val OFFSET_LIMIT = 256
+        const val STAT_FIELDS_THROUGH_START = 20
         const val STATUS_LIMIT = 65536
         const val MOUNT_LIMIT = 4 * 1024 * 1024
         const val ACCESS_MODE_MASK = 3L

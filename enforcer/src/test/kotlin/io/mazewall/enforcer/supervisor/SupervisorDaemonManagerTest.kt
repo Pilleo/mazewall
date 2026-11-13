@@ -5,6 +5,9 @@ import io.mazewall.enforcer.api.MockNativeEngine
 import io.mazewall.enforcer.api.MockProcess
 import io.mazewall.enforcer.api.MockProcessLauncher
 import io.mazewall.enforcer.api.MockSocketManager
+import io.mazewall.enforcer.api.execution.DrainReport
+import io.mazewall.enforcer.api.execution.ManagedRuntime
+import io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionStatus
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.NativeConstants
@@ -31,18 +34,371 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.io.ByteArrayInputStream
 import java.io.InputStream
+import java.lang.reflect.InvocationTargetException
 import java.nio.file.Path
 import java.nio.file.attribute.FileAttribute
+import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertSame
 
 class SupervisorDaemonManagerTest {
+    @Test
+    fun `canonical acquisition counts blocked helper startup then retains failure`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val cleanup = AtomicInteger()
+        val failure = IllegalArgumentException("controlled launch failure")
+        val launcher = object : MockProcessLauncher() {
+            override fun startProcess(
+                args: List<String>,
+                redirectErrorStream: Boolean,
+            ): Process {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                throw failure
+            }
+
+            override fun deleteIfExists(path: Path): Boolean {
+                cleanup.incrementAndGet()
+                return super.deleteIfExists(path)
+            }
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(mutableListOf()),
+        )
+        val owner = ManagedRuntime.newCanonicalAcquisition()
+        val state = owner.javaClass
+            .getDeclaredField("state")
+            .apply { isAccessible = true }
+        state.set(owner, state.type.enumConstants.single { (it as Enum<*>).name == "STARTING" })
+        val inFlight = owner.javaClass
+            .getDeclaredField("setupInFlight")
+            .apply { isAccessible = true }
+        inFlight.setBoolean(owner, true)
+        val actor = owner.javaClass
+            .getDeclaredField("startActor")
+            .apply { isAccessible = true }
+        val start = owner.javaClass
+            .getDeclaredMethod("startHelper", SupervisorDaemonManager::class.java)
+            .apply { isAccessible = true }
+        val observed = AtomicReference<Throwable>()
+        val starter = Thread {
+            actor.set(owner, Thread.currentThread())
+            try {
+                start.invoke(owner, manager)
+            } catch (failure: InvocationTargetException) {
+                observed.set(failure.cause)
+            } finally {
+                inFlight.setBoolean(owner, false)
+            }
+        }
+        try {
+            starter.start()
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.retire(Duration.ofSeconds(1)))
+        } finally {
+            release.countDown()
+            starter.join(5000)
+        }
+        assertFalse(starter.isAlive)
+        assertSame(failure, observed.get())
+        val rollbackCalls = cleanup.get()
+        assertTrue(rollbackCalls > 0)
+        val unknown = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(1)))
+        assertSame(failure, unknown.history)
+        assertEquals(rollbackCalls, cleanup.get())
+    }
+
+    private fun startedCanonicalHelper(manager: SupervisorDaemonManager): ManagedRuntime.CanonicalAcquisition {
+        val owner = ManagedRuntime.newCanonicalAcquisition()
+        val state = owner.javaClass
+            .getDeclaredField("state")
+            .apply { isAccessible = true }
+        state.set(owner, state.type.enumConstants.single { (it as Enum<*>).name == "STARTING" })
+        owner.javaClass
+            .getDeclaredField("startActor")
+            .apply { isAccessible = true }
+            .set(owner, Thread.currentThread())
+        owner.javaClass
+            .getDeclaredMethod("startHelper", SupervisorDaemonManager::class.java)
+            .apply { isAccessible = true }
+            .invoke(owner, manager)
+        return owner
+    }
+
+    @Test
+    fun `canonical acquisition remains pending while started helper stop is in flight`() {
+        val helperGone = AtomicBoolean(false)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(child) {
+            override fun removeShutdownHook(hook: Thread) {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                super.removeShutdownHook(hook)
+            }
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(mutableListOf(), helperGone = helperGone),
+        )
+        manager.onUnexpectedExit = {}
+        val owner = startedCanonicalHelper(manager)
+        child.setAlive(false)
+        helperGone.set(true)
+        val result = AtomicReference<ManagedRuntimeAcquisitionStatus>()
+        val retire = Thread { result.set(owner.retire(Duration.ofSeconds(5))) }
+        try {
+            retire.start()
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.status())
+            assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.retire(Duration.ofSeconds(1)))
+        } finally {
+            release.countDown()
+            retire.join(5000)
+        }
+        assertFalse(retire.isAlive)
+        assertIs<ManagedRuntimeAcquisitionStatus.Complete>(result.get())
+    }
+
+    @Test
+    fun `canonical publication waits for manager termination and helper stop`() {
+        val helperGone = AtomicBoolean(false)
+        val stops = AtomicInteger()
+        val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(child) {
+            override fun removeShutdownHook(hook: Thread) {
+                stops.incrementAndGet()
+                super.removeShutdownHook(hook)
+            }
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(mutableListOf(), helperGone = helperGone),
+        )
+        manager.onUnexpectedExit = {}
+        val owner = startedCanonicalHelper(manager)
+        child.setAlive(false)
+        for (name in listOf("returned", "finished")) {
+            owner.javaClass
+                .getDeclaredField(name)
+                .apply { isAccessible = true }
+                .setBoolean(owner, true)
+        }
+        val publish = owner.javaClass
+            .getDeclaredMethod("publishRetirement", DrainReport::class.java, Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        publish.invoke(owner, DrainReport.Complete, false)
+        assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.status())
+        assertEquals(0, stops.get())
+        publish.invoke(owner, DrainReport.Complete, true)
+        assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.status())
+        assertEquals(0, stops.get())
+        helperGone.set(true)
+        owner.javaClass
+            .getDeclaredMethod("retireStartedHelper")
+            .apply { isAccessible = true }
+            .invoke(owner)
+        assertEquals(1, stops.get())
+        publish.invoke(owner, DrainReport.Complete, true)
+        assertIs<ManagedRuntimeAcquisitionStatus.Complete>(owner.status())
+    }
+
+    @Test
+    fun `canonical helper remains unknown when original helper is still observable`() {
+        val stops = AtomicInteger()
+        val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(child) {
+            override fun removeShutdownHook(hook: Thread) {
+                stops.incrementAndGet()
+                super.removeShutdownHook(hook)
+            }
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(mutableListOf()),
+        )
+        manager.onUnexpectedExit = {}
+        val owner = startedCanonicalHelper(manager)
+        child.setAlive(false)
+        assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertEquals(1, stops.get())
+    }
+
+    @Test
+    fun `canonical helper observation failure is unknown without stop replay`() {
+        val deny = AtomicBoolean(false)
+        val stops = AtomicInteger()
+        val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(child) {
+            override fun removeShutdownHook(hook: Thread) {
+                stops.incrementAndGet()
+                super.removeShutdownHook(hook)
+            }
+        }
+        val observations = bootstrapObservations(mutableListOf()) { path ->
+            if (deny.get() && path == Path.of("/proc/556/stat")) throw java.nio.file.AccessDeniedException(path.toString())
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            observations,
+        )
+        manager.onUnexpectedExit = {}
+        val owner = startedCanonicalHelper(manager)
+        child.setAlive(false)
+        deny.set(true)
+        val first = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertIs<java.nio.file.AccessDeniedException>(first.history)
+        assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertEquals(1, stops.get())
+    }
+
+    @Test
+    fun `canonical helper malformed replacement identity remains unknown`() {
+        val malformed = AtomicBoolean(false)
+        val stops = AtomicInteger()
+        val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(child) {
+            override fun removeShutdownHook(hook: Thread) {
+                stops.incrementAndGet()
+                super.removeShutdownHook(hook)
+            }
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(mutableListOf(), helperMalformed = malformed),
+        )
+        manager.onUnexpectedExit = {}
+        val owner = startedCanonicalHelper(manager)
+        child.setAlive(false)
+        malformed.set(true)
+        assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertEquals(1, stops.get())
+    }
+
+    @Test
+    fun `canonical helper retirement checks incarnation and proc view`() {
+        for (scenario in listOf("zombie", "replacement", "view", "owner", "proc")) {
+            val mode = AtomicReference("normal")
+            val changed = AtomicBoolean(false)
+            val stops = AtomicInteger()
+            val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+            val launcher = object : MockProcessLauncher(child) {
+                override fun removeShutdownHook(hook: Thread) {
+                    stops.incrementAndGet()
+                    super.removeShutdownHook(hook)
+                }
+            }
+            val observations = bootstrapObservations(mutableListOf(), helperMode = mode) { path ->
+                if (changed.get() && (path == Path.of("/proc/self/ns/pid") || path == Path.of("/proc"))) error("changed proc view")
+            }
+            val manager = SupervisorDaemonManager(
+                MockNativeEngine().apply { process.tid = Tid(333) },
+                MockSocketManager(),
+                launcher,
+                observations,
+            )
+            manager.onUnexpectedExit = {}
+            val owner = startedCanonicalHelper(manager)
+            child.setAlive(false)
+            mode.set(scenario)
+            changed.set(scenario == "view" || scenario == "proc")
+            val result = owner.retire(Duration.ofSeconds(5))
+            if (scenario == "replacement") {
+                assertIs<ManagedRuntimeAcquisitionStatus.Complete>(result)
+            } else {
+                assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(result)
+            }
+            owner.retire(Duration.ofSeconds(5))
+            assertEquals(1, stops.get())
+        }
+    }
+
+    @Test
+    fun `canonical acquisition retains failed helper stop without replay`() {
+        val attempts = AtomicInteger()
+        val failure = IllegalArgumentException("controlled hook removal failure")
+        val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(child) {
+            override fun removeShutdownHook(hook: Thread) {
+                attempts.incrementAndGet()
+                throw failure
+            }
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(mutableListOf()),
+        )
+        manager.onUnexpectedExit = {}
+        val owner = startedCanonicalHelper(manager)
+        child.setAlive(false)
+        val first = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertSame(failure, first.history)
+        assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertEquals(1, attempts.get())
+    }
+
+    @Test
+    fun `canonical helper stop fatal remains unknown and releases retirement actor`() {
+        val attempts = AtomicInteger()
+        val fatal = AssertionError("controlled fatal hook removal")
+        val child = MockProcess(555, SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(child) {
+            override fun removeShutdownHook(hook: Thread) {
+                attempts.incrementAndGet()
+                throw fatal
+            }
+        }
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(mutableListOf()),
+        )
+        manager.onUnexpectedExit = {}
+        val owner = startedCanonicalHelper(manager)
+        child.setAlive(false)
+        assertSame(fatal, assertFailsWith<AssertionError> { owner.retire(Duration.ofSeconds(5)) })
+        val inFlight = owner.javaClass
+            .getDeclaredField("retirementInFlight")
+            .apply { isAccessible = true }
+        assertFalse(inFlight.getBoolean(owner))
+        val unknown = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(Duration.ofSeconds(5)))
+        assertSame(fatal, unknown.history)
+        assertEquals(1, attempts.get())
+    }
+
     private fun bootstrapObservations(
         seen: MutableList<Path>,
         children: List<Pid> = listOf(Pid(556)),
+        helperGone: AtomicBoolean = AtomicBoolean(false),
+        helperMalformed: AtomicBoolean = AtomicBoolean(false),
+        helperMode: AtomicReference<String> = AtomicReference("normal"),
         change: (Path) -> Unit = {},
     ) = HelperSecurityObservation(
             namespaceKey = { path ->
@@ -53,16 +409,32 @@ class SupervisorDaemonManagerTest {
             readBounded = { path, _ ->
                 seen.add(path)
                 change(path)
-                val pid = path.getName(1).toString().toInt()
+                val pid = path.getName(1).toString().let { if (it == "self") ProcessHandle.current().pid().toInt() else it.toInt() }
+                if (pid == 556 && path.fileName.toString() == "stat" && helperGone.get()) {
+                    throw java.nio.file.NoSuchFileException(path.toString())
+                }
                 when (path.fileName.toString()) {
-                    "stat" -> "$pid (bootstrap) S " + "0 ".repeat(18) + "17 0\n"
+                    "stat" ->
+                        if (pid == 556 && helperMalformed.get()) {
+                            "$pid (bootstrap) ? " + "0 ".repeat(18) + "18 0\n"
+                        } else {
+                            val state = if (pid == 556 && helperMode.get() == "zombie") "Z" else "S"
+                            val start = if ((pid == 556 && helperMode.get() == "replacement") ||
+                                (path == Path.of("/proc/self/stat") && helperMode.get() == "owner")
+                            ) {
+                                18
+                            } else {
+                                17
+                            }
+                            "$pid (bootstrap) $state " + "0 ".repeat(18) + "$start 0\n"
+                        }
                     "status" ->
                         "Tgid:\t$pid\nPid:\t${path.parent.fileName}\nUid:\t1 1 1 1\nGid:\t2 2 2 2\nGroups:\t2\n" +
                         "CapInh:\t0000000000000000\nCapPrm:\t0000000000000000\nCapEff:\t0000000000000000\n" +
                         "CapBnd:\t0000000000000000\nCapAmb:\t0000000000000000\nNoNewPrivs:\t1\nSeccomp:\t2\nSeccomp_filters:\t1\n"
                     "timens_offsets" -> "monotonic 0 0\nboottime 0 0\n"
                     "uid_map", "gid_map" -> "0 0 4294967295\n"
-                    "mountinfo" -> "23 1 0:1 / / rw - tmpfs tmpfs rw\n"
+                    "mountinfo" -> "23 1 0:1 / / rw - tmpfs tmpfs rw\n24 23 0:2 / /proc rw - proc proc rw\n"
                     else -> error("Unexpected observation $path")
                 }.toByteArray()
             },

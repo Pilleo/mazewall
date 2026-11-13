@@ -2,6 +2,8 @@ package io.mazewall.enforcer.api.execution
 
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
+import io.mazewall.enforcer.internal.supervisor.SupervisorPrewarmBudget
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.platform.native.LinuxNative
@@ -29,6 +31,60 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class OwnedRuntimeTest {
+    @Test
+    fun `canonical acquisition without helper support leaves helper owner absent`() {
+        val owner = ManagedRuntime.newCanonicalAcquisition()
+        try {
+            owner.start(timeout, timeout)
+            val field = owner.javaClass
+                .getDeclaredField("helperManager")
+                .apply { isAccessible = true }
+            assertNull(field.get(owner))
+        } finally {
+            owner.close()
+        }
+    }
+
+    @Test
+    fun `failed owned helper startup remains unknown without replay`() {
+        val property = SupervisorPrewarmBudget.PROPERTY
+        val previous = System.getProperty(property)
+        val cleanupCalls = AtomicInteger()
+        val launcher = object : MockProcessLauncher() {
+            override fun deleteIfExists(path: java.nio.file.Path): Boolean {
+                cleanupCalls.incrementAndGet()
+                return super.deleteIfExists(path)
+            }
+        }
+        val daemon = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
+        val owner = ManagedRuntime.newCanonicalAcquisition()
+        val state = owner.javaClass
+            .getDeclaredField("state")
+            .apply { isAccessible = true }
+        val starting = state.type.enumConstants.single { (it as Enum<*>).name == "STARTING" }
+        state.set(owner, starting)
+        owner.javaClass
+            .getDeclaredField("startActor")
+            .apply { isAccessible = true }
+            .set(owner, Thread.currentThread())
+        val start = owner.javaClass
+            .getDeclaredMethod("startHelper", daemon.javaClass)
+            .apply { isAccessible = true }
+        try {
+            System.setProperty(property, "15001")
+            val failure = assertFailsWith<java.lang.reflect.InvocationTargetException> { start.invoke(owner, daemon) }
+            assertIs<IllegalArgumentException>(failure.cause)
+            assertFalse(launcher.startProcessCalled)
+            val rollbackCalls = cleanupCalls.get()
+            assertTrue(rollbackCalls > 0)
+            assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+            assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+            assertEquals(rollbackCalls, cleanupCalls.get())
+        } finally {
+            if (previous == null) System.clearProperty(property) else System.setProperty(property, previous)
+        }
+    }
+
     @org.junit.jupiter.api.io.TempDir lateinit var directDirectory: java.nio.file.Path
     private val timeout = Duration.ofSeconds(5)
     private lateinit var engine: MockNativeEngine

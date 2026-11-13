@@ -18,7 +18,12 @@ import io.mazewall.ffi.internal.PreparedPath
 import io.mazewall.ffi.networking.ConfinedDeadline
 import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.platform.fd.ResourceRetirement
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.LiveCompletion
+import io.mazewall.platform.native.LiveSetup
 import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.native.WorkerOwner
+import io.mazewall.platform.native.WorkerRegistrationReceipt
 import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.HexFormat
@@ -155,12 +160,14 @@ internal class OwnedDomain(
 ) {
     private enum class HelperRelease { Retained, Releasing, Released }
 
+    internal val registrationKey: Any = generation
     private val lock = Any()
     private var liveRelease: LiveRelease? = if (scoping is FrozenStackScoping.Live) LiveRelease() else null
     private var phase = GenerationPhase.PREPARING
     private var failure: Throwable? = null
     private val bootstrap = Thread.currentThread()
-    private val helperPreparationEnded = CountDownLatch(if (liveCarrier == null) 1 else 0)
+    private val liveHelperContext = (scoping as? FrozenStackScoping.Live)?.bootstrap?.helperContext
+    private val helperPreparationEnded = CountDownLatch(if (confined != null || liveHelperContext != null) 1 else 0)
     private var helperPlan: PreparedHelperReadPlan? = liveCarrier?.helperPlan
     private var helperCapture: HelperSupportCapture? = liveCarrier?.helperCapture
     private var helperCleanupActor: Thread? = null
@@ -174,6 +181,8 @@ internal class OwnedDomain(
     private var directRulesetComplete = false
     private val startup = CountDownLatch(limits.workers)
     private val threads = CopyOnWriteArrayList<Thread>()
+    private val liveWorkers = LiveWorkers(this, limits.workers, environment.native)
+    private var nextWorkerSlot = 0
     private val pending = ConcurrentHashMap.newKeySet<OwnedInvocation<*>>()
     private val admission = Semaphore(limits.maxAdmissions)
     private val admitted = AtomicLong()
@@ -191,13 +200,17 @@ internal class OwnedDomain(
         ArrayBlockingQueue(limits.maxAdmissions),
         ThreadFactory { runnable ->
             check(Thread.currentThread() === bootstrap) { "Worker replacement must originate from the trusted manager" }
-            threadBuilder.unstarted { runWorker(runnable) }.also { threads.add(it) }
+            val slot = liveWorkers.slot(nextWorkerSlot++)
+            threadBuilder.unstarted { runWorker(runnable, slot) }.also {
+                slot.thread = it
+                threads.add(it)
+            }
         },
         ThreadPoolExecutor.AbortPolicy(),
     )
     private val retirement = if (preparedLandlock != null || preparedOperation != null || confined != null) {
         PreparedRetirement(name + "resource-retirement", {
-            awaitPhysicalWorkers(confined, helperPreparationEnded, executor, threads)
+            awaitPhysicalWorkers(helperPreparationEnded, executor, threads)
         }, ::releasePreparedResources, { recordCleanupFailure(cleanupFailure, it) })
     } else {
         null
@@ -228,9 +241,14 @@ internal class OwnedDomain(
                 owner.releaseUnstarted()
             })
         }
-        afterDomainCommit()
-        requireSupportedScopingStart(scoping)
-        prepareHelper(deadline)
+        try {
+            afterDomainCommit()
+            prepareHelper(deadline)
+            if (liveHelperContext != null) requireHelperReady(ConfinedDeadline.mint(environment.native, deadline::remainingNanos))
+        } finally {
+            helperPreparationEnded.countDown()
+        }
+        if (liveHelperContext == null) requireSupportedScopingStart(scoping)
         validateResources()
         val started = executor.prestartAllCoreThreads()
         // Early failure can stop the executor before the remaining workers are created.
@@ -249,17 +267,19 @@ internal class OwnedDomain(
     }
 
     @Suppress("TooGenericExceptionCaught") // startup/retirement boundary preserves fatal identity and owns executor bookkeeping
-    private fun runWorker(runnable: Runnable) {
+    private fun runWorker(runnable: Runnable, slot: LiveWorkerSlot) {
         var receipt: InstallationReceipt? = null
         var terminal: Throwable? = null
         RuntimeWorkerContext.enter(this, scoping)
         try {
             try {
+                if (scoping is FrozenStackScoping.Live) liveWorkers.register(slot, scoping)
                 requireSupportedScopingStart(scoping)
                 if (confined != null) requireHelperReady(ConfinedDeadline.mint(environment.native) { HELPER_TIMEOUT_NANOS })
                 receipt = ContainedExecutors.installOnCurrentThread(policy, scoping, environment, preparedLandlock)
                 receipt.requireInstalled()
             } catch (installationFailure: Throwable) {
+                if (slot.registrationReserved && slot.worker == null && slot.registrationFailure == null) slot.registrationFailure = installationFailure
                 terminal = installationFailure
                 fail(installationFailure)
             } finally {
@@ -404,7 +424,16 @@ internal class OwnedDomain(
         }
 
     private fun prepareHelper(deadline: Deadline) {
-        try {
+        val context: io.mazewall.enforcer.internal.supervisor.SupervisorContext
+        val observations: HelperSecurityObservation
+        val plan: PreparedHelperReadPlan
+        val liveContext = liveHelperContext
+        if (liveContext != null) {
+            val live = scoping as FrozenStackScoping.Live
+            context = liveContext
+            observations = checkNotNull(live.bootstrap.helperAdmission).observations
+            plan = checkNotNull(helperPlan)
+        } else {
             val configuration = confined ?: return
             val operation = requireNotNull(preparedOperation)
             val resources = operation.resources
@@ -428,39 +457,56 @@ internal class OwnedDomain(
                 check(confined === configuration && preparedOperation === operation && helperCapture == null)
                 helperCapture = capture
             }
-            val plan = PreparedHelperReadPlan.captureOwned(configuration.policy, resources, binding, configuration.support, configuration.lifetime, operation.native, parent.ancestry, capture)
+            plan = PreparedHelperReadPlan.captureOwned(configuration.policy, resources, binding, configuration.support, configuration.lifetime, operation.native, parent.ancestry, capture)
             synchronized(lock) {
                 helperPlan = plan
                 check(phase == GenerationPhase.PREPARING) { "Confined preparation was stopped before setup" }
             }
-            val result = SupervisorInstaller.prepareConfinedHelper(
-                plan,
-                configuration.context,
-                environment.native,
-                ConfinedDeadline.mint(environment.native, deadline::remainingNanos),
-                retain = { session ->
-                    synchronized(lock) {
-                        check(helperSession == null)
-                        helperSession = session
-                        check(phase == GenerationPhase.PREPARING) { "Confined preparation was stopped before connection acquisition" }
-                    }
-                },
-                cancelled = { synchronized(lock) { phase != GenerationPhase.PREPARING && phase != GenerationPhase.READY } },
-                observations = configuration.observations,
-            )
-            when (result) {
-                is ConfinedHelperPreparation.Ready -> check(result.binding == plan.manifest.binding && result.session === helperSession)
-                is ConfinedHelperPreparation.Rejected -> throw result.cause
-            }
-        } finally {
-            helperPreparationEnded.countDown()
+            context = configuration.context
+            observations = configuration.observations
+        }
+        val result = SupervisorInstaller.prepareConfinedHelper(
+            plan,
+            context,
+            environment.native,
+            ConfinedDeadline.mint(environment.native, deadline::remainingNanos),
+            retain = { session ->
+                synchronized(lock) {
+                    check(helperSession == null)
+                    helperSession = session
+                    check(phase == GenerationPhase.PREPARING) { "Confined preparation was stopped before connection acquisition" }
+                }
+            },
+            cancelled = { synchronized(lock) { phase != GenerationPhase.PREPARING && phase != GenerationPhase.READY } },
+            observations = observations,
+        )
+        when (result) {
+            is ConfinedHelperPreparation.Ready -> check(result.binding == plan.manifest.binding && result.session === helperSession)
+            is ConfinedHelperPreparation.Rejected -> throw result.cause
         }
     }
 
     private fun requireHelperReady(deadline: ConfinedDeadline) {
-        if (confined == null) return
+        if (confined == null && liveHelperContext == null) return
         val owners = synchronized(lock) { requireNotNull(helperPlan) to requireNotNull(helperSession) }
         owners.second.requireReady(owners.first.manifest.binding, deadline)
+    }
+
+    internal val liveWorkerAdmission = LiveWorkerAdmission()
+
+    internal inner class LiveWorkerAdmission {
+        internal fun reserve(slot: LiveWorkerSlot) {
+            synchronized(lock) {
+                check(
+                    phase == GenerationPhase.PREPARING &&
+                        liveWorkers.owns(slot) &&
+                        !slot.registrationReserved &&
+                        Thread.currentThread() === slot.thread &&
+                        !Thread.currentThread().isVirtual,
+                ) { "Live worker registration was not admitted" }
+                slot.registrationReserved = true
+            }
+        }
     }
 
     fun initialConfinedRetirementEnded(): Boolean = (confined != null || scoping is FrozenStackScoping.Live) && physicalWorkersStopped(executor, threads) && retirement?.finished() == true
@@ -481,6 +527,7 @@ internal class OwnedDomain(
         fun abortBeforePrepare() {
             check(Thread.currentThread() === bootstrap) { "Only the originating bootstrap can retire an unstarted domain" }
             executor.shutdownNow()
+            helperPreparationEnded.countDown()
             retirement?.releaseUnstarted()
         }
 
@@ -493,15 +540,22 @@ internal class OwnedDomain(
                     helperCleanupActor = Thread.currentThread()
                 }
                 try {
-                    val plan = helperPlan
-                    if (plan == null) helperCapture?.close() else plan.close()
-                    helperPinsClosed = true
+                    retireSessionAndPins(ConfinedDeadline.mint(environment.native) { HELPER_TIMEOUT_NANOS })
                 } finally {
                     synchronized(lock) {
                         helperCleanupActor = null
                         helperRelease = if (helperPinsClosed) HelperRelease.Released else HelperRelease.Retained
                     }
                 }
+            }
+        }
+
+        fun retireSessionAndPins(deadline: ConfinedDeadline) {
+            helperSession?.retire(deadline)
+            if (!helperPinsClosed) {
+                val plan = helperPlan
+                if (plan == null) helperCapture?.close() else plan.close()
+                helperPinsClosed = true
             }
         }
     }
@@ -528,22 +582,30 @@ internal class OwnedDomain(
                 progress = observeLiveInvalidation(progress, outcome)
                 if (outcome !is io.mazewall.platform.native.LiveCompletion.Complete) return
             }
-            if (progress.installation == ScopingPreparation.ReleaseStep.NotAttempted) {
-                progress = progress.copy(installation = ScopingPreparation.ReleaseStep.Unknown)
-                val outcome = owner.capability.retireInstallation(owner)
-                progress = observeLiveRetirement(progress, outcome)
-                if (outcome !is io.mazewall.platform.native.LiveCompletion.Complete) return
-            }
-            liveHelperRetirement.close()
-            if (progress.landlock == ScopingPreparation.ReleaseStep.NotAttempted) {
-                progress = progress.copy(landlock = ScopingPreparation.ReleaseStep.Unknown)
-                preparedLandlock?.close()
-                progress = progress.copy(landlock = ScopingPreparation.ReleaseStep.Complete)
-            }
-            if (progress.resources == ScopingPreparation.ReleaseStep.NotAttempted) {
-                progress = progress.copy(resources = ScopingPreparation.ReleaseStep.Unknown)
-                preparedOperation?.retire()
-                progress = progress.copy(resources = ScopingPreparation.ReleaseStep.Complete)
+            val workerOutcome = liveWorkers.retire(live)
+            if (workerOutcome is LiveCompletion.Complete) {
+                if (progress.installation == ScopingPreparation.ReleaseStep.NotAttempted) {
+                    progress = progress.copy(installation = ScopingPreparation.ReleaseStep.Unknown)
+                    val outcome = owner.capability.retireInstallation(owner)
+                    progress = observeLiveRetirement(progress, outcome)
+                    if (outcome !is io.mazewall.platform.native.LiveCompletion.Complete) return
+                }
+                liveHelperRetirement.close()
+                if (progress.landlock == ScopingPreparation.ReleaseStep.NotAttempted) {
+                    progress = progress.copy(landlock = ScopingPreparation.ReleaseStep.Unknown)
+                    preparedLandlock?.close()
+                    progress = progress.copy(landlock = ScopingPreparation.ReleaseStep.Complete)
+                }
+                if (progress.resources == ScopingPreparation.ReleaseStep.NotAttempted) {
+                    progress = progress.copy(resources = ScopingPreparation.ReleaseStep.Unknown)
+                    preparedOperation?.retire()
+                    progress = progress.copy(resources = ScopingPreparation.ReleaseStep.Complete)
+                }
+            } else {
+                progress = progress.copy(
+                    nativeOutcome = workerOutcome,
+                    failure = workerRetirementFailure(progress.failure, workerOutcome),
+                )
             }
         } catch (failure: Throwable) {
             progress = progress.copy(failure = CleanupFailures.merge(progress.failure, failure))
@@ -569,12 +631,7 @@ internal class OwnedDomain(
         if (!claimed) return
         var released = false
         try {
-            helperSession?.retire(deadline)
-            if (!helperPinsClosed) {
-                val plan = helperPlan
-                if (plan == null) helperCapture?.close() else plan.close()
-                helperPinsClosed = true
-            }
+            liveHelperRetirement.retireSessionAndPins(deadline)
             if (!operationClosed) {
                 preparedOperation?.retire()
                 operationClosed = true
@@ -684,6 +741,110 @@ internal class OwnedDomain(
     }
 }
 
+private class LiveWorkers(
+    private val domain: OwnedDomain,
+    capacity: Int,
+    private val native: NativeEngine,
+) {
+    private val slots = List(capacity) { LiveWorkerSlot(it) }
+
+    fun slot(index: Int): LiveWorkerSlot = slots[index]
+
+    fun owns(slot: LiveWorkerSlot): Boolean = slots.getOrNull(slot.index) === slot
+
+    fun register(
+        slot: LiveWorkerSlot,
+        live: FrozenStackScoping.Live,
+    ) {
+        live.bootstrap.reserveLiveWorker(domain, slot)
+        val owner = live.bootstrap.sealed
+        slot.tid = native.process.gettid()
+        val receipt = owner.capability.prepareWorkerReceipt(owner)
+        slot.receipt = receipt
+        slot.registrationAttempted = true
+        when (val result = owner.capability.registerCurrent(owner, receipt)) {
+            is LiveSetup.Ready -> {
+                validateLiveWorker(slot, live, result.value)
+                slot.worker = result.value
+            }
+            is LiveSetup.Refused -> throw IllegalStateException("Live worker registration refused: ${result.failure}", result.failure.cause)
+        }
+    }
+
+    private fun validateLiveWorker(
+        slot: LiveWorkerSlot,
+        live: FrozenStackScoping.Live,
+        worker: WorkerOwner,
+    ) {
+        check(worker.owner === live.bootstrap.sealed && worker.enrollment === live.bootstrap.enrollment && worker.tid == slot.tid) {
+            "Live worker identity differs from its original slot"
+        }
+    }
+
+    fun retire(live: FrozenStackScoping.Live): LiveCompletion {
+        for (slot in slots) {
+            if (!slot.registrationReserved) continue
+            check(slot.thread?.isAlive == false) { "Live worker must be joined before retirement" }
+            if (!slot.registrationAttempted) continue
+            var worker = slot.worker
+            if (worker == null) {
+                check(!slot.recoveryAttempted) { "Live worker registration remains unknown" }
+                slot.recoveryAttempted = true
+                when (
+                    val recovered = live.bootstrap.sealed.capability
+                        .recoverWorker(checkNotNull(slot.receipt))
+                ) {
+                    is LiveSetup.Ready -> {
+                        validateLiveWorker(slot, live, recovered.value)
+                        worker = recovered.value
+                        slot.worker = worker
+                    }
+                    is LiveSetup.Refused -> return LiveCompletion.Refused(recovered.failure)
+                }
+            }
+            if (!slot.retirementAttempted) {
+                slot.retirementAttempted = true
+                slot.retirement = live.bootstrap.sealed.capability
+                    .retireWorker(checkNotNull(worker))
+            }
+            when (val outcome = slot.retirement) {
+                LiveCompletion.Complete -> Unit
+                is LiveCompletion.Pending, is LiveCompletion.Refused -> return outcome
+                null -> error("Live worker retirement remains unknown")
+            }
+        }
+        return LiveCompletion.Complete
+    }
+}
+
+internal class LiveWorkerSlot(
+    val index: Int,
+) {
+    var thread: Thread? = null
+    var tid: Tid? = null
+    var receipt: WorkerRegistrationReceipt? = null
+    var registrationReserved = false
+    var registrationFailure: Throwable? = null
+    var registrationAttempted = false
+    var worker: WorkerOwner? = null
+    var recoveryAttempted = false
+    var retirementAttempted = false
+    var retirement: LiveCompletion? = null
+}
+
+private fun workerRetirementFailure(
+    previous: Throwable?,
+    outcome: LiveCompletion,
+): Throwable? =
+    when (outcome) {
+        is LiveCompletion.Pending -> previous
+        is LiveCompletion.Refused -> CleanupFailures.merge(
+            previous,
+            IllegalStateException("Native worker retirement refused: ${outcome.failure}", outcome.failure.cause),
+        )
+        LiveCompletion.Complete -> error("Unreachable completed worker retirement")
+    }
+
 private val noAfterDomainCommit: () -> Unit = {}
 
 private fun requireSupportedScopingStart(scoping: FrozenStackScoping) {
@@ -699,14 +860,13 @@ private fun physicalWorkersStopped(
 ): Boolean = executor.isTerminated && threads.none { it.isAlive }
 
 private fun awaitPhysicalWorkers(
-    confined: ConfinedHelperConfiguration?,
     helperPreparationEnded: CountDownLatch,
     executor: ThreadPoolExecutor,
     threads: List<Thread>,
 ) {
     var interrupted = Thread.interrupted()
     try {
-        while (confined != null && helperPreparationEnded.count != 0L) {
+        while (helperPreparationEnded.count != 0L) {
             try {
                 helperPreparationEnded.await()
             } catch (_: InterruptedException) {

@@ -4,8 +4,14 @@ import io.mazewall.enforcer.api.ReviewedOperationArtifact
 import io.mazewall.enforcer.api.execution.DomainLimits
 import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.enforcer.api.execution.PreparedOperationResources
+import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.LiveSetup
+import io.mazewall.platform.native.WorkerId
 import java.nio.file.Path
 import java.util.Optional
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 internal fun captureWithMissingAgent(
     runtime: ManagedRuntime,
@@ -62,6 +68,18 @@ internal class RecordingCapture(
         .AtomicReference<io.mazewall.platform.native.InstallationOwner>()
     val retireCalls = java.util.concurrent.atomic
         .AtomicInteger()
+    var beforeRegister: () -> Unit = {}
+    val refuseRegister = AtomicBoolean()
+    val wrongWorkerTid = AtomicBoolean()
+    val afterRegisterFailure = AtomicReference<Throwable?>()
+    val registerCalls = AtomicInteger()
+    val recoverWorkerCalls = AtomicInteger()
+    val workerRetireCalls = AtomicInteger()
+    val beginCalls = AtomicInteger()
+    val workerRetirement = AtomicReference<io.mazewall.platform.native.LiveCompletion>(io.mazewall.platform.native.LiveCompletion.Complete)
+    val workerThread = AtomicReference<Thread>()
+    val workerOwner = AtomicReference<io.mazewall.platform.native.WorkerOwner>()
+    val lifecycle = java.util.concurrent.CopyOnWriteArrayList<String>()
     val invalidateFailure = java.util.concurrent.atomic
         .AtomicReference<Throwable?>()
     val pendingRetire = java.util.concurrent.atomic
@@ -245,6 +263,64 @@ internal class RecordingCapture(
             }
         }
 
+        override fun prepareWorkerReceipt(owner: io.mazewall.platform.native.InstallationOwner): io.mazewall.platform.native.WorkerRegistrationReceipt =
+            RecordingWorkerReceipt(owner, Thread.currentThread())
+
+        override fun registerCurrent(
+            owner: io.mazewall.platform.native.InstallationOwner,
+            receipt: io.mazewall.platform.native.WorkerRegistrationReceipt,
+        ): io.mazewall.platform.native.LiveSetup<io.mazewall.platform.native.WorkerOwner> {
+            val original = receipt as RecordingWorkerReceipt
+            check(original.owner === owner && original.thread === Thread.currentThread() && original.worker == null)
+            registerCalls.incrementAndGet()
+            workerThread.set(Thread.currentThread())
+            lifecycle.add("register")
+            beforeRegister()
+            if (refuseRegister.get()) return LiveSetup.Refused(refusedOutcome.failure)
+            val tid = LinuxNative
+                .snapshot()
+                .process
+                .gettid()
+            val worker = io.mazewall.platform.native.WorkerOwner(
+                owner,
+                WorkerId(1),
+                if (wrongWorkerTid.get()) {
+                    io.mazewall.platform.lifecycle
+                        .Tid(Math.addExact(tid.value, 1))
+                } else {
+                    tid
+                },
+            )
+            original.worker = worker
+            workerOwner.set(worker)
+            afterRegisterFailure.getAndSet(null)?.let { throw it }
+            return LiveSetup.Ready(worker)
+        }
+
+        override fun recoverWorker(receipt: io.mazewall.platform.native.WorkerRegistrationReceipt): io.mazewall.platform.native.LiveSetup<io.mazewall.platform.native.WorkerOwner> {
+            recoverWorkerCalls.incrementAndGet()
+            return LiveSetup.Ready(checkNotNull((receipt as RecordingWorkerReceipt).worker))
+        }
+
+        override fun beginCurrent(worker: io.mazewall.platform.native.WorkerOwner): io.mazewall.platform.native.LiveSetup<io.mazewall.platform.native.TaskLease> {
+            beginCalls.incrementAndGet()
+            return io.mazewall.platform.native.UnsupportedNativeStackContexts
+                .beginCurrent(worker)
+        }
+
+        override fun prepareTaskReceipt(worker: io.mazewall.platform.native.WorkerOwner): io.mazewall.platform.native.TaskBeginReceipt {
+            beginCalls.incrementAndGet()
+            return io.mazewall.platform.native.UnsupportedNativeStackContexts
+                .prepareTaskReceipt(worker)
+        }
+
+        override fun retireWorker(worker: io.mazewall.platform.native.WorkerOwner): io.mazewall.platform.native.LiveCompletion {
+            check(worker === workerOwner.get() && !workerThread.get().isAlive)
+            workerRetireCalls.incrementAndGet()
+            lifecycle.add("worker")
+            return workerRetirement.get()
+        }
+
         override fun invalidate(owner: io.mazewall.platform.native.InstallationOwner): io.mazewall.platform.native.LiveCompletion {
             beforeInvalidate()
             retiredOwner.set(owner)
@@ -256,6 +332,7 @@ internal class RecordingCapture(
         }
 
         override fun retireInstallation(owner: io.mazewall.platform.native.InstallationOwner): io.mazewall.platform.native.LiveCompletion {
+            lifecycle.add("installation")
             retiredOwner.set(owner)
             retireCalls.incrementAndGet()
             return if (pendingRetire.getAndUpdate { value -> if (value > 0) value - 1 else 0 } > 0) {
@@ -265,6 +342,13 @@ internal class RecordingCapture(
             }
         }
     }
+}
+
+private class RecordingWorkerReceipt(
+    val owner: io.mazewall.platform.native.InstallationOwner,
+    val thread: Thread,
+) : io.mazewall.platform.native.WorkerRegistrationReceipt {
+    var worker: io.mazewall.platform.native.WorkerOwner? = null
 }
 
 internal fun captureSynthetic(
@@ -284,6 +368,7 @@ internal fun captureSyntheticWithSupport(
     beforePublish: (Any) -> Unit = {},
     omitHelperAuthority: Boolean = false,
     helperSupport: List<io.mazewall.enforcer.internal.execution.ReviewedHelperSupport>? = null,
+    helperContext: io.mazewall.enforcer.internal.supervisor.SupervisorContext? = null,
     afterReserve: (io.mazewall.platform.native.InstallationOwner) -> Unit,
 ): Any {
     val entry = resources.implementationClass.getMethod("call")
@@ -370,6 +455,9 @@ internal fun captureSyntheticWithSupport(
         ).apply { isAccessible = true }
             .newInstance(authority, baseline, observations)
         inputsClass.getDeclaredField("helperAdmission").apply { isAccessible = true }.set(inputs, admission)
+    }
+    if (helperContext != null) {
+        inputsClass.getDeclaredField("helperContext").apply { isAccessible = true }.set(inputs, helperContext)
     }
     val preparation = runtime.admitScopingPreparation()
     val companion = OwnedStackScopingBootstrap.Companion

@@ -566,6 +566,33 @@ public class ManagedRuntime private constructor(
         private val checkedRequest: io.mazewall.ffi.internal.CheckedBootstrapRequest? = null,
     ) {
         private var originalAssociation: io.mazewall.ffi.internal.CheckedBootstrapAssociation? = null
+        private var helperManager: io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager? = null
+        private var helperStarted = false
+        private var startedHelperContext: SupervisorContext? = null
+
+        // Startup records every failure on the owning acquisition before propagating it.
+        @Suppress("TooGenericExceptionCaught")
+        private fun startHelper(manager: io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager): SupervisorContext {
+            synchronized(gate) {
+                check(state == State.STARTING && startActor === Thread.currentThread() && helperManager == null)
+                helperManager = manager
+            }
+            return try {
+                manager.prepareConfinedReadBootstrap().also { context ->
+                    synchronized(gate) {
+                        helperStarted = true
+                        startedHelperContext = context
+                    }
+                }
+            } catch (failure: InterruptedException) {
+                recordCleanupFailure(failure)
+                Thread.currentThread().interrupt()
+                throw failure
+            } catch (failure: Throwable) {
+                recordCleanupFailure(failure)
+                throw failure
+            }
+        }
 
         private enum class State { NEW, STARTING, ACTIVE, RETIRING, COMPLETE, UNKNOWN }
 
@@ -616,7 +643,21 @@ public class ManagedRuntime private constructor(
                 check(candidatePermit === canonicalPermit && state == State.STARTING && startActor === Thread.currentThread() && original == null)
                 originalAssociation = association
             }
+            if (request.helperSupport != null) {
+                val manager = io.mazewall.enforcer.internal.supervisor
+                    .SupervisorDaemonManager(environment.native)
+                val context = startHelper(manager)
+                synchronized(gate) { association.bindHelperContext(this, context) }
+            }
             return environment
+        }
+
+        fun requireHelperContext(
+            association: io.mazewall.ffi.internal.CheckedBootstrapAssociation,
+            context: SupervisorContext,
+        ) {
+            check(Thread.holdsLock(gate) && state == State.STARTING && startActor === Thread.currentThread() && original == null)
+            check(originalAssociation === association && helperManager != null && helperStarted && startedHelperContext === context)
         }
 
         fun checkedAssociation(candidatePermit: Any): io.mazewall.ffi.internal.CheckedBootstrapAssociation? {
@@ -760,7 +801,7 @@ public class ManagedRuntime private constructor(
                 synchronized(gate) {
                     retainCaller(failure)
                     setupInFlight = false
-                    if (original != null) {
+                    if (cleanupUnknown || original != null) {
                         installUnknown = true
                         state = State.UNKNOWN
                     } else {
@@ -834,7 +875,12 @@ public class ManagedRuntime private constructor(
             State.ACTIVE -> ManagedRuntimeAcquisitionStatus.Active
             State.RETIRING -> ManagedRuntimeAcquisitionStatus.Pending(primary)
             State.COMPLETE -> ManagedRuntimeAcquisitionStatus.Complete(primary)
-            State.UNKNOWN -> ManagedRuntimeAcquisitionStatus.Unknown(checkNotNull(primary ?: installFailure))
+            State.UNKNOWN ->
+                if (setupInFlight) {
+                    ManagedRuntimeAcquisitionStatus.Pending(primary)
+                } else {
+                    ManagedRuntimeAcquisitionStatus.Unknown(checkNotNull(primary ?: installFailure))
+                }
         }
 
         private fun recordCleanupFailure(failure: Throwable) =
@@ -857,15 +903,21 @@ public class ManagedRuntime private constructor(
             (report as? DrainReport.Incomplete)?.cleanupFailure?.let { recordCleanupFailure(it) }
         }
 
-        private fun startupDispositionKnown(): Boolean = finished || neverStarted || (returned && !entered)
-
-        private fun startupPhysicallyExited(terminated: Boolean): Boolean = neverStarted || returned || terminated
+        private fun startupPhysicallyExited(terminated: Boolean): Boolean {
+            return (finished || neverStarted || (returned && !entered)) && (neverStarted || returned || terminated)
+        }
 
         private fun publishRetirement(
             report: DrainReport,
             terminated: Boolean,
         ) = synchronized(gate) {
-            if (startupDispositionKnown() && report == DrainReport.Complete && startupPhysicallyExited(terminated)) physicalComplete = true
+            if (
+                report == DrainReport.Complete &&
+                startupPhysicallyExited(terminated) &&
+                (helperManager == null || (!helperStarted && terminated))
+            ) {
+                physicalComplete = true
+            }
             when {
                 installFailure != null || installUnknown || cleanupUnknown || metadataUnknown -> state = State.UNKNOWN
                 physicalComplete -> state = State.COMPLETE
@@ -873,38 +925,44 @@ public class ManagedRuntime private constructor(
             }
         }
 
+        private fun claimRetirement(): Pair<ManagedRuntime?, ManagedRuntimeAcquisitionStatus?> =
+            synchronized(gate) {
+                if (state == State.NEW) state = State.COMPLETE
+                if (state == State.COMPLETE || physicalComplete || cleanupUnknown || metadataUnknown) {
+                    null to snapshot()
+                } else {
+                    if (state != State.UNKNOWN) state = State.RETIRING
+                    if (setupInFlight || retirementInFlight) {
+                        null to snapshot()
+                    } else {
+                        val claim = original to null
+                        retirementInFlight = true
+                        claim
+                    }
+                }
+            }
+
         // Retirement records the original failure and publishes typed Unknown before returning.
         @Suppress("TooGenericExceptionCaught")
         fun retire(timeout: Duration): ManagedRuntimeAcquisitionStatus {
             requirePositive(timeout)
-            var selected: ManagedRuntime? = null
-            var immediate: ManagedRuntimeAcquisitionStatus? = null
-            synchronized(gate) {
-                if (state == State.NEW) state = State.COMPLETE
-                if (state == State.COMPLETE || physicalComplete || cleanupUnknown || metadataUnknown) {
-                    immediate = snapshot()
-                } else {
-                    if (state != State.UNKNOWN) state = State.RETIRING
-                    if (setupInFlight || retirementInFlight) {
-                        immediate = snapshot()
-                    } else {
-                        retirementInFlight = true
-                        selected = original
-                    }
-                }
-            }
+            val (runtime, immediate) = claimRetirement()
             immediate?.let { return it }
-            val runtime = selected
-            if (runtime == null) {
-                synchronized(gate) { state = State.COMPLETE }
-            } else {
-                val report = try {
-                    runtime.drain(timeout)
-                } catch (failure: Throwable) {
-                    recordCleanupFailure(failure)
-                    null
-                }
-                if (report != null) {
+            try {
+                if (runtime == null) {
+                    retireStartedHelper()
+                    synchronized(gate) { if (!cleanupUnknown) state = State.COMPLETE }
+                } else {
+                    val report = try {
+                        runtime.drain(timeout)
+                    } catch (failure: Throwable) {
+                        recordCleanupFailure(failure)
+                        null
+                    }
+                    if (report == null) {
+                        mergeHistory()
+                        return synchronized(gate) { snapshot() }
+                    }
                     recordCleanupReceipt(report)
                     val terminated = try {
                         runtime.operations.canonicalManagerTerminated(canonicalPermit, this)
@@ -914,15 +972,35 @@ public class ManagedRuntime private constructor(
                     }
                     if (terminated != null) {
                         mergeHistory()
+                        if (report == DrainReport.Complete && terminated) retireStartedHelper()
                         publishRetirement(report, terminated)
                     }
-                } else {
-                    mergeHistory()
                 }
+            } finally {
+                synchronized(gate) { retirementInFlight = false }
             }
             return synchronized(gate) {
-                retirementInFlight = false
                 snapshot()
+            }
+        }
+
+        // Stop failures remain unknown and fatal failures retain their original identity.
+        @Suppress("TooGenericExceptionCaught")
+        private fun retireStartedHelper() {
+            val manager = synchronized(gate) {
+                if (!helperStarted) null else helperManager.also { helperStarted = false }
+            } ?: return
+            try {
+                manager.stop()
+                manager.requireConfinedHelperRetired()
+            } catch (failure: InterruptedException) {
+                recordCleanupFailure(failure)
+                Thread.currentThread().interrupt()
+            } catch (failure: Error) {
+                recordCleanupFailure(failure)
+                throw failure
+            } catch (failure: Throwable) {
+                recordCleanupFailure(failure)
             }
         }
 
@@ -1030,6 +1108,8 @@ public class ManagedRuntime private constructor(
     internal sealed interface CheckedOperations {
         fun helperAdmission(): io.mazewall.ffi.internal.TrustedHelperAdmission?
 
+        fun helperContext(): io.mazewall.enforcer.internal.supervisor.SupervisorContext?
+
         fun reserve(
             preparation: ScopingPreparation,
             request: io.mazewall.ffi.internal.CheckedBootstrapRequest,
@@ -1056,6 +1136,8 @@ public class ManagedRuntime private constructor(
         }
 
     override fun helperAdmission(): io.mazewall.ffi.internal.TrustedHelperAdmission? = association.helperAdmission
+
+    override fun helperContext(): io.mazewall.enforcer.internal.supervisor.SupervisorContext? = association.helperContext
 
     private fun matchesCheckedActor(preparation: ScopingPreparation): Boolean =
         shared.checkedPreparation === preparation &&
@@ -1218,6 +1300,49 @@ public class ManagedRuntime private constructor(
                     shared.checkedUnknown = true
                     throw failure
                 }
+            }
+        }
+    }
+
+    internal val liveWorkerAdmission: LiveWorkerAdmission = BoundLiveWorkerAdmission(shared)
+
+    internal interface LiveWorkerAdmission {
+        fun reserve(
+            preparation: ScopingPreparation,
+            bootstrap: io.mazewall.ffi.internal.OwnedStackScopingBootstrap,
+            domain: OwnedDomain,
+            slot: io.mazewall.enforcer.internal.execution.LiveWorkerSlot,
+        )
+    }
+
+    private class BoundLiveWorkerAdmission(
+        private val state: RuntimeState,
+    ) : LiveWorkerAdmission {
+        override fun reserve(
+            preparation: ScopingPreparation,
+            bootstrap: io.mazewall.ffi.internal.OwnedStackScopingBootstrap,
+            domain: OwnedDomain,
+            slot: io.mazewall.enforcer.internal.execution.LiveWorkerSlot,
+        ) {
+            synchronized(state.lock) {
+                requireLiveWorkerAdmission(preparation, bootstrap, domain)
+                // Live startup cannot reach READY before the unconditional B6 refusal. Audit lock ordering if that guard moves.
+                domain.liveWorkerAdmission.reserve(slot)
+            }
+        }
+
+        private fun requireLiveWorkerAdmission(
+            preparation: ScopingPreparation,
+            bootstrap: io.mazewall.ffi.internal.OwnedStackScopingBootstrap,
+            domain: OwnedDomain,
+        ) {
+            check(state.phase == Phase.OPEN && state.scopingPreparation === preparation) { "Live worker registration was not admitted" }
+            val current = preparation.state
+            check(current is ScopingPreparation.State.DomainOwned && current.domain === domain) { "Live worker registration was not admitted" }
+            check((state.domains as Map<*, *>)[domain.registrationKey] === domain) { "Live worker registration was not admitted" }
+            val live = domain.scoping
+            check(live is io.mazewall.enforcer.internal.execution.FrozenStackScoping.Live && live.bootstrap === bootstrap) {
+                "Live worker registration was not admitted"
             }
         }
     }

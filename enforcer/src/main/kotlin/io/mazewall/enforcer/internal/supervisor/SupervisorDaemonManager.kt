@@ -71,6 +71,8 @@ internal class SupervisorDaemonManager(
     @Volatile private var ownedResources: ChildProcessResources? = null
     private var pendingStartup: ChildStartupTransaction? = null
     private var confinedOriginalProcess: Process? = null
+    private var confinedOriginalContext: SupervisorContext? = null
+    private var confinedRetirementView: HelperSecurityObservation.RetirementView? = null
     private var confinedCommitted = false
     private var confinedStartupFailure: Throwable? = null
     private var confinedPtracerFailure: Throwable? = null
@@ -157,6 +159,14 @@ internal class SupervisorDaemonManager(
                 DaemonHandle.NotStarted -> retirePendingResources()
             }
             daemonHandle = DaemonHandle.NotStarted
+        }
+    }
+
+    internal fun requireConfinedHelperRetired() {
+        synchronized(daemonLock) {
+            check(daemonHandle == DaemonHandle.NotStarted) { "Confined daemon has not stopped" }
+            val context = checkNotNull(confinedOriginalContext)
+            observations.requireRetiredHelper(checkNotNull(confinedRetirementView), checkNotNull(context.confinedHelper))
         }
     }
 
@@ -295,6 +305,7 @@ internal class SupervisorDaemonManager(
                 }
             }
         }
+        if (parent != null) confinedRetirementView = observations.captureRetirementView(parent)
         val daemonProcess = startup.start(spec)
         if (provisioning == PoolProvisioning.PrestartedConfined) confinedOriginalProcess = daemonProcess
         val confinedBootstrap = parent?.let {
@@ -327,7 +338,10 @@ internal class SupervisorDaemonManager(
         val context = SupervisorContext(socketPath, socketDir, daemonProcess, startup.shutdownHook, confinedBootstrap, confinedHelper)
         val running = DaemonHandle.Running(context)
         val resources = startup.commit()
-        if (provisioning == PoolProvisioning.PrestartedConfined) confinedCommitted = true
+        if (provisioning == PoolProvisioning.PrestartedConfined) {
+            confinedOriginalContext = context
+            confinedCommitted = true
+        }
         ownedResources = resources
         daemonHandle = running
         if (!daemonProcess.isAlive) markDefunct(context, daemonProcess.exitValue())
