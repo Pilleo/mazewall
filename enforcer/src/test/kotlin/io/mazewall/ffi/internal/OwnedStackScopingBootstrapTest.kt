@@ -1,14 +1,148 @@
 package io.mazewall.ffi.internal
 
 import io.mazewall.enforcer.api.execution.ManagedRuntime
+import io.mazewall.enforcer.internal.execution.HelperSupportLifetime
+import io.mazewall.enforcer.internal.execution.ReviewedHelperSupport
 import io.mazewall.enforcer.internal.execution.ScopingPreparation
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.NativeStackContexts
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Modifier
+import java.nio.file.Path
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class OwnedStackScopingBootstrapTest {
+    private fun requestIdentity(path: Path): LiveStackBootstrap.LiveDeploymentIdentity {
+        val agent = LiveStackBootstrap.ArtifactIdentity("agent", path.toString(), "0".repeat(64), "00", "request")
+        val enforcer = LiveStackBootstrap.ArtifactIdentity("enforcer", "/not-opened/enforcer.jar", "0".repeat(64), "00", "request")
+        return LiveStackBootstrap.LiveDeploymentIdentity(
+            LiveStackBootstrap.Profile.CLOSED_V1,
+            LiveStackBootstrap.Variant.ONLY,
+            "request",
+            listOf(agent, enforcer),
+            emptyList(),
+            emptyList(),
+            "helper",
+            emptyList(),
+            emptyList(),
+            listOf(2, 257),
+            java.util.Optional.empty(),
+        )
+    }
+
+    @Test
+    fun `trusted helper support requires controlled lifetime and snapshots reviewed entries`() {
+        val entry = ReviewedHelperSupport(
+            Path.of("/not-opened/support.jar"),
+            "a".repeat(64),
+        )
+        val entries = mutableListOf(entry)
+        kotlin.test.assertFailsWith<IllegalArgumentException> {
+            TrustedHelperSupport.reviewed(entries, HelperSupportLifetime.Uncontrolled)
+        }
+        val support = TrustedHelperSupport.reviewed(
+            entries,
+            HelperSupportLifetime.NoWriters,
+        )
+        entries.clear()
+        kotlin.test.assertEquals(listOf(entry), support.recipe.entries)
+        kotlin.test.assertFailsWith<UnsupportedOperationException> { (support.recipe.entries as MutableList).clear() }
+    }
+
+    @Test
+    fun `checked owner retains original reviewed support without starting`() {
+        val path = Path.of("/not-opened/agent.so")
+        val support = TrustedHelperSupport.reviewed(
+            listOf(ReviewedHelperSupport(Path.of("/not-opened/support.jar"), "a".repeat(64))),
+            HelperSupportLifetime.NoWriters,
+        )
+        val owner = newCheckedRuntimeOwner(path, requestIdentity(path), support)
+        try {
+            kotlin.test.assertIs<io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionStatus.NotStarted>(owner.status())
+            val protocol = owner.javaClass
+                .getDeclaredField("protocol")
+                .apply { isAccessible = true }
+                .get(owner)
+            val request = protocol.javaClass
+                .getDeclaredField("checkedRequest")
+                .apply { isAccessible = true }
+                .get(protocol) as CheckedBootstrapRequest
+            kotlin.test.assertSame(support, request.helperSupport)
+        } finally {
+            owner.close()
+        }
+    }
+
+    @Test
+    fun `checked helper admission retains the observed baseline and expected support`() {
+        val pid = Pid(Math.toIntExact(ProcessHandle.current().pid()))
+        val baseline = HelperSecurityObservation().observeAncestry(
+            pid,
+            Tid(pid.value),
+            HelperSecurityObservation.Lineage.Bootstrap,
+        )
+        val support = TrustedHelperSupport.reviewed(
+            listOf(ReviewedHelperSupport(Path.of("/not-opened/support.jar"), "a".repeat(64))),
+            HelperSupportLifetime.NoWriters,
+        )
+        val admission = TrustedHelperAdmission.fromChecked(support, baseline)
+        kotlin.test.assertSame(support, admission.support)
+        kotlin.test.assertSame(baseline, admission.baseline)
+    }
+
+    @Test
+    fun `support present checked request refuses captured non-real engine before gettid`() {
+        val base = io.mazewall.platform.native.LinuxNative.engineIdentity as io.mazewall.platform.native.NativeEngine
+        val calls = java.util.concurrent.atomic
+            .AtomicInteger()
+        val stub = object : io.mazewall.platform.native.NativeEngine by base {
+            override val process = object : io.mazewall.platform.native.NativeProcess by base.process {
+                override fun gettid(): io.mazewall.platform.lifecycle.Tid {
+                    calls.incrementAndGet()
+                    return base.process.gettid()
+                }
+            }
+        }
+        val snapshot = io.mazewall.platform.native.RuntimeSnapshot::class.java
+            .getDeclaredConstructor(io.mazewall.platform.native.NativeEngine::class.java)
+            .apply { isAccessible = true }
+            .newInstance(stub)
+        val path = java.nio.file.Path
+            .of("/not-opened/agent.so")
+        val agent = LiveStackBootstrap.ArtifactIdentity("agent", path.toString(), "0".repeat(64), "00", "request")
+        val enforcer = LiveStackBootstrap.ArtifactIdentity("enforcer", "/not-opened/enforcer.jar", "0".repeat(64), "00", "request")
+        val identity = LiveStackBootstrap.LiveDeploymentIdentity(
+            LiveStackBootstrap.Profile.CLOSED_V1,
+            LiveStackBootstrap.Variant.ONLY,
+            "request",
+            listOf(agent, enforcer),
+            emptyList(),
+            emptyList(),
+            "helper",
+            emptyList(),
+            emptyList(),
+            listOf(2, 257),
+            java.util.Optional.empty(),
+        )
+        val support = TrustedHelperSupport.reviewed(
+            listOf(
+                io.mazewall.enforcer.internal.execution
+                .ReviewedHelperSupport(
+                    java.nio.file.Path
+                    .of("/not-opened/support.jar"),
+                        "0".repeat(64),
+                ),
+            ),
+            io.mazewall.enforcer.internal.execution.HelperSupportLifetime.NoWriters,
+        )
+        val failure = kotlin.test.assertFailsWith<CheckedBootstrapRefusal> { CheckedBootstrapRequest(path, identity, support).check(snapshot) }
+        kotlin.test.assertEquals(io.mazewall.platform.native.LiveFailureStatus.Unsupported, failure.failure.status)
+        kotlin.test.assertEquals(io.mazewall.platform.native.LiveFailureReason.RuntimeMismatch, failure.failure.reason)
+        kotlin.test.assertEquals(0, calls.get())
+    }
+
     @Test
     fun `arbitrary context interpreter remains private with no default hook arguments`() {
         val companion = OwnedStackScopingBootstrap.Companion

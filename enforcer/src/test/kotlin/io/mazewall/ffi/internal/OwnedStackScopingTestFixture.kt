@@ -96,16 +96,25 @@ internal class RecordingCapture(
     }
     val contexts = object : io.mazewall.platform.native.NativeStackContexts by io.mazewall.platform.native.UnsupportedNativeStackContexts {
         override fun reserve(capacity: io.mazewall.platform.native.WorkerCapacity): io.mazewall.platform.native.LiveSetup<io.mazewall.platform.native.InstallationOwner> {
+            val actualPid = io.mazewall.platform.lifecycle
+                .Pid(Math.toIntExact(ProcessHandle.current().pid()))
+            val actualProcess = HelperSecurityObservation()
+                .observeAncestry(
+                actualPid,
+                io.mazewall.platform.lifecycle
+                    .Tid(actualPid.value),
+                HelperSecurityObservation.Lineage.Bootstrap,
+            ).identity
             val owner = io.mazewall.platform.native.InstallationOwner(
                 if (wrongOwner) otherCapability else this,
                 io.mazewall.platform.native
                     .ProcessIdentity(
                         io.mazewall.platform.lifecycle
-                        .Pid(41),
+                        .Pid(actualPid.value),
                             io.mazewall.platform.native
                             .ProcessCookie(1uL),
                                 io.mazewall.platform.native
-                                .ProcessStartTicks(1uL),
+                                .ProcessStartTicks(actualProcess.startTimeTicks.toULong()),
                     ),
                 io.mazewall.platform.native
                     .InstallationId(1),
@@ -265,6 +274,17 @@ internal fun captureSynthetic(
     recording: RecordingCapture,
     beforePublish: (Any) -> Unit = {},
     afterReserve: (io.mazewall.platform.native.InstallationOwner) -> Unit,
+): Any = captureSyntheticWithSupport(runtime, reviewed, resources, recording, beforePublish, afterReserve = afterReserve)
+
+internal fun captureSyntheticWithSupport(
+    runtime: ManagedRuntime,
+    reviewed: ReviewedOperationArtifact,
+    resources: PreparedOperationResources,
+    recording: RecordingCapture,
+    beforePublish: (Any) -> Unit = {},
+    omitHelperAuthority: Boolean = false,
+    helperSupport: List<io.mazewall.enforcer.internal.execution.ReviewedHelperSupport>? = null,
+    afterReserve: (io.mazewall.platform.native.InstallationOwner) -> Unit,
 ): Any {
     val entry = resources.implementationClass.getMethod("call")
     val boundary = Class.forName("sun.nio.fs.UnixNativeDispatcher").getDeclaredMethod("open0", Long::class.javaPrimitiveType, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
@@ -293,6 +313,64 @@ internal fun captureSynthetic(
         listOf(listOf(boundary, entry)),
         emptyMap<Any, Any>(),
     )
+    if (!omitHelperAuthority) {
+        val support = resources.resources.grants
+            .single {
+                it.path.requested.fileName
+                .toString() == "support.jar"
+            }.path.requested
+        val expected = java.util.HexFormat
+            .of()
+            .formatHex(
+                java.security.MessageDigest
+                .getInstance("SHA-256")
+                .digest("reviewed".toByteArray()),
+            )
+        val authority = TrustedHelperSupport.reviewed(
+            helperSupport ?: listOf(
+                io.mazewall.enforcer.internal.execution
+                .ReviewedHelperSupport(support, expected),
+            ),
+            io.mazewall.enforcer.internal.execution.HelperSupportLifetime.NoWriters,
+        )
+        val pid = io.mazewall.platform.lifecycle
+            .Pid(Math.toIntExact(ProcessHandle.current().pid()))
+        val baseline = HelperSecurityObservation().observeAncestry(
+            pid,
+            io.mazewall.platform.lifecycle
+            .Tid(pid.value),
+                HelperSecurityObservation.Lineage.Bootstrap,
+        )
+        // Synthetic native contexts do not install Tier1; simulate only that observation effect.
+        val observations = HelperSecurityObservation(readBounded = { path, limit ->
+            val original = java.nio.file.Files
+                .newInputStream(path)
+                .use { it.readNBytes(limit + 1) }
+            if (path.fileName.toString() != "status" || path.parent.fileName.toString() == pid.value.toString()) {
+                original
+            } else {
+                original
+                    .toString(Charsets.UTF_8)
+                    .lineSequence()
+                    .joinToString("\n") { line ->
+                    when (line.substringBefore(':')) {
+                        "NoNewPrivs" -> "NoNewPrivs:\t1"
+                        "Seccomp" -> "Seccomp:\t2"
+                        "Seccomp_filters" -> "Seccomp_filters:\t${line.substringAfter(':').trim().toLong() + 1}"
+                        else -> line
+                    }
+                }.toByteArray()
+            }
+        })
+        val admission = TrustedHelperAdmission::class.java
+            .getDeclaredConstructor(
+            TrustedHelperSupport::class.java,
+            HelperSecurityObservation.Observation::class.java,
+            HelperSecurityObservation::class.java,
+        ).apply { isAccessible = true }
+            .newInstance(authority, baseline, observations)
+        inputsClass.getDeclaredField("helperAdmission").apply { isAccessible = true }.set(inputs, admission)
+    }
     val preparation = runtime.admitScopingPreparation()
     val companion = OwnedStackScopingBootstrap.Companion
     val method = companion.javaClass

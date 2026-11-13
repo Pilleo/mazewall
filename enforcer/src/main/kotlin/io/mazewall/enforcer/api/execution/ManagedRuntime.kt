@@ -1028,6 +1028,8 @@ public class ManagedRuntime private constructor(
     }
 
     internal sealed interface CheckedOperations {
+        fun helperAdmission(): io.mazewall.ffi.internal.TrustedHelperAdmission?
+
         fun reserve(
             preparation: ScopingPreparation,
             request: io.mazewall.ffi.internal.CheckedBootstrapRequest,
@@ -1052,6 +1054,8 @@ public class ManagedRuntime private constructor(
         init {
             check(owner.matchesOriginalState(shared, null, permit))
         }
+
+    override fun helperAdmission(): io.mazewall.ffi.internal.TrustedHelperAdmission? = association.helperAdmission
 
     private fun matchesCheckedActor(preparation: ScopingPreparation): Boolean =
         shared.checkedPreparation === preparation &&
@@ -1316,6 +1320,15 @@ public class ManagedRuntime private constructor(
             .isDirectResult(),
         ) { "Direct result Live scoping is not available" }
         require(ready.frozen.bootstrap.matchesClaim(this, definition, limits, preparation.environment.native)) { "Prepared scoping provenance does not match" }
+        if (ready.frozen.bootstrap.helperAdmission == null) {
+            synchronized(lock) {
+                requireRuntimeOpen(phase == Phase.OPEN)
+                check(scopingPreparation === preparation && preparation.state === ready) { "Prepared scoping is no longer ready" }
+                check(nextGeneration + 1L == generation) { "Prepared scoping generation changed" }
+                check(!manager.isShutdown && !manager.isTerminated) { "Scoping manager is not available" }
+                scopingFailureBoundary.refuseMissingHelperSupport()
+            }
+        }
         val shell = io.mazewall.landlock.PreparedLandlock
             .allocateRetained(ready.frozen.bootstrap.resources.resources, preparation.environment)
         val carrier = ScopingPreparation.ClaimProgress(ready, shell, ready.frozen)
@@ -1377,6 +1390,7 @@ public class ManagedRuntime private constructor(
             var committed: OwnedDomain? = null
             var claimed = false
             var claimRecorded = false
+            var domainPreparationStarted = false
             try {
                 val bootstrap = carrier.scoping.bootstrap
                 val artifact = bootstrap.artifact
@@ -1388,6 +1402,8 @@ public class ManagedRuntime private constructor(
                     transitionScoping(shared.scopingPreparation, preparation, ScopingPreparation.Event.ResourcesClaimed)
                     claimRecorded = true
                 }
+                captureLiveHelper(preparation, carrier, bootstrap, worker)
+                val helperCapture = checkNotNull(carrier.helperCapture)
                 carrier.scoping.bootstrap.planScoping(definition)
                 synchronized(shared.lock) { checkClaimMayProceed(preparation, carrier, shared.phase == Phase.OPEN) }
                 val landlock = io.mazewall.landlock.PreparedLandlock
@@ -1404,7 +1420,9 @@ public class ManagedRuntime private constructor(
                         bootstrap.resources,
                         "mazewall-domain-${owner.id}-${carrier.generation}-",
                         carrier.scoping,
+                        liveCarrier = carrier,
                     )
+                helperCapture.prepareTransfer(carrier, domain)
                 val deadline = Deadline(owner.preparationTimeout)
                 val commit = ScopingPreparation.Event.DomainCommit(domain, true)
                 synchronized(shared.lock) {
@@ -1413,17 +1431,20 @@ public class ManagedRuntime private constructor(
                     check(current != null && current.acquisition === carrier && current.request is ScopingPreparation.PrepareRequest.Awaiting) { "Scoping claim cannot commit" }
                     check(shared.domains.values.none { it.failedRetirementPending() || it.cleanupFailure.get() != null }) { "Prior failed generation still has live execution or cleanup" }
                     shared.domains[carrier.generation] = domain
-                    var attached = false
                     try {
                         val decisionEffects = transitionScoping(shared.scopingPreparation, preparation, commit)
-                        committed = domain
-                        shared.preparations--
-                        attached = true
                         check(decisionEffects.size == 1 && decisionEffects[0] === ScopingPreparation.Effect.Notify)
                     } finally {
-                        if (!attached) shared.domains.remove(carrier.generation)
+                        val actual = preparation.state as? ScopingPreparation.State.DomainOwned
+                        if (actual != null && actual.domain === domain) {
+                            committed = domain
+                            shared.preparations--
+                        } else {
+                            shared.domains.remove(carrier.generation)
+                        }
                     }
                 }
+                domainPreparationStarted = true
                 domain.prepare(deadline, effects.afterDomainCommit)
                 return InProcessDomain(owner, domain, artifact.binding)
             } catch (failure: Throwable) {
@@ -1434,10 +1455,70 @@ public class ManagedRuntime private constructor(
                         throw CleanupFailures.merge(failure, recordFailure)
                     }
                 }
-                throw finishFailedScopingClaim(preparation, committed, failure)
+                var retainedFailure = failure
+                val committedDomain = committed
+                if (committedDomain != null && !domainPreparationStarted) {
+                    try {
+                        committedDomain.liveHelperRetirement.abortBeforePrepare()
+                    } catch (cleanupFailure: Throwable) {
+                        retainedFailure = CleanupFailures.merge(retainedFailure, cleanupFailure)
+                    }
+                }
+                throw finishFailedScopingClaim(preparation, committed, retainedFailure)
             } finally {
                 preparation.claimFinished.complete(Unit)
             }
+        }
+
+        fun refuseMissingHelperSupport(): Nothing = throw UnsupportedOperationException("Reviewed helper support is unavailable")
+
+        private fun captureLiveHelper(
+            preparation: ScopingPreparation,
+            carrier: ScopingPreparation.ClaimProgress,
+            bootstrap: io.mazewall.ffi.internal.OwnedStackScopingBootstrap,
+            worker: CanonicalPolicyArtifact.Worker,
+        ) {
+                val helperAdmission = checkNotNull(bootstrap.helperAdmission) { "Reviewed helper support is unavailable" }
+                val nativeProcess = bootstrap.sealed.process
+                val baseline = helperAdmission.baseline
+                check(nativeProcess.pid == baseline.identity.pid && nativeProcess.startTicks.value == baseline.identity.startTimeTicks.toULong()) {
+                    "Live helper process differs from checked bootstrap"
+                }
+                val parent = helperAdmission.observations.observeAncestry(
+                    nativeProcess.pid,
+                    preparation.environment.native.process
+                    .gettid(),
+                        HelperSecurityObservation.Lineage.Tier1,
+                )
+                check(parent.identity == baseline.identity) { "Live helper process incarnation changed" }
+                parent.requireLineage(baseline, HelperSecurityObservation.Lineage.Tier1)
+                synchronized(shared.lock) { checkClaimMayProceed(preparation, carrier, shared.phase == Phase.OPEN) }
+                val helperCapture = io.mazewall.enforcer.internal.execution
+                    .HelperSupportCapture(carrier, bootstrap.resources.native)
+                carrier.helperCapture = helperCapture
+                val helperBinding = io.mazewall.enforcer.internal.execution.HelperBinding(
+                    nativeProcess.pid,
+                    baseline.identity.startTimeTicks,
+                    carrier.generation,
+                    bootstrap.resources.resources.generation,
+                    java.util.HexFormat
+                        .of()
+                        .formatHex(
+                            java.security.MessageDigest
+                            .getInstance("SHA-256")
+                            .digest(bootstrap.canonicalJson.toByteArray(Charsets.UTF_8)),
+                        ),
+                )
+                carrier.helperPlan = io.mazewall.enforcer.internal.execution.PreparedHelperReadPlan.captureOwned(
+                    worker,
+                    bootstrap.resources.resources,
+                    helperBinding,
+                    helperAdmission.support.recipe.entries,
+                    io.mazewall.enforcer.internal.execution.HelperSupportLifetime.NoWriters,
+                    bootstrap.resources.native,
+                    parent.ancestry,
+                    helperCapture,
+                )
         }
 
         @Suppress("TooGenericExceptionCaught") // Preserve original claim failure while retaining cleanup failures.
@@ -2211,6 +2292,7 @@ public class ManagedRuntime private constructor(
             check(operations.mayReleaseScoping(operationsPermit, preparation))
             val state = preparation.state as ScopingPreparation.State.Retiring
             check(state.retained.inFlight)
+            state.retained.helperCapture?.authorizeCarrierCleanup(preparation)
             state.retained
         }
         val owner = checkNotNull(progress.owner)
@@ -2222,6 +2304,9 @@ public class ManagedRuntime private constructor(
             if (progress.step == ScopingPreparation.ReleaseStage.RETIRE) {
                 progress = observeScopingRetirement(progress, owner.capability.retireInstallation(owner))
             }
+            val helperResult = releaseCarrierHelper(progress)
+            progress = helperResult.first
+            fatalFailure = helperResult.second
             if (canReleaseScopingLandlock(progress)) {
                 try {
                     progress.landlock?.close()
@@ -3312,6 +3397,27 @@ private fun observeScopingRetirement(
             failure = CleanupFailures.merge(progress.failure, IllegalStateException("Native retirement refused: ${outcome.failure}", outcome.failure.cause)),
         )
     }
+
+@Suppress("TooGenericExceptionCaught") // Preserve original fatal, Unknown, cause and interruption history.
+private fun releaseCarrierHelper(initial: ScopingPreparation.Retained): Pair<ScopingPreparation.Retained, Error?> {
+    if (initial.step != ScopingPreparation.ReleaseStage.RESOURCES || initial.helperStep != ScopingPreparation.ReleaseStep.NotAttempted) return initial to null
+    return try {
+        initial.helperCapture?.close()
+        initial.copy(helperStep = ScopingPreparation.ReleaseStep.Complete) to null
+    } catch (fatal: Error) {
+        initial.copy(
+            step = ScopingPreparation.ReleaseStage.RESOURCES_UNKNOWN,
+            helperStep = ScopingPreparation.ReleaseStep.Unknown,
+            failure = CleanupFailures.merge(initial.failure, fatal),
+        ) to fatal
+    } catch (failure: Throwable) {
+        initial.copy(
+            step = ScopingPreparation.ReleaseStage.RESOURCES_UNKNOWN,
+            helperStep = ScopingPreparation.ReleaseStep.Unknown,
+            failure = CleanupFailures.merge(initial.failure, failure),
+        ) to null
+    }
+}
 
 private fun canReleaseScopingLandlock(progress: ScopingPreparation.Retained): Boolean =
     progress.step == ScopingPreparation.ReleaseStage.RESOURCES &&

@@ -14,9 +14,12 @@ import io.mazewall.enforcer.internal.supervisor.ConfinedHelperPreparation
 import io.mazewall.enforcer.internal.supervisor.ConfinedHelperSession
 import io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
 import io.mazewall.ffi.internal.HelperSecurityObservation
+import io.mazewall.ffi.internal.PreparedPath
 import io.mazewall.ffi.networking.ConfinedDeadline
 import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.platform.fd.ResourceRetirement
+import io.mazewall.platform.native.NativeEngine
+import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.HexFormat
 import java.util.concurrent.ArrayBlockingQueue
@@ -35,6 +38,108 @@ import java.util.concurrent.atomic.AtomicReference
 
 private const val HELPER_TIMEOUT_NANOS = 5_000_000_000L
 
+internal class HelperSupportCapture private constructor(
+    private val native: NativeEngine,
+    private val owner: Owner,
+) {
+    private enum class CarrierPhase { Capturing, Prepared, Cleaning }
+
+    private sealed interface Owner {
+        class Domain(
+            val domain: OwnedDomain,
+        ) : Owner
+
+        class Carrier(
+            val carrier: ScopingPreparation.ClaimProgress,
+            val actor: Thread,
+        ) : Owner {
+            var cleanupActor: Thread? = null
+            var phase = CarrierPhase.Capturing
+        }
+    }
+
+    constructor(domain: OwnedDomain, native: NativeEngine) : this(native, Owner.Domain(domain))
+    constructor(carrier: ScopingPreparation.ClaimProgress, native: NativeEngine) : this(native, Owner.Carrier(carrier, Thread.currentThread()))
+
+    private val slots = mutableListOf<PreparedPath.HelperSlot>()
+
+    private var preparedDomain: OwnedDomain? = null
+
+    fun prepareTransfer(
+        carrier: ScopingPreparation.ClaimProgress,
+        domain: OwnedDomain,
+    ) {
+        val current = owner as? Owner.Carrier
+        check(current != null && current.carrier === carrier && current.actor === Thread.currentThread()) { "Foreign helper support carrier" }
+        check(preparedDomain == null && current.phase == CarrierPhase.Capturing)
+        preparedDomain = domain
+        current.phase = CarrierPhase.Prepared
+    }
+
+    fun open(path: Path): PreparedPath {
+        check(permitsActor(cleanup = false)) { "Foreign helper support open" }
+        val slot = PreparedPath.HelperSlot(this, native, path)
+        slots.add(slot)
+        return slot.open()
+    }
+
+    fun permits(
+        slot: PreparedPath.HelperSlot,
+        source: NativeEngine,
+        cleanup: Boolean,
+    ): Boolean = slots.any { it === slot } && source === native && permitsActor(cleanup)
+
+    fun authorizeCarrierCleanup(preparation: ScopingPreparation) {
+        val current = owner as? Owner.Carrier ?: error("Helper support is not carrier owned")
+        val state = preparation.state as? ScopingPreparation.State.Retiring
+        check(state != null && state.retained.inFlight && state.retained.helperCapture === this)
+        check(current.carrier.helperCapture === this)
+        check(current.actor === Thread.currentThread() || preparation.claimFinished.isDone)
+        current.cleanupActor = Thread.currentThread()
+        current.phase = CarrierPhase.Cleaning
+    }
+
+    private fun permitsActor(cleanup: Boolean): Boolean =
+        when (val current = owner) {
+        is Owner.Domain -> current.domain.permitsHelperCapture(this, native, cleanup)
+        is Owner.Carrier ->
+            current.carrier.helperCapture === this &&
+            if (cleanup) {
+                current.phase == CarrierPhase.Cleaning &&
+                    current.cleanupActor === Thread.currentThread() ||
+                    current.phase == CarrierPhase.Prepared &&
+                    preparedDomain?.permitsHelperCapture(this, native, true) == true
+            } else {
+                current.phase == CarrierPhase.Capturing && current.actor === Thread.currentThread()
+            }
+    }
+
+    fun requireCleanupActor() {
+        check(permitsActor(cleanup = true)) { "Foreign helper support cleanup" }
+    }
+
+    fun close() {
+        requireCleanupActor()
+        var interrupted = Thread.interrupted()
+        var failure: Throwable? = null
+        try {
+            slots.asReversed().forEach { slot ->
+                val observed = slot.closeOwned()
+                if (observed != null) {
+                    if (observed.newlyDispatched && observed.cause is InterruptedException) {
+                        interrupted = true
+                        Thread.interrupted()
+                    }
+                    failure = CleanupFailures.merge(failure, observed.cause)
+                }
+            }
+            failure?.let { throw it }
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+    }
+}
+
 /** Fixed physical generation; only its trusted bootstrap thread can construct workers. */
 internal class OwnedDomain(
     val generation: Long,
@@ -44,8 +149,9 @@ internal class OwnedDomain(
     private val preparedLandlock: io.mazewall.landlock.PreparedLandlock?,
     private val preparedOperation: io.mazewall.enforcer.api.execution.PreparedOperationResources?,
     name: String,
-    private val scoping: FrozenStackScoping,
+    internal val scoping: FrozenStackScoping,
     private val confined: ConfinedHelperConfiguration? = null,
+    liveCarrier: ScopingPreparation.ClaimProgress? = null,
 ) {
     private enum class HelperRelease { Retained, Releasing, Released }
 
@@ -54,10 +160,12 @@ internal class OwnedDomain(
     private var phase = GenerationPhase.PREPARING
     private var failure: Throwable? = null
     private val bootstrap = Thread.currentThread()
-    private val helperPreparationEnded = CountDownLatch(1)
-    private var helperPlan: PreparedHelperReadPlan? = null
+    private val helperPreparationEnded = CountDownLatch(if (liveCarrier == null) 1 else 0)
+    private var helperPlan: PreparedHelperReadPlan? = liveCarrier?.helperPlan
+    private var helperCapture: HelperSupportCapture? = liveCarrier?.helperCapture
+    private var helperCleanupActor: Thread? = null
     private var helperSession: ConfinedHelperSession? = null
-    private var helperRelease = if (confined == null) HelperRelease.Released else HelperRelease.Retained
+    private var helperRelease = if (confined == null && liveCarrier == null) HelperRelease.Released else HelperRelease.Retained
     private var helperPinsClosed = false
     private var operationClosed = false
     private var landlockClosed = false
@@ -94,8 +202,6 @@ internal class OwnedDomain(
     } else {
         null
     }
-
-    internal fun ownsScoping(expected: FrozenStackScoping.Live): Boolean = scoping === expected
 
     internal val allowsDirectValidation: Boolean
         get() = synchronized(lock) { !directRetiring && (phase == GenerationPhase.PREPARING || phase == GenerationPhase.READY) }
@@ -276,6 +382,27 @@ internal class OwnedDomain(
         cleanup.finish()
     }
 
+    /** Domain-bound original support slots remain reachable through uncertain cleanup. */
+    internal fun permitsHelperCapture(
+        capture: HelperSupportCapture,
+        native: NativeEngine,
+        cleanup: Boolean,
+    ): Boolean =
+        synchronized(lock) {
+            if (helperCapture !== capture) return@synchronized false
+            if (preparedOperation?.native !== native) return@synchronized false
+            if (!cleanup) {
+                return@synchronized confined != null &&
+                    phase == GenerationPhase.PREPARING &&
+                    bootstrap === Thread.currentThread()
+            }
+            if (confined == null && scoping !is FrozenStackScoping.Live) return@synchronized false
+            helperRelease == HelperRelease.Releasing &&
+                helperCleanupActor === Thread.currentThread() &&
+                helperPreparationEnded.count == 0L &&
+                physicalWorkersStopped(executor, threads)
+        }
+
     private fun prepareHelper(deadline: Deadline) {
         try {
             val configuration = confined ?: return
@@ -295,7 +422,13 @@ internal class OwnedDomain(
                 resources.generation,
                 HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(configuration.policy.toJson().toByteArray())),
             )
-            val plan = PreparedHelperReadPlan.capture(configuration.policy, resources, binding, configuration.support, configuration.lifetime, operation.native, parent.ancestry)
+            val capture = HelperSupportCapture(this, operation.native)
+            synchronized(lock) {
+                check(phase == GenerationPhase.PREPARING && Thread.currentThread() === this.bootstrap)
+                check(confined === configuration && preparedOperation === operation && helperCapture == null)
+                helperCapture = capture
+            }
+            val plan = PreparedHelperReadPlan.captureOwned(configuration.policy, resources, binding, configuration.support, configuration.lifetime, operation.native, parent.ancestry, capture)
             synchronized(lock) {
                 helperPlan = plan
                 check(phase == GenerationPhase.PREPARING) { "Confined preparation was stopped before setup" }
@@ -342,6 +475,37 @@ internal class OwnedDomain(
         retireIfStopped()
     }
 
+    internal val liveHelperRetirement = LiveHelperRetirement()
+
+    internal inner class LiveHelperRetirement {
+        fun abortBeforePrepare() {
+            check(Thread.currentThread() === bootstrap) { "Only the originating bootstrap can retire an unstarted domain" }
+            executor.shutdownNow()
+            retirement?.releaseUnstarted()
+        }
+
+        fun close() {
+            if (!helperPinsClosed) {
+                synchronized(lock) {
+                    check(helperPreparationEnded.count == 0L && physicalWorkersStopped(executor, threads))
+                    check(helperRelease == HelperRelease.Retained)
+                    helperRelease = HelperRelease.Releasing
+                    helperCleanupActor = Thread.currentThread()
+                }
+                try {
+                    val plan = helperPlan
+                    if (plan == null) helperCapture?.close() else plan.close()
+                    helperPinsClosed = true
+                } finally {
+                    synchronized(lock) {
+                        helperCleanupActor = null
+                        helperRelease = if (helperPinsClosed) HelperRelease.Released else HelperRelease.Retained
+                    }
+                }
+            }
+        }
+    }
+
     @Suppress("TooGenericExceptionCaught") // Commit exact Unknown and history before propagating any live cleanup failure.
     private fun releaseLiveResources() {
         val live = scoping as FrozenStackScoping.Live
@@ -370,6 +534,7 @@ internal class OwnedDomain(
                 progress = observeLiveRetirement(progress, outcome)
                 if (outcome !is io.mazewall.platform.native.LiveCompletion.Complete) return
             }
+            liveHelperRetirement.close()
             if (progress.landlock == ScopingPreparation.ReleaseStep.NotAttempted) {
                 progress = progress.copy(landlock = ScopingPreparation.ReleaseStep.Unknown)
                 preparedLandlock?.close()
@@ -394,16 +559,20 @@ internal class OwnedDomain(
             when (helperRelease) {
                 HelperRelease.Released, HelperRelease.Releasing -> false
                 HelperRelease.Retained -> {
+                    check(helperPreparationEnded.count == 0L && physicalWorkersStopped(executor, threads))
                     helperRelease = HelperRelease.Releasing
+                    helperCleanupActor = Thread.currentThread()
                     true
                 }
             }
         }
         if (!claimed) return
+        var released = false
         try {
             helperSession?.retire(deadline)
             if (!helperPinsClosed) {
-                helperPlan?.close()
+                val plan = helperPlan
+                if (plan == null) helperCapture?.close() else plan.close()
                 helperPinsClosed = true
             }
             if (!operationClosed) {
@@ -414,11 +583,15 @@ internal class OwnedDomain(
                 preparedLandlock?.close()
                 landlockClosed = true
             }
-            synchronized(lock) { helperRelease = HelperRelease.Released }
+            released = true
         } catch (failure: Throwable) {
             recordCleanupFailure(cleanupFailure, failure)
-            synchronized(lock) { helperRelease = HelperRelease.Retained }
             throw failure
+        } finally {
+            synchronized(lock) {
+                helperCleanupActor = null
+                helperRelease = if (released) HelperRelease.Released else HelperRelease.Retained
+            }
         }
     }
 

@@ -35,10 +35,31 @@ private class CheckedObservations(
     val beforeNotification: () -> Unit,
 )
 
+/** Independently reviewed support and trusted-host custody premise; neither is OS proof. */
+internal class TrustedHelperSupport private constructor(
+    val recipe: io.mazewall.enforcer.internal.execution.ReviewedHelperSupportRecipe,
+) {
+    companion object {
+        fun reviewed(
+            support: List<io.mazewall.enforcer.internal.execution.ReviewedHelperSupport>,
+            lifetime: io.mazewall.enforcer.internal.execution.HelperSupportLifetime,
+        ): TrustedHelperSupport {
+            require(lifetime == io.mazewall.enforcer.internal.execution.HelperSupportLifetime.NoWriters)
+            return TrustedHelperSupport(
+                io.mazewall.enforcer.internal.execution.ReviewedHelperSupportRecipe
+                .capture(support),
+            )
+        }
+    }
+}
+
 internal class CheckedBootstrapRequest(
     internal val path: Path,
     internal val identity: LiveStackBootstrap.LiveDeploymentIdentity,
+    internal val helperSupport: TrustedHelperSupport?,
 ) {
+    constructor(path: Path, identity: LiveStackBootstrap.LiveDeploymentIdentity) : this(path, identity, null)
+
     init {
         require(identity.profile() == LiveStackBootstrap.Profile.CLOSED_V1 && identity.variant() == LiveStackBootstrap.Variant.ONLY)
         require(identity.retransformFixture().isEmpty && identity.routeSubset() == listOf(CHECKED_OPEN_ROUTE, CHECKED_OPENAT_ROUTE))
@@ -53,11 +74,42 @@ internal class CheckedBootstrapRequest(
         )
     }
 
-    fun check(snapshot: io.mazewall.platform.native.RuntimeSnapshot): CheckedBootstrapAssociation =
-        when (val result = RealNativeStackContexts.bootstrapChecked(path, identity, snapshot)) {
-            is RealNativeStackContexts.BootstrapResult.Checked -> CheckedBootstrapAssociation(this, result, snapshot)
+    fun check(snapshot: io.mazewall.platform.native.RuntimeSnapshot): CheckedBootstrapAssociation {
+        return when (val result = RealNativeStackContexts.bootstrapChecked(path, identity, snapshot)) {
             is RealNativeStackContexts.BootstrapResult.Refused -> throw CheckedBootstrapRefusal(result.failure)
+            is RealNativeStackContexts.BootstrapResult.Checked -> {
+            val baseline = helperSupport?.let {
+                val observations = HelperSecurityObservation()
+                val pid = io.mazewall.platform.lifecycle
+                    .Pid(Math.toIntExact(ProcessHandle.current().pid()))
+                val leader = observations.observeAncestry(
+                    pid,
+                    io.mazewall.platform.lifecycle
+                    .Tid(pid.value),
+                        HelperSecurityObservation.Lineage.Bootstrap,
+                )
+                observations.observeAncestry(pid, snapshot.process.gettid(), HelperSecurityObservation.Lineage.Bootstrap).also { current ->
+                    check(current.identity == leader.identity) { "Checked bootstrap process changed" }
+                    current.requireLineage(leader, HelperSecurityObservation.Lineage.Bootstrap)
+                }
+            }
+                CheckedBootstrapAssociation(this, result, snapshot, baseline)
+            }
         }
+    }
+}
+
+internal class TrustedHelperAdmission private constructor(
+    val support: TrustedHelperSupport,
+    val baseline: HelperSecurityObservation.Observation,
+    val observations: HelperSecurityObservation,
+) {
+    companion object {
+        fun fromChecked(
+            support: TrustedHelperSupport,
+            baseline: HelperSecurityObservation.Observation,
+        ): TrustedHelperAdmission = TrustedHelperAdmission(support, baseline, HelperSecurityObservation())
+    }
 }
 
 internal class CheckedBootstrapRefusal(
@@ -68,7 +120,11 @@ internal class CheckedBootstrapAssociation(
     private val request: CheckedBootstrapRequest,
     private val checked: RealNativeStackContexts.BootstrapResult.Checked,
     private val snapshot: io.mazewall.platform.native.RuntimeSnapshot,
+    internal val helperBaseline: HelperSecurityObservation.Observation?,
 ) {
+    internal val helperAdmission: TrustedHelperAdmission? = request.helperSupport?.let { support ->
+        TrustedHelperAdmission.fromChecked(support, checkNotNull(helperBaseline))
+    }
     private val adapter = checked.contextsFor(request.identity, snapshot)
 
     fun revalidate(
@@ -106,6 +162,14 @@ internal fun newCheckedRuntimeOwner(
     io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionOwner
     .createChecked(CheckedBootstrapRequest(path, identity))
 
+internal fun newCheckedRuntimeOwner(
+    path: Path,
+    identity: LiveStackBootstrap.LiveDeploymentIdentity,
+    support: TrustedHelperSupport,
+): io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionOwner =
+    io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionOwner
+        .createChecked(CheckedBootstrapRequest(path, identity, support))
+
 private const val MAX_CAPTURE_OWNERS = 512
 private const val MAX_CAPTURE_METHODS = 4096
 private const val MAX_CAPTURE_CORRIDORS = 128
@@ -128,6 +192,7 @@ private class CaptureInputs(
         ?: throw IllegalArgumentException("Live capture requires a worker policy")
     val definition = worker.policy.definition.frozenCopy()
     val canonicalJson = worker.toJson()
+    var helperAdmission: TrustedHelperAdmission? = null
     val routes: Set<io.mazewall.platform.syscall.Syscall> = identity
         .routeSubset()
         .map { route ->
@@ -150,6 +215,8 @@ internal class OwnedStackScopingBootstrap private constructor(
     internal val artifact: ReviewedOperationArtifact get() = inputs.artifact
     internal val limits: DomainLimits get() = inputs.limits
     internal val resources: PreparedOperationResources get() = inputs.resources
+    internal val helperAdmission: TrustedHelperAdmission? = inputs.helperAdmission
+    internal val canonicalJson: String get() = inputs.canonicalJson
 
     internal fun matchesClaim(
         runtime: ManagedRuntime,
@@ -245,6 +312,7 @@ internal class OwnedStackScopingBootstrap private constructor(
                 val inputs = captureInputs(request.identity, artifact, limits, resources, owners, methods, corridors, scopingPolicy)
                 require(resources.runtime == runtime.runtime) { "Resource runtime differs from owner" }
                 require(resources.native.engineIdentity === preparation.environment.native.engineIdentity) { "Resources belong to a different native runtime" }
+                inputs.helperAdmission = checkNotNull(runtime.checkedOperations).helperAdmission()
                 val reserved = when (
                     val result = checkNotNull(
                         runtime.checkedOperations,

@@ -53,6 +53,25 @@ class MazewallProductionLocations : LocationProvider {
     importOptions = [ImportOption.DoNotIncludeTests::class, DoNotIncludeCompiledTestOutputs::class],
 )
 class ArchitectureTest {
+    private class UnrelatedCarrierCatch {
+        fun unrelated() {
+            try {
+                error("negative control")
+            } catch (failure: Throwable) {
+                check(failure.message == "negative control")
+            }
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `carrier helper exception does not exempt unrelated generic catches`() {
+        val classes = com.tngtech.archunit.core.importer
+            .ClassFileImporter()
+            .importClasses(UnrelatedCarrierCatch::class.java)
+        org.junit.jupiter.api
+            .assertThrows<AssertionError> { noGenericExceptionCatchingInEnforcer(classes) }
+    }
+
     @org.junit.jupiter.api.Test
     fun `prepared Landlock ownership choices are closed`() {
         val ownership = Class.forName("io.mazewall.landlock.PreparedLandlock\$ResourceOwnership")
@@ -438,6 +457,23 @@ class ArchitectureTest {
                     item: com.tngtech.archunit.core.domain.JavaMethod,
                     events: com.tngtech.archunit.lang.ConditionEvents,
                 ) {
+                    // This exact carrier rollback boundary retains Unknown and original fatal failures.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.ManagedRuntimeKt" &&
+                        item.name == "releaseCarrierHelper" &&
+                        item.rawParameterTypes.map { it.name } == listOf("io.mazewall.enforcer.internal.execution.ScopingPreparation\$Retained") &&
+                        item.rawReturnType.name == "kotlin.Pair"
+                    ) {
+                        return
+                    }
+                    // This exact close boundary records the original uncertain typed owner and
+                    // Throwable before its caller reports the failure, including fatal JVM errors.
+                    if (item.owner.name == "io.mazewall.ffi.internal.PreparedPath\$HelperSlot" &&
+                        item.name == "closeOwned" &&
+                        item.rawParameterTypes.isEmpty() &&
+                        item.rawReturnType.name == "io.mazewall.ffi.internal.PreparedPath\$HelperSlot\$CloseFailure"
+                    ) {
+                        return
+                    }
                     // This exact construction boundary attaches the retained staging owner before
                     // quiescence and rethrows the original Throwable, including allocation failure.
                     if (item.owner.name == "io.mazewall.ffi.internal.OwnedStackScopingBootstrap\$Companion" &&

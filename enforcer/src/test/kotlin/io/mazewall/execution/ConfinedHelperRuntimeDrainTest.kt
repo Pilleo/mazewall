@@ -2,6 +2,7 @@ package io.mazewall.enforcer.api.execution
 
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.internal.execution.HelperSupportLifetime
+import io.mazewall.enforcer.internal.execution.PreparedHelperReadPlan
 import io.mazewall.enforcer.internal.execution.ReviewedHelperSupport
 import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
 import io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol
@@ -14,9 +15,13 @@ import io.mazewall.ffi.internal.RealNativeEngine
 import io.mazewall.ffi.internal.RecordingCapture
 import io.mazewall.ffi.internal.assertActualCaptureFreezesInputs
 import io.mazewall.ffi.internal.captureSynthetic
+import io.mazewall.ffi.internal.captureSyntheticWithSupport
 import io.mazewall.ffi.internal.captureWithMissingAgent
+import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.readString
 import io.mazewall.ffi.networking.ConfinedDeadline
 import io.mazewall.ffi.networking.ConfinedHelperControlTest
+import io.mazewall.platform.lifecycle.OpenFlags
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.LiveFailureReason
 import io.mazewall.platform.native.LiveFailureStatus
@@ -24,6 +29,7 @@ import io.mazewall.platform.native.LiveSetup
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.NativeProcess
 import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.process.JvmChildProcess
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
 import io.mazewall.platform.socket.NativeCloseFailure
 import io.mazewall.platform.syscall.Arch
@@ -42,11 +48,15 @@ import java.time.Duration
 import java.util.HexFormat
 import java.util.concurrent.Callable
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import java.util.jar.JarEntry
 import java.util.jar.JarOutputStream
 import javax.tools.ToolProvider
@@ -87,6 +97,19 @@ class ConfinedHelperRuntimeDrainTest {
         .AtomicReference<Error>()
     private val rulesetCloseCalls = AtomicInteger()
     private var skipFixtureResourceClose = false
+    private val supportOpenPath = AtomicReference<String>()
+    private val otherSupportOpenPath = AtomicReference<String>()
+    private val otherSupportFd = AtomicLong(-1)
+    private val otherSupportToken = AtomicReference<Any>()
+    private val otherSupportCloseCalls = AtomicInteger()
+    private val supportCloseOrder = CopyOnWriteArrayList<String>()
+    private val otherSupportCloseSucceeded = AtomicBoolean()
+    private var beforeSupportOpen: (String) -> Unit = {}
+    private val supportFd = AtomicLong(-1)
+    private val supportCloseCalls = AtomicInteger()
+    private val supportToken = AtomicReference<Any>()
+    private val injectSupportCloseError = AtomicBoolean()
+    private val supportCloseThrow = AtomicReference<Throwable>()
 
     @BeforeEach
     fun nativeBoundary() {
@@ -124,13 +147,44 @@ class ConfinedHelperRuntimeDrainTest {
         LinuxNative.setEngine(object : NativeEngine by real {
             override val raw = raw
             override val fileSystem = object : io.mazewall.platform.native.NativeFileSystem by real.fileSystem {
+                override fun open(
+                    path: ManagedSegment,
+                    flags: OpenFlags,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    val requested = path.readString(0)
+                    beforeSupportOpen(requested)
+                    val result = real.fileSystem.open(path, flags)
+                    if (requested == supportOpenPath.get() && result is LinuxNative.SyscallResult.Success) {
+                        check(supportFd.compareAndSet(-1, result.value))
+                    }
+                    if (requested == otherSupportOpenPath.get() && result is LinuxNative.SyscallResult.Success) {
+                        check(otherSupportFd.compareAndSet(-1, result.value))
+                    }
+                    return result
+                }
+
                 override fun close(
                     fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
                 ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     if (countOwnedCloses.get()) ownedCloseCalls.incrementAndGet()
+                    if (fd.value.toLong() == supportFd.get() && supportToken.get() == null) supportToken.compareAndSet(null, fd)
+                    val supportTarget = supportToken.get() === fd
+                    if (supportTarget) {
+                        supportCloseCalls.incrementAndGet()
+                        supportCloseOrder.add("target")
+                    }
+                    if (fd.value.toLong() == otherSupportFd.get() && otherSupportToken.get() == null) otherSupportToken.compareAndSet(null, fd)
+                    if (otherSupportToken.get() === fd) {
+                        otherSupportCloseCalls.incrementAndGet()
+                        supportCloseOrder.add("other")
+                    }
                     val target = targetRuleset.get() === fd
                     if (target) rulesetCloseCalls.incrementAndGet()
                     val actual = real.fileSystem.close(fd)
+                    if (otherSupportToken.get() === fd) {
+                        check(actual is LinuxNative.SyscallResult.Success)
+                        otherSupportCloseSucceeded.set(true)
+                    }
                     if (target) {
                         check(actual is LinuxNative.SyscallResult.Success) { "Target ruleset close did not succeed before injection" }
                         rulesetCloseFailure.getAndSet(null)?.let { throw it }
@@ -140,7 +194,13 @@ class ConfinedHelperRuntimeDrainTest {
                         fatalOwnedCloseObserved.set(true)
                         throw fatal
                     }
-                    if (injectOwnedCloseError.compareAndSet(true, false)) {
+                    if (supportTarget) {
+                        supportCloseThrow.getAndSet(null)?.let {
+                            check(actual is LinuxNative.SyscallResult.Success)
+                            throw it
+                        }
+                    }
+                    if (injectOwnedCloseError.compareAndSet(true, false) || supportTarget && injectSupportCloseError.compareAndSet(true, false)) {
                         check(actual is LinuxNative.SyscallResult.Success)
                         return LinuxNative.SyscallResult.Error(5, -1L)
                     }
@@ -295,7 +355,16 @@ class ConfinedHelperRuntimeDrainTest {
         }
         val managerThread = manager.submit(Callable { Thread.currentThread() }).get(2, TimeUnit.SECONDS)
 
-        fun prepare() = runtime.prepareConfinedRead(reviewed, DomainLimits(1, 1), resources, endpoint.context, support, HelperSupportLifetime.NoWriters, observations(parent = true))
+        fun prepare(reviewedSupport: List<ReviewedHelperSupport> = support) =
+            runtime.prepareConfinedRead(
+                reviewed,
+                DomainLimits(1, 1),
+                resources,
+                endpoint.context,
+                reviewedSupport,
+                HelperSupportLifetime.NoWriters,
+                observations(parent = true),
+            )
 
         fun startPreparation() {
             preparing = Thread.ofPlatform().start {
@@ -324,6 +393,237 @@ class ConfinedHelperRuntimeDrainTest {
             return prepared.get(3, TimeUnit.SECONDS).also { assertEquals(2, installs.get()) }
         }
     }
+
+    companion object {
+        @JvmStatic
+        fun main(args: Array<String>) {
+            val fixture = ConfinedHelperRuntimeDrainTest()
+            fixture.directory = Path.of(args[0])
+            try {
+                fixture.nativeBoundary()
+                fixture.failedSupportCloseProbe(args[1])
+                kotlin.system.exitProcess(0)
+            } catch (failure: Throwable) {
+                failure.printStackTrace()
+                kotlin.system.exitProcess(1)
+            }
+        }
+    }
+
+    @Test
+    fun `failed support pin close remains counted and retains original resources`() = runSupportCloseProbe("error")
+
+    @Test
+    fun `thrown support pin close remains counted and is never repeated`() = runSupportCloseProbe("throw")
+
+    @Test
+    fun `fatal support close retains original error and never repeats`() = runSupportCloseProbe("fatal")
+
+    @Test
+    fun `interrupted support close is not redispatched on later manager sweep`() = runSupportCloseProbe("interrupt")
+
+    @Test
+    fun `postcapture support close failure remains counted and is never repeated`() = runSupportCloseProbe("postcapture")
+
+    @Test
+    fun `independent support owner closes once when another close becomes unknown`() = runSupportCloseProbe("multiple")
+
+    @Test
+    fun `live carrier retains unknown pin and closes independent pin once`() = runSupportCloseProbe("live_multiple")
+
+    private fun runSupportCloseProbe(mode: String) {
+        val agent = System.getProperty("mazewall.test.childCoverage.agent")
+        val coverageDirectory = System.getProperty("mazewall.test.childCoverage.directory")
+        check((agent == null) == (coverageDirectory == null))
+        val coverageArguments = if (agent == null) {
+            emptyList()
+        } else {
+            val root = Path.of(checkNotNull(coverageDirectory))
+            check(root.isAbsolute && Files.isDirectory(root) && !Files.isSymbolicLink(root))
+            check(root.toRealPath() == root && root == Path.of(System.getProperty("user.dir")).toRealPath().resolve("build/jacoco/unit-children"))
+            val agentPath = Path.of(agent)
+            check(agentPath == root.resolve("jacocoagent.jar") && Files.isRegularFile(agentPath, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            val output = root.resolve("ownership-${java.util.UUID.randomUUID()}.exec")
+            check(!Files.exists(output, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            listOf("-javaagent:$agentPath=destfile=$output,append=false,includes=io.mazewall.*")
+        }
+        val command = listOf(Path.of(System.getProperty("java.home"), "bin", "java").toString()) +
+            coverageArguments +
+            listOf(
+            "--enable-native-access=ALL-UNNAMED",
+            "-cp",
+            System.getProperty("java.class.path"),
+            ConfinedHelperRuntimeDrainTest::class.java.name,
+            directory.toString(),
+            mode,
+        )
+        val process = ProcessBuilder(command)
+            .redirectErrorStream(true)
+            .also { JvmChildProcess.stripInheritedJvmOptions(it.environment()) }
+            .start()
+        val output = CompletableFuture.supplyAsync {
+            process.inputStream.use { input ->
+                val retained = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(4096)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    retained.write(buffer, 0, minOf(count, (65536 - retained.size()).coerceAtLeast(0)))
+                }
+                retained.toString(Charsets.UTF_8)
+            }
+        }
+        try {
+            assertTrue(process.waitFor(45, TimeUnit.SECONDS), "support ownership child did not finish")
+            assertEquals(0, process.exitValue(), output.get(5, TimeUnit.SECONDS))
+        } finally {
+            if (process.isAlive) process.destroyForcibly()
+            assertTrue(process.waitFor(5, TimeUnit.SECONDS), "support ownership child was not reaped")
+        }
+    }
+
+    private fun failedSupportCloseProbe(mode: String) =
+        withRuntime { f ->
+        skipFixtureResourceClose = true
+        val firstSupport = f.support
+            .single()
+            .path
+            .toRealPath()
+        val secondSupport = directory.resolve("operation.jar").toRealPath()
+        if (mode == "multiple" || mode == "live_multiple") {
+            otherSupportOpenPath.set(firstSupport.toString())
+            supportOpenPath.set(secondSupport.toString())
+        } else {
+            supportOpenPath.set(firstSupport.toString())
+        }
+        val thrown = when (mode) {
+            "error", "postcapture", "multiple", "live_multiple" -> null
+            "throw" -> IllegalStateException("controlled support close throw")
+            "fatal" -> LinkageError("controlled support close fatal")
+            "interrupt" -> InterruptedException("controlled support close interrupt")
+            else -> error("Unknown support close probe")
+        }
+        val domain = if (mode == "postcapture" || mode == "interrupt") {
+            f.startPreparation()
+            f.completeSetup().resource
+        } else {
+            null
+        }
+        if (thrown == null) injectSupportCloseError.set(true) else supportCloseThrow.set(thrown)
+        if (domain == null) {
+            val incorrect = if (mode == "multiple" || mode == "live_multiple") {
+                f.support + ReviewedHelperSupport(secondSupport, "0".repeat(64))
+            } else {
+                f.support.map { it.copy(sha256 = "0".repeat(64)) }
+            }
+            val failure = if (mode == "live_multiple") {
+                val recording = RecordingCapture(completeCapture = true)
+                val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(captureSyntheticWithSupport(f.runtime, f.reviewed, f.resources, recording, helperSupport = incorrect) {})
+                assertFails {
+                    f.runtime.prepare((f.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy, DomainLimits(1, 1), ready.value)
+                }
+            } else {
+                assertFails { f.prepare(incorrect) }
+            }
+            assertTrue(failure.message.orEmpty().contains("reviewed bytes"), failure.toString())
+        }
+        val first = assertIs<DrainReport.Incomplete>(f.runtime.drain(timeout))
+        assertFalse(injectSupportCloseError.get(), "target support close was not injected")
+        assertEquals(null, supportCloseThrow.get(), "target support throw was not injected")
+        assertEquals(1, supportCloseCalls.get())
+        if (mode == "multiple" || mode == "live_multiple") {
+            assertEquals(1, otherSupportCloseCalls.get())
+            assertTrue(otherSupportCloseSucceeded.get())
+            assertEquals(listOf("target", "other"), supportCloseOrder.toList())
+        }
+        val cleanup = assertNotNull(first.cleanupFailure)
+        if (thrown is Error) assertSame(thrown, cleanup)
+        assertTrue(cleanup.toString().contains("close") || cleanup.suppressed.any { it.toString().contains("close") }, cleanup.toString())
+        assertTrue(f.managerThread.isAlive, "unknown support close must keep its manager counted")
+        f.resources.validate()
+        if (mode == "interrupt") {
+            val actualDomain = checkNotNull(domain)
+            assertTrue(actualDomain.initialConfinedRetirementEnded())
+            val observation = CompletableFuture<Pair<Throwable?, Boolean>>()
+            val retry = Thread.ofPlatform().start {
+                val problem = runCatching {
+                    actualDomain.retryConfinedRetirement(ConfinedDeadline.mint(f.relay.native) { 5_000_000_000 })
+                }.exceptionOrNull()
+                observation.complete(problem to Thread.currentThread().isInterrupted)
+            }
+            retry.join(6000)
+            assertFalse(retry.isAlive)
+            val observed = observation.get(1, TimeUnit.SECONDS)
+            assertSame(thrown, observed.first)
+            assertFalse(observed.second, "historical interruption must not interrupt a later cleanup actor")
+        }
+        assertIs<DrainReport.Incomplete>(f.runtime.drain(timeout))
+        assertEquals(1, supportCloseCalls.get())
+        if (mode == "multiple" || mode == "live_multiple") {
+            assertEquals(1, otherSupportCloseCalls.get())
+            assertTrue(otherSupportCloseSucceeded.get())
+            assertEquals(listOf("target", "other"), supportCloseOrder.toList())
+        }
+        f.resources.validate()
+        }
+
+    @Test
+    fun `foreign plan close leaves domain helper usable`() =
+        withRuntime { f ->
+        f.startPreparation()
+        val domain = f.completeSetup()
+        val field = domain.resource.javaClass
+            .getDeclaredField("helperPlan")
+            .apply { isAccessible = true }
+        val plan = field.get(domain.resource) as PreparedHelperReadPlan
+        assertFailsWith<IllegalStateException> { plan.close() }
+        plan.validate()
+        val value = f.runtime
+            .submit(domain, Callable { 42 })
+            .result()
+            .toCompletableFuture()
+            .get(2, TimeUnit.SECONDS)
+        assertEquals(42, value)
+        }
+
+    @Test
+    fun `drain waits for in flight second support open before closing first owner`() =
+        withRuntime { f ->
+        val firstPath = f.support
+            .single()
+            .path
+            .toRealPath()
+        val secondPath = directory.resolve("operation.jar").toRealPath()
+        val secondDigest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(secondPath)))
+        val arrived = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val result = CompletableFuture<Throwable?>()
+        supportOpenPath.set(firstPath.toString())
+        beforeSupportOpen = { path ->
+            if (path == secondPath.toString()) {
+                arrived.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+        }
+        val caller = Thread.ofPlatform().start {
+            result.complete(runCatching { f.prepare(f.support + ReviewedHelperSupport(secondPath, secondDigest)) }.exceptionOrNull())
+        }
+        try {
+            assertTrue(arrived.await(5, TimeUnit.SECONDS))
+            assertTrue(supportFd.get() >= 0)
+            assertIs<DrainReport.Incomplete>(f.runtime.drain(Duration.ofMillis(100)))
+            assertEquals(0, supportCloseCalls.get())
+        } finally {
+            release.countDown()
+            caller.join(6000)
+            beforeSupportOpen = {}
+        }
+        assertFalse(caller.isAlive)
+        assertNotNull(result.get(1, TimeUnit.SECONDS))
+        f.runtime.drain(timeout)
+        assertEquals(1, supportCloseCalls.get())
+        assertEquals(1, installs.get())
+        }
 
     @Test
     fun `drainWinsBeforeAdmissionRejectsWithoutEffects`() =
@@ -980,6 +1280,156 @@ class ConfinedHelperRuntimeDrainTest {
     }
 
     @Test
+    fun `missing helper authority leaves the actual live association ready`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(captureSyntheticWithSupport(fixture.runtime, fixture.reviewed, fixture.resources, recording, omitHelperAuthority = true) {})
+            val association = runtimeState(fixture.runtime).javaClass.getDeclaredField("scopingPreparation").let {
+                it.isAccessible = true
+                it.get(runtimeState(fixture.runtime)) as io.mazewall.enforcer.internal.execution.ScopingPreparation
+            }
+            val original = assertIs<io.mazewall.enforcer.internal.execution.ScopingPreparation.State.Ready>(association.state)
+            val generation = runtimeState(fixture.runtime).javaClass.getDeclaredField("nextGeneration").apply { isAccessible = true }
+            val before = generation.getLong(runtimeState(fixture.runtime))
+            val supportOpens = AtomicInteger()
+            val supportPath = fixture.support
+                .single()
+                .path
+                .toString()
+            beforeSupportOpen = { path -> if (path == supportPath) supportOpens.incrementAndGet() }
+            try {
+                repeat(2) {
+                    assertFailsWith<UnsupportedOperationException> {
+                        fixture.runtime.prepare((fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy, DomainLimits(1, 1), ready.value)
+                    }
+                    assertSame(original, association.state, "missing authority must not claim or transfer Ready")
+                    assertEquals(before, generation.getLong(runtimeState(fixture.runtime)))
+                    fixture.resources.validate()
+                    assertEquals(0, recording.retireCalls.get())
+                    assertEquals(0, supportOpens.get())
+                    assertEquals(0, supportCloseCalls.get())
+                }
+            } finally {
+                beforeSupportOpen = {}
+                ready.value.close()
+            }
+        }
+
+    @Test
+    fun `live carrier retains in flight support until drain can retire both pins`() =
+        withRuntime { fixture ->
+            val firstPath = fixture.support
+                .single()
+                .path
+                .toRealPath()
+            val secondPath = directory.resolve("operation.jar").toRealPath()
+            val secondDigest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(secondPath)))
+            val recording = RecordingCapture(completeCapture = true)
+            val support = fixture.support + ReviewedHelperSupport(secondPath, secondDigest)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(captureSyntheticWithSupport(fixture.runtime, fixture.reviewed, fixture.resources, recording, helperSupport = support) {})
+            val arrived = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val result = CompletableFuture<Throwable?>()
+            supportOpenPath.set(firstPath.toString())
+            otherSupportOpenPath.set(secondPath.toString())
+            beforeSupportOpen = { path ->
+                if (path == secondPath.toString()) {
+                    arrived.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+            }
+            val caller = Thread.ofPlatform().start {
+                result.complete(
+                    runCatching {
+                    fixture.runtime.prepare((fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy, DomainLimits(1, 1), ready.value)
+                }.exceptionOrNull(),
+                )
+            }
+            try {
+                assertTrue(arrived.await(5, TimeUnit.SECONDS))
+                assertTrue(supportFd.get() >= 0)
+                assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                assertEquals(0, supportCloseCalls.get())
+                assertEquals(0, otherSupportCloseCalls.get())
+                fixture.resources.validate()
+            } finally {
+                release.countDown()
+                caller.join(6000)
+                beforeSupportOpen = {}
+            }
+            assertFalse(caller.isAlive)
+            assertNotNull(result.get(1, TimeUnit.SECONDS))
+            val drained = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+            assertNotNull(drained.cleanupFailure)
+            assertFalse(fixture.managerThread.isAlive)
+            assertFails { fixture.resources.validate() }
+            assertEquals(1, supportCloseCalls.get())
+            assertEquals(1, otherSupportCloseCalls.get())
+            assertTrue(otherSupportCloseSucceeded.get())
+            assertEquals(listOf("other", "target"), supportCloseOrder.toList())
+        }
+
+    @Test
+    fun `transferred live carrier refuses another support open before native dispatch`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(captureSynthetic(fixture.runtime, fixture.reviewed, fixture.resources, recording) {})
+            val association = runtimeState(fixture.runtime).javaClass.getDeclaredField("scopingPreparation").let {
+                it.isAccessible = true
+                it.get(runtimeState(fixture.runtime)) as io.mazewall.enforcer.internal.execution.ScopingPreparation
+            }
+            val supportPath = fixture.support
+                .single()
+                .path
+                .toRealPath()
+            supportOpenPath.set(supportPath.toString())
+            val extraPath = directory.resolve("operation.jar").toRealPath()
+            val extraOpens = AtomicInteger()
+            beforeSupportOpen = { path -> if (path == extraPath.toString()) extraOpens.incrementAndGet() }
+            try {
+                val failure = assertFailsWith<java.lang.reflect.InvocationTargetException> {
+                    scopingMethod().invoke(
+                        fixture.runtime,
+                        (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                        DomainLimits(1, 1),
+                        ready.value,
+                        scopingEffects(afterDomainCommit = {
+                            val domain = assertIs<io.mazewall.enforcer.internal.execution.ScopingPreparation.State.DomainOwned>(association.state).domain
+                            val capture = domain.javaClass.getDeclaredField("helperCapture").let {
+                                it.isAccessible = true
+                                it.get(domain) as io.mazewall.enforcer.internal.execution.HelperSupportCapture
+                            }
+                            val ownerField = capture.javaClass
+                                .getDeclaredField("owner")
+                                .apply { isAccessible = true }
+                            val owner = ownerField.get(capture)
+                            val carrier = owner.javaClass.getDeclaredField("carrier").let {
+                                it.isAccessible = true
+                                it.get(owner) as io.mazewall.enforcer.internal.execution.ScopingPreparation.ClaimProgress
+                            }
+                            assertFailsWith<IllegalStateException> { capture.prepareTransfer(carrier, domain) }
+                            val foreignResult = CompletableFuture<Throwable?>()
+                            val foreign = Thread.ofPlatform().start {
+                                foreignResult.complete(runCatching { capture.prepareTransfer(carrier, domain) }.exceptionOrNull())
+                            }
+                            foreign.join(6000)
+                            assertFalse(foreign.isAlive)
+                            assertIs<IllegalStateException>(foreignResult.get(1, TimeUnit.SECONDS))
+                            assertSame(owner, ownerField.get(capture))
+                            assertEquals(0, supportCloseCalls.get())
+                            assertFailsWith<IllegalStateException> { capture.open(extraPath) }
+                        }),
+                    )
+                }
+                assertIs<UnsupportedOperationException>(failure.targetException)
+                assertEquals(0, extraOpens.get())
+            } finally {
+                beforeSupportOpen = {}
+                ready.value.close()
+            }
+        }
+
+    @Test
     fun `matching live claim transfers before unsupported start and preserves ownership`() =
         withRuntime { fixture ->
             val recording = RecordingCapture(completeCapture = true)
@@ -1009,6 +1459,21 @@ class ConfinedHelperRuntimeDrainTest {
                     it.get(domain)
                 }
                 assertSame(original.frozen, captured)
+                val helperPlan = domain.javaClass.getDeclaredField("helperPlan").let {
+                    it.isAccessible = true
+                    it.get(domain) as PreparedHelperReadPlan
+                }
+                val helperCapture = domain.javaClass.getDeclaredField("helperCapture").let {
+                    it.isAccessible = true
+                    it.get(domain)
+                }
+                val planOwner = helperPlan.javaClass.getDeclaredField("supportOwner").let {
+                    it.isAccessible = true
+                    it.get(helperPlan)
+                }
+                assertSame(helperCapture, planOwner, "the genuine captured plan must retain the transferred owner")
+                assertEquals(fixture.resources.resources.generation, helperPlan.binding.resourceGeneration)
+                assertEquals(ProcessHandle.current().pid().toInt(), helperPlan.binding.ownerPid.value)
                 assertEquals(1, installs.get(), "no worker restriction may run")
             } finally {
                 ready.value.close()

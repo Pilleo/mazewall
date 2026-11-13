@@ -9,6 +9,7 @@ import io.mazewall.enforcer.internal.execution.HelperSupportLifetime
 import io.mazewall.enforcer.internal.execution.PreparedHelperReadPlan
 import io.mazewall.enforcer.internal.execution.PreparedResourceSet
 import io.mazewall.enforcer.internal.execution.ReviewedHelperSupport
+import io.mazewall.enforcer.internal.execution.ReviewedHelperSupportRecipe
 import io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol.ControlTag
 import io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol.Frame
 import io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol.ResultTag
@@ -28,6 +29,7 @@ import io.mazewall.platform.native.NativeFileSystem
 import io.mazewall.platform.native.RawSyscallOperations
 import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.params.ParameterizedTest
@@ -42,6 +44,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertSame
@@ -55,12 +58,21 @@ class PreparedHelperReadPlanTest {
         val support = Files.writeString(directory.resolve("runtime.jar"), "reviewed-runtime")
         val closed = mutableListOf<Int>()
         var duplicates = 0
+        var opens = 0
         var failDuplicate = Int.MAX_VALUE
         var duplicateFailure: Error? = null
         var duplicateErrno = 13
         private val real = LinuxNative.snapshot()
         val native = object : NativeEngine by real {
             override val fileSystem = object : NativeFileSystem by real.fileSystem {
+                override fun open(
+                    path: ManagedSegment,
+                    flags: OpenFlags,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    opens++
+                    return real.fileSystem.open(path, flags)
+                }
+
                 override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
                     closed += fd.value
                     return real.fileSystem.close(fd)
@@ -101,6 +113,121 @@ class PreparedHelperReadPlanTest {
 
         override fun close() = resources.close()
     }
+
+    @Test
+    fun `reviewed recipe copies membership and preserves lexical aliases`() {
+        val input = mutableListOf(ReviewedHelperSupport(Path.of("runtime.jar"), "a".repeat(64)))
+        val recipe = ReviewedHelperSupportRecipe.capture(input)
+        input.clear()
+        assertEquals(listOf(ReviewedHelperSupport(Path.of("runtime.jar"), "a".repeat(64))), recipe.entries)
+        assertFailsWith<UnsupportedOperationException> { (recipe.entries as MutableList<ReviewedHelperSupport>).clear() }
+        assertEquals(2, ReviewedHelperSupportRecipe.capture(listOf(recipe.entries.single(), recipe.entries.single().copy(path = Path.of(".", "runtime.jar")))).entries.size)
+    }
+
+    @Test
+    fun `reviewed recipe rejects empty and oversized membership`() {
+        assertFailsWith<IllegalArgumentException> { ReviewedHelperSupportRecipe.capture(emptyList()) }
+        val many = (0 until 65).map { ReviewedHelperSupport(Path.of("runtime$it.jar"), "a".repeat(64)) }
+        assertEquals(64, ReviewedHelperSupportRecipe.capture(many.take(64)).entries.size)
+        assertFailsWith<IllegalArgumentException> { ReviewedHelperSupportRecipe.capture(many) }
+    }
+
+    @Test
+    fun `reviewed recipe rejects malformed digest and lexical duplicate`() {
+        val entry = ReviewedHelperSupport(Path.of("a"), "a".repeat(64))
+        assertFailsWith<IllegalArgumentException> { ReviewedHelperSupportRecipe.capture(listOf(entry.copy(sha256 = "A".repeat(64)))) }
+        assertFailsWith<IllegalArgumentException> { ReviewedHelperSupportRecipe.capture(listOf(entry.copy(sha256 = "abc"))) }
+        assertFailsWith<IllegalArgumentException> { ReviewedHelperSupportRecipe.capture(listOf(entry, entry)) }
+    }
+
+    @Test
+    fun `normalized duplicate takes precedence over malformed digest`() =
+        Fixture().use { f ->
+        val alias = f.support.parent
+            .resolve(".")
+            .resolve(f.support.fileName)
+        val invalid = listOf(f.reviewed.single(), ReviewedHelperSupport(alias, "bad"))
+        val failure = assertFails { f.capture(support = invalid) }
+        assertTrue(failure.message.orEmpty().contains("distinct exact support files"))
+        val earlier = assertFails { f.capture(support = invalid, lifetime = HelperSupportLifetime.Uncontrolled) }
+        assertTrue(earlier.message.orEmpty().contains("no-writer"))
+        val badBinding = assertFails { f.capture(binding = f.binding.copy(resourceGeneration = "0".repeat(64)), support = invalid) }
+        assertTrue(badBinding.message.orEmpty().contains("resource generation mismatch"))
+        val before = f.opens
+        val malformed = assertFails { f.capture(support = listOf(f.reviewed.single().copy(sha256 = "bad"))) }
+        assertTrue(malformed.message.orEmpty().contains("reviewed SHA-256"))
+        assertEquals(before, f.opens)
+        }
+
+    @Test
+    fun `same support inode via hard link rolls back acquired pins`() =
+        Fixture().use { f ->
+        val alias = Files.createLink(directory.resolve("alias.jar"), f.support)
+        val policy = CanonicalPolicyArtifact.worker(
+            RuntimeProfile.HOTSPOT_JIT,
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .allowFsRead(f.application)
+                .allowFsRead(f.support)
+                .allowFsRead(alias)
+                .build(),
+        )
+        PreparedResourceSet.capture(policy.definition, f.native).use { resources ->
+            val binding = f.binding.copy(resourceGeneration = resources.generation, policyDigest = sha(policy.toJson().toByteArray()))
+            val before = f.closed.size
+            val failure = assertFails {
+                PreparedHelperReadPlan.capture(
+                    policy,
+                    resources,
+                    binding,
+                    f.reviewed + f.reviewed.single().copy(path = alias),
+                    HelperSupportLifetime.NoWriters,
+                    f.native,
+                    f.observation.ancestry,
+                )
+            }
+            assertTrue(failure.message.orEmpty().contains("Duplicate helper support object"))
+            assertEquals(before + 2, f.closed.size)
+            resources.validate()
+        }
+        }
+
+    @Test
+    fun `missing support and conflicting writable grant refuse`() =
+        Fixture().use { f ->
+        val missing = f.reviewed
+            .single()
+            .copy(path = directory.resolve("missing.jar"))
+        assertFails { f.capture(support = listOf(missing)) }
+        val policy = CanonicalPolicyArtifact.worker(
+            RuntimeProfile.HOTSPOT_JIT,
+            WorkerPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .allowFsRead(f.application)
+                .allowFsRead(f.support)
+                .allowFsWrite(f.support)
+                .build(),
+        )
+        PreparedResourceSet.capture(policy.definition, f.native).use { resources ->
+            val binding = f.binding.copy(resourceGeneration = resources.generation, policyDigest = sha(policy.toJson().toByteArray()))
+            val failure = assertFails { PreparedHelperReadPlan.capture(policy, resources, binding, f.reviewed, HelperSupportLifetime.NoWriters, f.native, f.observation.ancestry) }
+            assertTrue(failure.message.orEmpty().contains("Writable source grant"))
+            resources.validate()
+        }
+        }
+
+    @Test
+    fun `writable unix mode alone does not contradict no writers premise`() =
+        Fixture().use { f ->
+        val store = Files.getFileStore(f.support)
+        assumeTrue(store.supportsFileAttributeView("posix"))
+        Files.setPosixFilePermissions(
+            f.support,
+            java.nio.file.attribute.PosixFilePermissions
+                .fromString("rw-rw-r--"),
+        )
+        f.capture().use { it.validate() }
+        }
 
     @Test
     fun `support originals and transfer duplicates are separate from borrowed application roots`() =

@@ -1088,6 +1088,22 @@ GC/JIT/reaper/housekeeping threads remain outside operation-thread Landlock; exi
 FDs/mappings are not revoked. This is a controlled helper boundary, not whole-JVM ACE
 containment. The process-wide Tier 1 baseline remains required for downstream use.
 
+#### B4-local reviewed-support recipe
+
+The internal ReviewedHelperSupportRecipe is an immutable structural snapshot used by existing B4 capture. It copies reviewed path/digest membership and checks 1–64 entries, SHA-256 syntax and lexical duplicates without filesystem access. Capture preserves its existing normalized-path validation and refusal order before opening support pins. File identity, content, authorization and rollback remain capture responsibilities. The recipe grants no authority and does not establish NoWriters custody, post-claim Live provenance, helper readiness or Live activation.
+
+See the [conditional B5 helper recipe evidence](../../evidence/tier-e-b5-helper-recipe-20261112.md) for the bounded full-build result and its limits.
+
+#### B4 domain-owned support capture (issue 338 bounded increment)
+
+The current B4 domain route preattaches its actual typed support slots before opening support files. The domain gate counts any acquisition authorized before drain until preparation quiesces. Before changing ownership, cleanup validates the original domain, captured native engine and selected actor. Each native close is dispatched once; an `Unknown` result retains the exact failure and is not redispatched, while other independent undispatched pins may still be closed. Helper/session and support settlement precede release of original resources. The existing bare component capture path remains unchanged. No trusted producer or continuous NoWriters guarantee is added by this implementation.
+
+See the [bounded retained-helper-capture evidence](../../evidence/tier-e-retained-helper-capture-20261112.md). This increment does not resolve issue 338 overall or authorize Live or public/native activation.
+
+#### Owned-helper pre-SETUP observation (controlled sample)
+
+The test-only observation reads bounded command-line and memory-map data for the retained genuine helper, with process identity checked around the reads. The accepted sample records seven ordered fixture classpath entries, false `-agentpath`/`-javaagent` presence, and 32 mapped paths with zero child-only paths relative to the contemporaneous parent sample. These observations were attributed through the inherited build log, not XML-attached output or an independent kernel trace. Both this helper sample and the managed T4 cohort are controlled fixtures, not the final production classpath. They do not establish cold-file closure, effective VM argument history, a final producer or custodian, Live readiness, or activation. See the [bounded child-observation evidence](../../evidence/tier-e-owned-helper-child-observation-20261113.md).
+
 The [open D1 issue](../../backlog/issue-20261105-074955-139-b4-d1-implement-real-prestarted-confined-read-help.md)
 records host and isolated real-child controls, including allowed bytes/EOF, forbidden
 readable preopens and pinned reopen, actual socket backpressure, GC, owner death and
@@ -1260,3 +1276,8 @@ where a supervisor may be involved and Java callers use try-with-resources.
 - WONTFIX: [issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st](../../backlog/resolved/issue-102-permanent-thread-pool-contamination-classloader-leaks-and-st.md)
 - WONTFIX: [issue-103-containedexecutors-thread-local-state-persistence-and-poison](../../backlog/resolved/issue-103-containedexecutors-thread-local-state-persistence-and-poison.md)
 - [issue-20260821-113003-report-already-active-landlock](../../backlog/resolved/issue-20260821-113003-report-already-active-landlock.md)
+
+
+### B5 carrier helper capture and handoff — bounded 2026-11-13
+
+Missing helper authority rechecks exact Ready and gate eligibility before claim; absence refuses before claim/effects. An admitted request performs the actual full claim, retains real typed support pins on the carrier, and transfers at canonical exact-domain `DomainCommit`. Native/helper retirement precedes original resources; ambiguous close remains `Unknown` and is not replayed. Capture may finish after drain while counted, but prevents late commit, SETUP, or body execution; no hard read deadline is claimed. The checked-owner production path is implemented to use a real baseline observer; no protected-native positive was established. Synthetic native/Tier1 tests are not protected-native qualification. Trusted startup recipe plus `NoWriters` is a trusted-host premise, not OS enforcement or custody proof. No new helper daemon/session/common-timepair readiness, Live/B6 activation, final production manifest/custody, or child cold-closure proof is established. See the [bounded full004 evidence](../../evidence/tier-e-b5-carrier-helper-capture-20261113.md).

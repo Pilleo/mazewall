@@ -45,6 +45,62 @@ internal class PreparedPath private constructor(
         }
     }
 
+    internal class HelperSlot(
+        private val capture: io.mazewall.enforcer.internal.execution.HelperSupportCapture,
+        private val native: NativeEngine,
+        private val path: Path,
+    ) {
+        private enum class CloseState { NotAttempted, Dispatched, Complete, Unknown }
+
+        private var descriptor: FileDescriptor<FileDescriptorRole.OPath, FdState.Open, FdOwnership.Owned>? = null
+        private var state = CloseState.NotAttempted
+        private var failure: Throwable? = null
+
+        internal data class CloseFailure(
+            val cause: Throwable,
+            val newlyDispatched: Boolean,
+        )
+
+        fun open(): PreparedPath {
+            check(capture.permits(this, native, cleanup = false)) { "Foreign helper support slot" }
+            check(descriptor == null && state == CloseState.NotAttempted)
+            val requested = path.toAbsolutePath().normalize()
+            val resolved = requested.toRealPath()
+            val before = Files.readAttributes(resolved, BasicFileAttributes::class.java)
+            require(before.isDirectory || before.isRegularFile) { "Prepared resource must be a regular file or directory: $requested" }
+            val identity = checkNotNull(before.fileKey()) { "Filesystem has no stable object identity: $requested" }
+            NativeArena.ofConfined().use { arena ->
+                descriptor = native.fileSystem
+                    .open(arena.allocateFrom(resolved.toString()), OpenFlags(NativeConstants.O_PATH or NativeConstants.O_CLOEXEC or NativeConstants.O_NOFOLLOW))
+                    .getFdOrThrow("open prepared resource $requested", FileDescriptorRole.OPath)
+            }
+            return PreparedPath(requested, resolved, checkNotNull(descriptor), before.isDirectory, identity, native).also { it.validate() }
+        }
+
+        @Suppress("TooGenericExceptionCaught") // Retain Unknown and original fatal identity after close dispatch.
+        fun closeOwned(): CloseFailure? {
+            check(capture.permits(this, native, cleanup = true)) { "Foreign helper support cleanup" }
+            return when (state) {
+                CloseState.Complete -> null
+                CloseState.Unknown -> CloseFailure(checkNotNull(failure), false)
+                CloseState.Dispatched -> error("Helper support close is in progress")
+                CloseState.NotAttempted -> descriptor?.let { owned ->
+                    state = CloseState.Dispatched
+                    try {
+                        native.fileSystem.close(owned).getOrThrow("close helper support $path")
+                        owned.markClosed()
+                        state = CloseState.Complete
+                        null
+                    } catch (problem: Throwable) {
+                        failure = problem
+                        state = CloseState.Unknown
+                        CloseFailure(problem, true)
+                    }
+                }
+            }
+        }
+    }
+
     internal class ManagedSlot(
         private val runtime: io.mazewall.enforcer.api.execution.ManagedRuntime,
         private val key: Any,

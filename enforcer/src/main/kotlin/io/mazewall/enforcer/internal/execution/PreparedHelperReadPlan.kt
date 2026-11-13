@@ -36,6 +36,24 @@ internal data class ReviewedHelperSupport(
     val sha256: String,
 )
 
+private const val MAX_SUPPORT_FILES = 64
+private val SUPPORT_DIGEST = Regex("[a-f0-9]{64}")
+
+internal class ReviewedHelperSupportRecipe private constructor(
+    val entries: List<ReviewedHelperSupport>,
+) {
+    companion object {
+        fun capture(support: List<ReviewedHelperSupport>): ReviewedHelperSupportRecipe {
+            val entries = java.util.List.copyOf(support)
+            require(entries.size in 1..MAX_SUPPORT_FILES && entries.map { it.path }.distinct().size == entries.size) {
+                "Helper needs 1..64 distinct exact support files"
+            }
+            require(entries.all { SUPPORT_DIGEST.matches(it.sha256) }) { "Helper support requires reviewed SHA-256 expectations" }
+            return ReviewedHelperSupportRecipe(entries)
+        }
+    }
+}
+
 /** Private preparation inputs; the runtime snapshots support membership before manager admission. */
 internal data class ConfinedHelperConfiguration(
     val policy: CanonicalPolicyArtifact.Worker,
@@ -53,6 +71,7 @@ internal class PreparedHelperReadPlan private constructor(
     private val application: PreparedPath,
     private val support: List<Pair<PreparedPath, String>>,
     private val native: NativeEngine,
+    private val supportOwner: HelperSupportCapture? = null,
 ) : AutoCloseable {
     val binding: HelperBinding get() = manifest.binding.owner
     private var closed = false
@@ -105,14 +124,12 @@ internal class PreparedHelperReadPlan private constructor(
 
     @Synchronized
     override fun close() {
+        supportOwner?.requireCleanupActor()
         closed = true
-        retire(support.map { it.first })
+        if (supportOwner == null) retire(support.map { it.first }) else supportOwner.close()
     }
 
     companion object {
-        private const val MAX_SUPPORT_FILES = 64
-        private val DIGEST = Regex("[a-f0-9]{64}")
-
         fun capture(
             policy: CanonicalPolicyArtifact.Worker,
             resources: PreparedResourceSet,
@@ -121,10 +138,32 @@ internal class PreparedHelperReadPlan private constructor(
             lifetime: HelperSupportLifetime,
             native: NativeEngine,
             ancestry: HelperAncestry,
+        ): PreparedHelperReadPlan = captureInternal(policy, resources, binding, support, lifetime, native, ancestry, null)
+
+        internal fun captureOwned(
+            policy: CanonicalPolicyArtifact.Worker,
+            resources: PreparedResourceSet,
+            binding: HelperBinding,
+            support: List<ReviewedHelperSupport>,
+            lifetime: HelperSupportLifetime,
+            native: NativeEngine,
+            ancestry: HelperAncestry,
+            owner: HelperSupportCapture,
+        ): PreparedHelperReadPlan = captureInternal(policy, resources, binding, support, lifetime, native, ancestry, owner)
+
+        private fun captureInternal(
+            policy: CanonicalPolicyArtifact.Worker,
+            resources: PreparedResourceSet,
+            binding: HelperBinding,
+            support: List<ReviewedHelperSupport>,
+            lifetime: HelperSupportLifetime,
+            native: NativeEngine,
+            ancestry: HelperAncestry,
+            owner: HelperSupportCapture?,
         ): PreparedHelperReadPlan {
             require(lifetime == HelperSupportLifetime.NoWriters) { "Helper runtime support needs a controlled no-writer lifetime" }
             require(binding.ownerPid.value > 0 && binding.ownerStartTicks > 0 && binding.domainGeneration > 0)
-            require(binding.resourceGeneration == resources.generation && DIGEST.matches(binding.resourceGeneration)) { "Helper resource generation mismatch" }
+            require(binding.resourceGeneration == resources.generation && SUPPORT_DIGEST.matches(binding.resourceGeneration)) { "Helper resource generation mismatch" }
             require(
                 binding.policyDigest == HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(policy.toJson().toByteArray(Charsets.UTF_8))),
             ) { "Helper canonical policy binding mismatch" }
@@ -133,16 +172,11 @@ internal class PreparedHelperReadPlan private constructor(
             resources.validate()
             val app = resources.grants.filter { it.purpose == PreparedResourceSet.GrantPurpose.Explicit && it.read && it.path.directory }
             require(app.size == 1) { "Confined helper requires exactly one explicit application read directory" }
-            val reviewed = java.util.List.copyOf(support)
-            require(
-                reviewed.size in 1..MAX_SUPPORT_FILES &&
-                    reviewed.map { it.path.toAbsolutePath().normalize() }.distinct().size == reviewed.size,
-            ) { "Helper needs 1..64 distinct exact support files" }
-            require(reviewed.all { DIGEST.matches(it.sha256) }) { "Helper support requires reviewed SHA-256 expectations" }
+            val recipe = validatedSupport(support)
             val owned = mutableListOf<PreparedPath>()
-            return ResourceRetirement.runWithRollback({
-                val pins = reviewed.map { expected ->
-                    val pin = PreparedPath.open(expected.path, native).also { owned.add(it) }
+            val capture = {
+                val pins = recipe.entries.map { expected ->
+                    val pin = (owner?.open(expected.path) ?: PreparedPath.open(expected.path, native)).also { owned.add(it) }
                     require(!pin.directory && resources.allowsRead(pin.resolved)) { "Helper runtime support must be an authorized exact regular file" }
                     require(!pin.resolved.startsWith(app.single().path.resolved)) { "Application subtree cannot double as runtime support" }
                     require(
@@ -164,8 +198,18 @@ internal class PreparedHelperReadPlan private constructor(
                 val capabilities = listOf(HelperCapability(0, HelperPurpose.Application, observation.observeRoot(app.single().path.descriptor), "0".repeat(64))) +
                     pins.mapIndexed { index, (pin, digest) -> HelperCapability(index + 1, HelperPurpose.RuntimeSupport, observation.observeRoot(pin.descriptor), digest) }
                 val manifest = ConfinedManifest.create(binding, ancestry, capabilities)
-                PreparedHelperReadPlan(manifest, policy, resources, app.single().path, java.util.List.copyOf(pins), native).also { it.validate() }
-            }, { retire(owned) })
+                PreparedHelperReadPlan(manifest, policy, resources, app.single().path, java.util.List.copyOf(pins), native, owner).also { it.validate() }
+            }
+            return if (owner == null) ResourceRetirement.runWithRollback(capture, { retire(owned) }) else capture()
+        }
+
+        private fun validatedSupport(support: List<ReviewedHelperSupport>): ReviewedHelperSupportRecipe {
+            val reviewed = java.util.List.copyOf(support)
+            require(
+                reviewed.size in 1..MAX_SUPPORT_FILES &&
+                    reviewed.map { it.path.toAbsolutePath().normalize() }.distinct().size == reviewed.size,
+            ) { "Helper needs 1..64 distinct exact support files" }
+            return ReviewedHelperSupportRecipe.capture(reviewed)
         }
 
         private fun requireReadRoutes(policy: CanonicalPolicyArtifact.Worker) {

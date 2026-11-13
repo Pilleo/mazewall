@@ -58,6 +58,226 @@ import java.util.jar.JarOutputStream
 /** Irreversible restrictions run only in an owned disposable helper under the isolated runner. */
 class ConfinedHelperProcessIntegrationTest {
     @Test
+    fun `child observation validates isolated timeout before launch`() {
+        check(observationTimeout(null) == 120L)
+        check(observationTimeout("1") == 1L)
+        check(observationTimeout("120") == 120L)
+        for (invalid in listOf("0", "121", "-1", "not-a-number", "999999999999999999999999")) {
+            check(runCatching { observationTimeout(invalid) }.isFailure)
+        }
+    }
+
+    private fun observationTimeout(raw: String?): Long {
+        val seconds = raw?.toLongOrNull() ?: if (raw == null) 120L else throw IllegalArgumentException("Invalid isolated timeout")
+        require(seconds in 1..120) { "Invalid isolated timeout" }
+        return seconds
+    }
+
+    private data class ObservedArgv(
+        val classpath: String,
+        val main: String,
+        val agentpath: Boolean,
+        val javaagent: Boolean,
+    )
+
+    @Test
+    fun `child observation rejects JVM option environment presence`() {
+        for (key in listOf("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS")) {
+            check(hasInjectedJvmOptions(mapOf(key to "")))
+            check(hasInjectedJvmOptions(mapOf(key to "value")))
+        }
+        check(!hasInjectedJvmOptions(mapOf("UNRELATED" to "value")))
+        val keysOnly = object : AbstractMap<String, String>() {
+            override val entries: Set<Map.Entry<String, String>> get() = error("values must not be enumerated")
+
+            override fun containsKey(key: String): Boolean = key == "JAVA_TOOL_OPTIONS"
+        }
+        check(hasInjectedJvmOptions(keysOnly))
+    }
+
+    @Test
+    fun `child observation parses selected bounded argv only`() {
+        val argv = listOf("java", "-cp", "/a:/b", SocketHelperMain::class.java.name).joinToString("\u0000", postfix = "\u0000").toByteArray()
+        check(parseObservedArgv(argv).classpath == "/a:/b")
+        check(runCatching { parseObservedArgv(argv.dropLast(1).toByteArray()) }.isFailure)
+        val agentArgv = listOf("java", "-agentpath:private", "-javaagent:private", "-cp", "/a:/b", SocketHelperMain::class.java.name).joinToString("\u0000", postfix = "\u0000").toByteArray()
+        check(parseObservedArgv(agentArgv).let { it.agentpath && it.javaagent && it.main == SocketHelperMain::class.java.name })
+        val duplicate = listOf("java", "-cp", "/a", "-cp", "/b", SocketHelperMain::class.java.name).joinToString("\u0000", postfix = "\u0000").toByteArray()
+        check(runCatching { parseObservedArgv(duplicate) }.isFailure)
+        val maxArgs = listOf("java") + List(252) { "-x" } + listOf("-cp", "/a", SocketHelperMain::class.java.name)
+        check(parseObservedArgv(maxArgs.joinToString("\u0000", postfix = "\u0000").toByteArray()).classpath == "/a")
+        check(runCatching { parseObservedArgv((maxArgs + "extra").joinToString("\u0000", postfix = "\u0000").toByteArray()) }.isFailure)
+        check(runCatching { parseObservedArgv(byteArrayOf(0xff.toByte(), 0)) }.isFailure)
+        check(runCatching { parseObservedArgv(ByteArray(64 * 1024 + 1)) }.isFailure)
+    }
+
+    @Test
+    fun `child observation validates bounded mapped paths`() {
+        val line = "1000-2000 r--p 00000000 00:01 12 /path with space\n"
+        check(parseObservedMaps(line.toByteArray()) == listOf("/path with space"))
+        check(parseObservedMaps("1000-2000 rw-p 00000000 00:00 0     \n".toByteArray()).isEmpty())
+        check(parseObservedMaps("1000-2000 r-xp 00000000 00:00 0 [vdso]\n".toByteArray()).isEmpty())
+        check(runCatching { parseObservedMaps("1000-2000 r--p 00000000 00:01 invalid     \n".toByteArray()) }.isFailure)
+        check(runCatching { parseObservedMaps("1000-2000 r--p 00000000 00:01 12     \n".toByteArray()) }.isFailure)
+        check(runCatching { parseObservedMaps((line.trimEnd() + " (deleted)\n").toByteArray()) }.isFailure)
+        check(runCatching { parseObservedMaps("broken\n".toByteArray()) }.isFailure)
+        check(runCatching { parseObservedMaps(line.dropLast(1).toByteArray()) }.isFailure)
+        check(parseObservedMaps(line.repeat(8192).toByteArray()).size == 8192)
+        check(runCatching { parseObservedMaps(line.repeat(8193).toByteArray()) }.isFailure)
+        check(runCatching { parseObservedMaps(ByteArray(1024 * 1024 + 1)) }.isFailure)
+    }
+
+    @Test
+    fun `child observation enforces elapsed acceptance ceiling`() {
+        check(!withinObservationTime(100L, 10_000_000_101L))
+        check(withinObservationTime(100L, 10_000_000_100L))
+        check(!withinObservationTime(100L, 99L))
+        check(withinObservationTime(Long.MAX_VALUE - 5, Long.MIN_VALUE + 4))
+    }
+
+    @Test
+    fun `child observation parses process incarnation`() {
+        val fields = listOf("S") + List(18) { "0" } + "123"
+        val stat = ("42 (a ) b) " + fields.joinToString(" ") + "\n").toByteArray()
+        check(parseObservedStartTicks(42, stat) == 123L)
+        check(runCatching { parseObservedStartTicks(43, stat) }.isFailure)
+        check(runCatching { parseObservedStartTicks(42, stat.dropLast(1).toByteArray()) }.isFailure)
+        check(runCatching { parseObservedStartTicks(42, ByteArray(8 * 1024 + 1)) }.isFailure)
+        val overflow = ("42 (a) " + (listOf("S") + List(18) { "0" } + "999999999999999999999999").joinToString(" ") + "\n").toByteArray()
+        check(runCatching { parseObservedStartTicks(42, overflow) }.isFailure)
+    }
+
+    private fun hasInjectedJvmOptions(environment: Map<String, String>): Boolean = listOf("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS").any(environment::containsKey)
+
+    private fun parseObservedArgv(bytes: ByteArray): ObservedArgv {
+        require(bytes.isNotEmpty() && bytes.size <= 64 * 1024 && bytes.last() == 0.toByte()) { "Invalid child argv" }
+        val text = bytes.decodeToString(throwOnInvalidSequence = true)
+        val arguments = text.dropLast(1).split('\u0000')
+        require(arguments.size in 1..256 && arguments.none(String::isEmpty)) { "Invalid child argv" }
+        val main = SocketHelperMain::class.java.name
+        val mainIndices = arguments.indices.filter { arguments[it] == main }
+        val classpathIndices = arguments.indices.filter { arguments[it] == "-cp" }
+        require(mainIndices.size == 1 && classpathIndices.size == 1) { "Invalid child launch layout" }
+        val mainIndex = mainIndices.single()
+        val cpIndex = classpathIndices.single()
+        require(cpIndex > 0 && cpIndex + 2 == mainIndex) { "Invalid child launch layout" }
+        val flags = arguments.subList(1, cpIndex)
+        return ObservedArgv(
+            arguments[cpIndex + 1],
+            main,
+            flags.any { it.startsWith("-agentpath:") },
+            flags.any { it.startsWith("-javaagent:") },
+        )
+    }
+
+    private fun parseObservedMaps(bytes: ByteArray): List<String> {
+        require(bytes.isNotEmpty() && bytes.size <= 1024 * 1024) { "Invalid child maps" }
+        val text = bytes.decodeToString(throwOnInvalidSequence = true)
+        require(text.endsWith('\n') && '\u0000' !in text) { "Invalid child maps" }
+        val lines = text.dropLast(1).split('\n')
+        require(lines.size <= 8192) { "Invalid child maps" }
+        return lines.mapNotNull { line ->
+            val fields = line.split(Regex(" +"), limit = 6)
+            require(fields.size in 5..6) { "Invalid child maps row" }
+            val addresses = fields[0].split('-')
+            require(addresses.size == 2) { "Invalid child maps row" }
+            val start = addresses[0].toULongOrNull(16)
+            val end = addresses[1].toULongOrNull(16)
+            require(start != null && end != null && start < end) { "Invalid child maps row" }
+            require(fields[1].matches(Regex("[r-][w-][x-][ps]"))) { "Invalid child maps row" }
+            require(fields[2].toULongOrNull(16) != null && fields[3].matches(Regex("[0-9a-fA-F]+:[0-9a-fA-F]+"))) { "Invalid child maps row" }
+            val inode = fields[4].toULongOrNull()
+            require(inode != null) { "Invalid child maps row" }
+            val path = fields.getOrNull(5)?.takeUnless { it.isEmpty() || it.all { char -> char == ' ' } }
+            require(path != null || inode == 0uL) { "Unidentified child mapping" }
+            require(path == null || path.startsWith('/') || path.startsWith('[') && path.endsWith(']')) { "Invalid child mapping" }
+            require(path == null || !path.endsWith(" (deleted)")) { "Deleted child mapping" }
+            require(path == null || '\\' !in path) { "Ambiguous child mapping" }
+            path?.takeIf { it.startsWith('/') }
+        }
+    }
+
+    private fun withinObservationTime(
+        start: Long,
+        now: Long,
+    ): Boolean {
+        val elapsed = now - start
+        return elapsed >= 0 && elapsed <= 10_000_000_000L
+    }
+
+    private fun parseObservedStartTicks(
+        pid: Int,
+        bytes: ByteArray,
+    ): Long {
+        require(pid > 0 && bytes.isNotEmpty() && bytes.size <= 8 * 1024) { "Invalid child stat" }
+        val stat = bytes.decodeToString(throwOnInvalidSequence = true)
+        require(stat.endsWith('\n') && '\u0000' !in stat) { "Invalid child stat" }
+        val identity = ProcProcessIdentityResolver { stat }.resolve(Pid(pid))
+        return requireNotNull(identity?.startTimeTicks?.takeIf { it > 0 }) { "Invalid child identity" }
+    }
+
+    @Test
+    fun `actual owned helper child startup observation`() {
+        observationTimeout(System.getProperty("io.mazewall.isolatedTestTimeoutSeconds"))
+        check(!hasInjectedJvmOptions(System.getenv())) { "Injected JVM option environment is present" }
+        IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifyObservedAllowed")
+    }
+
+    private fun readOwnedProc(
+        pid: Int,
+        name: String,
+        limit: Int,
+    ): ByteArray {
+        require(name in setOf("stat", "cmdline", "maps"))
+        val bytes = Files.newInputStream(Path.of("/proc", pid.toString(), name)).use { it.readNBytes(limit + 1) }
+        require(bytes.isNotEmpty() && bytes.size <= limit) { "Invalid owned child observation" }
+        return bytes
+    }
+
+    private fun requireObservationTime(started: Long) {
+        check(withinObservationTime(started, System.nanoTime())) { "Owned child observation exceeded elapsed ceiling" }
+    }
+
+    private fun observeOwnedChild(
+        helper: SocketHelperProcess,
+        classpath: List<Path>,
+        classpathDigests: List<String>,
+        parentMapped: List<Path>,
+        started: Long,
+    ) {
+        val handle = helper.processHandle
+        val identity = requireNotNull(helper.confinedIdentity) { "Owned child identity unavailable" }
+        val pid = identity.pid.value
+        check(pid > 0 && handle.pid() == pid.toLong()) { "Owned child identity mismatch" }
+
+        fun requireIdentity() {
+            requireObservationTime(started)
+            check(handle.isAlive && helper.confinedIdentity == identity) { "Owned child exited or changed" }
+            val stat = readOwnedProc(pid, "stat", 8 * 1024)
+            check(parseObservedStartTicks(pid, stat) == identity.startTimeTicks && handle.isAlive) { "Owned child incarnation changed" }
+            requireObservationTime(started)
+        }
+        requireIdentity()
+        val commandBytes = readOwnedProc(pid, "cmdline", 64 * 1024)
+        requireIdentity()
+        val argv = parseObservedArgv(commandBytes)
+        check(classpath.none { it.toString().contains(File.pathSeparator) || '\n' in it.toString() }) { "Invalid fixture classpath" }
+        check(argv.classpath == classpath.joinToString(File.pathSeparator)) { "Owned child classpath differs" }
+        requireIdentity()
+        val mapsBytes = readOwnedProc(pid, "maps", 1024 * 1024)
+        requireIdentity()
+        val childMappings = parseObservedMaps(mapsBytes).distinct().sorted()
+        val parentPaths = parentMapped.map(Path::toString).toSet()
+        requireObservationTime(started)
+        println("OWNED_CHILD pid=$pid start-ticks=${identity.startTimeTicks} main=${argv.main} agentpath=${argv.agentpath} javaagent=${argv.javaagent}")
+        check(classpath.size == classpathDigests.size) { "Invalid fixture expectations" }
+        classpath.forEachIndexed { index, path -> println("FIXTURE_CLASSPATH index=$index path=$path sha256=${classpathDigests[index]} no-writers=test-lifetime") }
+        childMappings.forEach { path -> println("CHILD_MAPPING path=$path parent-sample=${path in parentPaths}") }
+        println("OWNED_CHILD_MAPS count=${childMappings.size} child-only=${childMappings.count { it !in parentPaths }}")
+        requireObservationTime(started)
+    }
+
+    @Test
     fun `mapped support includes read only shared regular files`() {
         IsolatedProcessTester.runIsolatedMethod(javaClass.name, "verifySharedMappedSupport")
     }
@@ -194,7 +414,14 @@ class ConfinedHelperProcessIntegrationTest {
         fun main(args: Array<String>) = ConfinedHelperProcessIntegrationTest().verifyCase(Case.OwnerDeath.name)
     }
 
-    private fun verifyCase(case: String) {
+    private fun verifyCase(case: String) = runCase(case, observeChild = false)
+
+    private fun verifyObservedAllowed() = runCase(Case.Allowed.name, observeChild = true)
+
+    private fun runCase(
+        case: String,
+        observeChild: Boolean,
+    ) {
         val selected = Case.valueOf(case)
         val directory = Files.createTempDirectory(Files.createDirectories(Path.of("build/confined-helper-fixtures")), "$case-").toAbsolutePath()
         val application = Files.createDirectory(directory.resolve("application"))
@@ -205,6 +432,7 @@ class ConfinedHelperProcessIntegrationTest {
         val childEffects = selected in setOf(Case.ForbiddenPreopen, Case.ForbiddenPinnedReopen, Case.ChildGc, Case.KernelBackpressure, Case.ResultCloseFailure)
         val childLog = directory.resolve("child-effects.log")
         val classpath = runtimeClasspath(directory, childEffects)
+        val classpathDigests = if (observeChild) classpath.map(::digest) else emptyList()
         val fault = WireFault(selected, LinuxNative.snapshot())
         LinuxNative.setEngine(fault)
         val native = LinuxNative.snapshot()
@@ -221,6 +449,8 @@ class ConfinedHelperProcessIntegrationTest {
         println("ANCESTRY=${ancestry.ancestry.canonical}")
         reviewed.forEach { println("SUPPORT path=${it.path} sha256=${it.sha256} no-writers=test-lifetime") }
         var child: ProcessHandle? = null
+        var observedHelper: SocketHelperProcess? = null
+        var observationStarted = 0L
         var creates = 0
         val wrongRoot = if (selected == Case.WrongRoot) PreparedPath.open(outside, native).also { fault.wrongRoot = it.descriptor.value } else null
         val resources = PreparedResourceSet.capture(policy.definition, native)
@@ -236,8 +466,10 @@ class ConfinedHelperProcessIntegrationTest {
             try {
                 SocketHelperPool(PoolProvisioning.PrestartedConfined) {
                     creates++
+                    if (observeChild) observationStarted = System.nanoTime()
                     SocketHelperProcess
                         .startConfined(classpath.joinToString(File.pathSeparator)) { builder ->
+                        if (observeChild) check(!hasInjectedJvmOptions(builder.environment())) { "Injected JVM option environment is present" }
                         if (childEffects) {
                             val command = builder.command()
                             val main = command.indexOf(SocketHelperMain::class.java.name)
@@ -247,10 +479,14 @@ class ConfinedHelperProcessIntegrationTest {
                             builder.redirectError(childLog.toFile())
                         }
                         builder.start()
-                    }.also { child = it.processHandle }
+                    }.also {
+                        child = it.processHandle
+                        if (observeChild) observedHelper = it
+                    }
                 }.use { pool ->
                     pool.prewarm()
                     check(creates == 1 && requireNotNull(child).isAlive)
+                    if (observeChild) observeOwnedChild(requireNotNull(observedHelper), classpath, classpathDigests, mapped, observationStarted)
                     println("CHILD pid=${child.pid()} start=${child.info().startInstant()}")
                     val setupStarted = System.nanoTime()
                     val cap = ConfinedDeadline.mint(native) { 5_000_000_000L }

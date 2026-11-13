@@ -32,6 +32,8 @@ internal class ScopingPreparation(
         val landlock: io.mazewall.landlock.PreparedLandlock,
         val scoping: FrozenStackScoping.Live,
     ) {
+        var helperCapture: HelperSupportCapture? = null
+        var helperPlan: PreparedHelperReadPlan? = null
         val observationIdentity = Any()
         private var boundGeneration: Long = 0
         val generation: Long get() = boundGeneration
@@ -60,6 +62,8 @@ internal class ScopingPreparation(
         val landlockStep: ReleaseStep = ReleaseStep.NotAttempted,
         val resourceStep: ReleaseStep = ReleaseStep.NotAttempted,
         val observationIdentity: Any? = null,
+        val helperCapture: HelperSupportCapture? = null,
+        val helperStep: ReleaseStep = ReleaseStep.NotAttempted,
     )
 
     internal sealed interface State {
@@ -364,15 +368,23 @@ internal class ScopingPreparation(
                 is State.Constructing, is State.Ready, is State.PreparedSettled, is State.Claiming, is State.DomainOwned, is State.TransferredSettled -> reject(state)
             }
 
+        private fun sameReleaseOwner(
+            original: Retained,
+            next: Retained,
+        ): Boolean =
+            next.owner === original.owner &&
+                next.landlock === original.landlock &&
+                next.helperCapture === original.helperCapture &&
+                next.observationIdentity === original.observationIdentity &&
+                (next.step != ReleaseStage.SETTLED || next.helperCapture == null || next.helperStep == ReleaseStep.Complete)
+
         private fun releaseCompleted(
             state: State,
             event: Event.ReleaseCompleted,
         ): Decision =
             when (state) {
                 is State.Retiring -> if (state.retained.inFlight &&
-                    event.retained.owner === state.retained.owner &&
-                    event.retained.landlock === state.retained.landlock &&
-                    event.retained.observationIdentity === state.retained.observationIdentity
+                    sameReleaseOwner(state.retained, event.retained)
                 ) {
                     val history = event.retained.failure?.let {
                         io.mazewall.platform.fd.CleanupFailures
@@ -586,7 +598,7 @@ internal class ScopingPreparation(
                 state.request is PrepareRequest.Awaiting &&
                 state.disposition == ResourceDisposition.ClaimedOwned &&
                 event.domain.generation == state.acquisition.generation &&
-                event.domain.ownsScoping(state.acquisition.scoping)
+                event.domain.scoping === state.acquisition.scoping
             ) {
                 event.decision
             } else {
@@ -603,7 +615,15 @@ internal class ScopingPreparation(
             val cause = io.mazewall.platform.fd.CleanupFailures
                 .merge(waitFailure, event.cause)
             return Decision(
-                State.Retiring(claim.ready.retained.copy(observationIdentity = claim.observationIdentity, landlock = claim.landlock, disposition = state.disposition, failure = cause)),
+                State.Retiring(
+                    claim.ready.retained.copy(
+                        observationIdentity = claim.observationIdentity,
+                        landlock = claim.landlock,
+                        disposition = state.disposition,
+                        failure = cause,
+                        helperCapture = claim.helperCapture,
+                    ),
+                ),
                 listOf(Effect.Notify),
             )
         }

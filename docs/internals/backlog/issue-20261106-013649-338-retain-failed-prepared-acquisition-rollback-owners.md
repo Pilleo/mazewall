@@ -58,3 +58,15 @@ Remaining limits are unchanged: direct resolver/strict-path acquisition, actual 
 ### Conditional full-build checkpoint — 2026-11-12
 
 The [current full-build report](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/issue338-full-gate-detailed-report002.md) records a successful full build with 4,672 cases, 45 skips and no failures or errors; unit instruction coverage was 80,145/97,726 (82.009905%) and combined coverage was 80,572/97,726 (82.446841%). The owning FreshJvm task used the approved 15,000 ms configuration; full-run supervisor propagation was not sampled. The ordinary five-second default, issue 051 startup cause and default reliability remain unqualified. Three shutdown socket exceptions and three suppressed directory exceptions leave issue 752 resource retirement Unknown. Issues 051, 338 and 569 remain open: pre-typed raw/token ownership, VM and arena gaps, canonical dispatcher and custody limits remain; B5 helper capture requires its next preimplementation review. This conditional checkpoint does not close B5 or the wider roadmap. Earlier pending statements describe their historical checkpoints and are superseded only as to this full-build result.
+
+
+### B4 domain-owned retained support capture — 2026-11-12
+
+The controller accepted the actual current B4 domain-owned support transaction as **ACCEPT_SCOPED_WITH_SEPARATE_RECOVERED_POSTFLIGHT**. The [tracked evidence note](../evidence/tier-e-retained-helper-capture-20261112.md) records the Gradle exit-0 result and the separately recovered postflight. The original host wrapper exit 95 remains failed because its late collector found the child-coverage directory absent; recovery does not relabel it as passed. The full run recorded 4,687 invocations, 45 skipped test invocations, zero failures/errors and coverage of 80,842/98,481 unit and 81,269/98,481 combined. The 15-second setting applied only to the owning FreshJvm task; default reliability remains unqualified. Issue 752 retirement remains Unknown.
+
+This bounded domain route preattaches genuine typed support slots, counts already-authorized opens through preparation quiescence, and retains Unknown close failures without redispatch. It does not qualify bare component capture, raw-token/arena/VM acquisition, Live, or broader B5 custody and handoff. The existing **Needed** item remains unchecked, and issue 338 remains open. Earlier B4 D1/D2 acceptance statuses are unchanged.
+
+
+### Subsequent B5 carrier handoff checkpoint — 2026-11-13
+
+The [portable B5 evidence](../evidence/tier-e-b5-carrier-helper-capture-20261113.md) and [issue 842 checkpoint](issue-20261108-141254-842-b5-d4-bind-captured-engine-confined-helper-authori.md) record the later bounded carrier capture/handoff acceptance; this does not requalify earlier B4 runs. Raw/token, arena, VM, and bare-component frontiers remain open.
