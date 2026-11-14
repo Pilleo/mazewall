@@ -1,5 +1,6 @@
 #pragma once
 
+#include "live_stack_context.hpp"
 #include <jni.h>
 #include <jvmti.h>
 #include <cstdint>
@@ -13,7 +14,7 @@ __attribute__((visibility("hidden"))) bool begin_activation() noexcept;
 __attribute__((visibility("hidden"))) void end_activation(bool owner) noexcept;
 __attribute__((visibility("hidden"))) void poison_guard() noexcept;
 __attribute__((visibility("hidden"))) void thread_end() noexcept;
-__attribute__((visibility("hidden"))) void publish_capture(uint32_t, const jvmtiFrameInfo*, jint, bool) noexcept;
+__attribute__((visibility("hidden"))) void publish_capture(uint32_t, const jvmtiFrameInfo*, jint, bool, const Arguments&) noexcept;
 __attribute__((visibility("hidden"))) bool vm_init(JNIEnv*, jvmtiEnv*) noexcept;
 __attribute__((visibility("hidden"))) int startup_variant() noexcept;
 __attribute__((visibility("hidden"))) void* original(uint32_t binding) noexcept;

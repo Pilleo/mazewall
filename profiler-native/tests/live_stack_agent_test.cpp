@@ -172,7 +172,7 @@ jvmtiError JNICALL component_capture(jvmtiEnv*, jthread, jint, jint max, jvmtiFr
     if (component_capture_callback) mazewall::live::jni::method_entry(reinterpret_cast<jmethodID>(2));
     return component_capture_failed ? JVMTI_ERROR_INTERNAL : JVMTI_ERROR_NONE;
 }
-jint JNICALL component_original(JNIEnv*, jclass, jlong, jint, jint) {
+jint JNICALL component_original(JNIEnv*, jclass, jlong path, jint flags, jint mode) {
     ++original_calls;
     delegated_errno = errno;
     mw_live_snapshot_v1 snapshot{};
@@ -180,6 +180,20 @@ jint JNICALL component_original(JNIEnv*, jclass, jlong, jint, jint) {
     if (original_status == MW_LIVE_AVAILABLE) {
         assert(snapshot.frame_count == static_cast<uint32_t>(component_frame_count) && snapshot.frames[0].method_token == component_token);
         assert(snapshot.binding == (component_openat ? 2u : 1u));
+        auto exact = copy_request; exact.invocation_id = snapshot.invocation_id;
+        const mazewall::live::Arguments args{
+            component_openat ? mazewall::live::ArgumentKind::Openat0 : mazewall::live::ArgumentKind::Open0,
+            static_cast<uint64_t>(path), static_cast<uint32_t>(flags), static_cast<uint32_t>(mode),
+            component_openat ? static_cast<uint32_t>(-100) : 0u};
+        assert(mazewall::live::match_arguments(exact, snapshot.publication_id, args) == mazewall::live::MatchResult::Match);
+        auto changed = args; changed.path_bits ^= 1;
+        assert(mazewall::live::match_arguments(exact, snapshot.publication_id, changed) == mazewall::live::MatchResult::Unavailable);
+        changed = args; changed.flags_bits ^= 1;
+        assert(mazewall::live::match_arguments(exact, snapshot.publication_id, changed) == mazewall::live::MatchResult::Unavailable);
+        changed = args; changed.mode_bits ^= 1;
+        assert(mazewall::live::match_arguments(exact, snapshot.publication_id, changed) == mazewall::live::MatchResult::Unavailable);
+        changed = args; changed.dirfd_bits ^= 1;
+        assert(mazewall::live::match_arguments(exact, snapshot.publication_id, changed) == mazewall::live::MatchResult::Unavailable);
     }
     if (component_original_exception) pending_object = throwable;
     errno = component_original_error;
@@ -190,7 +204,7 @@ jint JNICALL component_original_at(JNIEnv* env, jclass owner, jint dirfd, jlong 
     return component_original(env, owner, path, flags, mode);
 }
 jint component_invoke(JNIEnv* env) {
-    return component_openat ? proxy_unix_openat0(env, nullptr, -100, 0, 0, 0) : proxy_unix_open0(env, nullptr, 0, 0, 0);
+    return component_openat ? proxy_unix_openat0(env, nullptr, -100, -17, -1, -23) : proxy_unix_open0(env, nullptr, -17, -1, -23);
 }
 jboolean JNICALL component_probe(JNIEnv* env, jclass, jmethodID method, va_list) {
     namespace jni = mazewall::live::jni;
@@ -252,6 +266,33 @@ void component_setup() {
     jni::helper_methods[0] = reinterpret_cast<jmethodID>(1);
     jni::guard.prepared = true;
 }
+void recorder_component_case(int selected) {
+    component_setup(); stimulus = Stimulus::Good; component_openat = false;
+    original_calls = probe_calls = body_calls = acquisition_calls = 0;
+    pending_object = selected == 1 ? throwable : nullptr;
+    component_original_exception = selected == 3; component_original_error = EPERM;
+    JNINativeInterface_ table{};
+    table.ExceptionCheck = component_exception; table.IsSameObject = same_object;
+    table.CallStaticBooleanMethodV = component_probe; table.DeleteLocalRef = delete_local;
+    table.NewWeakGlobalRef = component_weak_ref; table.DeleteWeakGlobalRef = delete_local;
+    JNIEnv env{&table};
+    jvmtiInterface_1_ tooling_table{};
+    tooling_table.GetCurrentThread = actual_thread; tooling_table.GetStackTrace = component_capture;
+    jvmtiEnv tooling{&tooling_table}; global_jvmti = &tooling;
+    original_unix_open0.store(selected == 2 ? nullptr : component_original);
+    live_startup_mode = LiveStartupMode::Only;
+    open_boundary_recorder = std::make_unique<mazewall::profiler::OpenBoundaryRecorder>(
+        8, read_open_boundary_clock, read_open_boundary_tid, read_open_boundary_path);
+    const char path[] = "recorder-test";
+    errno = EBUSY;
+    const auto result = proxy_unix_open0(&env, nullptr, static_cast<jlong>(reinterpret_cast<uintptr_t>(path)), -1, -23);
+    assert(result == (selected == 2 ? -1 : 73));
+    assert(original_calls == (selected == 2 ? 0 : 1));
+    assert(errno == (selected == 2 ? EDOM : EPERM));
+    if (selected != 2) assert(delegated_errno == EDOM);
+    assert((selected == 1 || selected == 3) ? pending_object == throwable : pending_object == nullptr);
+}
+
 void guard_component_case(Stimulus selected) {
     component_setup(); stimulus = selected;
     original_calls = probe_calls = body_calls = acquisition_calls = 0;
@@ -516,6 +557,7 @@ int main(int argc, char** argv) {
     else if (std::strncmp(argv[1], "capture-component", 17) == 0) {
         component_openat = std::strcmp(argv[1], "capture-component-openat0") == 0;
         for (int selected = 0; selected <= 14; ++selected) isolated([=] { capture_component_case(selected); });
+        if (!component_openat) for (int selected = 0; selected < 4; ++selected) isolated([=] { recorder_component_case(selected); });
     }
     else startup();
     std::cout << "live_stack_agent_" << argv[1] << ": passed\n";

@@ -64,18 +64,27 @@ __attribute__((visibility("hidden"))) void current_thread_exited() noexcept;
 // Actual worker only; the immutable JNI enrollment owner stays pinned until physical exit.
 // Never retain this pointer beyond that worker or expose it to Copy/FFM.
 __attribute__((visibility("hidden"))) void* current_enrollment_owner() noexcept;
+enum class __attribute__((visibility("hidden"))) ArgumentKind : uint32_t { None, Open0, Openat0 };
+struct __attribute__((visibility("hidden"))) Arguments {
+    ArgumentKind kind = ArgumentKind::None;
+    uint64_t path_bits = 0;
+    uint32_t flags_bits = 0, mode_bits = 0, dirfd_bits = 0;
+};
+enum class __attribute__((visibility("hidden"))) MatchResult { Match, Unavailable };
+__attribute__((visibility("hidden"))) MatchResult match_arguments(const mw_live_request_v1&, uint64_t, const Arguments&) noexcept;
 // Entry clears before capture. Capture/translation occurs outside the payload gate.
 __attribute__((visibility("hidden"))) void enter() noexcept;
 // Momentary TLS/immortal-atomic prerequisite only; publish still rechecks authority.
 __attribute__((visibility("hidden"))) bool probe_eligible() noexcept;
 __attribute__((visibility("hidden"))) void publish(uint32_t binding, const mw_live_frame_v1* frames,
-                                                uint32_t count, Reason failure = Reason::None) noexcept;
+                                                uint32_t count, Reason failure = Reason::None, const Arguments& arguments = {}) noexcept;
 __attribute__((visibility("hidden"))) void poison() noexcept;
 __attribute__((visibility("hidden"))) void leave() noexcept;
 
 #ifdef MAZEWALL_LIVE_TEST
 enum class TestPoint { CopyDiscovered, CopyLocked, CopyReleased, InvalidateCAS, SealCAS,
-                       RegisterDiscovered, RegisterOwned, RegisterCommit, BeginBound, PublishLocked };
+                       RegisterDiscovered, RegisterOwned, RegisterCommit, BeginBound, PublishLocked,
+                       MatchReleased, MatchLive, MatchControl, MatchTask, MatchPublication };
 // Separately compiled test core only: no hooks or synthetic enrollment in the DSO.
 void test_hook(void (*hook)(TestPoint)) noexcept;
 void test_limits(uint64_t next_id, uint64_t serial) noexcept;

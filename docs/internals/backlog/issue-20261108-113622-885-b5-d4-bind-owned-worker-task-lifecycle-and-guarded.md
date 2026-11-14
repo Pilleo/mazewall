@@ -53,3 +53,13 @@ Platform Register/Begin receipt attachment is a separate open prerequisite: [iss
 
 ---
 <!-- id: issue-20261108-113622-885-b5-d4-bind-owned-worker-task-lifecycle-and-guarded  file: issue-20261108-113622-885-b5-d4-bind-owned-worker-task-lifecycle-and-guarded.md -->
+
+
+## B5 D4 worker/task lifecycle — bounded structural acceptance — 2026-11-14
+
+Root accepted `ACCEPT_STRUCTURAL_TASK_LIFECYCLE_WITH_B6_CLOSED`. See the [portable evidence](../evidence/tier-e-b5-worker-task-lifecycle-20261114.md) and [controller decision](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-worker-task-lifecycle-controller-decision-20261114-001.md). The primary/secondary task recovery actors are distinct: `recoverTask(TaskBeginReceipt)` and its single End run on the original physical worker before it exits; only after join may the retirement owner recover a missing WorkerOwner via `WorkerRegistrationReceipt`/`recoverWorker` and retire that worker. `EndPending` is retained with no retry; early installation-invalidation Pending may be retried only by later explicit drain after quiescence. This synthetic already-installed worker lifecycle result keeps B6 closed and does not qualify production Live/native/helper behavior or complete B5. Issue 885 remains open; Needed entries are unchanged.
+
+
+## Bounded packaged-helper flow cross-reference — 2026-11-14
+
+The private packaged-helper flow is recorded under primary [issue 842](issue-20261108-141254-842-b5-d4-bind-captured-engine-confined-helper-authori.md) with [portable evidence](../evidence/tier-e-b5-packaged-helper-qualification-20261114.md). This does not expand issue 885's accepted structural task-lifecycle result: B6 remains closed, production Live/helper/native qualification remains unestablished, and issue 885 Needed entries remain unchanged.

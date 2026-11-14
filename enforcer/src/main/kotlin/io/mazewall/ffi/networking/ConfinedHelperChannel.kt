@@ -60,6 +60,16 @@ internal class ConfinedHelperChannel(
         if (poll(NativeConstants.POLLIN, cap)) receiveFrame(cap) else null
     }
 
+    /** Idle readiness may expire without consuming any bytes or terminating the channel. */
+    fun pollObservationInput(localCap: ConfinedDeadline): Boolean =
+        exchange {
+            try {
+                poll(NativeConstants.POLLIN, localCap)
+            } catch (_: TimeoutException) {
+                false
+            }
+        }
+
     fun sendFrame(
         frame: ConfinedHelperProtocol.Frame,
         localCap: ConfinedDeadline = frame.deadline,

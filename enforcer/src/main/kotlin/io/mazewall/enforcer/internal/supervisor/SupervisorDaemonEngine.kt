@@ -48,6 +48,17 @@ internal class SupervisorDaemonEngine(
         socketManager = socketManager,
         hooks = SeccompConnectionHooks(
             beforeListener = confinedBootstrap?.let { { socket, deadline -> requireNotNull(confinedControl).handle(socket, deadline) } },
+            liveListenerFactory = { live, socket, listener ->
+                val original = live as ConfinedHelperControl.LiveAdmission
+                original.attach(socket)
+                val replies = SupervisorReplyInterpreter(
+                    engine,
+                    listener,
+                    SupervisorExecRewriteExchange(engine, socket),
+                    TraceeDescriptorImporter(engine),
+                )
+                LiveListenerHandler(listener, replies, engine, original)
+            },
             afterConnectionClosed = confinedBootstrap?.let { { socket, outcome -> requireNotNull(confinedControl).connectionClosed(socket, outcome) } },
         ),
     )

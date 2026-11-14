@@ -17,6 +17,10 @@ import io.mazewall.ffi.internal.HelperSecurityObservation
 import io.mazewall.ffi.internal.PreparedPath
 import io.mazewall.ffi.networking.ConfinedDeadline
 import io.mazewall.platform.fd.CleanupFailures
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.fd.ResourceRetirement
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.LiveCompletion
@@ -160,6 +164,11 @@ internal class OwnedDomain(
 ) {
     private enum class HelperRelease { Retained, Releasing, Released }
 
+    private class ReceiverRetirementState(
+        val receivers: List<LiveReceiverRetirement?>,
+        val retired: Boolean,
+    )
+
     internal val registrationKey: Any = generation
     private val lock = Any()
     private var liveRelease: LiveRelease? = if (scoping is FrozenStackScoping.Live) LiveRelease() else null
@@ -181,15 +190,14 @@ internal class OwnedDomain(
     private var directRulesetComplete = false
     private val startup = CountDownLatch(limits.workers)
     private val threads = CopyOnWriteArrayList<Thread>()
-    private val liveWorkers = LiveWorkers(this, limits.workers, environment.native)
+    private val liveWorkers = LiveWorkers(this, lock, limits.workers, environment.native)
     private var nextWorkerSlot = 0
     private val pending = ConcurrentHashMap.newKeySet<OwnedInvocation<*>>()
+    private val liveCancellationPermit = Any()
     private val admission = Semaphore(limits.maxAdmissions)
     private val admitted = AtomicLong()
     private val rejected = AtomicLong()
-    private val cancellationRequests = AtomicLong()
-    private val delivered = AtomicLong()
-    private val ended = AtomicLong()
+    internal val invocationMetrics = DomainInvocationMetrics()
     val cleanupFailure = AtomicReference<Throwable?>()
     private val threadBuilder = Thread.ofPlatform().name(name, 0L).inheritInheritableThreadLocals(false)
     private val executor = ThreadPoolExecutor(
@@ -211,6 +219,7 @@ internal class OwnedDomain(
     private val retirement = if (preparedLandlock != null || preparedOperation != null || confined != null) {
         PreparedRetirement(name + "resource-retirement", {
             awaitPhysicalWorkers(helperPreparationEnded, executor, threads)
+            liveWorkerAdmission.awaitReceivers()
         }, ::releasePreparedResources, { recordCleanupFailure(cleanupFailure, it) })
     } else {
         null
@@ -255,7 +264,12 @@ internal class OwnedDomain(
         repeat((limits.workers - started).coerceAtLeast(0)) { startup.countDown() }
         if (!startup.await(deadline.remainingNanos(), TimeUnit.NANOSECONDS)) fail(TimeoutException("Required worker preparation did not finish"))
         val problem = synchronized(lock) {
-            phase = GenerationLifecycle.evaluate(phase, GenerationEvent.PREPARED)
+            if (scoping is FrozenStackScoping.Live && !liveWorkers.allObservationInstalled()) {
+                failure = failure ?: IllegalStateException("Live observation endpoint was not installed")
+                phase = GenerationLifecycle.evaluate(phase, GenerationEvent.FAILED)
+            } else {
+                phase = GenerationLifecycle.evaluate(phase, GenerationEvent.PREPARED)
+            }
             failure ?: if (phase != GenerationPhase.READY) RejectedExecutionException("Domain preparation ended during drain") else null
         }
         if (problem != null) {
@@ -273,10 +287,11 @@ internal class OwnedDomain(
         RuntimeWorkerContext.enter(this, scoping)
         try {
             try {
-                if (scoping is FrozenStackScoping.Live) liveWorkers.register(slot, scoping)
+                if (scoping is FrozenStackScoping.Live) RuntimeWorkerContext.bindLiveWorker(liveWorkers.register(slot, scoping))
+                val validation = if (scoping is FrozenStackScoping.Live) liveWorkerAdmission.reserveLiveValidation(slot) else null
                 requireSupportedScopingStart(scoping)
                 if (confined != null) requireHelperReady(ConfinedDeadline.mint(environment.native) { HELPER_TIMEOUT_NANOS })
-                receipt = ContainedExecutors.installOnCurrentThread(policy, scoping, environment, preparedLandlock)
+                receipt = ContainedExecutors.installOnCurrentThread(policy, scoping, environment, preparedLandlock, validation)
                 receipt.requireInstalled()
             } catch (installationFailure: Throwable) {
                 if (slot.registrationReserved && slot.worker == null && slot.registrationFailure == null) slot.registrationFailure = installationFailure
@@ -309,50 +324,104 @@ internal class OwnedDomain(
 
     fun <T> submit(action: Callable<T>): InvocationHandle<T> {
         val task: OwnedInvocation<T>
+        var liveRejection: Throwable? = null
         synchronized(lock) {
             if (phase != GenerationPhase.READY) {
                 recordRejection()
                 throw RejectedExecutionException("Domain generation is not admitting", failure)
             }
+            val liveTask = if (scoping is FrozenStackScoping.Live) OwnedInvocation(this, action, liveCancellationPermit) else null
             if (!admission.tryAcquire()) {
                 recordRejection()
                 throw RejectedExecutionException("Domain admission limit reached")
             }
-            task = OwnedInvocation(this, action)
+            task = liveTask ?: OwnedInvocation(this, action, liveCancellationPermit)
             pending.add(task)
             admitted.incrementAndGet()
             try {
                 executor.execute(task)
             } catch (rejected: RejectedExecutionException) {
                 recordRejection()
-                task.generationFailed(rejected)
-                fail(rejected)
+                if (scoping is FrozenStackScoping.Live) {
+                    failure = failure ?: rejected
+                    phase = GenerationLifecycle.evaluate(phase, GenerationEvent.FAILED)
+                    liveRejection = rejected
+                } else {
+                    task.generationFailed(rejected)
+                    fail(rejected)
+                }
             } catch (replacementRefused: IllegalStateException) {
-                task.generationFailed(replacementRefused)
-                fail(replacementRefused)
+                if (scoping is FrozenStackScoping.Live) {
+                    failure = failure ?: replacementRefused
+                    phase = GenerationLifecycle.evaluate(phase, GenerationEvent.FAILED)
+                    liveRejection = replacementRefused
+                } else {
+                    task.generationFailed(replacementRefused)
+                    fail(replacementRefused)
+                }
             }
         }
+        liveRejection?.let(::fail)
         return task
     }
 
     fun fail(problem: Throwable) {
+        var hasActiveLiveTask = false
         val first = synchronized(lock) {
             val recorded = failure ?: problem
             failure = recorded
+            // A task claim uses this same gate; after failure closes it no queued task can Begin.
+            hasActiveLiveTask = scoping is FrozenStackScoping.Live && liveWorkers.hasActiveTask()
+            liveWorkers.revokeAllTasks()
             phase = GenerationLifecycle.evaluate(phase, GenerationEvent.FAILED)
             recorded
         }
-        executor.shutdownNow()
-        retirement?.request()
-        pending.toList().forEach { it.generationFailed(first) }
+        if (!hasActiveLiveTask) {
+            executor.shutdownNow()
+            retirement?.request()
+            pending.toList().forEach { it.generationFailed(first) }
+            return
+        }
+        var cleanup: Throwable? = null
+        var interrupted = false
+
+        fun retain(failure: Throwable?) {
+            if (failure != null) {
+                interrupted = interrupted || failure.wasInterrupted()
+                cleanup = CleanupFailures.merge(cleanup, failure)
+            }
+        }
+
+        retain(runCatching { invalidateLiveAdmission() }.exceptionOrNull())
+        retain(runCatching { executor.shutdownNow() }.exceptionOrNull())
+        retain(runCatching { retirement?.request() }.exceptionOrNull())
+        retain(
+            runCatching {
+                pending.toList().forEach { task -> retain(runCatching { task.generationFailed(first) }.exceptionOrNull()) }
+            }.exceptionOrNull(),
+        )
+        val failure = cleanup
+        try {
+            if (failure != null) recordCleanupFailure(cleanupFailure, failure)
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+        if (failure is Error) throw failure
     }
 
     fun beginDrain() {
+        var hasActiveLiveTask = false
         synchronized(lock) {
+            hasActiveLiveTask = scoping is FrozenStackScoping.Live && liveWorkers.hasActiveTask()
+            liveWorkers.revokeAllTasks()
             phase = GenerationLifecycle.evaluate(phase, GenerationEvent.DRAIN)
         }
-        executor.shutdown()
-        retirement?.request()
+        try {
+            if (hasActiveLiveTask) invalidateLiveAdmission()
+        } finally {
+            executor.shutdown()
+            retirement?.request()
+        }
     }
 
     fun awaitRetirement(deadline: Deadline) {
@@ -492,9 +561,68 @@ internal class OwnedDomain(
         owners.second.requireReady(owners.first.manifest.binding, deadline)
     }
 
-    internal val liveWorkerAdmission = LiveWorkerAdmission()
+    internal val liveWorkerAdmission = LiveWorkerAdmission(liveHelperContext, limits.workers)
+    internal val liveTaskAdmission = LiveTaskAdmission()
 
-    internal inner class LiveWorkerAdmission {
+    internal inner class LiveWorkerAdmission(
+        private val originalContext: io.mazewall.enforcer.internal.supervisor.SupervisorContext?,
+        capacity: Int,
+    ) {
+        private val liveValidation = arrayOfNulls<LiveValidationTransport>(capacity)
+        private val liveValidationWorkers = arrayOfNulls<WorkerOwner>(capacity)
+        private var receiverRetirement = ReceiverRetirementState(List(capacity) { null }, retired = true)
+        private val liveValidationSpent = BooleanArray(capacity)
+        private val liveValidationSent = BooleanArray(capacity)
+        private val liveValidationSockets =
+            arrayOfNulls<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>(
+                capacity,
+            )
+
+        internal fun registerReceiver(
+            receipt: LiveValidationTransport,
+            receiver: LiveReceiverRetirement,
+            socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        ) {
+            synchronized(lock) {
+                val index = liveValidation.indexOfFirst { it === receipt }
+                check(index >= 0 && retirement?.live() == true && phase == GenerationPhase.PREPARING) { "Live receiver has no current retirement owner" }
+                val slot = liveWorkers.slot(index)
+                val live = scoping as FrozenStackScoping.Live
+                val plan = checkNotNull(helperPlan)
+                check(
+                    receiverRetirement.receivers[index] == null &&
+                        liveValidationSent[index] &&
+                        liveValidationSockets[index] === socket &&
+                        slot.thread?.isAlive == true &&
+                        slot.worker != null &&
+                        slot.worker === liveValidationWorkers[index] &&
+                        slot.worker?.owner === live.bootstrap.sealed &&
+                        slot.worker?.tid == slot.tid &&
+                        plan.manifest.binding.owner.domainGeneration == generation &&
+                        checkNotNull(helperSession).matchesOriginal(plan, checkNotNull(originalContext)),
+                ) { "Live receiver no longer belongs to its original worker" }
+                val updated = receiverRetirement.receivers.toMutableList()
+                updated[index] = receiver
+                receiverRetirement = ReceiverRetirementState(updated.toList(), retired = false)
+            }
+        }
+
+        internal fun receiversExited(): Boolean = synchronized(lock) { receiverRetirement.retired }
+
+        internal fun awaitReceivers() {
+            // Workers have physically stopped; registration cannot succeed after this snapshot.
+            val retained = synchronized(lock) { receiverRetirement }
+            retained.receivers.filterNotNull().forEach { receiver ->
+                receiver.awaitPhysicalExit()
+                check(receiver.physicallyExited()) { "Live receiver has not physically exited" }
+                receiver.failure()?.let { recordCleanupFailure(cleanupFailure, it) }
+            }
+            synchronized(lock) {
+                check(receiverRetirement === retained) { "Live receiver owner changed during retirement" }
+                receiverRetirement = ReceiverRetirementState(retained.receivers, retired = true)
+            }
+        }
+
         internal fun reserve(slot: LiveWorkerSlot) {
             synchronized(lock) {
                 check(
@@ -507,9 +635,324 @@ internal class OwnedDomain(
                 slot.registrationReserved = true
             }
         }
+
+        internal fun reserveLiveValidation(slot: LiveWorkerSlot): LiveValidationTransport {
+            val candidate = newLiveValidationTransport(this@OwnedDomain)
+            synchronized(lock) {
+                check(
+                    phase == GenerationPhase.PREPARING &&
+                        liveWorkers.owns(slot) &&
+                        slot.index in 0 until MAX_LIVE_VALIDATION_ATTEMPTS &&
+                        slot.thread === Thread.currentThread() &&
+                        !Thread.currentThread().isVirtual &&
+                        slot.worker === RuntimeWorkerContext.liveWorker &&
+                        slot.worker != null &&
+                        helperSession != null &&
+                        helperPlan != null &&
+                        liveValidation[slot.index] == null,
+                ) { "Live validation was not admitted by its original worker" }
+                val plan = checkNotNull(helperPlan)
+                val session = checkNotNull(helperSession)
+                val context = checkNotNull(originalContext)
+                val live = scoping as FrozenStackScoping.Live
+                check(
+                    plan.manifest.binding.owner.domainGeneration == generation &&
+                        slot.worker?.owner === live.bootstrap.sealed &&
+                        session.matchesOriginal(plan, context),
+                ) { "Live validation original binding differs" }
+                liveValidationWorkers[slot.index] = slot.worker
+                liveValidation[slot.index] = candidate
+            }
+            return candidate
+        }
+
+        internal fun consumeLiveValidation(
+            receipt: LiveValidationTransport,
+            socket: io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
+            deadline: ConfinedDeadline,
+        ) {
+            var admittedIndex = -1
+            val captured = synchronized(lock) {
+                val index = liveValidation.indexOfFirst { it === receipt }
+                check(index >= 0 && !liveValidationSpent[index] && phase == GenerationPhase.PREPARING) { "Live validation receipt is not current" }
+                val slot = liveWorkers.slot(index)
+                val worker = checkNotNull(slot.worker)
+                val live = scoping as FrozenStackScoping.Live
+                check(
+                    slot.thread?.isAlive == true &&
+                        worker === liveValidationWorkers[index] &&
+                        worker.owner === live.bootstrap.sealed &&
+                        worker.tid == slot.tid,
+                ) { "Live validation worker is no longer registered" }
+                liveValidationSpent[index] = true
+                admittedIndex = index
+                val plan = checkNotNull(helperPlan)
+                val session = checkNotNull(helperSession)
+                check(
+                    plan.manifest.binding.owner.domainGeneration == generation &&
+                        session.matchesOriginal(plan, checkNotNull(originalContext)),
+                ) {
+                    "Live validation original binding differs"
+                }
+                Triple(session, plan.manifest.binding, worker)
+            }
+            val (session, binding, worker) = captured
+            val owner = binding.owner
+            val hex = java.util.HexFormat.of()
+            val bytes = java.nio.ByteBuffer
+                .allocate(149)
+                .put(0xe5.toByte())
+                .putInt(1)
+                .putInt(owner.ownerPid.value)
+                .putLong(owner.ownerStartTicks)
+                .putLong(owner.domainGeneration)
+                .put(hex.parseHex(owner.resourceGeneration))
+                .put(hex.parseHex(owner.policyDigest))
+                .put(hex.parseHex(binding.manifestDigest))
+                .putInt(worker.tid.value)
+                .putLong(worker.owner.installation.value)
+                .putLong(worker.worker.value)
+                .putLong((admittedIndex + 1).toLong())
+                .array()
+            session.authenticateLiveSocket(socket)
+            synchronized(lock) {
+                check(
+                    phase == GenerationPhase.PREPARING &&
+                        helperSession === session &&
+                        liveValidation[admittedIndex] === receipt &&
+                        liveWorkers.slot(admittedIndex).worker === worker,
+                ) { "Live validation was revoked during authentication" }
+            }
+            session.sendAuthenticatedLivePrelude(socket, bytes, deadline)
+            synchronized(lock) {
+                check(phase == GenerationPhase.PREPARING && helperSession === session) { "Live validation was revoked during handoff" }
+                liveValidationSent[admittedIndex] = true
+                liveValidationSockets[admittedIndex] = socket
+            }
+        }
+
+        internal fun installObservation(
+            receipt: LiveValidationTransport,
+            socket: io.mazewall.platform.fd.FileDescriptor<io.mazewall.platform.fd.FileDescriptorRole.UnixSocket, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
+        ): LiveObservationEndpoint =
+            synchronized(lock) {
+                val index = liveValidation.indexOfFirst { it === receipt }
+                check(index >= 0 && phase == GenerationPhase.PREPARING && liveValidationSent[index] && liveValidationSockets[index] === socket)
+                val slot = liveWorkers.slot(index)
+                val worker = checkNotNull(slot.worker)
+                val live = scoping as FrozenStackScoping.Live
+                val plan = checkNotNull(helperPlan)
+                val session = checkNotNull(helperSession)
+                check(
+                    slot.endpoint === LiveEndpointState.NotInstalled &&
+                        slot.thread?.isAlive == true &&
+                        worker === liveValidationWorkers[index] &&
+                        worker.owner === live.bootstrap.sealed &&
+                        worker.enrollment === live.bootstrap.enrollment &&
+                        worker.tid == slot.tid &&
+                        plan.manifest.binding.owner.domainGeneration == generation &&
+                        session.matchesOriginal(plan, checkNotNull(originalContext)),
+                ) { "Live observation endpoint no longer belongs to its original worker" }
+                LiveObservationEndpoint(this@OwnedDomain, slot, socket).also { slot.endpoint = LiveEndpointState.Installed(it) }
+            }
+
+        internal fun requireLiveValidation(receipt: LiveValidationTransport) {
+            synchronized(lock) {
+                val index = liveValidation.indexOfFirst { it === receipt }
+                check(index >= 0 && liveValidationSent[index] && phase == GenerationPhase.PREPARING) { "Live validation receipt is not current" }
+                val slot = liveWorkers.slot(index)
+                val live = scoping as FrozenStackScoping.Live
+                val plan = checkNotNull(helperPlan)
+                val session = checkNotNull(helperSession)
+                check(
+                    slot.thread?.isAlive == true &&
+                        slot.worker != null &&
+                        slot.worker === liveValidationWorkers[index] &&
+                        slot.worker?.owner === live.bootstrap.sealed &&
+                        slot.worker?.tid == slot.tid &&
+                        plan.manifest.binding.owner.domainGeneration == generation &&
+                        session.matchesOriginal(plan, checkNotNull(originalContext)),
+                ) {
+                    "Live validation worker is no longer registered"
+                }
+            }
+        }
+
+        internal fun liveValidationSocketPath(receipt: LiveValidationTransport): String =
+            synchronized(lock) {
+                val index = liveValidation.indexOfFirst { it === receipt }
+                check(index >= 0 && phase == GenerationPhase.PREPARING && !liveValidationSent[index]) { "Live validation receipt is not current" }
+                check(liveWorkers.slot(index).thread?.isAlive == true && helperSession != null)
+                checkNotNull(originalContext).socketPath
+            }
     }
 
-    fun initialConfinedRetirementEnded(): Boolean = (confined != null || scoping is FrozenStackScoping.Live) && physicalWorkersStopped(executor, threads) && retirement?.finished() == true
+    private fun isPendingInvocation(invocation: OwnedInvocation<*>): Boolean = pending.contains(invocation)
+
+    internal inner class LiveTaskAdmission {
+        internal fun claimLiveTask(invocation: OwnedInvocation<*>): LiveWorkerSlot =
+            synchronized(lock) {
+                val slot = liveWorkers.currentSlot()
+                check(
+                    invocation.belongsTo(this@OwnedDomain) &&
+                        isPendingInvocation(invocation) &&
+                        phase == GenerationPhase.READY &&
+                        slot != null &&
+                        slot.worker === RuntimeWorkerContext.liveWorker &&
+                        slot.activeTask == null,
+                ) {
+                    "Live invocation was not admitted on its registered worker"
+                }
+                slot.activeTask = invocation
+                slot
+            }
+
+        internal fun publishLiveTask(
+            slot: LiveWorkerSlot,
+            invocation: OwnedInvocation<*>,
+            lease: io.mazewall.platform.native.TaskLease,
+        ) {
+            synchronized(lock) {
+                val live = scoping as FrozenStackScoping.Live
+                check(
+                    invocation.belongsTo(this@OwnedDomain) &&
+                        liveWorkers.owns(slot) &&
+                        slot.thread === Thread.currentThread() &&
+                        slot.activeTask === invocation &&
+                        slot.worker === lease.worker &&
+                        lease.worker === RuntimeWorkerContext.liveWorker &&
+                        lease.worker.owner === live.bootstrap.sealed &&
+                        lease.worker.enrollment === live.bootstrap.enrollment &&
+                        slot.tid == lease.worker.tid &&
+                        !slot.hasPublication() &&
+                        !slot.hasCleanup(),
+                ) { "Live task publication was revoked or differs from its original owner" }
+                // Retain the exact owned lease before any allocation or admission check can fail.
+                slot.retainCleanup(invocation, lease)
+                check(phase == GenerationPhase.READY && isPendingInvocation(invocation) && slot.endpoint !is LiveEndpointState.Lost) {
+                    "Live task publication was revoked"
+                }
+                slot.publishRetained(invocation, lease)
+            }
+        }
+
+        internal fun registerLiveCleanup(
+            slot: LiveWorkerSlot,
+            invocation: OwnedInvocation<*>,
+            lease: io.mazewall.platform.native.TaskLease,
+        ) {
+            synchronized(lock) {
+                check(liveWorkers.owns(slot) && slot.activeTask === invocation && slot.worker === lease.worker && !slot.hasPublication())
+                check(!slot.hasCleanup())
+                slot.retainCleanup(invocation, lease)
+            }
+        }
+
+        internal fun observeLiveTask(
+            endpoint: LiveObservationEndpoint,
+            tid: Int,
+        ): Boolean {
+            val claim = claimLiveObservation(endpoint, tid) ?: return false
+            val lease = claim.lease
+            val first = firstLiveSnapshot(lease) ?: return false
+            val second = (
+                lease.worker.owner.capability
+                    .copy(lease, first.invocation) as? io.mazewall.platform.native.LiveRead.Available
+            )?.snapshot
+            return second != null && sameLiveSnapshots(lease, first, second) && isCurrentLiveObservation(endpoint, claim)
+        }
+
+        private fun firstLiveSnapshot(lease: io.mazewall.platform.native.TaskLease): io.mazewall.platform.native.LiveSnapshot? {
+            val first = (
+                lease.worker.owner.capability
+                    .copy(lease) as? io.mazewall.platform.native.LiveRead.Available
+            )?.snapshot
+            return if (first != null && first.task === lease && (scoping as FrozenStackScoping.Live).bootstrap.matchesObservation(first)) first else null
+        }
+
+        private fun claimLiveObservation(
+            endpoint: LiveObservationEndpoint,
+            tid: Int,
+        ): LiveTaskPublication? = synchronized(lock) { claimLiveObservationUnderGate(endpoint, tid) }
+
+        private fun claimLiveObservationUnderGate(
+            endpoint: LiveObservationEndpoint,
+            tid: Int,
+        ): LiveTaskPublication? {
+            val slot = endpoint.slot
+            val current = phase == GenerationPhase.READY && liveWorkers.owns(slot) && slot.tid == Tid(tid)
+            return if (current) slot.claimPublication(endpoint) else null
+        }
+
+        private fun sameLiveSnapshots(
+            lease: io.mazewall.platform.native.TaskLease,
+            first: io.mazewall.platform.native.LiveSnapshot,
+            second: io.mazewall.platform.native.LiveSnapshot,
+        ): Boolean =
+            second.task === lease &&
+                first.invocation == second.invocation &&
+                first.publication == second.publication &&
+                first.binding == second.binding &&
+                first.frames == second.frames
+
+        private fun isCurrentLiveObservation(
+            endpoint: LiveObservationEndpoint,
+            claim: LiveTaskPublication,
+        ): Boolean = synchronized(lock) { isCurrentLiveObservationUnderGate(endpoint, claim) }
+
+        private fun isCurrentLiveObservationUnderGate(
+            endpoint: LiveObservationEndpoint,
+            claim: LiveTaskPublication,
+        ): Boolean = phase == GenerationPhase.READY && endpoint.slot.isCurrentPublication(endpoint, claim)
+
+        internal fun revokeLiveTask(
+            slot: LiveWorkerSlot,
+            invocation: OwnedInvocation<*>,
+            lease: io.mazewall.platform.native.TaskLease,
+        ) {
+            synchronized(lock) {
+                check(liveWorkers.owns(slot) && slot.activeTask === invocation)
+                if (slot.hasPublication()) {
+                    check(slot.publishedMatches(invocation, lease)) { "Live task publication belongs to another lease" }
+                    slot.revokePublication()
+                } else if (!slot.revokedMatches(invocation, lease) && !slot.cleanupMatches(invocation, lease)) {
+                    check(canRetainCleanup(slot, invocation, lease)) { "Live task cleanup does not match its original lease" }
+                    slot.retainCleanup(invocation, lease)
+                }
+            }
+        }
+
+        private fun canRetainCleanup(
+            slot: LiveWorkerSlot,
+            invocation: OwnedInvocation<*>,
+            lease: io.mazewall.platform.native.TaskLease,
+        ): Boolean {
+            val originalWorker = slot.thread === Thread.currentThread() && slot.worker === lease.worker
+            val noConflict = !slot.hasCleanup() && !slot.wasRevokedFor(invocation)
+            return originalWorker && noConflict && invocation.retainsLiveLease(lease)
+        }
+    }
+
+    internal fun cancelLiveInvocation(
+        invocation: OwnedInvocation<*>,
+        permit: Any,
+    ): OwnedInvocation.LiveCancellation =
+        synchronized(lock) {
+            check(permit === liveCancellationPermit && invocation.belongsTo(this)) { "Live cancellation does not own this domain" }
+            if (!pending.contains(invocation)) return@synchronized OwnedInvocation.LiveCancellation.ENDED
+            val transition = invocation.markLiveCancellation(permit)
+            if (transition != OwnedInvocation.LiveCancellation.ENDED && phase == GenerationPhase.READY) {
+                liveWorkers.revokeAllTasks()
+                phase = GenerationPhase.DRAINING
+            }
+            transition
+        }
+
+    fun initialConfinedRetirementEnded(): Boolean =
+        (confined != null || scoping is FrozenStackScoping.Live) &&
+            physicalWorkersStopped(executor, threads) &&
+            liveWorkerAdmission.receiversExited() &&
+            retirement?.finished() == true
 
     internal val isLiveScoping: Boolean get() = scoping is FrozenStackScoping.Live
 
@@ -517,7 +960,7 @@ internal class OwnedDomain(
 
     fun retryConfinedRetirement(deadline: ConfinedDeadline) {
         check(initialConfinedRetirementEnded()) { "Initial helper retirement still owns cleanup" }
-        if (scoping is FrozenStackScoping.Live) releaseLiveResources() else releaseConfinedResources(deadline)
+        if (scoping is FrozenStackScoping.Live) releaseLiveResources(allowPendingRetry = true) else releaseConfinedResources(deadline)
         retireIfStopped()
     }
 
@@ -561,15 +1004,12 @@ internal class OwnedDomain(
     }
 
     @Suppress("TooGenericExceptionCaught") // Commit exact Unknown and history before propagating any live cleanup failure.
-    private fun releaseLiveResources() {
+    private fun releaseLiveResources(allowPendingRetry: Boolean = false) {
+        check(liveWorkerAdmission.receiversExited()) { "Live receiver still owns its resources" }
         val live = scoping as FrozenStackScoping.Live
         var progress = synchronized(lock) {
             val current = checkNotNull(liveRelease)
-            if (current.pass == ScopingPreparation.ReleasePass.Releasing ||
-                current.failure != null ||
-                current.nativeOutcome is io.mazewall.platform.native.LiveCompletion.Refused ||
-                listOf(current.invalidate, current.installation, current.landlock, current.resources).contains(ScopingPreparation.ReleaseStep.Unknown)
-            ) {
+            if (!current.mayRelease(allowPendingRetry)) {
                 return
             }
             current.copy(pass = ScopingPreparation.ReleasePass.Releasing).also { liveRelease = it }
@@ -652,6 +1092,66 @@ internal class OwnedDomain(
         }
     }
 
+    internal fun closeLiveAdmission(endpoint: LiveObservationEndpoint? = null) {
+        if (scoping !is FrozenStackScoping.Live) return
+        if (endpoint != null) {
+            val lost = synchronized(lock) {
+                val slot = endpoint.slot
+                if (!liveWorkers.owns(slot) || !slot.endpointIsInstalled(endpoint)) {
+                    false
+                } else {
+                    slot.endpoint = LiveEndpointState.Lost(endpoint)
+                    slot.revokePublication()
+                    if (phase == GenerationPhase.READY) {
+                        phase = GenerationPhase.DRAINING
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            if (lost) fail(IllegalStateException("Live observation endpoint was lost"))
+        } else {
+            synchronized(lock) {
+                liveWorkers.revokeAllTasks()
+                if (phase == GenerationPhase.READY) phase = GenerationPhase.DRAINING
+            }
+            invalidateLiveAdmission()
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Retain the single original invalidate outcome before exposing a cleanup failure.
+    private fun invalidateLiveAdmission() {
+        val live = scoping as? FrozenStackScoping.Live ?: return
+        var progress = synchronized(lock) {
+            val current = checkNotNull(liveRelease)
+            if (current.pass == ScopingPreparation.ReleasePass.Releasing ||
+                current.invalidate != ScopingPreparation.ReleaseStep.NotAttempted ||
+                current.earlyInvalidateAttempted ||
+                current.nativeOutcome != null ||
+                current.failure != null
+            ) {
+                return
+            }
+            current
+                .copy(
+                    pass = ScopingPreparation.ReleasePass.Releasing,
+                    invalidate = ScopingPreparation.ReleaseStep.Unknown,
+                    earlyInvalidateAttempted = true,
+                ).also { liveRelease = it }
+        }
+        try {
+            val owner = live.bootstrap.staging
+            progress = observeLiveInvalidation(progress, owner.capability.invalidate(owner))
+        } catch (failure: Throwable) {
+            progress = progress.copy(failure = CleanupFailures.merge(progress.failure, failure))
+            restoreInterrupt(failure)
+            throw failure
+        } finally {
+            synchronized(lock) { liveRelease = progress.copy(pass = ScopingPreparation.ReleasePass.Retained) }
+        }
+    }
+
     fun validateResources() {
         preparedLandlock?.validate()
         preparedOperation?.validate()
@@ -662,6 +1162,7 @@ internal class OwnedDomain(
 
     fun retired(): Boolean =
         physicalWorkersStopped(executor, threads) &&
+            liveWorkerAdmission.receiversExited() &&
             (retirement?.finished() != false) &&
             (preparedOperation?.isDirectResult() != true || synchronized(lock) { directReleased }) &&
             synchronized(lock) { liveReleaseComplete(liveRelease) } &&
@@ -674,6 +1175,7 @@ internal class OwnedDomain(
         val outcome = retirement?.outcome()
         val retired =
             workersStopped &&
+                liveWorkerAdmission.receiversExited() &&
                 (retirement == null || outcome?.releaseAttempted == true) &&
                 (preparedOperation?.isDirectResult() != true || synchronized(lock) { directReleased }) &&
                 synchronized(lock) { liveReleaseComplete(liveRelease) } &&
@@ -699,18 +1201,6 @@ internal class OwnedDomain(
         rejected.incrementAndGet()
     }
 
-    fun recordCancellation() {
-        cancellationRequests.incrementAndGet()
-    }
-
-    fun recordDelivery() {
-        delivered.incrementAndGet()
-    }
-
-    fun recordEnd() {
-        ended.incrementAndGet()
-    }
-
     fun diagnostics(runtimeAccepting: Boolean): ExecutionDiagnostics =
         synchronized(lock) {
         val cleanupFailed = cleanupFailure.get() != null
@@ -724,18 +1214,18 @@ internal class OwnedDomain(
         ExecutionDiagnostics(
             if (failure != null || cleanupFailed) ExecutionDiagnosticState.FAILED else sampled,
             ExecutionGeneration.InProcess(generation),
-            InvocationDiagnostics(admitted.get(), rejected.get(), cancellationRequests.get(), delivered.get(), ended.get()),
+            invocationMetrics.snapshot(admitted.get(), rejected.get()),
             liveWorkers(),
             pending.size,
             phase == GenerationPhase.CLOSED && retired() && !cleanupFailed && pending.isEmpty(),
         )
     }
 
-    fun removeQueued(task: OwnedInvocation<*>) {
-        executor.remove(task)
-    }
-
-    fun finished(task: OwnedInvocation<*>) {
+    fun finished(
+        task: OwnedInvocation<*>,
+        removeQueued: Boolean = false,
+    ) {
+        if (removeQueued) executor.remove(task)
         check(pending.remove(task)) { "Invocation admission already released" }
         admission.release()
     }
@@ -743,19 +1233,28 @@ internal class OwnedDomain(
 
 private class LiveWorkers(
     private val domain: OwnedDomain,
+    private val gate: Any,
     capacity: Int,
     private val native: NativeEngine,
 ) {
-    private val slots = List(capacity) { LiveWorkerSlot(it) }
+    private val slots = List(capacity) { LiveWorkerSlot(it, gate) }
 
     fun slot(index: Int): LiveWorkerSlot = slots[index]
 
     fun owns(slot: LiveWorkerSlot): Boolean = slots.getOrNull(slot.index) === slot
 
+    fun currentSlot(): LiveWorkerSlot? = slots.firstOrNull { it.thread === Thread.currentThread() }
+
+    fun hasActiveTask(): Boolean = slots.any { it.activeTask != null }
+
+    fun allObservationInstalled(): Boolean = slots.all { it.endpoint is LiveEndpointState.Installed }
+
+    fun revokeAllTasks() = slots.forEach { it.revokePublication() }
+
     fun register(
         slot: LiveWorkerSlot,
         live: FrozenStackScoping.Live,
-    ) {
+    ): WorkerOwner {
         live.bootstrap.reserveLiveWorker(domain, slot)
         val owner = live.bootstrap.sealed
         slot.tid = native.process.gettid()
@@ -766,6 +1265,7 @@ private class LiveWorkers(
             is LiveSetup.Ready -> {
                 validateLiveWorker(slot, live, result.value)
                 slot.worker = result.value
+                return result.value
             }
             is LiveSetup.Refused -> throw IllegalStateException("Live worker registration refused: ${result.failure}", result.failure.cause)
         }
@@ -808,7 +1308,7 @@ private class LiveWorkers(
                     .retireWorker(checkNotNull(worker))
             }
             when (val outcome = slot.retirement) {
-                LiveCompletion.Complete -> Unit
+                LiveCompletion.Complete -> slot.activeTask = null
                 is LiveCompletion.Pending, is LiveCompletion.Refused -> return outcome
                 null -> error("Live worker retirement remains unknown")
             }
@@ -819,6 +1319,7 @@ private class LiveWorkers(
 
 internal class LiveWorkerSlot(
     val index: Int,
+    private val gate: Any,
 ) {
     var thread: Thread? = null
     var tid: Tid? = null
@@ -830,6 +1331,142 @@ internal class LiveWorkerSlot(
     var recoveryAttempted = false
     var retirementAttempted = false
     var retirement: LiveCompletion? = null
+    var activeTask: OwnedInvocation<*>? = null
+    var endpoint: LiveEndpointState = LiveEndpointState.NotInstalled
+    private var publication: LiveTaskPublication? = null
+    private var revokedPublication: LiveTaskPublication? = null
+    private var cleanupLease: io.mazewall.platform.native.TaskLease? = null
+
+    fun hasPublication(): Boolean = publication != null
+
+    fun hasCleanup(): Boolean = cleanupLease != null
+
+    fun retainCleanup(
+        invocation: OwnedInvocation<*>,
+        lease: io.mazewall.platform.native.TaskLease,
+    ) {
+        check(Thread.holdsLock(gate) && thread === Thread.currentThread() && activeTask === invocation && worker === lease.worker)
+        check(invocation.retainsLiveLease(lease) && !hasCleanup())
+        cleanupLease = lease
+    }
+
+    fun publishRetained(
+        invocation: OwnedInvocation<*>,
+        lease: io.mazewall.platform.native.TaskLease,
+    ) {
+        check(Thread.holdsLock(gate) && thread === Thread.currentThread() && activeTask === invocation && worker === lease.worker)
+        check(cleanupMatches(invocation, lease) && endpoint !is LiveEndpointState.Lost && !hasPublication())
+        publication = LiveTaskPublication(invocation, lease)
+        cleanupLease = null
+    }
+
+    fun endpointIsInstalled(candidate: LiveObservationEndpoint): Boolean =
+        when (val state = endpoint) {
+            LiveEndpointState.NotInstalled -> false
+            is LiveEndpointState.Installed -> state.endpoint === candidate
+            is LiveEndpointState.Lost -> false
+        }
+
+    fun claimPublication(candidate: LiveObservationEndpoint): LiveTaskPublication? {
+        val current = publication
+        return if (Thread.holdsLock(gate) &&
+            endpointIsInstalled(candidate) &&
+            current != null &&
+            activeTask === current.invocation &&
+            worker === current.lease.worker
+        ) {
+            current
+        } else {
+            null
+        }
+    }
+
+    fun isCurrentPublication(
+        candidate: LiveObservationEndpoint,
+        claim: LiveTaskPublication,
+    ): Boolean = claimPublication(candidate) === claim
+
+    fun publishedMatches(
+        invocation: OwnedInvocation<*>,
+        lease: io.mazewall.platform.native.TaskLease,
+    ): Boolean {
+        val current = publication ?: return false
+        return current.invocation === invocation && current.lease === lease
+    }
+
+    fun revokedMatches(
+        invocation: OwnedInvocation<*>,
+        lease: io.mazewall.platform.native.TaskLease,
+    ): Boolean {
+        val previous = revokedPublication ?: return false
+        return previous.invocation === invocation && previous.lease === lease
+    }
+
+    fun wasRevokedFor(invocation: OwnedInvocation<*>): Boolean {
+        val previous = revokedPublication ?: return false
+        return previous.invocation === invocation
+    }
+
+    fun cleanupMatches(
+        invocation: OwnedInvocation<*>,
+        lease: io.mazewall.platform.native.TaskLease,
+    ): Boolean = activeTask === invocation && cleanupLease === lease
+
+    fun revokePublication() {
+        check(Thread.holdsLock(gate))
+        publication?.let {
+            revokedPublication = it
+            publication = null
+        }
+    }
+
+    fun complete(invocation: OwnedInvocation<*>) {
+        synchronized(gate) {
+            check(activeTask === invocation && thread === Thread.currentThread())
+            activeTask = null
+            cleanupLease = null
+        }
+    }
+}
+
+internal class LiveTaskPublication(
+    val invocation: OwnedInvocation<*>,
+    val lease: io.mazewall.platform.native.TaskLease,
+)
+
+internal sealed interface LiveEndpointState {
+    data object NotInstalled : LiveEndpointState
+
+    class Installed(
+        val endpoint: LiveObservationEndpoint,
+    ) : LiveEndpointState
+
+    class Lost(
+        val endpoint: LiveObservationEndpoint,
+    ) : LiveEndpointState
+}
+
+internal class DomainInvocationMetrics {
+    private val cancellationRequests = AtomicLong()
+    private val delivered = AtomicLong()
+    private val ended = AtomicLong()
+
+    fun recordCancellation() {
+        cancellationRequests.incrementAndGet()
+    }
+
+    fun recordDelivery() {
+        delivered.incrementAndGet()
+    }
+
+    fun recordEnd() {
+        ended.incrementAndGet()
+    }
+
+    fun snapshot(
+        admitted: Long,
+        rejected: Long,
+    ): InvocationDiagnostics = InvocationDiagnostics(admitted, rejected, cancellationRequests.get(), delivered.get(), ended.get())
 }
 
 private fun workerRetirementFailure(
@@ -902,7 +1539,23 @@ private data class LiveRelease(
     val resources: ScopingPreparation.ReleaseStep = ScopingPreparation.ReleaseStep.NotAttempted,
     val nativeOutcome: io.mazewall.platform.native.LiveCompletion? = null,
     val failure: Throwable? = null,
-)
+    val earlyInvalidateAttempted: Boolean = false,
+) {
+    fun mayRelease(allowPendingRetry: Boolean): Boolean {
+        val available = pass != ScopingPreparation.ReleasePass.Releasing &&
+            failure == null &&
+            nativeOutcome !is LiveCompletion.Refused
+        val earlyPending = earlyInvalidateAttempted && nativeOutcome is LiveCompletion.Pending && !allowPendingRetry
+        val unknown = listOf(invalidate, installation, landlock, resources).contains(ScopingPreparation.ReleaseStep.Unknown)
+        return available && !earlyPending && !unknown
+    }
+}
+
+private fun restoreInterrupt(failure: Throwable) {
+    if (failure.wasInterrupted()) Thread.currentThread().interrupt()
+}
+
+private fun Throwable.wasInterrupted(): Boolean = this is InterruptedException
 
 private fun liveReleaseComplete(progress: LiveRelease?): Boolean =
     progress == null ||
@@ -948,3 +1601,5 @@ private fun observeLiveRetirement(
             failure = CleanupFailures.merge(progress.failure, IllegalStateException("Native retirement refused: ${outcome.failure}", outcome.failure.cause)),
         )
     }
+
+private const val MAX_LIVE_VALIDATION_ATTEMPTS = 200

@@ -136,6 +136,93 @@ class SupervisorDaemonManagerTest {
         return owner
     }
 
+    internal data class SyntheticHistoryHelper(
+        val manager: SupervisorDaemonManager,
+        val process: MockProcess,
+        val context: SupervisorContext,
+        val entered: CountDownLatch,
+        val release: CountDownLatch,
+        val stops: AtomicInteger,
+    )
+
+    // Test-only composition; the simulated process is not an OS-owned helper.
+    internal fun attachSyntheticHistoryHelper(
+        owner: ManagedRuntime.CanonicalAcquisition,
+        relayContext: SupervisorContext,
+    ): SyntheticHistoryHelper {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val stops = AtomicInteger()
+        val process = MockProcess(ProcessHandle.current().pid(), SupervisorDaemon.DAEMON_READY_SENTINEL + "\n")
+        val launcher = object : MockProcessLauncher(process) {
+            override fun removeShutdownHook(hook: Thread) {
+                stops.incrementAndGet()
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                super.removeShutdownHook(hook)
+            }
+        }
+        val gone = AtomicBoolean(false)
+        val helperPid = checkNotNull(relayContext.confinedHelper).identity.pid
+        val manager = SupervisorDaemonManager(
+            MockNativeEngine().apply { this.process.tid = Tid(333) },
+            MockSocketManager(),
+            launcher,
+            bootstrapObservations(
+                mutableListOf(),
+                children = listOf(helperPid),
+                helperGone = gone,
+                helperPid = helperPid,
+                daemonPid = Pid(process.pid().toInt()),
+            ),
+        )
+        manager.onUnexpectedExit = {}
+        val state = owner.javaClass
+            .getDeclaredField("state")
+            .apply { isAccessible = true }
+        val prior = state.get(owner)
+        state.set(owner, state.type.enumConstants.single { (it as Enum<*>).name == "STARTING" })
+        owner.javaClass
+            .getDeclaredField("startActor")
+            .apply { isAccessible = true }
+            .set(owner, Thread.currentThread())
+        val previousProcessState = ContainmentStateRegistry.processState
+        try {
+            ContainmentStateRegistry.processState = ContainerState()
+            owner.javaClass
+                .getDeclaredMethod("startHelper", SupervisorDaemonManager::class.java)
+                .apply { isAccessible = true }
+                .invoke(owner, manager)
+        } finally {
+            ContainmentStateRegistry.processState = previousProcessState
+            state.set(owner, prior)
+        }
+        val context = relayContext.copy(daemonProcess = process)
+        val handleField = manager.javaClass
+            .getDeclaredField("handleRef")
+            .apply { isAccessible = true }
+
+        @Suppress("UNCHECKED_CAST")
+        val handle = handleField.get(manager) as AtomicReference<Any>
+        val running = handle
+            .get()
+            .javaClass
+            .getDeclaredConstructor(SupervisorContext::class.java)
+            .apply { isAccessible = true }
+            .newInstance(context)
+        handle.set(running)
+        manager.javaClass
+            .getDeclaredField("confinedOriginalContext")
+            .apply { isAccessible = true }
+            .set(manager, context)
+        owner.javaClass
+            .getDeclaredField("startedHelperContext")
+            .apply { isAccessible = true }
+            .set(owner, context)
+        gone.set(true)
+        return SyntheticHistoryHelper(manager, process, context, entered, release, stops)
+    }
+
     @Test
     fun `canonical acquisition remains pending while started helper stop is in flight`() {
         val helperGone = AtomicBoolean(false)
@@ -399,6 +486,8 @@ class SupervisorDaemonManagerTest {
         helperGone: AtomicBoolean = AtomicBoolean(false),
         helperMalformed: AtomicBoolean = AtomicBoolean(false),
         helperMode: AtomicReference<String> = AtomicReference("normal"),
+        helperPid: Pid = Pid(556),
+        daemonPid: Pid = Pid(555),
         change: (Path) -> Unit = {},
     ) = HelperSecurityObservation(
             namespaceKey = { path ->
@@ -410,7 +499,7 @@ class SupervisorDaemonManagerTest {
                 seen.add(path)
                 change(path)
                 val pid = path.getName(1).toString().let { if (it == "self") ProcessHandle.current().pid().toInt() else it.toInt() }
-                if (pid == 556 && path.fileName.toString() == "stat" && helperGone.get()) {
+                if (pid == helperPid.value && path.fileName.toString() == "stat" && helperGone.get()) {
                     throw java.nio.file.NoSuchFileException(path.toString())
                 }
                 when (path.fileName.toString()) {
@@ -439,7 +528,7 @@ class SupervisorDaemonManagerTest {
                 }.toByteArray()
             },
             childrenOf = { parent ->
-                assertEquals(Pid(555), parent)
+                assertEquals(daemonPid, parent)
                 children
             },
         )

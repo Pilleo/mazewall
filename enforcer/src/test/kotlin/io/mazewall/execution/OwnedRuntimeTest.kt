@@ -1297,6 +1297,16 @@ class OwnedRuntimeTest {
     }
 
     @Test
+    fun `owned domain has no synthetic raw phase setter`() {
+        val names = io.mazewall.enforcer.internal.execution.OwnedDomain::class.java.declaredMethods.map { it.name }
+        assertFalse(names.any { it == "access\$setPhase\$p" })
+        assertFalse(names.any { it == "access\$getPending\$p" })
+        assertFalse(names.any { it.contains("liveCancellationPermit", ignoreCase = true) })
+        val invocationNames = io.mazewall.enforcer.internal.execution.OwnedInvocation::class.java.declaredMethods.map { it.name }
+        assertFalse(invocationNames.any { it.contains("cancellationPermit", ignoreCase = true) })
+    }
+
+    @Test
     fun `canonical synchronous entry nests inline on the exact active worker`() {
         open().use { runtime ->
             val domain = runtime.prepare(policy(), DomainLimits(1, 1))
@@ -1605,6 +1615,10 @@ class OwnedRuntimeTest {
                     assertSame(worker.get(), Thread.currentThread())
                     assertNull(failure)
                     assertEquals(42, value)
+                    assertNull(io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.invocation)
+                    assertFailsWith<ExecutionTransitionException> {
+                        Mazewall.callContained(runtime, domain, Callable { secondEntries.incrementAndGet() })
+                    }
                     callbackEntered.countDown()
                     check(releaseCallback.await(5, TimeUnit.SECONDS))
                 }

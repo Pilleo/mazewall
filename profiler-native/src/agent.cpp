@@ -984,7 +984,7 @@ public:
 
     [[nodiscard]] std::uint64_t execution_id() const noexcept { return execution_.id; }
 
-    InvocationScope(JNIEnv* env, mazewall::profiler::BindingKind binding_kind) noexcept
+    InvocationScope(JNIEnv* env, mazewall::profiler::BindingKind binding_kind, const mazewall::live::Arguments& arguments = {}) noexcept
         : binding_kind_(binding_kind) {
         mazewall::live::enter();
         if (live_startup_mode != LiveStartupMode::DiagnosticOnly) {
@@ -1009,7 +1009,7 @@ public:
         }
         mazewall::live::jni::publish_capture(
             binding_kind == mazewall::profiler::BindingKind::unix_open0 ? 1 : 2,
-            raw_.frames.data(), raw_.count, raw_.failed);
+            raw_.frames.data(), raw_.count, raw_.failed, arguments);
     }
 
 private:
@@ -1369,14 +1369,17 @@ private:
     RawCapture raw_{};
 };
 
+static_assert(sizeof(jlong) == sizeof(uint64_t) && sizeof(jint) == sizeof(uint32_t));
 jint JNICALL proxy_unix_open0(JNIEnv* env, jclass owner, jlong path, jint flags, jint mode) {
+    const mazewall::live::Arguments arguments{mazewall::live::ArgumentKind::Open0, static_cast<uint64_t>(path),
+        static_cast<uint32_t>(flags), static_cast<uint32_t>(mode), 0};
     const int entry_errno = errno;
     if (open_boundary_recorder != nullptr) {
         const auto input = prepare_open_boundary(path, flags, mode);
         jint result;
         int original_errno;
         {
-            InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0);
+            InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0, arguments);
             const auto id = invocation.published_invocation_id();
             const auto execution_id = invocation.execution_id();
             const auto original = original_unix_open0.load(std::memory_order_acquire);
@@ -1391,7 +1394,7 @@ jint JNICALL proxy_unix_open0(JNIEnv* env, jclass owner, jlong path, jint flags,
     jint result;
     int original_errno;
     {
-        InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0);
+        InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0, arguments);
         const auto original = original_unix_open0.load(std::memory_order_acquire);
         const bool exceptional = live_startup_mode != LiveStartupMode::DiagnosticOnly && env->ExceptionCheck();
 #ifdef MAZEWALL_LIVE_JNI_TEST
@@ -1406,11 +1409,13 @@ jint JNICALL proxy_unix_open0(JNIEnv* env, jclass owner, jlong path, jint flags,
 }
 
 jint JNICALL proxy_unix_openat0(JNIEnv* env, jclass owner, jint dirfd, jlong path, jint flags, jint mode) {
+    const mazewall::live::Arguments arguments{mazewall::live::ArgumentKind::Openat0, static_cast<uint64_t>(path),
+        static_cast<uint32_t>(flags), static_cast<uint32_t>(mode), static_cast<uint32_t>(dirfd)};
     const int entry_errno = errno;
     jint result;
     int original_errno;
     {
-        InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_openat0);
+        InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_openat0, arguments);
         record_invocation_fd(invocation.published_invocation_id(), dirfd);
         const auto original = original_unix_openat0.load(std::memory_order_acquire);
         const bool exceptional = live_startup_mode != LiveStartupMode::DiagnosticOnly && env->ExceptionCheck();

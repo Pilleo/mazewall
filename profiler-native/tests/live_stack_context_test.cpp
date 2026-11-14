@@ -1,4 +1,5 @@
 #include "live_stack_context.hpp"
+#include "live_stack_match_abi.h"
 
 #include <cassert>
 #include <chrono>
@@ -17,6 +18,7 @@
 #include <thread>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 
 using namespace mazewall::live;
 using namespace std::chrono_literals;
@@ -290,7 +292,7 @@ void lifecycle_and_capture() {
             case 4: ++wrong.tid; break; case 5: ++wrong.process_start_ticks; break;
         }
         end(w, wrong, 4, 8);
-        assert(test_gate(q.worker_id, true)); end(w, wrong, 4, 8); test_gate(q.worker_id, false);
+            assert(test_gate(q.worker_id, true)); end(w, wrong, 4, 8); test_gate(q.worker_id, false);
         assert(read(q).publication_id == b.publication_id);
     }
     end(w, a, 4, 8); assert(read(q).publication_id == b.publication_id);
@@ -532,6 +534,8 @@ void readiness_failure(const char* mode) {
     auto q = request(1); q.worker_capacity = 1; call(q, 5, reason);
     q = request(0); q.installation_id = 1; q.worker_id = 2; q.task_id = 3; q.code_generation = 4; q.tid = 5;
     read(q, 5, reason);
+    q.invocation_id = 6;
+    assert(match_arguments(q, 7, Arguments{ArgumentKind::Open0, 0, 0, 0, 0}) == MatchResult::Unavailable);
 }
 
 void malformed_buffers() {
@@ -660,9 +664,297 @@ void isolated_exhaustion(bool serial_overflow) {
     auto reserve = request(1); reserve.worker_capacity = 1; call(reserve, 7, 15);
 }
 
+void argument_provenance() {
+    InstallationFixture i; WorkerThread w; auto q = i.registration(w); begin(w, q);
+    const Arguments args{ArgumentKind::Open0, 0xfedcba9876543210ULL, 0x80000000U, 0xffffffffU, 0};
+    w.run([&] { enter(); mw_live_frame_v1 frame{i.token, -1}; publish(1, &frame, 1, Reason::None, args); });
+    const auto snapshot = read(q); q.invocation_id = snapshot.invocation_id;
+    assert(match_arguments(q, snapshot.publication_id, args) == MatchResult::Match);
+    auto changed = args; changed.path_bits ^= 1;
+    assert(match_arguments(q, snapshot.publication_id, changed) == MatchResult::Unavailable);
+    changed = args; changed.flags_bits ^= 1;
+    assert(match_arguments(q, snapshot.publication_id, changed) == MatchResult::Unavailable);
+    changed = args; changed.mode_bits ^= 1;
+    assert(match_arguments(q, snapshot.publication_id, changed) == MatchResult::Unavailable);
+    changed = args; changed.dirfd_bits = 1;
+    assert(match_arguments(q, snapshot.publication_id, changed) == MatchResult::Unavailable);
+    assert(match_arguments(q, 0, args) == MatchResult::Unavailable);
+    assert(match_arguments(q, snapshot.publication_id + 1, args) == MatchResult::Unavailable);
+    auto invalid = q; invalid.invocation_id = 0;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.invocation_id = MW_LIVE_MAX_ID + 1;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.abi_version = 2;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.struct_bytes--;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.operation = 1;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.reserved0 = 1;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.reserved1 = 1;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.worker_capacity = 1;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.task_id = 0;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.worker_id = MW_LIVE_MAX_ID + 1;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.installation_id++;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.code_generation++;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.tid++;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.process_cookie++;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    changed = args; changed.kind = ArgumentKind::None;
+    assert(match_arguments(q, snapshot.publication_id, changed) == MatchResult::Unavailable);
+    changed.kind = static_cast<ArgumentKind>(99);
+    assert(match_arguments(q, snapshot.publication_id, changed) == MatchResult::Unavailable);
+    changed.kind = ArgumentKind::Openat0;
+    assert(match_arguments(q, snapshot.publication_id, changed) == MatchResult::Unavailable);
+    for (auto member : {&mw_live_request_v1::installation_id, &mw_live_request_v1::worker_id,
+                        &mw_live_request_v1::task_id, &mw_live_request_v1::code_generation,
+                        &mw_live_request_v1::invocation_id}) {
+        invalid = q; invalid.*member = 0;
+        assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+        invalid.*member = MW_LIVE_MAX_ID + 1;
+        assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    }
+    invalid = q; invalid.tid = 0;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.tgid = 0;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    invalid = q; invalid.process_start_ticks = 0;
+    assert(match_arguments(invalid, snapshot.publication_id, args) == MatchResult::Unavailable);
+    assert(match_arguments(q, MW_LIVE_MAX_ID + 1, args) == MatchResult::Unavailable);
+    assert(match_arguments(q, snapshot.publication_id, args) == MatchResult::Match);
+    assert(test_gate(q.worker_id, true));
+    assert(match_arguments(q, snapshot.publication_id, args) == MatchResult::Unavailable);
+    assert(test_gate(q.worker_id, false));
+    w.run([] { leave(); });
+    assert(match_arguments(q, snapshot.publication_id, args) == MatchResult::Unavailable);
+    w.run([&] { enter(); mw_live_frame_v1 frames[128]{};
+        for (auto& frame : frames) frame = {i.token, 0};
+        publish(1, frames, 128, Reason::None, args); });
+    q.invocation_id = 0; const auto full = read(q); q.invocation_id = full.invocation_id;
+    assert(full.frame_count == 128 && match_arguments(q, full.publication_id, args) == MatchResult::Match);
+    assert(match_arguments(q, snapshot.publication_id, args) == MatchResult::Unavailable);
+    w.run([] { poison(); });
+    assert(match_arguments(q, full.publication_id, args) == MatchResult::Unavailable);
+    w.run([] { leave(); });
+    w.run([&] { enter(); mw_live_frame_v1 frames[129]{};
+        for (auto& frame : frames) frame = {i.token, 0};
+        publish(1, frames, 129, Reason::None, args); });
+    assert(match_arguments(q, full.publication_id, args) == MatchResult::Unavailable);
+    w.run([] { leave(); });
+    q.invocation_id = 0; end(w, q); retire(i, w, q);
+}
+
+void argument_match_revocation(TestPoint point) {
+    InstallationFixture i; WorkerThread w; auto q = i.registration(w); begin(w, q);
+    const Arguments args{ArgumentKind::Open0, 7, 8, 9, 0};
+    w.run([&] { enter(); mw_live_frame_v1 frame{i.token, 0}; publish(1, &frame, 1, Reason::None, args); });
+    auto snapshot = read(q); q.invocation_id = snapshot.invocation_id;
+    Rendezvous barrier; arm(point, barrier);
+    auto match = std::async(std::launch::async, [&] { return match_arguments(q, snapshot.publication_id, args); });
+    barrier.wait(); w.run([] { leave(); }); disarm(barrier);
+    assert(completed(match) == MatchResult::Unavailable);
+    q.invocation_id = 0; end(w, q); retire(i, w, q);
+}
+
+void argument_lifecycle_revocation(int mode, TestPoint point) {
+    InstallationFixture i; WorkerThread w; auto q = i.registration(w); begin(w, q);
+    const Arguments args{ArgumentKind::Open0, 42, 0, 0, 0};
+    w.run([&] { enter(); mw_live_frame_v1 frame{i.token, 0}; publish(1, &frame, 1, Reason::None, args); });
+    const auto snapshot = read(q); q.invocation_id = snapshot.invocation_id;
+    Rendezvous barrier; arm(point, barrier);
+    auto match = std::async(std::launch::async, [&] { return match_arguments(q, snapshot.publication_id, args); });
+    barrier.wait();
+    if (mode == 0) { auto e = q; e.invocation_id = 0; end(w, e); }
+    else if (mode == 1) call(i.operation(6));
+    else if (mode == 2) replacement();
+    else if (mode == 3) shutdown();
+    else if (mode == 4) w.run([] { enter(); });
+    else if (mode == 5) w.run([] { poison(); });
+    else if (mode == 6) w.join();
+    else if (mode == 7) { test_limits(MW_LIVE_MAX_ID, replacement_serial()); uint64_t id = 0; assert(!mint_id(id).ok()); }
+    else w.run([&] { publish(1, nullptr, 0, Reason::CaptureFailed, args); });
+    disarm(barrier); assert(completed(match) == MatchResult::Unavailable);
+    assert(match_arguments(q, snapshot.publication_id, args) == MatchResult::Unavailable);
+}
+void isolated_argument_lifecycle() {
+    for (int mode = 0; mode < 9; ++mode) {
+        for (auto point : {TestPoint::MatchReleased, TestPoint::MatchLive, TestPoint::MatchControl,
+                           TestPoint::MatchTask, TestPoint::MatchPublication}) {
+            const auto pid = fork(); assert(pid >= 0);
+            if (pid == 0) { test_process(static_cast<uint32_t>(getpid())); argument_lifecycle_revocation(mode, point); _exit(0); }
+            int status = 0; assert(waitpid(pid, &status, 0) == pid);
+            assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        }
+    }
+}
+
+void argument_retirement_reuse() {
+    const Arguments args{ArgumentKind::Openat0, 0x1234, 0xffffffffU, 0x80000000U, 0xffffff9cU};
+    InstallationFixture first; WorkerThread old_worker; auto old = first.registration(old_worker); begin(old_worker, old);
+    old_worker.run([&] { enter(); mw_live_frame_v1 frame{first.token, 0}; publish(2, &frame, 1, Reason::None, args); });
+    auto prior = read(old); old.invocation_id = prior.invocation_id;
+    assert(match_arguments(old, prior.publication_id, args) == MatchResult::Match);
+    old_worker.run([] { leave(); }); auto old_end = old; old_end.invocation_id = 0; end(old_worker, old_end);
+    retire(first, old_worker, old_end);
+    assert(match_arguments(old, prior.publication_id, args) == MatchResult::Unavailable);
+    InstallationFixture second; WorkerThread new_worker; auto fresh = second.registration(new_worker); begin(new_worker, fresh);
+    new_worker.run([&] { enter(); mw_live_frame_v1 frame{second.token, 0}; publish(2, &frame, 1, Reason::None, args); });
+    auto current = read(fresh); fresh.invocation_id = current.invocation_id;
+    assert(match_arguments(old, prior.publication_id, args) == MatchResult::Unavailable);
+    assert(match_arguments(fresh, current.publication_id, args) == MatchResult::Match);
+    assert(match_arguments(fresh, prior.publication_id, args) == MatchResult::Unavailable);
+    new_worker.run([] { leave(); }); fresh.invocation_id = 0; end(new_worker, fresh); retire(second, new_worker, fresh);
+}
+
+void invalid_published_arguments_preserve_snapshot() {
+    InstallationFixture i; WorkerThread w; auto q = i.registration(w); begin(w, q);
+    const Arguments good{ArgumentKind::Open0, 42, 7, 8, 0};
+    const Arguments invalid[] = {
+        {}, {static_cast<ArgumentKind>(99), 42, 7, 8, 0},
+        {ArgumentKind::Openat0, 42, 7, 8, 0}, {ArgumentKind::Open0, 42, 7, 8, 1}
+    };
+    for (const auto& published : invalid) {
+        w.run([&] { enter(); mw_live_frame_v1 frame{i.token, -1};
+            publish(1, &frame, 1, Reason::None, published); });
+        q.invocation_id = 0; const auto snapshot = read(q);
+        assert(snapshot.binding == 1 && snapshot.frame_count == 1 && snapshot.frames[0].method_token == i.token &&
+               snapshot.frames[0].location == -1);
+        q.invocation_id = snapshot.invocation_id;
+        for (const auto& candidate : invalid)
+            assert(match_arguments(q, snapshot.publication_id, candidate) == MatchResult::Unavailable);
+        assert(match_arguments(q, snapshot.publication_id, good) == MatchResult::Unavailable);
+        w.run([] { leave(); });
+    }
+    w.run([&] { enter(); mw_live_frame_v1 frame{i.token, -1}; publish(1, &frame, 1, Reason::None, good); });
+    q.invocation_id = 0; const auto snapshot = read(q); q.invocation_id = snapshot.invocation_id;
+    assert(match_arguments(q, snapshot.publication_id, good) == MatchResult::Match);
+    w.run([] { leave(); }); q.invocation_id = 0; end(w, q); retire(i, w, q);
+}
+
+static_assert(sizeof(mw_live_match_request_v1) == 128 && alignof(mw_live_match_request_v1) == 8);
+static_assert(offsetof(mw_live_match_request_v1, request) == 0);
+static_assert(offsetof(mw_live_match_request_v1, expected_publication) == 88);
+static_assert(offsetof(mw_live_match_request_v1, kind) == 96);
+static_assert(offsetof(mw_live_match_request_v1, flags_bits) == 100);
+static_assert(offsetof(mw_live_match_request_v1, mode_bits) == 104);
+static_assert(offsetof(mw_live_match_request_v1, dirfd_bits) == 108);
+static_assert(offsetof(mw_live_match_request_v1, path_bits) == 112);
+static_assert(offsetof(mw_live_match_request_v1, reserved) == 120);
+static_assert(sizeof(mw_live_match_result_v1) == 16 && alignof(mw_live_match_result_v1) == 8);
+static_assert(offsetof(mw_live_match_result_v1, abi_version) == 0);
+static_assert(offsetof(mw_live_match_result_v1, struct_bytes) == 4);
+static_assert(offsetof(mw_live_match_result_v1, status) == 8);
+static_assert(offsetof(mw_live_match_result_v1, reserved) == 12);
+void native_match_wrapper() {
+    InstallationFixture i; WorkerThread w; auto q = i.registration(w); begin(w, q);
+    const Arguments args{ArgumentKind::Open0, 42, 7, 8, 0};
+    w.run([&] { enter(); mw_live_frame_v1 frame{i.token, -1}; publish(1, &frame, 1, Reason::None, args); });
+    const auto snapshot = read(q); q.invocation_id = snapshot.invocation_id;
+    mw_live_match_request_v1 input{}; input.request = q; input.expected_publication = snapshot.publication_id;
+    input.kind = 1; input.path_bits = 42; input.flags_bits = 7; input.mode_bits = 8;
+    struct Output { uint64_t before; mw_live_match_result_v1 result; uint64_t after; } output{0x1234, {}, 0x5678};
+    const auto unchanged = input;
+    assert(mazewall_live_match_arguments_v1(&input, sizeof(input), &output.result, sizeof(output.result)) == MW_LIVE_MATCH_MATCH);
+    assert(output.result.abi_version == 1 && output.result.struct_bytes == 16 && output.result.status == MW_LIVE_MATCH_MATCH && !output.result.reserved);
+    assert(output.before == 0x1234 && output.after == 0x5678 && std::memcmp(&input, &unchanged, sizeof(input)) == 0);
+    input.path_bits ^= 1; const auto altered = input;
+    assert(mazewall_live_match_arguments_v1(&input, sizeof(input), &output.result, sizeof(output.result)) == MW_LIVE_MATCH_UNAVAILABLE);
+    assert(output.result.status == MW_LIVE_MATCH_UNAVAILABLE && output.before == 0x1234 && output.after == 0x5678);
+    assert(std::memcmp(&input, &altered, sizeof(input)) == 0);
+    auto check = [&](const mw_live_match_request_v1& in, uint32_t status) {
+        output.result = {}; const auto saved = in;
+        assert(mazewall_live_match_arguments_v1(&in, sizeof(in), &output.result, sizeof(output.result)) == status);
+        assert(output.result.abi_version == 1 && output.result.struct_bytes == 16 && output.result.status == status && !output.result.reserved);
+        assert(output.before == 0x1234 && output.after == 0x5678 && std::memcmp(&in, &saved, sizeof(in)) == 0);
+    };
+    input = unchanged;
+    for (auto member : {&mw_live_request_v1::installation_id, &mw_live_request_v1::worker_id,
+                        &mw_live_request_v1::task_id, &mw_live_request_v1::code_generation, &mw_live_request_v1::invocation_id}) {
+        auto bad = input; bad.request.*member = 0; check(bad, MW_LIVE_MATCH_MALFORMED);
+        bad.request.*member = MW_LIVE_MAX_ID + 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    }
+    auto bad = input; bad.request.abi_version = 2; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.struct_bytes--; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.operation = 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.reserved0 = 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.reserved1 = 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.worker_capacity = 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.process_cookie = 0; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.process_start_ticks = 0; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.tgid = 0; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.tgid = uint32_t(INT32_MAX) + 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.tid = 0; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.tid = uint32_t(INT32_MAX) + 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.request.process_cookie = UINT64_C(1) << 63; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    bad = input; bad.request.process_start_ticks = UINT64_C(1) << 63; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    bad = input; ++bad.request.tid; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    bad = input; bad.expected_publication = 0; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad.expected_publication = MW_LIVE_MAX_ID + 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.reserved = 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.kind = 0; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad.kind = 3; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.dirfd_bits = 1; check(bad, MW_LIVE_MATCH_MALFORMED);
+    bad = input; bad.kind = 2; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    bad = input; bad.flags_bits ^= 1; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    bad = input; bad.mode_bits ^= 1; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    bad = input; ++bad.request.tgid; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    for (auto member : {&mw_live_request_v1::installation_id, &mw_live_request_v1::worker_id,
+                        &mw_live_request_v1::task_id, &mw_live_request_v1::code_generation}) {
+        bad = input; ++(bad.request.*member); check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    }
+    bad = input; ++bad.request.process_cookie; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    assert(test_gate(q.worker_id, true)); check(input, MW_LIVE_MATCH_UNAVAILABLE); assert(test_gate(q.worker_id, false));
+    alignas(8) unsigned char buffers[192]; std::memset(buffers, 0xA5, sizeof(buffers));
+    auto unchanged_buffer = [&] { for (auto byte : buffers) assert(byte == 0xA5); };
+    assert(mazewall_live_match_arguments_v1(&input, sizeof(input), nullptr, 16) == MW_LIVE_MATCH_MALFORMED);
+    assert(mazewall_live_match_arguments_v1(&input, sizeof(input), buffers + 1, 16) == MW_LIVE_MATCH_MALFORMED); unchanged_buffer();
+    assert(mazewall_live_match_arguments_v1(&input, sizeof(input), buffers, 15) == MW_LIVE_MATCH_MALFORMED); unchanged_buffer();
+    for (auto pair : {std::pair<size_t, size_t>{0, 0}, {0, 8}, {8, 0}}) {
+        assert(mazewall_live_match_arguments_v1(buffers + pair.first, 128, buffers + pair.second, 16) == MW_LIVE_MATCH_MALFORMED);
+        unchanged_buffer();
+    }
+    assert(mazewall_live_match_arguments_v1(buffers, 8, buffers, 16) == MW_LIVE_MATCH_MALFORMED); unchanged_buffer();
+    assert(mazewall_live_match_arguments_v1(buffers + 1, 8, buffers, 16) == MW_LIVE_MATCH_MALFORMED); unchanged_buffer();
+    assert(mazewall_live_match_arguments_v1(buffers, 128, buffers + 128, 16) == MW_LIVE_MATCH_MALFORMED);
+    auto* adjacent = reinterpret_cast<mw_live_match_result_v1*>(buffers + 128);
+    assert(adjacent->abi_version == 1 && adjacent->struct_bytes == 16 && adjacent->status == MW_LIVE_MATCH_MALFORMED && !adjacent->reserved);
+    for (size_t n = 0; n < 128; ++n) assert(buffers[n] == 0xA5);
+    std::memset(buffers, 0xA5, sizeof(buffers));
+    const auto* overflow = reinterpret_cast<const void*>(UINTPTR_MAX - 7);
+    assert(mazewall_live_match_arguments_v1(overflow, 128, buffers, 16) == MW_LIVE_MATCH_MALFORMED); unchanged_buffer();
+    auto* overflow_out = reinterpret_cast<void*>(UINTPTR_MAX - 7);
+    assert(mazewall_live_match_arguments_v1(&input, sizeof(input), overflow_out, 16) == MW_LIVE_MATCH_MALFORMED);
+    assert(mazewall_live_match_arguments_v1(nullptr, 0, &output.result, 16) == MW_LIVE_MATCH_MALFORMED);
+    assert(output.result.abi_version == 1 && output.result.struct_bytes == 16 && output.result.status == MW_LIVE_MATCH_MALFORMED && !output.result.reserved);
+    assert(mazewall_live_match_arguments_v1(buffers + 1, 128, &output.result, 16) == MW_LIVE_MATCH_MALFORMED);
+    assert(mazewall_live_match_arguments_v1(buffers, 127, &output.result, 16) == MW_LIVE_MATCH_MALFORMED);
+    check(input, MW_LIVE_MATCH_MATCH);
+    w.run([] { leave(); }); check(input, MW_LIVE_MATCH_UNAVAILABLE);
+    const Arguments at{ArgumentKind::Openat0, 0, 0x80000000U, 0xffffffffU, 0xffffff9cU};
+    w.run([&] { enter(); mw_live_frame_v1 frame{i.token, -1}; publish(2, &frame, 1, Reason::None, at); });
+    q.invocation_id = 0; const auto at_snapshot = read(q); q.invocation_id = at_snapshot.invocation_id;
+    input.request = q; input.expected_publication = at_snapshot.publication_id; input.kind = 2;
+    input.path_bits = at.path_bits; input.flags_bits = at.flags_bits; input.mode_bits = at.mode_bits; input.dirfd_bits = at.dirfd_bits;
+    check(input, MW_LIVE_MATCH_MATCH);
+    bad = input; bad.dirfd_bits ^= 1; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    bad = input; bad.expected_publication = snapshot.publication_id; check(bad, MW_LIVE_MATCH_UNAVAILABLE);
+    auto cancel = i.operation(6); call(cancel); check(input, MW_LIVE_MATCH_UNAVAILABLE);
+    w.run([] { leave(); }); check(input, MW_LIVE_MATCH_UNAVAILABLE);
+    q.invocation_id = 0; end(w, q); retire(i, w, q);
+    check(input, MW_LIVE_MATCH_UNAVAILABLE);
+}
+
 void exports(const char* path) {
     void* library = dlopen(path, RTLD_NOW | RTLD_LOCAL); assert(library);
-    const char* names[] = {"mazewall_live_info_v1", "mazewall_live_lifecycle_v1", "mazewall_live_copy_v1"};
+    const char* names[] = {"mazewall_live_info_v1", "mazewall_live_lifecycle_v1", "mazewall_live_copy_v1", "mazewall_live_match_arguments_v1"};
     for (auto name : names) assert(dlsym(library, name));
     auto info = reinterpret_cast<uint32_t (*)(void*, uint32_t)>(dlsym(library, names[0]));
     mw_live_info_v1 out{}; assert(info(&out, 64) == 5 && out.status == 5 && out.reason == 19);
@@ -701,7 +993,7 @@ void exports(const char* path) {
             }
         }
     }
-    assert(live_exports == 3);
+    assert(live_exports == 4);
     dlclose(library);
 }
 }
@@ -725,6 +1017,13 @@ int main(int argc, char** argv) {
         assert(owners.load() == 0); return 0;
     }
     available_while_original_stopped();
+    argument_provenance();
+    isolated_argument_lifecycle();
+    argument_retirement_reuse();
+    invalid_published_arguments_preserve_snapshot();
+    native_match_wrapper();
+    for (auto point : {TestPoint::MatchReleased, TestPoint::MatchLive, TestPoint::MatchControl,
+                       TestPoint::MatchTask, TestPoint::MatchPublication}) argument_match_revocation(point);
     probe_eligibility();
     malformed_buffers(); bounds_and_enrollment(); lifecycle_and_capture(); held_gates();
     reader_reuse(TestPoint::CopyDiscovered); reader_reuse(TestPoint::CopyReleased);

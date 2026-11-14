@@ -1161,7 +1161,7 @@ void test_observe_original() noexcept {
                                                 &snapshot, sizeof(snapshot));
 }
 #endif
-void publish_capture(uint32_t binding, const jvmtiFrameInfo* frames, jint count, bool failed) noexcept {
+void publish_capture(uint32_t binding, const jvmtiFrameInfo* frames, jint count, bool failed, const Arguments& arguments) noexcept {
     if (guard.state != GuardState::Admitted || !probe_eligible()) return;
     if (failed || count <= 0 || !frames) { publish(binding, nullptr, 0, Reason::CaptureFailed); return; }
     if (count > static_cast<jint>(MW_LIVE_MAX_FRAMES)) { publish(binding, nullptr, 0, Reason::Overflow); return; }
@@ -1174,7 +1174,7 @@ void publish_capture(uint32_t binding, const jvmtiFrameInfo* frames, jint count,
         translated[n] = {method->second.token, frames[n].location};
     }
     if (guard.state == GuardState::Admitted && probe_eligible())
-        publish(binding, translated.data(), static_cast<uint32_t>(count));
+        publish(binding, translated.data(), static_cast<uint32_t>(count), Reason::None, arguments);
 }
 
 #ifdef MAZEWALL_MANAGED_T4_FIXTURE

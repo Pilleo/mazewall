@@ -232,6 +232,18 @@ internal class OwnedStackScopingBootstrap private constructor(
     internal val helperContext: io.mazewall.enforcer.internal.supervisor.SupervisorContext? = inputs.helperContext
     internal val canonicalJson: String get() = inputs.canonicalJson
 
+    internal fun matchesObservation(snapshot: io.mazewall.platform.native.LiveSnapshot): Boolean {
+        if (snapshot.task.worker.owner !== sealed || snapshot.task.worker.enrollment !== enrollment) return false
+        val boundary = when (snapshot.binding) {
+            io.mazewall.platform.native.LiveBinding.Open0 -> "open0"
+            io.mazewall.platform.native.LiveBinding.Openat0 -> "openat0"
+        }
+        val identities = snapshot.frames.map { frame -> enrollment.methods.singleOrNull { it.token == frame.method }?.identity ?: return false }
+        return inputs.corridors.any { corridor ->
+            corridor.first().name == boundary && identities.size >= corridor.size && identities.take(corridor.size) == corridor
+        }
+    }
+
     internal fun matchesClaim(
         runtime: ManagedRuntime,
         policy: io.mazewall.enforcer.api.PolicyDefinition<*>,

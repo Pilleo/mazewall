@@ -960,6 +960,11 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.enforcer.internal.execution.LiveEndpointState" to setOf(
+                "io.mazewall.enforcer.internal.execution.LiveEndpointState\$NotInstalled",
+                "io.mazewall.enforcer.internal.execution.LiveEndpointState\$Installed",
+                "io.mazewall.enforcer.internal.execution.LiveEndpointState\$Lost",
+            ),
             "io.mazewall.ffi.internal.RealNativeStackContexts\$BootstrapResult" to setOf(
                 "io.mazewall.ffi.internal.RealNativeStackContexts\$BootstrapResult\$Checked",
                 "io.mazewall.ffi.internal.RealNativeStackContexts\$BootstrapResult\$Refused",

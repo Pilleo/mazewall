@@ -28,6 +28,7 @@ internal class ConfinedHelperRelay(
     private val session: SocketHelperPool.Session,
     private val validateSetup: (ConfinedManifest) -> Unit,
     private val validateRoot: (HelperCapability, SupervisorOwnedFd) -> Unit,
+    private val publishReady: () -> Unit = {},
 ) {
     private var state: ConfinedHelperState = ConfinedHelperState.Unsealed
     private var pendingStage: CompletableFuture<ConfinedStage>? = null
@@ -151,6 +152,7 @@ internal class ConfinedHelperRelay(
         val next = ConfinedHelperMachine.evaluate(state, event)
         state = next.state
         next.effects.forEach(::interpret)
+        if (event is ConfinedHelperEvent.Sealed && next.state is ConfinedHelperState.Ready) publishReady()
         if (next.state is ConfinedHelperState.Ready && next.state.active == null) localDeadline = null
     }
 

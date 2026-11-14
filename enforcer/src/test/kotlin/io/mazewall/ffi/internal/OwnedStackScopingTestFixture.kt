@@ -5,12 +5,17 @@ import io.mazewall.enforcer.api.execution.DomainLimits
 import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.enforcer.api.execution.PreparedOperationResources
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.LiveCompletion
 import io.mazewall.platform.native.LiveSetup
+import io.mazewall.platform.native.TaskId
+import io.mazewall.platform.native.TaskLease
 import io.mazewall.platform.native.WorkerId
+import io.mazewall.platform.native.WorkerOwner
 import java.nio.file.Path
 import java.util.Optional
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 internal fun captureWithMissingAgent(
@@ -76,6 +81,27 @@ internal class RecordingCapture(
     val recoverWorkerCalls = AtomicInteger()
     val workerRetireCalls = AtomicInteger()
     val beginCalls = AtomicInteger()
+
+    @Volatile var afterTaskBegin: () -> Unit = {}
+
+    @Volatile var duringTaskEnd: () -> Unit = {}
+
+    val copyCalls = AtomicInteger()
+
+    @Volatile var copyResult: (io.mazewall.platform.native.TaskLease, io.mazewall.platform.native.InvocationId?) -> io.mazewall.platform.native.LiveRead =
+        { task, expected ->
+            io.mazewall.platform.native.UnsupportedNativeStackContexts
+                .copy(task, expected)
+        }
+    val endCalls = AtomicInteger()
+    val taskBeginFailure = AtomicReference<Throwable?>()
+    val taskBeginRefusal = AtomicReference<io.mazewall.platform.native.LiveFailure?>()
+    val taskRecoveryFailure = AtomicReference<Throwable?>()
+    val taskRecoveryCalls = AtomicInteger()
+    val taskEndFailure = AtomicReference<Throwable?>()
+    val foreignTaskWorker = AtomicBoolean()
+    val taskEndResult = AtomicReference<LiveCompletion>(LiveCompletion.Complete)
+    val nextTaskId = AtomicLong()
     val workerRetirement = AtomicReference<io.mazewall.platform.native.LiveCompletion>(io.mazewall.platform.native.LiveCompletion.Complete)
     val workerThread = AtomicReference<Thread>()
     val workerOwner = AtomicReference<io.mazewall.platform.native.WorkerOwner>()
@@ -308,10 +334,50 @@ internal class RecordingCapture(
                 .beginCurrent(worker)
         }
 
-        override fun prepareTaskReceipt(worker: io.mazewall.platform.native.WorkerOwner): io.mazewall.platform.native.TaskBeginReceipt {
+        override fun prepareTaskReceipt(worker: io.mazewall.platform.native.WorkerOwner): io.mazewall.platform.native.TaskBeginReceipt = RecordingTaskReceipt(worker, Thread.currentThread())
+
+        override fun beginCurrent(
+            worker: io.mazewall.platform.native.WorkerOwner,
+            receipt: io.mazewall.platform.native.TaskBeginReceipt,
+        ): LiveSetup<io.mazewall.platform.native.TaskLease> {
+            val original = receipt as RecordingTaskReceipt
+            check(original.worker === worker && original.thread === Thread.currentThread() && original.task == null)
             beginCalls.incrementAndGet()
-            return io.mazewall.platform.native.UnsupportedNativeStackContexts
-                .prepareTaskReceipt(worker)
+            taskBeginRefusal.get()?.let { return LiveSetup.Refused(it) }
+            val taskWorker = if (foreignTaskWorker.get()) {
+                WorkerOwner(worker.owner, WorkerId(2), worker.tid)
+            } else {
+                worker
+            }
+            val task = TaskLease(taskWorker, TaskId(nextTaskId.incrementAndGet()))
+            original.task = task
+            taskBeginFailure.getAndSet(null)?.let { throw it }
+            afterTaskBegin()
+            return LiveSetup.Ready(task)
+        }
+
+        override fun recoverTask(receipt: io.mazewall.platform.native.TaskBeginReceipt): LiveSetup<io.mazewall.platform.native.TaskLease> {
+            val original = receipt as RecordingTaskReceipt
+            check(original.thread === Thread.currentThread())
+            taskRecoveryCalls.incrementAndGet()
+            taskRecoveryFailure.getAndSet(null)?.let { throw it }
+            return LiveSetup.Ready(checkNotNull(original.task))
+        }
+
+        override fun endCurrent(task: io.mazewall.platform.native.TaskLease): io.mazewall.platform.native.LiveCompletion {
+            check(task.worker === workerOwner.get() && workerThread.get() === Thread.currentThread())
+            endCalls.incrementAndGet()
+            duringTaskEnd()
+            taskEndFailure.getAndSet(null)?.let { throw it }
+            return taskEndResult.get()
+        }
+
+        override fun copy(
+            task: io.mazewall.platform.native.TaskLease,
+            expectedInvocation: io.mazewall.platform.native.InvocationId?,
+        ): io.mazewall.platform.native.LiveRead {
+            copyCalls.incrementAndGet()
+            return copyResult(task, expectedInvocation)
         }
 
         override fun retireWorker(worker: io.mazewall.platform.native.WorkerOwner): io.mazewall.platform.native.LiveCompletion {
@@ -349,6 +415,13 @@ private class RecordingWorkerReceipt(
     val thread: Thread,
 ) : io.mazewall.platform.native.WorkerRegistrationReceipt {
     var worker: io.mazewall.platform.native.WorkerOwner? = null
+}
+
+private class RecordingTaskReceipt(
+    val worker: io.mazewall.platform.native.WorkerOwner,
+    val thread: Thread,
+) : io.mazewall.platform.native.TaskBeginReceipt {
+    var task: io.mazewall.platform.native.TaskLease? = null
 }
 
 internal fun captureSynthetic(

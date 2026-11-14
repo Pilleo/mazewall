@@ -81,6 +81,7 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFailsWith
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ConfinedHelperControlTest {
@@ -172,9 +173,11 @@ class ConfinedHelperControlTest {
         decorateNative: (NativeEngine) -> NativeEngine = { it },
         beforeForwarded: () -> Unit = {},
         afterForwarded: () -> Unit = {},
+        sharedObservations: HelperSecurityObservation? = null,
     ) : AutoCloseable {
         val native = decorateNative(LinuxNative.snapshot())
-        val observations = HelperSecurityObservation()
+        val observations = sharedObservations ?: HelperSecurityObservation()
+        val controlObservationsUsed = sharedObservations ?: controlObservations
         private val pid = Pid(ProcessHandle.current().pid().toInt())
         val bootstrap = observations.observeAncestry(pid, native.process.gettid(), HelperSecurityObservation.Lineage.Bootstrap)
         val roots = listOf(
@@ -252,7 +255,7 @@ class ConfinedHelperControlTest {
 
         init {
             pool.prewarm()
-            control = ConfinedHelperControl(pool, SocketHelperProcess.ConfinedStartup(bootstrap, bootstrap), native, controlObservations, retryConnection = { socket ->
+            control = ConfinedHelperControl(pool, SocketHelperProcess.ConfinedStartup(bootstrap, bootstrap), native, controlObservationsUsed, retryConnection = { socket ->
                 retries.incrementAndGet()
                 val old = connections.firstOrNull { it.accepted === socket }
                 if (old == null) {
@@ -1041,6 +1044,142 @@ class ConfinedHelperControlTest {
                 assertEquals(0, f.reaps)
             }
         }
+    }
+
+    @Test
+    fun `ready setup admits an authenticated live listener prelude`() {
+        RelayFixture(directory).use { fixture ->
+            val setup = fixture.connect()
+            val deadline = ConfinedDeadline.mint(fixture.native) { 5_000_000_000 }
+            fixture.setup(setup, deadline)
+            fixture.connect().use { live ->
+                live.parent.send(livePrelude(fixture.manifest.binding, 3), deadline)
+                val outcome = live.loopEnded.get(2, TimeUnit.SECONDS)
+                assertEquals("LiveListener", outcome.javaClass.simpleName)
+            }
+            fixture.connect().use { replay ->
+                replay.parent.send(livePrelude(fixture.manifest.binding, 3), deadline)
+                val failure = assertFailsWith<java.util.concurrent.ExecutionException> { replay.loopEnded.get(2, TimeUnit.SECONDS) }
+                assertEquals("Live listener attempt is spent", failure.cause?.message)
+            }
+            fixture.connect().use { wrong ->
+                val foreign = fixture.manifest.binding.copy(manifestDigest = "0".repeat(64))
+                wrong.parent.send(livePrelude(foreign, 4), deadline)
+                val failure = assertFailsWith<java.util.concurrent.ExecutionException> { wrong.loopEnded.get(2, TimeUnit.SECONDS) }
+                assertEquals("Live setup is not active", failure.cause?.message)
+            }
+        }
+    }
+
+    @Test
+    fun `live admission revocation and overlap refuse an in flight finish`() {
+        RelayFixture(directory).use { fixture ->
+            val setup = fixture.connect()
+            val deadline = ConfinedDeadline.mint(fixture.native) { 5_000_000_000 }
+            fixture.setup(setup, deadline)
+            for (overlap in listOf(false, true)) {
+                fixture.connect(holdClose = true).use { live ->
+                    live.parent.send(livePrelude(fixture.manifest.binding, if (overlap) 12 else 11), deadline)
+                    val accepted = assertIs<PreludeOutcome.LiveListener>(live.loopEnded.get(2, TimeUnit.SECONDS))
+                    val admission = assertIs<ConfinedHelperControl.LiveAdmission>(accepted.admission)
+                    admission.attach(live.accepted)
+                    val serial = checkNotNull(admission.begin(live.accepted))
+                    if (overlap) {
+                        assertEquals(null, admission.begin(live.accepted))
+                    } else {
+                        admission.close()
+                    }
+                    val finished: Any = admission.finish(serial, true)
+                    assertEquals(false, finished)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `live listener is refused while setup is not ready`() {
+        RelayFixture(directory).use { fixture ->
+            val setup = fixture.connect()
+            val deadline = ConfinedDeadline.mint(fixture.native) { 5_000_000_000 }
+            setup.start(Frame.Setup(fixture.manifest, deadline))
+            assertIs<Frame.Setup>(fixture.helper.receiveFrame(deadline).frame)
+            fixture.connect().use { live ->
+                live.parent.send(livePrelude(fixture.manifest.binding, 1), deadline)
+                val failure = assertFailsWith<java.util.concurrent.ExecutionException> { live.loopEnded.get(2, TimeUnit.SECONDS) }
+                assertEquals("Live setup is not active", failure.cause?.message)
+            }
+        }
+    }
+
+    @Test
+    fun `live listener attempts remain spent until setup ends`() {
+        RelayFixture(directory).use { fixture ->
+            val setup = fixture.connect()
+            fixture.setup(setup, ConfinedDeadline.mint(fixture.native) { 5_000_000_000 })
+            for (serial in 1L..201L) {
+                val deadline = ConfinedDeadline.mint(fixture.native) { 5_000_000_000 }
+                fixture.connect().use { live ->
+                    live.parent.send(livePrelude(fixture.manifest.binding, serial), deadline)
+                    if (serial <= 200) {
+                        val outcome = live.loopEnded.get(2, TimeUnit.SECONDS)
+                        assertEquals("LiveListener", outcome.javaClass.simpleName)
+                    } else {
+                        val failure = assertFailsWith<java.util.concurrent.ExecutionException> { live.loopEnded.get(2, TimeUnit.SECONDS) }
+                        assertEquals("Live listener attempts exhausted", failure.cause?.message)
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `retirement revokes a reserved live listener before helper reap`() {
+        RelayFixture(directory).use { fixture ->
+            val setup = fixture.connect()
+            val deadline = ConfinedDeadline.mint(fixture.native) { 5_000_000_000 }
+            fixture.setup(setup, deadline)
+            val live = fixture.connect(holdClose = true)
+            live.parent.send(livePrelude(fixture.manifest.binding, 1), deadline)
+            val result = assertIs<PreludeOutcome.LiveListener>(live.loopEnded.get(2, TimeUnit.SECONDS))
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            fixture.beforeReap = {
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            try {
+                setup.parent.sendFrame(Frame.Control(ControlTag.Retire, fixture.manifest.binding, deadline))
+                check(entered.await(5, TimeUnit.SECONDS))
+                val admission = assertIs<ConfinedHelperControl.LiveAdmission>(result.admission)
+                assertFailsWith<IllegalStateException> { admission.attach(live.accepted) }
+            } finally {
+                release.countDown()
+                live.closeAllowed.countDown()
+            }
+            assertIs<Frame.Retired>(setup.parent.receiveFrame(deadline).frame)
+        }
+    }
+
+    private fun livePrelude(
+        binding: ConfinedBinding,
+        serial: Long,
+    ): ByteArray {
+        val owner = binding.owner
+        return java.nio.ByteBuffer
+            .allocate(1 + 4 + 4 + 8 + 8 + 32 * 3 + 4 + 8 * 3)
+            .put(0xe5.toByte())
+            .putInt(1)
+            .putInt(owner.ownerPid.value)
+            .putLong(owner.ownerStartTicks)
+            .putLong(owner.domainGeneration)
+            .put(HexFormat.of().parseHex(owner.resourceGeneration))
+            .put(HexFormat.of().parseHex(owner.policyDigest))
+            .put(HexFormat.of().parseHex(binding.manifestDigest))
+            .putInt(owner.ownerPid.value)
+            .putLong(1)
+            .putLong(2)
+            .putLong(serial)
+            .array()
     }
 
     @Test

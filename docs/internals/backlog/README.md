@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 270 | *Total Resolved Issues:* 719
+*Total Active Issues:* 274 | *Total Resolved Issues:* 719
 
-Active status detail: 269 open, 1 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 272 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,10 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261114-192453-295](issue-20261114-192453-295-add-a-native-only-wrapper-for-private-argument-mat.md) | Duplicate native match-wrapper proposal deferred in favor of issue 192340 | high | profiler |
+| [issue-20261114-192340-328](issue-20261114-192340-328-add-a-native-only-wrapper-for-private-argument-mat.md) | Add a native-only wrapper for private argument matching | high | profiler |
+| [issue-20261114-174301-368](issue-20261114-174301-368-bind-native-open-arguments-to-the-live-publication.md) | Bind native open arguments to the live publication | high | profiler |
+| [issue-20261114-023757-094](issue-20261114-023757-094-b6-bind-authenticated-listener-authorization-to-ex.md) | B6 bind authenticated listener authorization to exact Live worker task | high | core |
 | [issue-20261112-063058-038](issue-20261112-063058-038-preserve-expected-ffm-handle-shape-when-a-libc-sym.md) | Preserve expected FFM handle shape when a libc symbol is missing | high | core |
 | [issue-20261112-051312-407](issue-20261112-051312-407-preserve-supervisor-startup-failure-when-helper-sh.md) | Preserve supervisor startup failure when helper shutdown also fails | high | core |
 | [issue-20261111-230615-569](issue-20261111-230615-569-bind-checked-stack-association-to-canonical-runtim.md) | Bind checked stack association to canonical runtime owner | high | core |

@@ -308,6 +308,29 @@ public class ManagedRuntime private constructor(
             return manager.isTerminated && managerThread.get()?.isAlive != true
         }
 
+        fun canonicalTransferredHelperRetired(
+            candidatePermit: Any,
+            owner: CanonicalAcquisition,
+            context: SupervisorContext,
+        ): Boolean {
+            authenticate(candidatePermit)
+            check(canonicalOwner === owner)
+            if (!canonicalManagerTerminated(candidatePermit, owner)) return false
+            return synchronized(lock) {
+                val settled = scopingPreparation?.state as? ScopingPreparation.State.TransferredSettled
+                val domain = settled?.domain
+                val live = domain?.scoping as? io.mazewall.enforcer.internal.execution.FrozenStackScoping.Live
+                (phase == Phase.DRAINING || phase == Phase.CLOSED) &&
+                    shared.preparations == 0 &&
+                    !shared.checkedUnknown &&
+                    domain != null &&
+                    (domains as Map<*, *>)[domain.registrationKey] === domain &&
+                    live != null &&
+                    live.bootstrap.helperContext === context &&
+                    domains.values.all { it.retired() }
+            }
+        }
+
         fun canonicalActivate(
             candidatePermit: Any,
             owner: CanonicalAcquisition,
@@ -809,7 +832,7 @@ public class ManagedRuntime private constructor(
                     }
                     if (failure is Error) markDelivered(failure)
                 }
-                propagateOriginal(failure)
+                CanonicalFailure.propagate(failure)
             }
             val skipped = synchronized(gate) {
                 setupInFlight = false
@@ -818,7 +841,7 @@ public class ManagedRuntime private constructor(
             if (skipped) {
                 val failure = IllegalStateException("Runtime was retired during bootstrap")
                 synchronized(gate) { retainCaller(failure) }
-                propagateOriginal(failure)
+                CanonicalFailure.propagate(failure)
             }
             val completed = try {
                 taskReturned.await(preparationTimeout.toNanos(), TimeUnit.NANOSECONDS)
@@ -829,7 +852,7 @@ public class ManagedRuntime private constructor(
                 }
                 runtime.operations.canonicalCancel(canonicalPermit, this)
                 Thread.currentThread().interrupt()
-                propagateOriginal(failure)
+                CanonicalFailure.propagate(failure)
             }
             if (!completed) {
                 val failure = TimeoutException("Canonical runtime startup timed out")
@@ -838,11 +861,15 @@ public class ManagedRuntime private constructor(
                     if (state == State.STARTING) state = State.RETIRING
                 }
                 runtime.operations.canonicalCancel(canonicalPermit, this)
-                propagateOriginal(failure)
+                CanonicalFailure.propagate(failure)
             }
             val failure = publishStartOutcome(runtime, IllegalStateException("Runtime was retired during bootstrap"))
-            if (failure != null) propagateOriginal(failure)
+            if (failure != null) CanonicalFailure.propagate(failure)
             return runtime
+        }
+
+        private object CanonicalFailure {
+            fun propagate(failure: Throwable): Nothing = throw failure
         }
 
         private fun publishStartOutcome(
@@ -863,8 +890,6 @@ public class ManagedRuntime private constructor(
                 null
             }
         }
-
-        private fun propagateOriginal(failure: Throwable): Nothing = throw failure
 
         fun status(): ManagedRuntimeAcquisitionStatus = synchronized(gate) { snapshot() }
 
@@ -946,7 +971,7 @@ public class ManagedRuntime private constructor(
         @Suppress("TooGenericExceptionCaught")
         fun retire(timeout: Duration): ManagedRuntimeAcquisitionStatus {
             requirePositive(timeout)
-            val (runtime, immediate) = claimRetirement()
+            val (runtime, immediate) = retireHistoryOnly()?.let { null to it } ?: claimRetirement()
             immediate?.let { return it }
             try {
                 if (runtime == null) {
@@ -979,9 +1004,32 @@ public class ManagedRuntime private constructor(
             } finally {
                 synchronized(gate) { retirementInFlight = false }
             }
-            return synchronized(gate) {
-                snapshot()
+            return synchronized(gate) { snapshot() }
+        }
+
+        private fun retireHistoryOnly(): ManagedRuntimeAcquisitionStatus? {
+            val historyRuntime = synchronized(gate) {
+                if (cleanupUnknown && !metadataUnknown && !installUnknown && helperStarted && !setupInFlight && !retirementInFlight) {
+                    original?.also { retirementInFlight = true }
+                } else {
+                    null
+                }
             }
+            if (historyRuntime != null) {
+                try {
+                    val context = synchronized(gate) {
+                        val current = startedHelperContext
+                        if (originalAssociation?.helperContext === current && current != null && startupPhysicallyExited(true)) current else null
+                    }
+                    if (context != null && historyRuntime.operations.canonicalTransferredHelperRetired(canonicalPermit, this, context)) {
+                        retireStartedHelper()
+                    }
+                } finally {
+                    synchronized(gate) { retirementInFlight = false }
+                }
+                return synchronized(gate) { snapshot() }
+            }
+            return null
         }
 
         // Stop failures remain unknown and fatal failures retain their original identity.

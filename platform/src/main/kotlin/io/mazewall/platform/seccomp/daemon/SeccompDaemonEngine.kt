@@ -45,13 +45,27 @@ internal sealed interface PreludeOutcome {
     data object LegacyListener : PreludeOutcome
 
     data object Handled : PreludeOutcome
+
+    class LiveListener(
+        val admission: LiveListenerAdmission,
+    ) : PreludeOutcome
 }
+
+/** Connection-owned one-shot admission; its producer retains the original setup. */
+internal interface LiveListenerAdmission : AutoCloseable
 
 internal class SeccompConnectionHooks(
     val connectionAcceptor: (
         (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
     )? = null,
     val beforeListener: ((FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, Deadline) -> PreludeOutcome)? = null,
+    val liveListenerFactory: (
+        (
+            LiveListenerAdmission,
+            FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+            FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        ) -> SeccompNotifHandler
+    )? = null,
     val afterConnectionClosed: ((FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, SeccompCleanupOutcome) -> Unit)? = null,
 )
 
@@ -118,6 +132,7 @@ internal class SeccompDaemonEngine(
         var current: SeccompConnection? = null
         var reactor: Thread? = null
         var session: SeccompSessionHandler? = null
+        var liveAdmission: LiveListenerAdmission? = null
         var retirement: SessionRetirement = SessionRetirement.Complete
         var socketUnknown = false
         var advancing = false
@@ -574,12 +589,21 @@ internal class SeccompDaemonEngine(
         initial: SeccompConnection,
     ) {
             if (synchronized(admissionGate) { admissionClosed } || isGlobalShutdown()) return
-            when (hooks.beforeListener?.invoke(socketFd, Deadline.afterMillis(PRELUDE_TIMEOUT_MS))) {
-                PreludeOutcome.LegacyListener, null -> Unit
-                PreludeOutcome.Handled -> return
-            }
-            var connection = initial
-            NativeArena.ofConfined().use { arena ->
+            val prelude = hooks.beforeListener?.invoke(socketFd, Deadline.afterMillis(PRELUDE_TIMEOUT_MS))
+            val live = (prelude as? PreludeOutcome.LiveListener)?.admission
+            try {
+                when (prelude) {
+                    PreludeOutcome.LegacyListener, null -> Unit
+                    PreludeOutcome.Handled -> return
+                    is PreludeOutcome.LiveListener -> {
+                        synchronized(admissionGate) {
+                            check(admissions.any { it === record } && record.socket === socketFd && record.liveAdmission == null)
+                            record.liveAdmission = prelude.admission
+                        }
+                    }
+                }
+                var connection = initial
+                NativeArena.ofConfined().use { arena ->
                 val pollFd = PollFdSegment.of(arena.allocate(Layouts.POLLFD))
                 pollFd.setFd(socketFd.value)
                 pollFd.setEvents(NativeConstants.POLLIN)
@@ -589,6 +613,9 @@ internal class SeccompDaemonEngine(
                     val next = processConnectionStep(arena, connection, socketFd, pollFdManaged, record) ?: break
                     connection = next
                 }
+                }
+            } finally {
+                live?.close()
             }
     }
 
@@ -768,7 +795,12 @@ internal class SeccompDaemonEngine(
         }
         val socketFd = connection.socketFd
         val listenerFd = connection.listenerFd
-        val notifHandler = notifHandlerFactory(socketFd, listenerFd)
+        val live = record.liveAdmission
+        val notifHandler = if (live == null) {
+            notifHandlerFactory(socketFd, listenerFd)
+        } else {
+            checkNotNull(hooks.liveListenerFactory) { "Live listener factory unavailable" }(live, socketFd, listenerFd)
+        }
         try {
             val sessionHandler = SeccompSessionHandler(
                 socketFd = socketFd,

@@ -8,6 +8,8 @@ import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.diagnostics.validateNotVirtual
 import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.internal.execution.LiveReceiverRetirement
+import io.mazewall.enforcer.internal.execution.LiveValidationTransport
 import io.mazewall.enforcer.internal.execution.PreparedHelperReadPlan
 import io.mazewall.enforcer.internal.seccomp.BpfFilter
 import io.mazewall.enforcer.state.*
@@ -18,6 +20,7 @@ import io.mazewall.ffi.memory.SupervisorProcessMemoryReader
 import io.mazewall.ffi.memory.SupervisorProcessMemoryWriter
 import io.mazewall.ffi.networking.ConfinedDeadline
 import io.mazewall.ffi.networking.ConfinedHelperChannel
+import io.mazewall.ffi.networking.SeccompInstallationGate
 import io.mazewall.ffi.networking.SupervisorHelperCredentials
 import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
 import io.mazewall.ffi.networking.SupervisorValidationChannel
@@ -50,6 +53,7 @@ import java.util.logging.Logger
 internal object SupervisorInstaller {
     private val logger = Logger.getLogger(SupervisorInstaller::class.java.name)
     private val installations = ThreadLocal.withInitial { mutableListOf<SupervisorInstallationLifetime>() }
+    private val liveInstallations = ThreadLocal.withInitial { mutableListOf<LiveInstallationLifetime>() }
 
     internal fun prepareConfinedHelper(
         plan: PreparedHelperReadPlan,
@@ -67,6 +71,7 @@ internal object SupervisorInstaller {
 
     internal fun requireReusableInstallations() {
         installations.get().forEach { it.requireReusable() }
+        liveInstallations.get().forEach { it.requireReusable() }
     }
 
     @Suppress("TooGenericExceptionCaught") // rollback releases acquired leases, then preserves the original failure
@@ -128,6 +133,49 @@ internal object SupervisorInstaller {
             userNotifSupported,
         )
 
+    /** Dormant until the production Live dispatcher guard is released. */
+    @Suppress("TooGenericExceptionCaught") // A permanent filter retains its lifetime on every failure, including fatal errors.
+    internal fun installLiveSupervisedFilterForThread(
+        policy: PolicyDefinition<*>,
+        receipt: LiveValidationTransport,
+        onFilterApplied: () -> Unit,
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+    ): SupervisorSession {
+        requireReusableInstallations()
+        check(installations.get().isEmpty() && liveInstallations.get().isEmpty()) { "Live supervision requires a fresh platform thread" }
+        validateNotVirtual()
+        val filter = BpfFilter.build(Arch.current(), policy)
+        val lifetime = LiveInstallationLifetime(Thread.currentThread(), native, receipt)
+        var applied = false
+        try {
+            lifetime.start()
+            SupervisorSeccompNotifInstaller.installLiveOwned(
+                native,
+                userNotifSupported,
+                receipt.socketPath,
+                filter,
+                receipt,
+                {
+                    applied = true
+                    onFilterApplied()
+                },
+                SeccompInstallationGate.Direct,
+            ) { socket, ready -> lifetime.attach(socket, ready) }
+            lifetime.requireReusable()
+            liveInstallations.get().add(lifetime)
+            return SupervisorSession { lifetime.closeAndAwait() }
+        } catch (failure: Throwable) {
+            if (applied) {
+                liveInstallations.get().add(lifetime)
+                lifetime.fail(failure)
+            } else {
+                lifetime.close()
+            }
+            throw failure
+        }
+    }
+
     internal fun installCapturedSupervisedFilterForThread(
         policy: PolicyDefinition<*>,
         capturedScoping: CapturedScopingPolicy,
@@ -136,6 +184,7 @@ internal object SupervisorInstaller {
         userNotifSupported: Boolean,
     ): SupervisorSession {
         requireReusableInstallations()
+        check(liveInstallations.get().isEmpty()) { "Cannot install Legacy supervision over a Live listener" }
         check(installations.get().all { it.capturedScoping.matches(capturedScoping) }) {
             "Cannot replace the scoping policy of a permanent supervised filter; use a new platform thread"
         }
@@ -237,6 +286,28 @@ internal class ConfinedHelperSession(
     private var transfer: SupervisorOwnedFd? = null
     private var receipt: ConfinedHelperProtocol.Frame.Retired? = null
     val retired: Boolean get() = phase == Phase.Retired
+
+    internal fun matchesOriginal(
+        plan: PreparedHelperReadPlan,
+        context: SupervisorContext,
+    ): Boolean = this.plan === plan && this.context === context
+
+    internal fun authenticateLiveSocket(target: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>) {
+        check(phase == Phase.Ready && !stopping.get()) { "Confined helper is not Ready" }
+        plan.validate()
+        authenticate(target)
+        check(phase == Phase.Ready && !stopping.get()) { "Confined helper was stopped" }
+    }
+
+    internal fun sendAuthenticatedLivePrelude(
+        target: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        bytes: ByteArray,
+        deadline: ConfinedDeadline,
+    ) {
+        check(phase == Phase.Ready && !stopping.get()) { "Confined helper was stopped" }
+        ConfinedHelperChannel(native, target, { stopping.get() || cancelled() }, context.daemonProcess::isAlive).send(bytes, deadline)
+        check(phase == Phase.Ready && !stopping.get()) { "Confined helper stopped during Live handoff" }
+    }
 
     @Suppress("TooGenericExceptionCaught") // A failed readiness observation quarantines the session before worker installation.
     fun requireReady(
@@ -427,6 +498,211 @@ internal class ConfinedHelperSession(
         channel = null
         socket?.let { SupervisorOwnedFd(it, native.fileSystem).close() }
         socket = null
+    }
+}
+
+/** Owns the Live validation socket without interpreting Legacy validation requests. */
+private class LiveInstallationLifetime(
+    private val owner: Thread,
+    private val native: NativeEngine,
+    private val receipt: LiveValidationTransport?,
+) : AutoCloseable {
+    constructor(owner: Thread, native: NativeEngine) : this(owner, native, null)
+
+    private companion object {
+        const val RETIRE_TIMEOUT_SECONDS = 5L
+    }
+
+    private val stopped = AtomicBoolean(false)
+    private val completed = CountDownLatch(1)
+    private var failure: Throwable? = null
+    private var watcher: Thread? = null
+
+    @Volatile private var reactor: Thread? = null
+
+    @Volatile private var endpoint: io.mazewall.enforcer.internal.execution.LiveObservationEndpoint? = null
+
+    @Synchronized
+    fun requireReusable() {
+        check(!stopped.get() && failure == null) { "Permanent Live supervisor installation failed or retired; use a new platform thread" }
+    }
+
+    @Synchronized
+    fun start() {
+        watcher = Thread({
+            try {
+                owner.join()
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } finally {
+                close()
+            }
+        }, "live-supervisor-owner-${owner.threadId()}").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught", "InstanceOfCheckForException") // One socket rollback preserves every failure and interrupted status.
+    fun attach(
+        socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        ready: CountDownLatch,
+    ) {
+        var receiver: ReceiverRetirement? = null
+        var thread: Thread? = null
+        try {
+            receiver = ReceiverRetirement()
+            receipt?.registerReceiver(receiver, socket)
+            thread = Thread({ runReceiver(socket, ready) }, "live-validation-listener-${socket.value}").apply { isDaemon = true }
+            reactor = thread
+            thread.start()
+            receiver.started(thread)
+        } catch (problem: Throwable) {
+            var retained = problem
+            val started = thread != null && thread.state != Thread.State.NEW
+            if (!started) {
+                try {
+                    native.fileSystem.close(socket).getOrThrow("close failed Live listener startup")
+                } catch (cleanup: Throwable) {
+                    if (cleanup is InterruptedException) Thread.currentThread().interrupt()
+                    retained = CleanupFailures.merge(retained, cleanup)
+                }
+            }
+            if (problem is InterruptedException) Thread.currentThread().interrupt()
+            try {
+                fail(retained)
+            } finally {
+                ready.countDown()
+                if (started) {
+                    checkNotNull(receiver).started(checkNotNull(thread))
+                } else {
+                    completed.countDown()
+                    receiver?.unstartedClosed()
+                }
+            }
+            throw retained
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // The receiver retains all failures before publishing completion.
+    private fun runReceiver(
+        socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        ready: CountDownLatch,
+    ) {
+        var problem: Throwable? = null
+        try {
+            val channel = ConfinedHelperChannel(native, socket, { false }, { true })
+            val ackDeadline = ConfinedDeadline.mint(native) { TimeUnit.SECONDS.toNanos(5) }
+            val ack = channel.receive(1, ackDeadline).single().toInt() and 0xff
+            check(SupervisorValidationDecoder.handshake(ack) == SupervisorValidationDecodeResult.HandshakeAccepted) { "Invalid Live listener acknowledgement" }
+            val installed = receipt?.install(socket)
+            endpoint = installed
+            if (stopped.get()) installed?.revoke()
+            ready.countDown()
+            var sequence = 0L
+            while (!stopped.get()) {
+                val idleCap = ConfinedDeadline.mint(native) { TimeUnit.SECONDS.toNanos(1) }
+                if (!channel.pollObservationInput(idleCap)) continue
+                // mint clamps this once to the existing maximum; the offered deadline can only shorten it.
+                val cap = ConfinedDeadline.mint(native) { Long.MAX_VALUE }
+                val prefix = channel.receive(LiveObservationProtocol.PREFIX_BYTES, cap)
+                val deadline = cap.accept(LiveObservationProtocol.deadline(prefix), ConfinedDeadline.now(native))
+                val request = prefix + channel.receive(LiveObservationProtocol.REQUEST_BYTES - prefix.size, deadline)
+                sequence = LiveObservationProtocol.validate(request, sequence)
+                val matched = endpoint?.observe(LiveObservationProtocol.tid(request)) ?: false
+                channel.send(LiveObservationProtocol.response(request, matched), deadline)
+            }
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            problem = interrupted
+        } catch (caught: Throwable) {
+            problem = caught
+        } finally {
+            try {
+                endpoint?.revoke()
+            } catch (cleanup: Throwable) {
+                problem = CleanupFailures.merge(problem, cleanup)
+            }
+            try {
+                native.fileSystem.close(socket).getOrThrow("close Live validation socket")
+            } catch (cleanup: Throwable) {
+                problem = CleanupFailures.merge(problem, cleanup)
+            }
+            problem?.let(::fail)
+            ready.countDown()
+            completed.countDown()
+        }
+    }
+
+    private fun requireNotReceiverThread() {
+        check(Thread.currentThread() !== reactor) { "Live listener cannot await its own retirement" }
+    }
+
+    private inner class ReceiverRetirement : LiveReceiverRetirement {
+        private val resolved = CountDownLatch(1)
+
+        @Volatile private var started: Thread? = null
+
+        fun started(thread: Thread) {
+            started = thread
+            resolved.countDown()
+        }
+
+        fun unstartedClosed() = resolved.countDown()
+
+        override fun physicallyExited(): Boolean = resolved.count == 0L && started?.isAlive != true
+
+        override fun failure(): Throwable? = synchronized(this@LiveInstallationLifetime) { failure }
+
+        override fun awaitPhysicalExit() {
+            requireNotReceiverThread()
+            var interrupted = false
+            try {
+                while (true) {
+                    try {
+                        resolved.await()
+                        break
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    }
+                }
+                val thread = started ?: return
+                check(Thread.currentThread() !== thread) { "Live listener cannot await its own retirement" }
+                while (thread.isAlive) {
+                    try {
+                        thread.join()
+                    } catch (_: InterruptedException) {
+                        interrupted = true
+                    }
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    fun fail(cause: Throwable) {
+        stopped.set(true)
+        val cleanup = runCatching { endpoint?.revoke() }.exceptionOrNull()
+        if (cleanup is InterruptedException) Thread.currentThread().interrupt()
+        val retained = if (cleanup == null) cause else CleanupFailures.merge(cause, cleanup)
+        synchronized(this) { failure = CleanupFailures.merge(failure, retained) }
+    }
+
+    fun closeAndAwait() {
+        close()
+        check(Thread.currentThread() !== reactor) { "Live listener cannot await its own retirement" }
+        SocketCleanup.await(TimeUnit.SECONDS.toNanos(RETIRE_TIMEOUT_SECONDS)) { completed.await(it, TimeUnit.NANOSECONDS) }
+        synchronized(this) { failure }?.let { throw it }
+    }
+
+    override fun close() {
+        stopped.set(true)
+        try {
+            endpoint?.revoke()
+        } finally {
+            synchronized(this) { watcher }?.interrupt()
+        }
     }
 }
 

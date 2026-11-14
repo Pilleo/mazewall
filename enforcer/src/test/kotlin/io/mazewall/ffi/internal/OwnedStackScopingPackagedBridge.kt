@@ -7,21 +7,69 @@ import io.mazewall.enforcer.api.execution.ManagedRuntime
 import io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionOwner
 import io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionStatus
 import io.mazewall.enforcer.api.execution.PreparedOperationResources
+import io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol
+import io.mazewall.enforcer.internal.supervisor.SupervisorContext
+import io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
 import io.mazewall.platform.native.LiveSetup
 import java.lang.reflect.Executable
 import java.lang.reflect.InvocationTargetException
+import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
 import java.util.Optional
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 internal object OwnedStackScopingPackagedBridge {
+    internal data class HelperArguments(
+        val manifest: Path,
+        val applicationRoot: Path,
+    )
+
+    internal fun parseHelperArguments(args: Array<String>): HelperArguments {
+        require(args.size == 3 && args[0] == "protected-canonical-helper") { "Expected helper mode, manifest and application root" }
+        val manifest = Path.of(args[1])
+        val applicationRoot = Path.of(args[2])
+        require(manifest.isAbsolute && manifest == manifest.normalize() && Files.isRegularFile(manifest) && manifest.toRealPath() == manifest) {
+            "Helper support manifest must be an exact regular file"
+        }
+        require(applicationRoot.isAbsolute && applicationRoot == applicationRoot.normalize() && Files.isDirectory(applicationRoot) && applicationRoot.toRealPath() == applicationRoot) {
+            "Helper application root must be an exact directory"
+        }
+        return HelperArguments(manifest, applicationRoot)
+    }
+
+    private data class OriginalHelperObservation(
+        val protocol: Any,
+        val manager: SupervisorDaemonManager,
+        val context: SupervisorContext,
+        val view: HelperSecurityObservation.RetirementView,
+    )
+
+    internal fun parseHelperSupport(lines: List<String>): List<io.mazewall.enforcer.internal.execution.ReviewedHelperSupport> {
+        require(lines.size in 1..64) { "Expected 1..64 reviewed support entries" }
+        val entries = lines.map { line ->
+            val fields = line.split('\t')
+            require(fields.size == 2 && fields[0].matches(Regex("[a-f0-9]{64}"))) { "Malformed support entry" }
+            val path = Path.of(fields[1])
+            require(path.isAbsolute && path == path.normalize() && Files.isRegularFile(path) && path.toRealPath() == path) {
+                "Support must be an exact regular file"
+            }
+            io.mazewall.enforcer.internal.execution
+                .ReviewedHelperSupport(path, fields[0])
+        }
+        require(entries.map { it.path }.distinct().size == entries.size) { "Duplicate support entry" }
+        return java.util.List
+            .copyOf(entries)
+    }
+
     @JvmStatic
     fun run(args: Array<String>) {
-        val mode = args.singleOrNull() ?: "valid"
+        val helperArguments = if (args.firstOrNull() == "protected-canonical-helper") parseHelperArguments(args) else null
+        val mode = if (helperArguments != null) "protected-canonical-helper" else args.singleOrNull() ?: "valid"
         if (mode == "canonical-request-validation") {
             canonicalRequestValidation()
             return
@@ -42,7 +90,7 @@ internal object OwnedStackScopingPackagedBridge {
             return
         }
         if (mode == "protected-producer" || mode == "protected-producer-measure" || mode.startsWith("protected-canonical")) {
-            protectedProducer(mode == "protected-producer-measure" || mode == "protected-canonical-measure", mode.startsWith("protected-canonical"), mode)
+            protectedProducer(mode == "protected-producer-measure" || mode == "protected-canonical-measure", mode.startsWith("protected-canonical"), mode, helperArguments)
             return
         }
         if (mode == "producer") {
@@ -509,8 +557,16 @@ internal object OwnedStackScopingPackagedBridge {
         measureOnly: Boolean,
         checkedOwner: Boolean,
         mode: String,
+        helperArguments: HelperArguments?,
     ) {
-        val frontier = if (mode.startsWith("protected-canonical-") && mode != "protected-canonical-measure") mode.removePrefix("protected-canonical-") else ""
+        val helperMode = mode == "protected-canonical-helper"
+        val frontier = if (mode.startsWith("protected-canonical-") && mode != "protected-canonical-measure" && !helperMode) mode.removePrefix("protected-canonical-") else ""
+        val support = if (helperMode) {
+            val manifest = checkNotNull(helperArguments).manifest
+            parseHelperSupport(Files.readAllLines(manifest))
+        } else {
+            null
+        }
         val isolatedUnknown = frontier == "notification-fatal" || frontier == "old-abandon-after-reserve"
         var frontierHandled = false
         val argument = java.lang.management.ManagementFactory
@@ -584,7 +640,15 @@ internal object OwnedStackScopingPackagedBridge {
                 identity.retransformFixture(),
             )
             check(runCatching { newCheckedRuntimeOwner(agent, missingEnforcer) }.exceptionOrNull() is IllegalArgumentException)
-            newCheckedRuntimeOwner(agent, identity)
+            if (support == null) {
+                newCheckedRuntimeOwner(agent, identity)
+            } else {
+                newCheckedRuntimeOwner(
+                    agent,
+                    identity,
+                    TrustedHelperSupport.reviewed(support, io.mazewall.enforcer.internal.execution.HelperSupportLifetime.NoWriters),
+                )
+            }
         } else {
             io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionOwner
                 .create()
@@ -599,10 +663,16 @@ internal object OwnedStackScopingPackagedBridge {
                     .location
                     .toURI(),
             ).toRealPath()
-        val policy = io.mazewall.enforcer.api.WorkerPolicyBuilder
+        val policyBuilder = io.mazewall.enforcer.api.WorkerPolicyBuilder
             .denyList(profile)
             .allowFsRead(artifactPath)
-            .build()
+        if (support != null) {
+            val appRoot = checkNotNull(helperArguments).applicationRoot
+            require(Files.isDirectory(appRoot))
+            policyBuilder.allowFsRead(appRoot)
+            support.forEach { policyBuilder.allowFsRead(it.path) }
+        }
+        val policy = policyBuilder.build()
         val owner = selectedOwner
         val resources = io.mazewall.enforcer.api.execution.PreparedOperationResources
             .resolve(
@@ -616,6 +686,8 @@ internal object OwnedStackScopingPackagedBridge {
         var drainAttempted = false
         var settled = false
         var runtime: io.mazewall.enforcer.api.execution.ManagedRuntime? = null
+        var originalHelper: OriginalHelperObservation? = null
+        var b6Failure: Throwable? = null
         var primary: Throwable? = null
         val timeout = java.time.Duration.ofSeconds(10)
         try {
@@ -648,6 +720,7 @@ internal object OwnedStackScopingPackagedBridge {
             val actualRuntime = owner.start(timeout, timeout)
             runtime = actualRuntime
             check(owner.ownsRuntime(actualRuntime))
+            if (helperMode) originalHelper = captureOriginalHelper(owner)
             try {
                 ProductionDeploymentVerifier.observe(identity)
                 println("PROTECTED_PRODUCER_READY_FOR_PARENT")
@@ -721,6 +794,7 @@ internal object OwnedStackScopingPackagedBridge {
                     check(failure.stackTrace.any { it.className == "io.mazewall.enforcer.internal.execution.OwnedDomainKt" && it.methodName == "requireSupportedScopingStart" })
                     failure
                 }
+                b6Failure = refusal
                 drainAttempted = true
                 val report = actualRuntime.drain(timeout)
                 check(report is io.mazewall.enforcer.api.execution.DrainReport.Incomplete)
@@ -735,6 +809,30 @@ internal object OwnedStackScopingPackagedBridge {
                 val scoping = observedField(domain, "scoping")
                 check(observedField(scoping, "bootstrap") === bootstrap)
                 check(observedField(bootstrap, "staging") === staging && observedField(bootstrap, "enrollment") === enrollment && observedField(bootstrap, "sealed") === sealed)
+                if (helperMode) {
+                    val session = observedField(domain, "helperSession")
+                    val original = checkNotNull(originalHelper)
+                    check(observedField(domain, "liveHelperContext") === original.context)
+                    check(observedField(session, "context") === original.context)
+                    check(observedField(session, "plan") === observedField(domain, "helperPlan"))
+                    check(observedField(session, "phase").toString() == "Retired") { "Original helper session did not retire" }
+                    val receipt = observedField(session, "receipt") as ConfinedHelperProtocol.Frame.Retired
+                    val identity = checkNotNull(original.context.confinedHelper).identity
+                    check(receipt.helperPid == identity.pid && receipt.helperStartTicks == identity.startTimeTicks)
+                    val workers = observedField(domain, "liveWorkers")
+                    val slots = observedField(workers, "slots") as List<*>
+                    val slot = checkNotNull(slots.single())
+                    val workerThread = observedField(slot, "thread") as Thread
+                    check(!workerThread.isAlive) { "Original worker is still alive" }
+                    check(observedField(slot, "registrationReserved") == true && observedField(slot, "registrationAttempted") == true)
+                    check(observedField(slot, "receipt") is io.mazewall.platform.native.WorkerRegistrationReceipt)
+                    check(observedField(slot, "worker") is io.mazewall.platform.native.WorkerOwner)
+                    check(observedField(slot, "retirementAttempted") == true)
+                    check(observedField(slot, "retirement") is io.mazewall.platform.native.LiveCompletion.Complete)
+                    check((observedField(domain, "admitted") as AtomicLong).get() == 0L)
+                    println("PROTECTED_HELPER_SESSION_RETIRED_WORKER_JOINED")
+                    println("PROTECTED_HELPER_READY_AND_NO_BEGIN_SOURCE_CONTROL_FLOW_INFERENCE")
+                }
                 val release = observedField(domain, "liveRelease")
                 check(observedField(release, "pass").toString() == "Retained")
                 listOf("invalidate", "installation", "landlock", "resources").forEach { check(observedField(release, it).toString() == "Complete") }
@@ -756,6 +854,17 @@ internal object OwnedStackScopingPackagedBridge {
                 check(!drainAttempted || settled) { "Original drain outcome remains unresolved; no retirement replay" }
                 outcome = owner.retire(timeout)
                 println("PROTECTED_PRODUCER_ACQUISITION_RETIRE:$outcome")
+                if (helperMode && settled && outcome is ManagedRuntimeAcquisitionStatus.Unknown) {
+                    check(containsOriginalFailure(outcome.history, checkNotNull(b6Failure)))
+                    val later = owner.retire(timeout)
+                    println("PROTECTED_HELPER_ACQUISITION_OBSERVATION:$later")
+                    if (later is ManagedRuntimeAcquisitionStatus.Unknown) {
+                        check(containsOriginalFailure(later.history, checkNotNull(b6Failure)))
+                        reportOriginalHelper(checkNotNull(originalHelper))
+                    } else {
+                        println("PROTECTED_ORIGINAL_HELPER_PHYSICAL_UNKNOWN:acquisition-not-unknown")
+                    }
+                }
             } catch (failure: Throwable) {
                 retirementFailure = failure
             }
@@ -796,6 +905,44 @@ internal object OwnedStackScopingPackagedBridge {
             }
             if (selected != null && selected !== primary) throw selected
             }
+        }
+    }
+
+    private fun captureOriginalHelper(owner: ManagedRuntimeAcquisitionOwner): OriginalHelperObservation {
+        val protocol = observedField(owner, "protocol")
+        val manager = observedField(protocol, "helperManager") as SupervisorDaemonManager
+        val context = observedField(protocol, "startedHelperContext") as SupervisorContext
+        val association = observedField(protocol, "originalAssociation")
+        check(observedField(association, "helperContext") === context)
+        check(observedField(manager, "confinedOriginalContext") === context)
+        check(observedField(protocol, "helperStarted") == true)
+        val view = observedField(manager, "confinedRetirementView") as HelperSecurityObservation.RetirementView
+        val daemon = checkNotNull(context.confinedBootstrap).child.identity
+        val helper = checkNotNull(context.confinedHelper).identity
+        check(context.daemonProcess.pid() == daemon.pid.value.toLong())
+        println("PROTECTED_ORIGINAL_DAEMON pid=${daemon.pid.value} start=${daemon.startTimeTicks}")
+        println("PROTECTED_ORIGINAL_HELPER pid=${helper.pid.value} start=${helper.startTimeTicks}")
+        println("PROTECTED_ORIGINAL_PROC owner=${view.owner} pidns=${view.pidNamespace} proc=${view.procKey}")
+        return OriginalHelperObservation(protocol, manager, context, view)
+    }
+
+    private fun reportOriginalHelper(original: OriginalHelperObservation) {
+        check(observedField(original.manager, "confinedOriginalContext") === original.context)
+        check(observedField(original.manager, "confinedRetirementView") === original.view)
+        val attempted = observedField(original.protocol, "helperStarted") == false
+        println("PROTECTED_ORIGINAL_HELPER_STOP_ATTEMPTED:$attempted")
+        if (!attempted) return
+        try {
+            original.manager.requireConfinedHelperRetired()
+            check(!original.context.daemonProcess.isAlive)
+            val helper = checkNotNull(original.context.confinedHelper).identity
+            println("PROTECTED_ORIGINAL_HELPER_PHYSICALLY_RETIRED pid=${helper.pid.value} start=${helper.startTimeTicks}")
+            println("PROTECTED_ORIGINAL_PROC_VERIFIED owner=${original.view.owner} pidns=${original.view.pidNamespace} proc=${original.view.procKey}")
+        } catch (failure: InterruptedException) {
+            Thread.currentThread().interrupt()
+            println("PROTECTED_ORIGINAL_HELPER_PHYSICAL_UNKNOWN:${failure.javaClass.name}")
+        } catch (failure: Exception) {
+            println("PROTECTED_ORIGINAL_HELPER_PHYSICAL_UNKNOWN:${failure.javaClass.name}")
         }
     }
 

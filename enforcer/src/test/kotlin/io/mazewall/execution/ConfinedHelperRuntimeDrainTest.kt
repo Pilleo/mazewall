@@ -2,11 +2,26 @@ package io.mazewall.enforcer.api.execution
 
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.internal.execution.HelperSupportLifetime
+import io.mazewall.enforcer.internal.execution.LiveValidationTransport
+import io.mazewall.enforcer.internal.execution.LiveWorkerSlot
+import io.mazewall.enforcer.internal.execution.OwnedDomain
 import io.mazewall.enforcer.internal.execution.PreparedHelperReadPlan
 import io.mazewall.enforcer.internal.execution.ReviewedHelperSupport
+import io.mazewall.enforcer.internal.execution.RuntimeWorkerContext
+import io.mazewall.enforcer.internal.execution.ScopingPreparation
 import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.enforcer.internal.supervisor.ConfinedHelperControl
+import io.mazewall.enforcer.internal.supervisor.ConfinedHelperPreparation
 import io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol
 import io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol.Frame
+import io.mazewall.enforcer.internal.supervisor.ConfinedHelperSession
+import io.mazewall.enforcer.internal.supervisor.LiveListenerHandler
+import io.mazewall.enforcer.internal.supervisor.SupervisorExecRewriteExchange
+import io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+import io.mazewall.enforcer.internal.supervisor.SupervisorOwnedFd
+import io.mazewall.enforcer.internal.supervisor.SupervisorReplyInterpreter
+import io.mazewall.enforcer.internal.supervisor.TraceeDescriptorImporter
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.ffi.NativeConstants
@@ -18,20 +33,48 @@ import io.mazewall.ffi.internal.captureSynthetic
 import io.mazewall.ffi.internal.captureSyntheticWithSupport
 import io.mazewall.ffi.internal.captureWithMissingAgent
 import io.mazewall.ffi.memory.ManagedSegment
+import io.mazewall.ffi.memory.NativeArena
+import io.mazewall.ffi.memory.PollFdSegment
+import io.mazewall.ffi.memory.readInt
 import io.mazewall.ffi.memory.readString
+import io.mazewall.ffi.memory.writeInt
+import io.mazewall.ffi.memory.writeLong
 import io.mazewall.ffi.networking.ConfinedDeadline
 import io.mazewall.ffi.networking.ConfinedHelperControlTest
+import io.mazewall.ffi.networking.SeccompInstallHandshake
+import io.mazewall.ffi.networking.SeccompInstallationGate
+import io.mazewall.ffi.networking.SupervisorSeccompNotifInstaller
+import io.mazewall.platform.fd.FdOwnership
+import io.mazewall.platform.fd.FdState
+import io.mazewall.platform.fd.FileDescriptor
+import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.lifecycle.OpenFlags
+import io.mazewall.platform.lifecycle.Tid
+import io.mazewall.platform.native.InvocationId
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.LiveAbsentReason
+import io.mazewall.platform.native.LiveFailure
 import io.mazewall.platform.native.LiveFailureReason
 import io.mazewall.platform.native.LiveFailureStatus
+import io.mazewall.platform.native.LiveIncompleteReason
+import io.mazewall.platform.native.LiveRead
 import io.mazewall.platform.native.LiveSetup
+import io.mazewall.platform.native.LiveStaleReason
+import io.mazewall.platform.native.LiveUnsupportedReason
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.NativeProcess
+import io.mazewall.platform.native.PublicationId
 import io.mazewall.platform.native.RawSyscallOperations
+import io.mazewall.platform.native.TaskId
+import io.mazewall.platform.native.TaskLease
+import io.mazewall.platform.native.WorkerOwner
+import io.mazewall.platform.native.getFdOrThrow
 import io.mazewall.platform.process.JvmChildProcess
+import io.mazewall.platform.seccomp.daemon.PreludeOutcome
 import io.mazewall.platform.seccomp.daemon.SeccompCleanupOutcome
+import io.mazewall.platform.seccomp.daemon.SeccompSessionHandler
 import io.mazewall.platform.socket.NativeCloseFailure
+import io.mazewall.platform.socket.RealSocketManager
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.platform.syscall.PrctlCommand
@@ -40,6 +83,7 @@ import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.lang.reflect.Modifier
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
@@ -51,6 +95,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -287,10 +332,13 @@ class ConfinedHelperRuntimeDrainTest {
 
     private fun withRuntime(
         preparationTimeout: Duration = timeout,
+        canonical: Boolean = false,
+        retainOnExit: Boolean = false,
+        sharedObservations: HelperSecurityObservation? = null,
         body: (RuntimeFixture) -> Unit,
     ) {
         val jar = implementationJar()
-        ConfinedHelperControlTest.RelayFixture(directory, observations(parent = false)).use { f ->
+        ConfinedHelperControlTest.RelayFixture(directory, observations(parent = false), sharedObservations = sharedObservations).use { f ->
             f.Endpoint().use { endpoint ->
                 URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
                     val policy = WorkerPolicyBuilder
@@ -306,8 +354,10 @@ class ConfinedHelperRuntimeDrainTest {
                         val document = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy), emptySet(), emptyMap())
                         val reviewed = ReviewedOperationArtifact.load(document.toJson(), TrustedPolicyReview("operator", document.sha256(), emptySet()), binding)
                         val support = listOf(ReviewedHelperSupport(f.roots[1].requested, HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest("reviewed".toByteArray()))))
-                        val runtime = ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, preparationTimeout, timeout)
-                        val fixture = RuntimeFixture(f, endpoint, resources, reviewed, support, runtime)
+                        val owner = if (canonical) ManagedRuntime.newCanonicalAcquisition() else null
+                        val runtime = owner?.start(preparationTimeout, timeout)
+                            ?: ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, preparationTimeout, timeout)
+                        val fixture = RuntimeFixture(f, endpoint, resources, reviewed, support, runtime, owner)
                         try {
                             body(fixture)
                         } finally {
@@ -317,11 +367,13 @@ class ConfinedHelperRuntimeDrainTest {
                                 thread.join(6000)
                                 check(!thread.isAlive)
                             }
-                            runtime.drain(timeout)
-                            runtime.drain(timeout)
+                            if (!retainOnExit) {
+                                runtime.drain(timeout)
+                                runtime.drain(timeout)
+                            }
                         }
                         } finally {
-                            if (!skipFixtureResourceClose) resources.close()
+                            if (!skipFixtureResourceClose && !retainOnExit) resources.close()
                         }
                     }
                 }
@@ -358,6 +410,7 @@ class ConfinedHelperRuntimeDrainTest {
         val reviewed: ReviewedOperationArtifact,
         val support: List<ReviewedHelperSupport>,
         val runtime: ManagedRuntime,
+        val canonicalOwner: ManagedRuntime.CanonicalAcquisition?,
     ) {
         val prepared = CompletableFuture<InProcessDomain>()
         var preparing: Thread? = null
@@ -368,6 +421,26 @@ class ConfinedHelperRuntimeDrainTest {
             field.get(runtime) as ThreadPoolExecutor
         }
         val managerThread = manager.submit(Callable { Thread.currentThread() }).get(2, TimeUnit.SECONDS)
+
+        fun helperPhysicallyRetired(): Boolean {
+            val owner = checkNotNull(canonicalOwner)
+            val operations = runtime.javaClass
+                .getDeclaredField("operations")
+                .apply { isAccessible = true }
+                .get(runtime)
+            val permit = owner.javaClass
+                .getDeclaredField("canonicalPermit")
+                .apply { isAccessible = true }
+                .get(owner)
+            return operations.javaClass
+                .getDeclaredMethod(
+                    "canonicalTransferredHelperRetired",
+                    Any::class.java,
+                    owner.javaClass,
+                    io.mazewall.enforcer.internal.supervisor.SupervisorContext::class.java,
+                ).apply { isAccessible = true }
+                .invoke(operations, permit, owner, endpoint.context) as Boolean
+        }
 
         fun prepare(reviewedSupport: List<ReviewedHelperSupport> = support) =
             runtime.prepareConfinedRead(
@@ -416,6 +489,11 @@ class ConfinedHelperRuntimeDrainTest {
             try {
                 fixture.nativeBoundary()
                 when {
+                    args[1] == "receiver_retirement" -> fixture.receiverRetirementProbe()
+                    args[1] == "b6_unprepared_receiver" || args[1].startsWith("b6_handshake_frame_") -> fixture.standaloneTransportProbe(args[1])
+                    args[1].startsWith("task_begin") -> fixture.liveInvocationBeginProbe(args[1])
+                    args[1].startsWith("b6_handshake") -> fixture.liveHandshakeProbe(args[1])
+                    args[1] == "history_only" -> fixture.historyOnlyProbe()
                     args[1] == "worker_refused" -> fixture.refusedWorkerRegistrationProbe(false)
                     args[1] == "worker_wrong_identity" -> fixture.refusedWorkerRegistrationProbe(true)
                     args[1].startsWith("worker_retire_") -> fixture.workerRetirementIncompleteProbe(args[1])
@@ -431,9 +509,1606 @@ class ConfinedHelperRuntimeDrainTest {
     }
 
     @Test
-    fun `transferred live plan reaches exact Ready before B6 refusal`() =
+    fun `transferred live plan reaches exact Ready before B6 refusal`() = runSupportCloseProbe("history_only")
+
+    @Test
+    fun `synthetic original worker receipt reaches the confined listener consumer`() = runSupportCloseProbe("b6_handshake")
+
+    @Test
+    fun `drain revokes an unsent original worker receipt`() = runSupportCloseProbe("b6_handshake_drained")
+
+    @Test
+    fun `exited worker cannot send an unsent original receipt`() = runSupportCloseProbe("b6_handshake_worker_exit")
+
+    @Test
+    fun `drain after peer credentials prevents original receipt handoff`() = runSupportCloseProbe("b6_handshake_after_auth")
+
+    @Test
+    fun `drain after prelude prevents original receipt handoff`() = runSupportCloseProbe("b6_handshake_after_write")
+
+    @Test
+    fun `original Live session denies observation without a task and stays usable`() = runSupportCloseProbe("b6_handshake_observe_empty")
+
+    @Test
+    fun `original Live notification observes its owned task and still replies EPERM`() = runSupportCloseProbe("b6_handshake_observe_task")
+
+    @Test
+    fun `reactor deadline denies once while Live observation is blocked`() = runSupportCloseProbe("b6_handshake_observe_task_timeout")
+
+    @Test
+    fun `lost original Live endpoint fails queued work`() = runSupportCloseProbe("b6_handshake_endpoint_loss")
+
+    @Test
+    fun `receipt cannot install endpoint after original worker exits`() = runSupportCloseProbe("b6_handshake_ack_worker_exit")
+
+    @Test
+    fun `Live observation accepts a fragmented frame within one deadline`() = runSupportCloseProbe("b6_handshake_frame_short")
+
+    @Test
+    fun `Live observation accepts an active prefix lasting beyond one idle interval`() = runSupportCloseProbe("b6_handshake_frame_slow")
+
+    @Test
+    fun `Live observation survives idle polling before the next frame`() = runSupportCloseProbe("b6_handshake_frame_idle")
+
+    @Test
+    fun `Live observation poisons a timed out partial frame`() = runSupportCloseProbe("b6_handshake_frame_partial")
+
+    @Test
+    fun `Live observation poisons a replayed sequence`() = runSupportCloseProbe("b6_handshake_frame_replay")
+
+    @Test
+    fun `Live observation poisons an unsupported frame version`() = runSupportCloseProbe("b6_handshake_frame_malformed")
+
+    @Test
+    fun `Live observation poisons sequence overflow and reuse`() = runSupportCloseProbe("b6_handshake_frame_overflow")
+
+    @Test
+    fun `endpoint loss during Begin ends the exact task without entering its body`() = runSupportCloseProbe("b6_handshake_observe_task_loss_begin")
+
+    @Test
+    fun `changed publication between copies denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_changed_publication")
+
+    @Test
+    fun `changed invocation between copies denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_changed_invocation")
+
+    @Test
+    fun `wrong snapshot binding denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_wrong_binding")
+
+    @Test
+    fun `wrong notification TID denies without copying`() = runSupportCloseProbe("b6_handshake_observe_task_wrong_tid")
+
+    @Test
+    fun `uninstalled endpoint cannot observe a published task`() = runSupportCloseProbe("b6_handshake_observe_task_notinstalled")
+
+    @Test
+    fun `recovered Begin remains unobservable during exact End`() = runSupportCloseProbe("b6_handshake_observe_task_recovered_end")
+
+    @Test
+    fun `pending End remains unobservable`() = runSupportCloseProbe("b6_handshake_observe_task_pending_end")
+
+    @Test
+    fun `busy snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_busy")
+
+    @Test
+    fun `absent snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_absent")
+
+    @Test
+    fun `incomplete snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_incomplete")
+
+    @Test
+    fun `stale snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_stale")
+
+    @Test
+    fun `unsupported snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_unsupported")
+
+    @Test
+    fun `foreign task snapshot denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_foreign")
+
+    @Test
+    fun `changed frame between copies denies observation`() = runSupportCloseProbe("b6_handshake_observe_task_changed_frame")
+
+    @Test
+    fun `notification bytes are owned before reactor mutation`() = runSupportCloseProbe("b6_handshake_observe_task_input_mutation")
+
+    @Test
+    fun `task End during first copy revokes observation`() = runSupportCloseProbe("b6_handshake_observe_task_copy_end")
+
+    @Test
+    fun `cancellation during first copy revokes observation`() = runSupportCloseProbe("b6_handshake_observe_task_copy_cancel")
+
+    @Test
+    fun `endpoint loss during first copy prevents a matched result`() = runSupportCloseProbe("b6_handshake_observe_task_copy_loss")
+
+    @Test
+    fun `live installation lifetime exposes no public thread returning method`() {
+        val lifetimeType = Class.forName("io.mazewall.enforcer.internal.supervisor.LiveInstallationLifetime")
+        val exposed = lifetimeType
+            .declaredMethods
+            .filter {
+                Modifier.isPublic(it.modifiers) && it.returnType == Thread::class.java
+            }
+        assertTrue(exposed.isEmpty(), "Live lifetime exposes receiver threads: $exposed")
+    }
+
+    @Test
+    fun `receiver physical exit precedes original domain retirement`() = runSupportCloseProbe("receiver_retirement")
+
+    // The socket and task are genuine component authorities. This does not exercise a kernel notification.
+    private fun receiverRetirementProbe() =
         withRuntime { fixture ->
+            skipFixtureResourceClose = true
             val recording = RecordingCapture(completeCapture = true)
+            val invalidations = AtomicInteger()
+            recording.beforeInvalidate = { invalidations.incrementAndGet() }
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(fixture.runtime, fixture.reviewed, fixture.resources, recording, helperContext = fixture.endpoint.context) {},
+            )
+            val preparation = runtimeState(fixture.runtime).javaClass.getDeclaredField("scopingPreparation").let {
+                it.isAccessible = true
+                it.get(runtimeState(fixture.runtime)) as ScopingPreparation
+            }
+            val frozen = assertIs<ScopingPreparation.State.Ready>(preparation.state).frozen
+            val domainReady = CompletableFuture<OwnedDomain>()
+            val receiptReady = CompletableFuture<LiveValidationTransport>()
+            val invocationReady = CompletableFuture<io.mazewall.enforcer.internal.execution.OwnedInvocation<Int>>()
+            val lifetimeReady = CompletableFuture<Any>()
+            val closeFailure = CompletableFuture<Throwable>()
+            val copyEntered = CountDownLatch(1)
+            val copyRelease = CountDownLatch(1)
+            val taskEntered = CountDownLatch(1)
+            val taskRelease = CountDownLatch(1)
+            val callerResult = CompletableFuture<Throwable?>()
+            val lifetimeType = Class.forName("io.mazewall.enforcer.internal.supervisor.LiveInstallationLifetime")
+
+            fun invoke(
+                lifetime: Any,
+                name: String,
+                vararg values: Any,
+            ): Any? =
+                lifetimeType.declaredMethods
+                    .single { it.name == name && it.parameterCount == values.size }
+                    .apply { isAccessible = true }
+                    .invoke(lifetime, *values)
+
+            fun field(
+                owner: Any,
+                name: String,
+            ): Any? =
+                owner.javaClass.getDeclaredField(name).let {
+                    it.isAccessible = true
+                    it.get(owner)
+                }
+            recording.copyResult = { _, _ ->
+                copyEntered.countDown()
+                while (copyRelease.count != 0L) {
+                    try {
+                        copyRelease.await()
+                    } catch (_: InterruptedException) {
+                        // Preserve the blocked physical receiver until its test owner releases it.
+                    }
+                }
+                LiveRead.Absent(LiveAbsentReason.NoTask)
+            }
+            val caller = Thread.ofPlatform().start {
+                callerResult.complete(
+                    runCatching {
+                        scopingMethod().invoke(
+                            fixture.runtime,
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            ready.value,
+                            scopingEffects(afterDomainCommit = {
+                                val domain = assertIs<ScopingPreparation.State.DomainOwned>(preparation.state).domain
+                                val plan = field(domain, "helperPlan") as PreparedHelperReadPlan
+                                val helperSetup = SupervisorInstaller.prepareConfinedHelper(
+                                    plan,
+                                    fixture.endpoint.context,
+                                    fixture.resources.native,
+                                    ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 },
+                                    retain = { session ->
+                                        domain.javaClass
+                                            .getDeclaredField("helperSession")
+                                            .apply { isAccessible = true }
+                                            .set(domain, session)
+                                    },
+                                    observations = observations(parent = true),
+                                )
+                                if (helperSetup is ConfinedHelperPreparation.Rejected) {
+                                    throw AssertionError("Original committed helper setup rejected", helperSetup.cause)
+                                }
+                                assertIs<ConfinedHelperPreparation.Ready>(helperSetup)
+                                val slots = checkNotNull(field(domain, "liveWorkers"))
+                                val slot = slots.javaClass
+                                    .getDeclaredMethod("slot", Int::class.javaPrimitiveType)
+                                    .apply { isAccessible = true }
+                                    .invoke(slots, 0) as LiveWorkerSlot
+                                val worker = Thread.ofPlatform().unstarted {
+                                    try {
+                                        val registered = slots.javaClass.declaredMethods
+                                            .single { it.name == "register" }
+                                            .apply { isAccessible = true }
+                                            .invoke(slots, slot, frozen) as WorkerOwner
+                                        RuntimeWorkerContext.enter(domain, frozen)
+                                        RuntimeWorkerContext.bindLiveWorker(registered)
+                                        try {
+                                            receiptReady.complete(domain.liveWorkerAdmission.reserveLiveValidation(slot))
+                                            invocationReady.get(15, TimeUnit.SECONDS).run()
+                                            val lifetime = lifetimeReady.get(15, TimeUnit.SECONDS)
+                                            val failure = assertFails { invoke(lifetime, "closeAndAwait") }
+                                            closeFailure.complete((failure as? java.lang.reflect.InvocationTargetException)?.targetException ?: failure)
+                                        } finally {
+                                            RuntimeWorkerContext.exit()
+                                        }
+                                    } catch (failure: Throwable) {
+                                        receiptReady.completeExceptionally(failure)
+                                        closeFailure.completeExceptionally(failure)
+                                    }
+                                }
+                                @Suppress("UNCHECKED_CAST")
+                                (field(domain, "threads") as MutableList<Thread>).add(worker)
+                                slot.thread = worker
+                                worker.start()
+                                domainReady.complete(domain)
+                                val failure = closeFailure.get(20, TimeUnit.SECONDS)
+                                worker.join(5000)
+                                check(!worker.isAlive)
+                                throw failure
+                            }),
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                try {
+                    completeLiveRelaySetup(fixture)
+                } catch (failure: Throwable) {
+                    val setupFailure = callerResult.get(1, TimeUnit.SECONDS)
+                    throw AssertionError("Committed domain setup failed before relay setup", setupFailure ?: failure)
+                }
+                val domain = domainReady.get(5, TimeUnit.SECONDS)
+                val originalPlan = field(domain, "helperPlan") as PreparedHelperReadPlan
+                assertFalse(field(originalPlan, "closed") as Boolean)
+                val receipt = receiptReady.get(5, TimeUnit.SECONDS)
+                fixture.relay.connect(holdClose = true).use { live ->
+                    @Suppress("UNCHECKED_CAST")
+                    val socket = field(live.parent, "socket") as FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
+                    NativeArena.ofConfined().use { arena ->
+                        val listener = fixture.relay.native.fileSystem
+                            .open(arena.allocateFrom("/dev/null"), OpenFlags.RDONLY)
+                            .getFdOrThrow("synthetic owned listener", FileDescriptorRole.SeccompNotif)
+                        SupervisorOwnedFd(listener, fixture.relay.native.fileSystem).use {
+                            assertTrue(SupervisorSeccompNotifInstaller.transferLiveListener(fixture.relay.native, socket, listener, receipt, SeccompInstallHandshake({})))
+                            val accepted = assertIs<PreludeOutcome.LiveListener>(live.loopEnded.get(5, TimeUnit.SECONDS))
+                            val received = checkNotNull(RealSocketManager.capture(fixture.relay.native).recvDescriptor(live.accepted))
+                            SupervisorOwnedFd(received, fixture.relay.native.fileSystem).use {
+                                assertIs<ConfinedHelperControl.LiveAdmission>(accepted.admission).attach(live.accepted)
+                                val worker = checkNotNull(recording.workerThread.get())
+                                val lifetime = lifetimeType
+                                    .getDeclaredConstructor(Thread::class.java, NativeEngine::class.java, LiveValidationTransport::class.java)
+                                    .apply { isAccessible = true }
+                                    .newInstance(worker, fixture.relay.native, receipt)
+                                val receiverReady = CountDownLatch(1)
+                                val channel = io.mazewall.ffi.networking
+                                    .ConfinedHelperChannel(fixture.relay.native, live.accepted, { false }, { true })
+                                try {
+                                    invoke(lifetime, "start")
+                                    invoke(lifetime, "attach", socket, receiverReady)
+                                    val deadline = ConfinedDeadline.mint(fixture.relay.native) { 30_000_000_000 }
+                                    channel.send(byteArrayOf(0xac.toByte()), deadline)
+                                    check(receiverReady.await(5, TimeUnit.SECONDS))
+                                    val phase = domain.javaClass.getDeclaredField("phase").apply { isAccessible = true }
+                                    phase.set(domain, phase.type.enumConstants.single { (it as Enum<*>).name == "READY" })
+                                    val invocation = io.mazewall.enforcer.internal.execution.OwnedInvocation(
+                                        domain,
+                                        Callable {
+                                            taskEntered.countDown()
+                                            check(taskRelease.await(15, TimeUnit.SECONDS))
+                                            42
+                                        },
+                                        checkNotNull(field(domain, "liveCancellationPermit")),
+                                    )
+                                    (field(domain, "admission") as java.util.concurrent.Semaphore).acquire()
+                                    @Suppress("UNCHECKED_CAST")
+                                    check((field(domain, "pending") as MutableSet<Any>).add(invocation))
+                                    lifetimeReady.complete(lifetime)
+                                    invocationReady.complete(invocation)
+                                    check(taskEntered.await(5, TimeUnit.SECONDS))
+                                    val request = java.nio.ByteBuffer
+                                        .allocate(104)
+                                        .putInt(0x4d574f42)
+                                        .putInt(1)
+                                        .putInt(1)
+                                        .putInt(104)
+                                        .putLong(1)
+                                        .putLong(77)
+                                        .putLong(deadline.nanos)
+                                        .putInt(checkNotNull(recording.workerOwner.get()).tid.value)
+                                        .putInt(257)
+                                        .putInt(0xc000003e.toInt())
+                                        .putInt(0)
+                                        .apply { repeat(6) { putLong(0) } }
+                                        .array()
+                                    channel.send(request, deadline)
+                                    check(copyEntered.await(5, TimeUnit.SECONDS))
+                                    taskRelease.countDown()
+                                    val timeoutFailure = closeFailure.get(8, TimeUnit.SECONDS)
+                                    assertEquals("Socket helper cleanup timed out", timeoutFailure.message)
+                                    caller.join(5000)
+                                    check(!caller.isAlive)
+                                    assertNotNull(callerResult.get(1, TimeUnit.SECONDS))
+                                    val report = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(500)))
+                                    assertNotNull(report.cleanupFailure)
+                                    assertTrue((field(lifetime, "reactor") as Thread).isAlive)
+                                    org.junit.jupiter.api.Assertions.assertAll(
+                                        "original resources remain owned while receiver is alive",
+                                        { assertFalse(field(originalPlan, "closed") as Boolean, "original helper plan closed") },
+                                        { assertEquals(0, recording.workerRetireCalls.get(), "original worker retired") },
+                                        { assertFalse(domain.retired(), "original domain retired") },
+                                        { assertEquals(0, recording.lifecycle.count { it == "installation" }, "installation retired") },
+                                        { assertEquals(0, fixture.relay.reaps.get(), "original helper reaped") },
+                                        { fixture.resources.validate() },
+                                    )
+                                } finally {
+                                    copyRelease.countDown()
+                                    taskRelease.countDown()
+                                    val receiver = field(lifetime, "reactor") as? Thread
+                                    receiver?.join(10000)
+                                    check(receiver == null || !receiver.isAlive)
+                                }
+                                val settled = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                                assertNotNull(settled.cleanupFailure)
+                                assertEquals(1, recording.copyCalls.get())
+                                assertEquals(1, recording.workerRetireCalls.get())
+                                assertEquals(1, invalidations.get())
+                                assertEquals(1, recording.lifecycle.count { it == "installation" })
+                                assertEquals(2, recording.retireCalls.get())
+                                assertSame(frozen.bootstrap.staging, recording.retiredOwner.get())
+                                assertEquals(1, fixture.relay.reaps.get())
+                                assertTrue(field(originalPlan, "closed") as Boolean)
+                                assertFails { fixture.resources.validate() }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                copyRelease.countDown()
+                taskRelease.countDown()
+                caller.join(10000)
+                check(!caller.isAlive)
+            }
+        }
+
+    @Test
+    fun `bound receiver without prepared retirement is refused and closes its socket once`() = runSupportCloseProbe("b6_unprepared_receiver")
+
+    private fun standaloneTransportProbe(mode: String) {
+        val shared = HelperSecurityObservation()
+        withRuntime(sharedObservations = shared) { fixture ->
+            // Reflection composes one synthetic domain with its own exact real relay plan and session;
+            // it does not establish protected startup, native provenance or production custody.
+            assertSame(shared, fixture.relay.observations)
+            assertSame(shared, fixture.relay.controlObservationsUsed)
+            val ownerBinding = fixture.relay.manifest.binding.owner
+            val observed = shared.observeAncestry(
+                ownerBinding.ownerPid,
+                Tid(ownerBinding.ownerPid.value),
+                HelperSecurityObservation.Lineage.Bootstrap,
+            )
+            assertEquals(ownerBinding.ownerStartTicks, observed.identity.startTimeTicks)
+            assertEquals(fixture.relay.manifest.ancestry.canonical, observed.ancestry.canonical)
+            val recording = RecordingCapture(completeCapture = true)
+            val prepared = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val preparation = runtimeState(fixture.runtime)
+                .javaClass
+                .getDeclaredField("scopingPreparation")
+                .apply { isAccessible = true }
+                .get(runtimeState(fixture.runtime)) as ScopingPreparation
+            val frozen = assertIs<ScopingPreparation.State.Ready>(preparation.state).frozen
+            val policy = fixture.relay
+                .javaClass
+                .getDeclaredField("policy")
+                .apply { isAccessible = true }
+                .get(fixture.relay) as CanonicalPolicyArtifact.Worker
+            val domain = OwnedDomain(
+                fixture.relay.manifest.binding.owner.domainGeneration,
+                DomainLimits(1, 1),
+                policy.policy.definition,
+                preparation.environment,
+                null,
+                null,
+                "synthetic-b6-handshake-",
+                frozen,
+            )
+            val session = CompletableFuture<ConfinedHelperSession>()
+            val setup = CompletableFuture<ConfinedHelperPreparation>()
+            val setupThread = Thread.ofPlatform().start {
+                try {
+                    setup.complete(
+                        SupervisorInstaller.prepareConfinedHelper(
+                            fixture.relay.plan,
+                            fixture.endpoint.context,
+                            fixture.relay.native,
+                            ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 },
+                            { session.complete(it) },
+                            observations = fixture.relay.observations,
+                        ),
+                    )
+                } catch (failure: Throwable) {
+                    setup.completeExceptionally(failure)
+                }
+            }
+            try {
+                completeLiveRelaySetup(fixture)
+            } catch (failure: Throwable) {
+                val outcome = try {
+                    setup.get(1, TimeUnit.SECONDS)
+                } catch (setupFailure: Throwable) {
+                    throw AssertionError("Original helper setup failed before relay setup", setupFailure)
+                }
+                if (outcome is ConfinedHelperPreparation.Rejected) {
+                    throw AssertionError("Original helper setup rejected before relay setup", outcome.cause)
+                }
+                throw failure
+            }
+            assertIs<ConfinedHelperPreparation.Ready>(setup.get(5, TimeUnit.SECONDS))
+            setupThread.join(5000)
+            check(!setupThread.isAlive)
+            val originalSession = session.get(1, TimeUnit.SECONDS)
+            check(originalSession.matchesOriginal(fixture.relay.plan, fixture.endpoint.context))
+            domain
+                .javaClass
+                .getDeclaredField("helperPlan")
+                .apply { isAccessible = true }
+                .set(domain, fixture.relay.plan)
+            domain
+                .javaClass
+                .getDeclaredField("helperSession")
+                .apply { isAccessible = true }
+                .set(domain, originalSession)
+            val slots = domain
+                .javaClass
+                .getDeclaredField("liveWorkers")
+                .apply { isAccessible = true }
+                .get(domain)
+            val slot = slots
+                .javaClass
+                .getDeclaredMethod("slot", Int::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+                .invoke(slots, 0) as LiveWorkerSlot
+            val receipt = CompletableFuture<LiveValidationTransport>()
+            val release = CountDownLatch(1)
+            val worker = Thread.ofPlatform().unstarted {
+                try {
+                    val owner = frozen.bootstrap.sealed
+                    val registration = recording.contexts.prepareWorkerReceipt(owner)
+                    slot.receipt = registration
+                    slot.registrationAttempted = true
+                    val registered = assertIs<LiveSetup.Ready<WorkerOwner>>(
+                        recording.contexts.registerCurrent(owner, registration),
+                    ).value
+                    slot.tid = registered.tid
+                    slot.worker = registered
+                    slot.registrationReserved = true
+                    RuntimeWorkerContext.enter(domain, frozen)
+                    RuntimeWorkerContext.bindLiveWorker(registered)
+                    try {
+                        val sessionField = domain
+                            .javaClass
+                            .getDeclaredField("helperSession")
+                            .apply { isAccessible = true }
+                        val copiedContext = fixture.endpoint.context.copy()
+                        check(copiedContext == fixture.endpoint.context && copiedContext !== fixture.endpoint.context)
+                        val foreignSession = ConfinedHelperSession(
+                            fixture.relay.plan,
+                            copiedContext,
+                            fixture.relay.native,
+                            { false },
+                            fixture.relay.observations,
+                        )
+                        sessionField.set(domain, foreignSession)
+                        val failure = assertFailsWith<IllegalStateException> { domain.liveWorkerAdmission.reserveLiveValidation(slot) }
+                        assertEquals("Live validation original binding differs", failure.message)
+                        sessionField.set(domain, originalSession)
+                        receipt.complete(domain.liveWorkerAdmission.reserveLiveValidation(slot))
+                        check(release.await(10, TimeUnit.SECONDS))
+                    } finally {
+                        RuntimeWorkerContext.exit()
+                    }
+                } catch (failure: Throwable) {
+                    receipt.completeExceptionally(failure)
+                }
+            }
+            @Suppress("UNCHECKED_CAST")
+            (
+                domain.javaClass
+                    .getDeclaredField("threads")
+                    .apply { isAccessible = true }
+                    .get(domain) as MutableList<Thread>
+            ).add(worker)
+            slot.thread = worker
+            worker.start()
+            try {
+                val originalReceipt = receipt.get(5, TimeUnit.SECONDS)
+                fixture.relay.connect(holdClose = true).use { live ->
+                    @Suppress("UNCHECKED_CAST")
+                    val socket = live.parent.javaClass
+                        .getDeclaredField("socket")
+                        .apply { isAccessible = true }
+                        .get(live.parent) as FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
+                    NativeArena.ofConfined().use { arena ->
+                        val listener = fixture.relay.native.fileSystem
+                            .open(arena.allocateFrom("/dev/null"), OpenFlags.RDONLY)
+                            .getFdOrThrow("synthetic owned listener", FileDescriptorRole.SeccompNotif)
+                        SupervisorOwnedFd(listener, fixture.relay.native.fileSystem).use {
+                            assertTrue(
+                                SupervisorSeccompNotifInstaller.transferLiveListener(
+                                    fixture.relay.native,
+                                    socket,
+                                    listener,
+                                    originalReceipt,
+                                    SeccompInstallHandshake({}),
+                                ),
+                            )
+                            val accepted = assertIs<PreludeOutcome.LiveListener>(live.loopEnded.get(5, TimeUnit.SECONDS))
+                            val received = checkNotNull(RealSocketManager.capture(fixture.relay.native).recvDescriptor(live.accepted))
+                            SupervisorOwnedFd(received, fixture.relay.native.fileSystem).use {
+                                assertIs<ConfinedHelperControl.LiveAdmission>(accepted.admission).attach(live.accepted)
+                                if (mode.startsWith("b6_handshake_frame_")) {
+                                    runUnboundFrameProbe(mode, worker, socket, live.accepted, fixture.relay.native, recording)
+                                    return@withRuntime
+                                }
+                                val closes = AtomicInteger()
+                                val native = object : NativeEngine by fixture.relay.native {
+                                    override val fileSystem = object : io.mazewall.platform.native.NativeFileSystem by fixture.relay.native.fileSystem {
+                                        override fun close(fd: FileDescriptor<*, FdState.Open, FdOwnership.Owned>): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                                            if (fd === socket) closes.incrementAndGet()
+                                            return fixture.relay.native.fileSystem
+                                                .close(fd)
+                                        }
+                                    }
+                                }
+                                val lifetimeType = Class.forName("io.mazewall.enforcer.internal.supervisor.LiveInstallationLifetime")
+                                val lifetime = lifetimeType
+                                    .getDeclaredConstructor(Thread::class.java, NativeEngine::class.java, LiveValidationTransport::class.java)
+                                    .apply { isAccessible = true }
+                                    .newInstance(worker, native, originalReceipt)
+                                val ready = CountDownLatch(1)
+                                val failure = assertFailsWith<java.lang.reflect.InvocationTargetException> {
+                                    lifetimeType
+                                        .getDeclaredMethod("attach", FileDescriptor::class.java, CountDownLatch::class.java)
+                                        .apply { isAccessible = true }
+                                        .invoke(lifetime, socket, ready)
+                                }
+                                assertEquals("Live receiver has no current retirement owner", failure.targetException.message)
+                                assertEquals(0L, ready.count)
+                                assertEquals(1, closes.get())
+                                assertNull(lifetimeType.getDeclaredField("reactor").apply { isAccessible = true }.get(lifetime))
+                                val closeFailure = assertFailsWith<java.lang.reflect.InvocationTargetException> {
+                                    lifetimeType.getDeclaredMethod("closeAndAwait").apply { isAccessible = true }.invoke(lifetime)
+                                }
+                                assertSame(failure.targetException, closeFailure.targetException)
+                                assertEquals(1, closes.get())
+                            }
+                        }
+                    }
+                }
+            } finally {
+                release.countDown()
+                worker.join(10000)
+                check(!worker.isAlive)
+                recording.workerOwner.get()?.let { recording.contexts.retireWorker(it) }
+                originalSession.retire(ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 })
+                prepared.value.close()
+            }
+        }
+    }
+
+    // Unbound framing controls own no domain endpoint or receiver retirement handle.
+    private fun runUnboundFrameProbe(
+        mode: String,
+        worker: Thread,
+        socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        accepted: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        native: NativeEngine,
+        recording: RecordingCapture,
+    ) {
+        val shortRead = CountDownLatch(1)
+        val receiverNative = if (mode == "b6_handshake_frame_short" || mode == "b6_handshake_frame_slow") {
+            object : NativeEngine by native {
+                override val networking = object : io.mazewall.platform.native.NativeNetworking by native.networking {
+                    override fun recvmsg(
+                        sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                        msg: ManagedSegment,
+                        flags: Int,
+                    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                        val result = native.networking.recvmsg(sockfd, msg, flags)
+                        if (sockfd === socket && result is LinuxNative.SyscallResult.Success && result.value == 19L) shortRead.countDown()
+                        return result
+                    }
+                }
+            }
+        } else {
+            native
+        }
+        val lifetimeType = Class.forName("io.mazewall.enforcer.internal.supervisor.LiveInstallationLifetime")
+        val lifetime = lifetimeType
+            .getDeclaredConstructor(Thread::class.java, NativeEngine::class.java)
+            .apply { isAccessible = true }
+            .newInstance(worker, receiverNative)
+
+        fun invoke(
+            name: String,
+            vararg values: Any,
+        ) = lifetimeType.declaredMethods
+            .single { it.name == name && it.parameterCount == values.size }
+            .apply { isAccessible = true }
+            .invoke(lifetime, *values)
+        val poisoned = mode != "b6_handshake_frame_short" && mode != "b6_handshake_frame_slow" && mode != "b6_handshake_frame_idle"
+        try {
+            invoke("start")
+            val ready = CountDownLatch(1)
+            invoke("attach", socket, ready)
+            val channel = io.mazewall.ffi.networking
+                .ConfinedHelperChannel(native, accepted, { false }, { true })
+            val deadline = ConfinedDeadline.mint(native) { 5_000_000_000 }
+            channel.send(byteArrayOf(0xac.toByte()), deadline)
+            check(ready.await(5, TimeUnit.SECONDS))
+
+            fun frame(serial: Long): ByteArray =
+                java.nio.ByteBuffer
+                    .allocate(104)
+                    .putInt(0x4d574f42)
+                    .putInt(1)
+                    .putInt(1)
+                    .putInt(104)
+                    .putLong(serial)
+                    .putLong(77L)
+                    .putLong(deadline.nanos)
+                    .putInt(checkNotNull(recording.workerOwner.get()).tid.value)
+                    .putInt(257)
+                    .putInt(0xc000003e.toInt())
+                    .putInt(0)
+                    .apply { repeat(6) { putLong(it.toLong()) } }
+                    .array()
+            val first = frame(if (mode == "b6_handshake_frame_overflow") Long.MAX_VALUE else 1)
+            when (mode) {
+                "b6_handshake_frame_short", "b6_handshake_frame_slow" -> {
+                    channel.send(first.copyOfRange(0, 19), deadline)
+                    check(shortRead.await(5, TimeUnit.SECONDS))
+                    if (mode == "b6_handshake_frame_slow") assertFalse(CountDownLatch(1).await(1200, TimeUnit.MILLISECONDS))
+                    channel.send(first.copyOfRange(19, first.size), deadline)
+                    kotlin.test.assertContentEquals(first, channel.receive(108, deadline).copyOfRange(0, 104))
+                    invoke("requireReusable")
+                }
+                "b6_handshake_frame_idle" -> {
+                    assertFalse(CountDownLatch(1).await(1200, TimeUnit.MILLISECONDS))
+                    channel.send(first, deadline)
+                    kotlin.test.assertContentEquals(first, channel.receive(108, deadline).copyOfRange(0, 104))
+                    invoke("requireReusable")
+                }
+                "b6_handshake_frame_partial" -> {
+                    channel.send(first.copyOfRange(0, 40), deadline)
+                    assertFails { channel.receive(108, deadline) }
+                }
+                "b6_handshake_frame_malformed" -> {
+                    java.nio.ByteBuffer
+                        .wrap(first)
+                        .putInt(4, 2)
+                    channel.send(first, deadline)
+                    assertFails { channel.receive(108, deadline) }
+                }
+                "b6_handshake_frame_replay", "b6_handshake_frame_overflow" -> {
+                    channel.send(first, deadline)
+                    kotlin.test.assertContentEquals(first, channel.receive(108, deadline).copyOfRange(0, 104))
+                    channel.send(frame(1), deadline)
+                    assertFails { channel.receive(108, deadline) }
+                }
+                else -> error("Unknown frame case")
+            }
+            assertEquals(0, recording.copyCalls.get())
+        } finally {
+            try {
+                if (poisoned) assertFails { invoke("closeAndAwait") } else invoke("closeAndAwait")
+            } finally {
+                val reactor = lifetimeType
+                    .getDeclaredField("reactor")
+                    .apply { isAccessible = true }
+                    .get(lifetime) as? Thread
+                reactor?.join(5000)
+                check(reactor == null || !reactor.isAlive)
+            }
+        }
+    }
+
+    private fun liveHandshakeProbe(mode: String) =
+        withRuntime { fixture ->
+            skipFixtureResourceClose = true
+            val recording = RecordingCapture(completeCapture = true)
+            val prepared = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val preparation = runtimeState(fixture.runtime)
+                .javaClass
+                .getDeclaredField("scopingPreparation")
+                .apply { isAccessible = true }
+                .get(runtimeState(fixture.runtime)) as ScopingPreparation
+            val frozen = assertIs<ScopingPreparation.State.Ready>(preparation.state).frozen
+            val boundary = IllegalStateException("controlled committed handshake boundary")
+            val result = CompletableFuture<Throwable?>()
+            val caller = Thread.ofPlatform().start {
+                result.complete(
+                    runCatching {
+                        scopingMethod().invoke(
+                            fixture.runtime,
+                            (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy,
+                            DomainLimits(1, 1),
+                            prepared.value,
+                            scopingEffects(afterDomainCommit = {
+                                val domain = assertIs<ScopingPreparation.State.DomainOwned>(preparation.state).domain
+                                val plan = domain.javaClass
+                                    .getDeclaredField("helperPlan")
+                                    .apply { isAccessible = true }
+                                    .get(domain) as PreparedHelperReadPlan
+                                runCommittedHandshake(fixture, domain, frozen, plan, recording, mode)
+                                throw boundary
+                            }),
+                        )
+                    }.exceptionOrNull(),
+                )
+            }
+            try {
+                try {
+                    completeLiveRelaySetup(fixture)
+                } catch (failure: Throwable) {
+                    val setupFailure = result.get(1, TimeUnit.SECONDS)
+                    throw AssertionError("Committed handshake setup failed before relay setup", setupFailure ?: failure)
+                }
+                caller.join(35000)
+                check(!caller.isAlive) { "Committed handshake did not finish" }
+                val failure = result.get(1, TimeUnit.SECONDS)
+                val actual = (failure as? java.lang.reflect.InvocationTargetException)?.targetException ?: failure
+                if (actual !== boundary) throw AssertionError("Committed handshake failed", actual)
+            } finally {
+                caller.join(10000)
+                check(!caller.isAlive)
+            }
+        }
+
+    // Component composition only: the committed domain owns the plan, session, worker and retirement actor.
+    private fun runCommittedHandshake(
+        fixture: RuntimeFixture,
+        domain: OwnedDomain,
+        frozen: io.mazewall.enforcer.internal.execution.FrozenStackScoping.Live,
+        plan: PreparedHelperReadPlan,
+        recording: RecordingCapture,
+        mode: String,
+    ) {
+        val validationSocket = AtomicReference<FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>>()
+        val drainedAfterCredentials = AtomicBoolean()
+        val sentBytes = AtomicLong()
+        val raw = object : RawSyscallOperations by fixture.relay.native.raw {
+            override fun syscall(
+                nr: Long,
+                a1: NativeArg,
+                a2: NativeArg,
+                a3: NativeArg,
+                a4: NativeArg,
+                a5: NativeArg,
+                a6: NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val result = fixture.relay.native.raw
+                    .syscall(nr, a1, a2, a3, a4, a5, a6)
+                if (mode == "b6_handshake_after_auth" &&
+                    nr == Arch.current().getsockopt.toLong() &&
+                    a1 is NativeArg.FdArg &&
+                    a1.fd === validationSocket.get() &&
+                    a2.asLong == 1L &&
+                    a3.asLong == 17L &&
+                    result is LinuxNative.SyscallResult.Success
+                ) {
+                    drainedAfterCredentials.set(true)
+                    domain.beginDrain()
+                }
+                return result
+            }
+        }
+        val networking = object : io.mazewall.platform.native.NativeNetworking by fixture.relay.native.networking {
+            override fun sendmsg(
+                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                msg: ManagedSegment,
+                flags: Int,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                val result = fixture.relay.native.networking
+                    .sendmsg(sockfd, msg, flags)
+                if (mode == "b6_handshake_after_write" &&
+                    sockfd === validationSocket.get() &&
+                    result is LinuxNative.SyscallResult.Success &&
+                    result.value > 0 &&
+                    sentBytes.addAndGet(result.value) == 149L
+                ) {
+                    domain.beginDrain()
+                }
+                return result
+            }
+        }
+        val sessionNative = object : NativeEngine by fixture.relay.native {
+            override val raw = raw
+            override val networking = networking
+        }
+        val session = CompletableFuture<ConfinedHelperSession>()
+        val setup = SupervisorInstaller.prepareConfinedHelper(
+            plan,
+            fixture.endpoint.context,
+            sessionNative,
+            ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 },
+            { session.complete(it) },
+            observations = observations(parent = true),
+        )
+        if (setup is ConfinedHelperPreparation.Rejected) {
+            throw AssertionError("Original committed helper setup rejected", setup.cause)
+        }
+        assertIs<ConfinedHelperPreparation.Ready>(setup)
+        val originalSession = session.get(1, TimeUnit.SECONDS)
+        check(originalSession.matchesOriginal(plan, fixture.endpoint.context))
+        domain.javaClass
+            .getDeclaredField("helperSession")
+            .apply { isAccessible = true }
+            .set(domain, originalSession)
+        val slots = domain
+            .javaClass
+            .getDeclaredField("liveWorkers")
+            .apply { isAccessible = true }
+            .get(domain)
+        val slot = slots
+            .javaClass
+            .getDeclaredMethod("slot", Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+            .invoke(slots, 0) as LiveWorkerSlot
+        val receipt = CompletableFuture<LiveValidationTransport>()
+        val release = CountDownLatch(1)
+        val taskBody = CountDownLatch(1)
+        val taskRelease = CountDownLatch(1)
+        val copyEntered = CountDownLatch(1)
+        val copyRelease = CountDownLatch(1)
+        val copyResumed = CountDownLatch(1)
+        val beginEntered = CountDownLatch(1)
+        val beginRelease = CountDownLatch(1)
+        val endEntered = CountDownLatch(1)
+        val endRelease = CountDownLatch(1)
+        val workerExit = CountDownLatch(1)
+        val observationTask = AtomicReference<io.mazewall.enforcer.internal.execution.OwnedInvocation<Int>>()
+        val worker = Thread.ofPlatform().unstarted {
+            try {
+                val registered = slots.javaClass.declaredMethods
+                    .single { it.name == "register" }
+                    .apply { isAccessible = true }
+                    .invoke(slots, slot, frozen) as WorkerOwner
+                RuntimeWorkerContext.enter(domain, frozen)
+                RuntimeWorkerContext.bindLiveWorker(registered)
+                try {
+                    val sessionField = domain
+                        .javaClass
+                        .getDeclaredField("helperSession")
+                        .apply { isAccessible = true }
+                    val copiedContext = fixture.endpoint.context.copy()
+                    check(copiedContext == fixture.endpoint.context && copiedContext !== fixture.endpoint.context)
+                    val foreignSession = ConfinedHelperSession(
+                        plan,
+                        copiedContext,
+                        fixture.relay.native,
+                        { false },
+                        fixture.relay.observations,
+                    )
+                    sessionField.set(domain, foreignSession)
+                    val failure = assertFailsWith<IllegalStateException> { domain.liveWorkerAdmission.reserveLiveValidation(slot) }
+                    assertEquals("Live validation original binding differs", failure.message)
+                    sessionField.set(domain, originalSession)
+                    receipt.complete(domain.liveWorkerAdmission.reserveLiveValidation(slot))
+                    check(release.await(10, TimeUnit.SECONDS))
+                    if (mode.startsWith("b6_handshake_observe_task")) {
+                        checkNotNull(observationTask.get()).run()
+                        if (mode.startsWith("b6_handshake_observe_task_copy_")) {
+                            while (workerExit.count != 0L) {
+                                try {
+                                    workerExit.await()
+                                } catch (_: InterruptedException) {
+                                    // Keep the original socket owner alive until the observation finishes.
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    RuntimeWorkerContext.exit()
+                }
+            } catch (failure: Throwable) {
+                receipt.completeExceptionally(failure)
+            }
+        }
+        @Suppress("UNCHECKED_CAST")
+        (
+            domain.javaClass
+                .getDeclaredField("threads")
+                .apply { isAccessible = true }
+                .get(domain) as MutableList<Thread>
+        ).add(worker)
+        slot.thread = worker
+        worker.start()
+        try {
+            val originalReceipt = receipt.get(5, TimeUnit.SECONDS)
+            assertEquals(fixture.endpoint.context.socketPath, originalReceipt.socketPath)
+            assertFailsWith<IllegalStateException> { originalReceipt.requireCurrent() }
+            val unsupportedNative = MockNativeEngine().apply {
+                onSyscall = { _, _, _, _, _, _, _ -> error("unsupported Live install invoked a syscall") }
+            }
+            val filter = BpfFilter.build(
+                Arch.current(),
+                ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).build().definition,
+            )
+            assertFailsWith<UnsupportedKernelFeatureException> {
+                SupervisorSeccompNotifInstaller.installLiveOwned(
+                    native = unsupportedNative,
+                    userNotifSupported = false,
+                    socketPath = originalReceipt.socketPath,
+                    filter = filter,
+                    receipt = originalReceipt,
+                    onFilterApplied = { error("unsupported Live install applied a filter") },
+                    installationGate = SeccompInstallationGate.Direct,
+                    onSocketConnected = { _, _ -> error("unsupported Live install connected a socket") },
+                )
+            }
+            if (mode == "b6_handshake_after_auth" || mode == "b6_handshake_after_write") {
+                fixture.relay.connect(holdClose = true).use { live ->
+                    val socket = live.parent.javaClass
+                        .getDeclaredField("socket")
+                        .apply { isAccessible = true }
+                        .get(live.parent)
+
+                    @Suppress("UNCHECKED_CAST")
+                    val ownedSocket = socket as FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
+                    validationSocket.set(ownedSocket)
+                    val failure = assertFailsWith<IllegalStateException> {
+                        originalReceipt.send(ownedSocket, ConfinedDeadline.mint(fixture.relay.native) { 1_000_000_000 })
+                    }
+                    if (mode == "b6_handshake_after_auth") {
+                        assertEquals("Live validation was revoked during authentication", failure.message)
+                        assertTrue(drainedAfterCredentials.get())
+                    } else {
+                        assertEquals("Live validation was revoked during handoff", failure.message)
+                        assertEquals(149L, sentBytes.get())
+                        assertFailsWith<IllegalStateException> {
+                            originalReceipt.send(ownedSocket, ConfinedDeadline.mint(fixture.relay.native) { 1_000_000_000 })
+                        }
+                    }
+                    assertTrue(worker.isAlive)
+                }
+                return
+            }
+            if (mode != "b6_handshake" &&
+                mode != "b6_handshake_observe_empty" &&
+                !mode.startsWith("b6_handshake_observe_task") &&
+                !mode.startsWith("b6_handshake_frame_") &&
+                mode != "b6_handshake_endpoint_loss" &&
+                mode != "b6_handshake_ack_worker_exit"
+            ) {
+                if (mode == "b6_handshake_drained") {
+                    domain.beginDrain()
+                    assertTrue(worker.isAlive)
+                } else {
+                    release.countDown()
+                    worker.join(10000)
+                    check(!worker.isAlive)
+                }
+                assertFailsWith<IllegalStateException> { originalReceipt.socketPath }
+                fixture.relay.connect(holdClose = true).use { live ->
+                    val socket = live.parent.javaClass
+                        .getDeclaredField("socket")
+                        .apply { isAccessible = true }
+                        .get(live.parent)
+
+                    @Suppress("UNCHECKED_CAST")
+                    val ownedSocket = socket as FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
+                    assertFailsWith<IllegalStateException> {
+                        originalReceipt.send(ownedSocket, ConfinedDeadline.mint(fixture.relay.native) { 1_000_000_000 })
+                    }
+                    assertFalse(live.loopEnded.isDone)
+                }
+                return
+            }
+            fixture.relay.connect(holdClose = true).use { live ->
+                val socket = live.parent
+                    .javaClass
+                    .getDeclaredField("socket")
+                    .apply { isAccessible = true }
+                    .get(live.parent)
+
+                @Suppress("UNCHECKED_CAST")
+                val ownedSocket = socket as FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>
+                NativeArena.ofConfined().use { arena ->
+                    val listener = fixture.relay.native.fileSystem
+                        .open(arena.allocateFrom("/dev/null"), OpenFlags.RDONLY)
+                        .getFdOrThrow("synthetic owned listener", FileDescriptorRole.SeccompNotif)
+                    // A real owned regular FD is an SCM transport surrogate, not a seccomp listener.
+                    SupervisorOwnedFd(listener, fixture.relay.native.fileSystem).use {
+                        assertTrue(
+                            SupervisorSeccompNotifInstaller.transferLiveListener(
+                                fixture.relay.native,
+                                ownedSocket,
+                                listener,
+                                originalReceipt,
+                                SeccompInstallHandshake({}),
+                            ),
+                        )
+                        val accepted = assertIs<PreludeOutcome.LiveListener>(live.loopEnded.get(5, TimeUnit.SECONDS))
+                        val manager = RealSocketManager.capture(fixture.relay.native)
+                        val received = checkNotNull(manager.recvDescriptor(live.accepted))
+                        SupervisorOwnedFd(received, fixture.relay.native.fileSystem).use {
+                            val liveAdmission = assertIs<ConfinedHelperControl.LiveAdmission>(accepted.admission)
+                            liveAdmission.attach(live.accepted)
+                            if (mode == "b6_handshake_observe_empty" ||
+                                mode.startsWith("b6_handshake_observe_task") ||
+                                mode.startsWith("b6_handshake_frame_") ||
+                                mode == "b6_handshake_endpoint_loss" ||
+                                mode == "b6_handshake_ack_worker_exit"
+                            ) {
+                                if (mode == "b6_handshake_ack_worker_exit") {
+                                    release.countDown()
+                                    worker.join(10000)
+                                    check(!worker.isAlive)
+                                    assertFails { originalReceipt.install(ownedSocket) }
+                                    return
+                                }
+                                val lifetimeType = Class.forName("io.mazewall.enforcer.internal.supervisor.LiveInstallationLifetime")
+                                val shortRead = CountDownLatch(1)
+                                val lifetimeNative = if (mode == "b6_handshake_frame_short" || mode == "b6_handshake_frame_slow") {
+                                    object : NativeEngine by fixture.relay.native {
+                                        override val networking = object : io.mazewall.platform.native.NativeNetworking by fixture.relay.native.networking {
+                                            override fun recvmsg(
+                                                sockfd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                                                msg: ManagedSegment,
+                                                flags: Int,
+                                            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                                                val result = fixture.relay.native.networking
+                                                    .recvmsg(sockfd, msg, flags)
+                                                if (sockfd === ownedSocket && result is LinuxNative.SyscallResult.Success && result.value == 19L) shortRead.countDown()
+                                                return result
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    fixture.relay.native
+                                }
+                                val lifetime = if (mode != "b6_handshake_observe_empty" && mode != "b6_handshake_observe_task_notinstalled" && !mode.startsWith("b6_handshake_frame_")) {
+                                    lifetimeType
+                                        .getDeclaredConstructor(Thread::class.java, NativeEngine::class.java, LiveValidationTransport::class.java)
+                                        .apply { isAccessible = true }
+                                        .newInstance(worker, lifetimeNative, originalReceipt)
+                                } else {
+                                    lifetimeType
+                                        .getDeclaredConstructor(Thread::class.java, NativeEngine::class.java)
+                                        .apply { isAccessible = true }
+                                        .newInstance(worker, lifetimeNative)
+                                }
+
+                                fun invoke(
+                                    name: String,
+                                    vararg values: Any,
+                                ) = lifetimeType.declaredMethods
+                                    .single { method -> method.name == name && method.parameterCount == values.size }
+                                    .apply { isAccessible = true }
+                                    .invoke(lifetime, *values)
+                                val ready = CountDownLatch(1)
+                                val channel = io.mazewall.ffi.networking
+                                    .ConfinedHelperChannel(fixture.relay.native, live.accepted, { false }, { true })
+                                val poisonedFrame = mode.startsWith("b6_handshake_frame_") &&
+                                    mode != "b6_handshake_frame_short" &&
+                                    mode != "b6_handshake_frame_slow" &&
+                                    mode != "b6_handshake_frame_idle"
+                                AutoCloseable {
+                                    try {
+                                        if (poisonedFrame) assertFails { invoke("closeAndAwait") } else invoke("closeAndAwait")
+                                    } finally {
+                                        copyRelease.countDown()
+                                        val reactor = lifetimeType.getDeclaredField("reactor").apply { isAccessible = true }.get(lifetime) as? Thread
+                                        reactor?.join(5000)
+                                        check(reactor == null || !reactor.isAlive) { "Original receiver did not physically exit" }
+                                    }
+                                }.use {
+                                    invoke("start")
+                                    invoke("attach", ownedSocket, ready)
+                                    val deadline = ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 }
+                                    channel.send(byteArrayOf(0xac.toByte()), deadline)
+                                    check(ready.await(5, TimeUnit.SECONDS))
+                                    if (mode.startsWith("b6_handshake_frame_")) {
+                                        fun frame(serial: Long): ByteArray =
+                                            java.nio.ByteBuffer
+                                                .allocate(104)
+                                                .putInt(0x4d574f42)
+                                                .putInt(1)
+                                                .putInt(1)
+                                                .putInt(104)
+                                                .putLong(serial)
+                                                .putLong(77L)
+                                                .putLong(deadline.nanos)
+                                                .putInt(checkNotNull(recording.workerOwner.get()).tid.value)
+                                                .putInt(257)
+                                                .putInt(0xc000003e.toInt())
+                                                .putInt(0)
+                                                .apply { repeat(6) { putLong(it.toLong()) } }
+                                                .array()
+                                        val first = frame(if (mode == "b6_handshake_frame_overflow") Long.MAX_VALUE else 1)
+                                        when (mode) {
+                                            "b6_handshake_frame_short", "b6_handshake_frame_slow" -> {
+                                                channel.send(first.copyOfRange(0, 19), deadline)
+                                                check(shortRead.await(5, TimeUnit.SECONDS))
+                                                if (mode == "b6_handshake_frame_slow") {
+                                                    assertFalse(CountDownLatch(1).await(1200, TimeUnit.MILLISECONDS))
+                                                }
+                                                channel.send(first.copyOfRange(19, first.size), deadline)
+                                                kotlin.test.assertContentEquals(first, channel.receive(108, deadline).copyOfRange(0, 104))
+                                                invoke("requireReusable")
+                                            }
+                                            "b6_handshake_frame_idle" -> {
+                                                assertFalse(CountDownLatch(1).await(1200, TimeUnit.MILLISECONDS))
+                                                channel.send(first, deadline)
+                                                kotlin.test.assertContentEquals(first, channel.receive(108, deadline).copyOfRange(0, 104))
+                                                invoke("requireReusable")
+                                            }
+                                            "b6_handshake_frame_partial" -> {
+                                                channel.send(first.copyOfRange(0, 40), deadline)
+                                                assertFails { channel.receive(108, deadline) }
+                                            }
+                                            "b6_handshake_frame_malformed" -> {
+                                                java.nio.ByteBuffer
+                                                    .wrap(first)
+                                                    .putInt(4, 2)
+                                                channel.send(first, deadline)
+                                                assertFails { channel.receive(108, deadline) }
+                                            }
+                                            "b6_handshake_frame_replay", "b6_handshake_frame_overflow" -> {
+                                                channel.send(first, deadline)
+                                                kotlin.test.assertContentEquals(first, channel.receive(108, deadline).copyOfRange(0, 104))
+                                                channel.send(frame(1), deadline)
+                                                assertFails { channel.receive(108, deadline) }
+                                            }
+                                            else -> error("Unknown frame case")
+                                        }
+                                        assertEquals(0, recording.copyCalls.get())
+                                        return@use
+                                    }
+                                    if (mode == "b6_handshake_endpoint_loss") {
+                                        val phaseField = domain.javaClass
+                                            .getDeclaredField("phase")
+                                            .apply { isAccessible = true }
+                                        phaseField.set(domain, phaseField.type.enumConstants.single { (it as Enum<*>).name == "READY" })
+                                        val permit = domain.javaClass
+                                            .getDeclaredField("liveCancellationPermit")
+                                            .apply { isAccessible = true }
+                                            .get(domain)
+                                        val bodyEntries = AtomicInteger()
+                                        val queued = io.mazewall.enforcer.internal.execution.OwnedInvocation(
+                                            domain,
+                                            Callable { bodyEntries.incrementAndGet() },
+                                            permit,
+                                        )
+                                        val semaphore = domain.javaClass
+                                            .getDeclaredField("admission")
+                                            .apply { isAccessible = true }
+                                            .get(domain) as java.util.concurrent.Semaphore
+                                        semaphore.acquire()
+
+                                        @Suppress("UNCHECKED_CAST")
+                                        val pending = domain.javaClass
+                                            .getDeclaredField("pending")
+                                            .apply { isAccessible = true }
+                                            .get(domain) as MutableSet<Any>
+                                        check(pending.add(queued))
+                                        invoke("close")
+                                        assertIs<ExecutionEnd.NotStarted>(
+                                            queued.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS),
+                                        )
+                                        assertEquals("FAILED", (phaseField.get(domain) as Enum<*>).name)
+                                        assertEquals(0, bodyEntries.get())
+                                        return@use
+                                    }
+                                    if (mode.startsWith("b6_handshake_observe_task")) {
+                                        val inputs = frozen.bootstrap.javaClass
+                                            .getDeclaredField("inputs")
+                                            .apply { isAccessible = true }
+                                            .get(frozen.bootstrap)
+
+                                        @Suppress("UNCHECKED_CAST")
+                                        val corridors = inputs.javaClass
+                                            .getDeclaredField("corridors")
+                                            .apply { isAccessible = true }
+                                            .get(inputs) as List<List<java.lang.reflect.Executable>>
+                                        val corridor = corridors.first()
+                                        val actualBinding = if (corridor.first().name == "open0") {
+                                            io.mazewall.platform.native.LiveBinding.Open0
+                                        } else {
+                                            io.mazewall.platform.native.LiveBinding.Openat0
+                                        }
+                                        val binding = if (mode == "b6_handshake_observe_task_wrong_binding") {
+                                            when (actualBinding) {
+                                                io.mazewall.platform.native.LiveBinding.Open0 -> io.mazewall.platform.native.LiveBinding.Openat0
+                                                io.mazewall.platform.native.LiveBinding.Openat0 -> io.mazewall.platform.native.LiveBinding.Open0
+                                            }
+                                        } else {
+                                            actualBinding
+                                        }
+                                        val frames = corridor.map { method ->
+                                            io.mazewall.platform.native.LiveFrame(
+                                                frozen.bootstrap.enrollment.methods
+                                                    .single { it.identity == method }
+                                                    .token,
+                                                0,
+                                            )
+                                        }
+                                        recording.copyResult = { lease, expected ->
+                                            if ((mode == "b6_handshake_observe_task_timeout" || mode.startsWith("b6_handshake_observe_task_copy_")) && expected == null) {
+                                                copyEntered.countDown()
+                                                check(copyRelease.await(5, TimeUnit.SECONDS))
+                                                copyResumed.countDown()
+                                            }
+                                            check(expected == null || expected == InvocationId(1))
+                                            val unavailable = when (mode) {
+                                                "b6_handshake_observe_task_busy" -> LiveRead.Busy
+                                                "b6_handshake_observe_task_absent" -> LiveRead.Absent(LiveAbsentReason.NoTask)
+                                                "b6_handshake_observe_task_incomplete" -> LiveRead.Incomplete(LiveIncompleteReason.CaptureFailed)
+                                                "b6_handshake_observe_task_stale" -> LiveRead.Stale(LiveStaleReason.IdentityMismatch)
+                                                "b6_handshake_observe_task_unsupported" -> LiveRead.Unsupported(LiveUnsupportedReason.AdapterNotImplemented)
+                                                else -> null
+                                            }
+                                            unavailable ?: io.mazewall.platform.native.LiveRead.Available(
+                                                io.mazewall.platform.native.LiveSnapshot(
+                                                    if (mode == "b6_handshake_observe_task_foreign") TaskLease(lease.worker, TaskId(lease.task.value + 1)) else lease,
+                                                    InvocationId(if (expected != null && mode == "b6_handshake_observe_task_changed_invocation") 2 else 1),
+                                                    PublicationId(if (expected != null && mode == "b6_handshake_observe_task_changed_publication") 2 else 1),
+                                                    binding,
+                                                    if (expected != null && mode == "b6_handshake_observe_task_changed_frame") frames.map { it.copy(location = it.location + 1) } else frames,
+                                                ),
+                                            )
+                                        }
+                                        val phaseField = domain.javaClass
+                                            .getDeclaredField("phase")
+                                            .apply { isAccessible = true }
+                                        phaseField.set(domain, phaseField.type.enumConstants.single { (it as Enum<*>).name == "READY" })
+                                        val permit = domain.javaClass
+                                            .getDeclaredField("liveCancellationPermit")
+                                            .apply { isAccessible = true }
+                                            .get(domain)
+                                        val invocation = io.mazewall.enforcer.internal.execution.OwnedInvocation(
+                                            domain,
+                                            Callable {
+                                                taskBody.countDown()
+                                                if (mode != "b6_handshake_observe_task_pending_end") check(taskRelease.await(5, TimeUnit.SECONDS))
+                                                42
+                                            },
+                                            permit,
+                                        )
+                                        val semaphore = domain.javaClass
+                                            .getDeclaredField("admission")
+                                            .apply { isAccessible = true }
+                                            .get(domain) as java.util.concurrent.Semaphore
+                                        semaphore.acquire()
+
+                                        @Suppress("UNCHECKED_CAST")
+                                        val pending = domain.javaClass
+                                            .getDeclaredField("pending")
+                                            .apply { isAccessible = true }
+                                            .get(domain) as MutableSet<Any>
+                                        check(pending.add(invocation))
+                                        observationTask.set(invocation)
+                                        if (mode == "b6_handshake_observe_task_recovered_end" || mode == "b6_handshake_observe_task_pending_end") {
+                                            if (mode == "b6_handshake_observe_task_recovered_end") recording.taskBeginFailure.set(IllegalStateException("controlled Begin failure"))
+                                            if (mode == "b6_handshake_observe_task_pending_end") recording.taskEndResult.set(recording.pendingRetireOutcome)
+                                            recording.duringTaskEnd = {
+                                                endEntered.countDown()
+                                                check(endRelease.await(5, TimeUnit.SECONDS))
+                                            }
+                                        }
+                                        if (mode == "b6_handshake_observe_task_loss_begin") {
+                                            recording.afterTaskBegin = {
+                                                beginEntered.countDown()
+                                                while (beginRelease.count != 0L) {
+                                                    try {
+                                                        beginRelease.await()
+                                                    } catch (_: InterruptedException) {
+                                                        // The domain may interrupt the worker while physical Begin remains owned.
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        release.countDown()
+                                        if (mode == "b6_handshake_observe_task_recovered_end" || mode == "b6_handshake_observe_task_pending_end") {
+                                            check(endEntered.await(5, TimeUnit.SECONDS))
+                                            val request = java.nio.ByteBuffer
+                                                .allocate(104)
+                                                .putInt(0x4d574f42)
+                                                .putInt(1)
+                                                .putInt(1)
+                                                .putInt(104)
+                                                .putLong(1)
+                                                .putLong(77)
+                                                .putLong(deadline.nanos)
+                                                .putInt(checkNotNull(recording.workerOwner.get()).tid.value)
+                                                .putInt(257)
+                                                .putInt(0xc000003e.toInt())
+                                                .putInt(0)
+                                                .apply { repeat(6) { putLong(0) } }
+                                                .array()
+                                            channel.send(request, deadline)
+                                            val reply = channel.receive(108, deadline)
+                                            kotlin.test.assertContentEquals(request, reply.copyOfRange(0, 104))
+                                            assertEquals(
+                                                0,
+                                                java.nio.ByteBuffer
+                                                    .wrap(reply, 104, 4)
+                                                    .int,
+                                            )
+                                            assertEquals(0, recording.copyCalls.get())
+                                            endRelease.countDown()
+                                            invocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+                                            assertEquals(1, recording.endCalls.get())
+                                            return@use
+                                        }
+                                        if (mode == "b6_handshake_observe_task_loss_begin") {
+                                            check(beginEntered.await(5, TimeUnit.SECONDS))
+                                            invoke("close")
+                                            beginRelease.countDown()
+                                            invocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+                                            assertEquals(1L, taskBody.count)
+                                            assertEquals(1, recording.endCalls.get())
+                                            assertEquals(0, recording.copyCalls.get())
+                                            return@use
+                                        }
+                                        check(taskBody.await(5, TimeUnit.SECONDS))
+                                        NativeArena.ofConfined().use { arena ->
+                                            val sends = AtomicInteger()
+                                            val errors = CopyOnWriteArrayList<Int>()
+                                            val raw = object : RawSyscallOperations by fixture.relay.native.raw {
+                                                override fun <Req, Res> ioctl(
+                                                    fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                                                    command: io.mazewall.ffi.IoctlCommand<Req, Res>,
+                                                    arg: Req,
+                                                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                                                    assertSame(received, fd)
+                                                    val buffer = (arg as io.mazewall.ffi.TypedSegment<*>).segment
+                                                    if (command.code == io.mazewall.ffi.IoctlCommand.SECCOMP_IOCTL_NOTIF_RECV.code) {
+                                                        buffer.writeLong(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_ID_OFFSET, 77L)
+                                                        val tid = checkNotNull(recording.workerOwner.get()).tid.value
+                                                        buffer.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, if (mode == "b6_handshake_observe_task_wrong_tid") tid + 1 else tid)
+                                                    } else {
+                                                        assertEquals(io.mazewall.ffi.IoctlCommand.SECCOMP_IOCTL_NOTIF_SEND.code, command.code)
+                                                        errors.add(buffer.readInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_RESP_ERROR_OFFSET))
+                                                        sends.incrementAndGet()
+                                                    }
+                                                    return LinuxNative.SyscallResult.Success(0L)
+                                                }
+                                            }
+                                            val native = object : NativeEngine by fixture.relay.native {
+                                                override val raw = raw
+                                            }
+                                            val replies = SupervisorReplyInterpreter(
+                                                native,
+                                                received,
+                                                SupervisorExecRewriteExchange(native, live.accepted),
+                                                TraceeDescriptorImporter(native),
+                                            )
+                                            val actual = LiveListenerHandler(received, replies, native, liveAdmission)
+                                            val capturedWork = AtomicReference<io.mazewall.platform.seccomp.daemon.NotificationWork>()
+                                            val handler = object : io.mazewall.platform.seccomp.daemon.SeccompNotifHandler by actual {
+                                                context(scope: NativeArena) override fun beginNotification(
+                                                    notif: ManagedSegment,
+                                                    resp: ManagedSegment,
+                                                    listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+                                                    socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+                                                    deadline: io.mazewall.platform.lifecycle.Deadline,
+                                                ): io.mazewall.platform.seccomp.daemon.NotificationWork =
+                                                    actual
+                                                        .beginNotification(notif, resp, listenerFd, socketFd, deadline)
+                                                        .also {
+                                                            capturedWork.set(it)
+                                                            if (mode == "b6_handshake_observe_task_input_mutation") {
+                                                                notif.writeInt(io.mazewall.ffi.Layouts.SECCOMP_NOTIF_PID_OFFSET, 1)
+                                                            }
+                                                        }
+                                            }
+                                            var now = System.nanoTime()
+                                            SeccompSessionHandler(
+                                                live.accepted,
+                                                received,
+                                                handler,
+                                                engine = native,
+                                                nanoTime = { now },
+                                            ).use { reactor ->
+                                                val poll = arena.allocate(io.mazewall.ffi.Layouts.POLLFD, 2)
+                                                PollFdSegment.of(poll).setRevents(NativeConstants.POLLIN)
+                                                with(arena) { reactor.handleActiveListener(poll) }
+                                                val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
+                                                val blockCopy = mode == "b6_handshake_observe_task_timeout" || mode.startsWith("b6_handshake_observe_task_copy_")
+                                                while (sends.get() == 0 && System.nanoTime() < end && (!blockCopy || copyEntered.count != 0L)) {
+                                                    with(arena) { reactor.handleActiveListener(poll) }
+                                                    Thread.yield()
+                                                }
+                                                if (mode == "b6_handshake_observe_task_timeout") {
+                                                    assertEquals(0L, copyEntered.count)
+                                                    now += TimeUnit.SECONDS.toNanos(31)
+                                                    with(arena) { reactor.handleActiveListener(poll) }
+                                                    copyRelease.countDown()
+                                                    check(copyResumed.await(5, TimeUnit.SECONDS))
+                                                    with(arena) { reactor.handleActiveListener(poll) }
+                                                } else {
+                                                    if (mode.startsWith("b6_handshake_observe_task_copy_")) {
+                                                        assertEquals(0L, copyEntered.count)
+                                                        when (mode) {
+                                                            "b6_handshake_observe_task_copy_end" -> {
+                                                                taskRelease.countDown()
+                                                                invocation.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS)
+                                                            }
+                                                            "b6_handshake_observe_task_copy_cancel" -> invocation.requestCancellation()
+                                                            "b6_handshake_observe_task_copy_loss" -> invoke("close")
+                                                        }
+                                                        copyRelease.countDown()
+                                                        check(copyResumed.await(5, TimeUnit.SECONDS))
+                                                        while (sends.get() == 0 && System.nanoTime() < end) {
+                                                            try {
+                                                                with(arena) { reactor.handleActiveListener(poll) }
+                                                            } catch (expected: Exception) {
+                                                                check(sends.get() == 1) { "Transport failed before terminal denial" }
+                                                            }
+                                                            Thread.yield()
+                                                        }
+                                                    }
+                                                    val work = checkNotNull(capturedWork.get())
+                                                    val observation = work.javaClass
+                                                        .getDeclaredField("observation")
+                                                        .apply { isAccessible = true }
+                                                        .get(work)
+                                                    val expected = if (mode == "b6_handshake_observe_task" || mode == "b6_handshake_observe_task_input_mutation") {
+                                                        "ObservationMatched"
+                                                    } else {
+                                                        "ObservationDenied"
+                                                    }
+                                                    if (mode == "b6_handshake_observe_task_copy_loss") {
+                                                        assertTrue(observation?.toString() != "ObservationMatched")
+                                                    } else {
+                                                        assertEquals(expected, observation.toString())
+                                                    }
+                                                    val expectedCopies = when (mode) {
+                                                        "b6_handshake_observe_task_wrong_tid", "b6_handshake_observe_task_notinstalled" -> 0
+                                                        "b6_handshake_observe_task_wrong_binding", "b6_handshake_observe_task_busy", "b6_handshake_observe_task_absent",
+                                                        "b6_handshake_observe_task_incomplete", "b6_handshake_observe_task_stale", "b6_handshake_observe_task_unsupported",
+                                                        "b6_handshake_observe_task_foreign",
+                                                        -> 1
+                                                        "b6_handshake_observe_task_copy_loss" -> null
+                                                        else -> 2
+                                                    }
+                                                    expectedCopies?.let { assertEquals(it, recording.copyCalls.get()) }
+                                                }
+                                                assertEquals(listOf(-NativeConstants.EPERM), errors)
+                                                assertEquals(1, sends.get())
+                                            }
+                                        }
+                                        return@use
+                                    }
+                                    repeat(2) { index ->
+                                        // Frozen v1 observation vector: header, sequence, notification,
+                                        // absolute monotonic deadline, TID, raw nr/arch, reserved and six args.
+                                        val request = java.nio.ByteBuffer
+                                            .allocate(104)
+                                            .putInt(0x4d574f42)
+                                            .putInt(1)
+                                            .putInt(1)
+                                            .putInt(104)
+                                            .putLong(index.toLong() + 1)
+                                            .putLong(77L)
+                                            .putLong(deadline.nanos)
+                                            .putInt(checkNotNull(recording.workerOwner.get()).tid.value)
+                                            .putInt(257)
+                                            .putInt(0xc000003e.toInt())
+                                            .putInt(0)
+                                            .apply { repeat(6) { putLong(it.toLong()) } }
+                                            .array()
+                                        channel.send(request, deadline)
+                                        val response = channel.receive(108, deadline)
+                                        kotlin.test.assertContentEquals(request, response.copyOfRange(0, 104))
+                                        assertEquals(
+                                            0,
+                                            java.nio.ByteBuffer
+                                                .wrap(response, 104, 4)
+                                                .int,
+                                        )
+                                    }
+                                    assertEquals(0, recording.copyCalls.get())
+                                    invoke("requireReusable")
+                                }
+                            }
+                        }
+                        if (mode == "b6_handshake_observe_empty" ||
+                            mode.startsWith("b6_handshake_observe_task") ||
+                            mode.startsWith("b6_handshake_frame_") ||
+                            mode == "b6_handshake_endpoint_loss" ||
+                            mode == "b6_handshake_ack_worker_exit"
+                        ) {
+                            return
+                        }
+                        originalReceipt.requireCurrent()
+                        assertFailsWith<IllegalStateException> { originalReceipt.socketPath }
+                        assertFails { originalReceipt.send(ownedSocket, ConfinedDeadline.mint(fixture.relay.native) { 1_000_000_000 }) }
+                        release.countDown()
+                        worker.join(10000)
+                        check(!worker.isAlive)
+                        assertFailsWith<IllegalStateException> { originalReceipt.requireCurrent() }
+                    }
+                }
+            }
+        } finally {
+            workerExit.countDown()
+            endRelease.countDown()
+            beginRelease.countDown()
+            copyRelease.countDown()
+            taskRelease.countDown()
+            release.countDown()
+            worker.join(10000)
+            check(!worker.isAlive)
+        }
+    }
+
+    private fun historyOnlyProbe() =
+        withRuntime(canonical = true) { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            val owner = checkNotNull(fixture.canonicalOwner)
+            // This reflection-only composition models ownership transitions; it is not native provenance evidence.
+            val historyHelper = io.mazewall.enforcer.internal.supervisor
+                .SupervisorDaemonManagerTest()
+                .attachSyntheticHistoryHelper(owner, fixture.endpoint.context)
+            val unsafe = sun.misc.Unsafe::class.java
+                .getDeclaredField("theUnsafe")
+                .apply { isAccessible = true }
+                .get(null) as sun.misc.Unsafe
+            val association = unsafe.allocateInstance(io.mazewall.ffi.internal.CheckedBootstrapAssociation::class.java)
+            val associationContext = association.javaClass.getDeclaredField("helperContext").apply { isAccessible = true }
+            associationContext.set(association, historyHelper.context)
+            val originalAssociation = owner.javaClass.getDeclaredField("originalAssociation").apply { isAccessible = true }
+            originalAssociation.set(owner, association)
+            val helperManager = owner.javaClass.getDeclaredField("helperManager").apply { isAccessible = true }
+            val ownerContext = owner.javaClass.getDeclaredField("startedHelperContext").apply { isAccessible = true }
+            val managerContext = historyHelper.manager.javaClass
+                .getDeclaredField("confinedOriginalContext")
+                .apply { isAccessible = true }
+            assertSame(historyHelper.manager, helperManager.get(owner))
+            assertSame(historyHelper.context, ownerContext.get(owner))
+            assertSame(historyHelper.context, managerContext.get(historyHelper.manager))
+            val operations = fixture.runtime.javaClass
+                .getDeclaredField("operations")
+                .apply { isAccessible = true }
+                .get(fixture.runtime)
+            val permit = owner.javaClass
+                .getDeclaredField("canonicalPermit")
+                .apply { isAccessible = true }
+                .get(owner)
+            val physical = operations.javaClass
+                .getDeclaredMethod(
+                    "canonicalTransferredHelperRetired",
+                    Any::class.java,
+                    owner.javaClass,
+                    io.mazewall.enforcer.internal.supervisor.SupervisorContext::class.java,
+                ).apply { isAccessible = true }
+            assertEquals(false, physical.invoke(operations, permit, owner, historyHelper.context))
             // The relay and capture are synthetic; this proves the domain/session protocol only.
             val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
                 captureSyntheticWithSupport(
@@ -441,7 +2116,7 @@ class ConfinedHelperRuntimeDrainTest {
                     fixture.reviewed,
                     fixture.resources,
                     recording,
-                    helperContext = fixture.endpoint.context,
+                    helperContext = historyHelper.context,
                 ) {},
             )
             val outcome = CompletableFuture<Throwable?>()
@@ -458,7 +2133,7 @@ class ConfinedHelperRuntimeDrainTest {
             }
             try {
                 val first = CompletableFuture.anyOf(fixture.endpoint.firstAccepted, outcome).get(5, TimeUnit.SECONDS)
-                assertFalse(first is Throwable, "B6 refused before helper SETUP: $first")
+                if (first is Throwable) throw AssertionError("B6 refused before helper SETUP", first)
                 val deadline = ConfinedDeadline.mint(fixture.relay.native) { 5_000_000_000 }
                 val helper = fixture.relay.helper
                 val setup = assertIs<Frame.Setup>(helper.receiveFrame(deadline).frame)
@@ -477,10 +2152,34 @@ class ConfinedHelperRuntimeDrainTest {
                 assertEquals(0, recording.beginCalls.get())
                 assertEquals(1, installs.get(), "B6 refusal must precede worker restrictions")
                 fixture.runtime.drain(timeout)
+                assertTrue(fixture.manager.awaitTermination(5, TimeUnit.SECONDS))
+                historyHelper.process.setAlive(false)
+                assertEquals(true, physical.invoke(operations, permit, owner, historyHelper.context))
+                assertEquals(false, physical.invoke(operations, permit, owner, historyHelper.context.copy()))
+                val foreign = ManagedRuntime.newCanonicalAcquisition()
+                val rejected = assertFailsWith<java.lang.reflect.InvocationTargetException> { physical.invoke(operations, permit, foreign, historyHelper.context) }
+                assertIs<IllegalStateException>(rejected.cause)
                 assertEquals(1, recording.workerRetireCalls.get())
                 assertFalse(recording.workerThread.get().isAlive)
                 assertTrue(recording.lifecycle.indexOf("worker") < recording.lifecycle.indexOf("installation"))
                 assertEquals(1, fixture.relay.reaps.get())
+                val firstHistory = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+                val stopped = CompletableFuture<ManagedRuntimeAcquisitionStatus>()
+                val stopper = Thread.ofPlatform().start { stopped.complete(owner.retire(timeout)) }
+                try {
+                    assertTrue(historyHelper.entered.await(5, TimeUnit.SECONDS))
+                    val concurrent = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+                    assertSame(firstHistory.history, concurrent.history)
+                    assertEquals(1, historyHelper.stops.get())
+                } finally {
+                    historyHelper.release.countDown()
+                    stopper.join(6000)
+                }
+                assertFalse(stopper.isAlive)
+                val final = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(stopped.get(1, TimeUnit.SECONDS))
+                assertSame(firstHistory.history, final.history)
+                assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+                assertEquals(1, historyHelper.stops.get())
             } finally {
                 caller.join(6000)
                 assertFalse(caller.isAlive)
@@ -488,8 +2187,624 @@ class ConfinedHelperRuntimeDrainTest {
         }
 
     @Test
+    fun `synthetic installed live invocation begins before its physical body`() = runSupportCloseProbe("task_begin")
+
+    @Test
+    fun `recovered live begin failure ends its exact task without entering body`() = runSupportCloseProbe("task_begin_throw")
+
+    @Test
+    fun `fatal recovered live begin ends its exact task and retains identity`() = runSupportCloseProbe("task_begin_fatal")
+
+    @Test
+    fun `pending live task end closes admission and retains its exact task`() = runSupportCloseProbe("task_begin_pending")
+
+    @Test
+    fun `pending live task end retains invalidation failure and typed outcome`() = runSupportCloseProbe("task_begin_pending_throw")
+
+    @Test
+    fun `refused live task end closes admission and retains its exact task`() = runSupportCloseProbe("task_begin_refused")
+
+    @Test
+    fun `live delivery callback retains canonical context failure before task end`() = runSupportCloseProbe("task_begin_late")
+
+    @Test
+    fun `foreign live task lease is neither published nor ended`() = runSupportCloseProbe("task_begin_foreign")
+
+    @Test
+    fun `foreign recovered live task is neither published nor ended`() = runSupportCloseProbe("task_begin_foreign_recovered")
+
+    @Test
+    fun `live task delivery callback holds its lease until callback returns`() = runSupportCloseProbe("task_begin_callback_blocked")
+
+    @Test
+    fun `queued live cancellation invalidates once without task context`() = runSupportCloseProbe("task_begin_cancel")
+
+    @Test
+    fun `running live cancellation retains the task until its physical end`() = runSupportCloseProbe("task_begin_cancel_running")
+
+    @Test
+    fun `concurrent live cancellations share one invalidation`() = runSupportCloseProbe("task_begin_cancel_concurrent")
+
+    @Test
+    fun `live cancellation before worker invocation prevents begin`() = runSupportCloseProbe("task_begin_cancel_before_run")
+
+    @Test
+    fun `live cancellation delivers after invalidation throws without replay`() = runSupportCloseProbe("task_begin_cancel_throw")
+
+    @Test
+    fun `live dependent stage failure does not become invocation failure`() = runSupportCloseProbe("task_begin_dependent")
+
+    @Test
+    fun `live restoration and private inline body retain the same lease`() = runSupportCloseProbe("task_begin_context_inline")
+
+    @Test
+    fun `late ordinary failure and refused end retain both outcomes`() = runSupportCloseProbe("task_begin_late_refused")
+
+    @Test
+    fun `late ordinary failure and fatal end preserve fatal precedence`() = runSupportCloseProbe("task_begin_late_fatal_end")
+
+    @Test
+    fun `late fatal failure and pending end preserve both outcomes`() = runSupportCloseProbe("task_begin_fatal_pending")
+
+    @Test
+    fun `first invocation one shot end guard cannot clear the active second task`() = runSupportCloseProbe("task_begin_stale")
+
+    @Test
+    fun `revoked task tombstone rejects a different cleanup lease`() = runSupportCloseProbe("task_begin_tombstone")
+
+    @Test
+    fun `retained original lease remains endable before slot cleanup record`() = runSupportCloseProbe("task_begin_retained_frontier")
+
+    @Test
+    fun `retained slot lease remains endable before publication`() = runSupportCloseProbe("task_begin_retained_slot")
+
+    @Test
+    fun `live cancellation rejects wrong permit foreign domain and unregistered task`() = runSupportCloseProbe("task_begin_cancel_identity")
+
+    @Test
+    fun `live failure before task claim prevents begin without early invalidation`() = runSupportCloseProbe("task_begin_fail_before_run")
+
+    @Test
+    fun `live failure after task claim invalidates and retains task until end`() = runSupportCloseProbe("task_begin_fail_running")
+
+    @Test
+    fun `refused live begin and fatal recovery retain both failures without end`() = runSupportCloseProbe("task_begin_refused_recovery")
+
+    private fun liveInvocationBeginProbe(mode: String) =
+        withRuntime(retainOnExit = mode != "task_begin") { fixture ->
+            // Test-only already-installed domain: this is not a successful Live preparation or native qualification.
+            val recording = RecordingCapture(completeCapture = true)
+            val beginFailure = if (mode == "task_begin_fatal") {
+                AssertionError("controlled fatal Begin failure")
+            } else {
+                IllegalStateException("controlled attached Begin failure")
+            }
+            val contextFailure = if (mode == "task_begin_fatal_pending") {
+                LinkageError("controlled fatal context failure")
+            } else {
+                IllegalStateException("controlled callback context failure")
+            }
+            val endFailure = LinkageError("controlled fatal End failure")
+            val refusalCause = IllegalArgumentException("controlled Begin refusal")
+            val recoveryFailure = LinkageError("controlled task recovery fatal")
+            val invalidationFailure = IllegalStateException("controlled pending End invalidation failure")
+            if (mode == "task_begin_throw" || mode == "task_begin_fatal" || mode == "task_begin_foreign_recovered") recording.taskBeginFailure.set(beginFailure)
+            if (mode == "task_begin_foreign" || mode == "task_begin_foreign_recovered") recording.foreignTaskWorker.set(true)
+            if (mode == "task_begin_pending" || mode == "task_begin_pending_throw") recording.taskEndResult.set(recording.pendingRetireOutcome)
+            if (mode == "task_begin_pending_throw") recording.beforeInvalidate = { throw invalidationFailure }
+            if (mode == "task_begin_refused") recording.taskEndResult.set(recording.refusedOutcome)
+            if (mode == "task_begin_late_refused") recording.taskEndResult.set(recording.refusedOutcome)
+            if (mode == "task_begin_fatal_pending") recording.taskEndResult.set(recording.pendingRetireOutcome)
+            if (mode == "task_begin_late_fatal_end") recording.taskEndFailure.set(endFailure)
+            if (mode == "task_begin_refused_recovery") {
+                recording.taskBeginRefusal.set(
+                    LiveFailure(LiveFailureStatus.Stale, LiveFailureReason.IdentityMismatch, refusalCause),
+                )
+                recording.taskRecoveryFailure.set(recoveryFailure)
+            }
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                captureSyntheticWithSupport(
+                    fixture.runtime,
+                    fixture.reviewed,
+                    fixture.resources,
+                    recording,
+                    helperContext = fixture.endpoint.context,
+                ) {},
+            )
+            val state = runtimeState(fixture.runtime)
+            val preparation = state.javaClass
+                .getDeclaredField("scopingPreparation")
+                .apply { isAccessible = true }
+                .get(state) as io.mazewall.enforcer.internal.execution.ScopingPreparation
+            val frozen = assertIs<io.mazewall.enforcer.internal.execution.ScopingPreparation.State.Ready>(preparation.state).frozen
+            val domain = io.mazewall.enforcer.internal.execution.OwnedDomain(
+                1,
+                DomainLimits(1, if (mode == "task_begin_cancel_concurrent") 2 else 1),
+                (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy.definition,
+                preparation.environment,
+                null,
+                null,
+                "synthetic-installed-live-",
+                frozen,
+            )
+            val phase = domain.javaClass.getDeclaredField("phase").apply { isAccessible = true }
+            phase.set(domain, phase.type.enumConstants.single { (it as Enum<*>).name == "READY" })
+            val cancellationPermit = domain.javaClass
+                .getDeclaredField("liveCancellationPermit")
+                .apply { isAccessible = true }
+                .get(domain)
+            val bodyEntries = AtomicInteger()
+            val firstLease = AtomicReference<io.mazewall.platform.native.TaskLease>()
+            val secondLease = AtomicReference<io.mazewall.platform.native.TaskLease>()
+            val callbackCalls = AtomicInteger()
+            val callbackEntered = CountDownLatch(1)
+            val releaseCallback = CountDownLatch(1)
+            val bodyEntered = CountDownLatch(1)
+            val releaseBody = CountDownLatch(1)
+            val beforeRun = CountDownLatch(1)
+            val releaseRun = CountDownLatch(1)
+            val secondEntered = CountDownLatch(1)
+            val releaseSecond = CountDownLatch(1)
+            lateinit var invocation: io.mazewall.enforcer.internal.execution.OwnedInvocation<Int>
+            invocation = io.mazewall.enforcer.internal.execution.OwnedInvocation(
+                domain,
+                Callable {
+                    val current = checkNotNull(io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask)
+                    assertSame(recording.workerOwner.get(), current.worker)
+                    firstLease.set(current)
+                    bodyEntries.incrementAndGet()
+                    if (mode == "task_begin_tombstone" || mode == "task_begin_retained_frontier" || mode == "task_begin_retained_slot") {
+                        val workers = domain.javaClass
+                            .getDeclaredField("liveWorkers")
+                            .apply { isAccessible = true }
+                            .get(domain)
+                        val slot = workers.javaClass
+                            .getDeclaredMethod("slot", Int::class.javaPrimitiveType)
+                            .apply { isAccessible = true }
+                            .invoke(workers, 0) as LiveWorkerSlot
+                        if (mode == "task_begin_retained_frontier" || mode == "task_begin_retained_slot") {
+                            // Synthetic state frontier: model a retained lease before slot record publication.
+                            val gate = slot.javaClass
+                                .getDeclaredField("gate")
+                                .apply { isAccessible = true }
+                                .get(slot)
+                            synchronized(gate) {
+                                slot.javaClass
+                                    .getDeclaredField("publication")
+                                    .apply { isAccessible = true }
+                                    .set(slot, null)
+                                if (mode == "task_begin_retained_slot") slot.retainCleanup(invocation, current)
+                            }
+                            domain.liveTaskAdmission.revokeLiveTask(slot, invocation, current)
+                            assertEquals(0, recording.copyCalls.get())
+                        } else {
+                            domain.liveTaskAdmission.revokeLiveTask(slot, invocation, current)
+                            val foreign = TaskLease(current.worker, TaskId(current.task.value + 1))
+                            assertFailsWith<IllegalStateException> { domain.liveTaskAdmission.revokeLiveTask(slot, invocation, foreign) }
+                        }
+                    }
+                    if (mode == "task_begin_context_inline") {
+                        val snapshot = InvocationContextSnapshot(emptyMap()) {
+                            assertSame(current, io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask)
+                            AutoCloseable { assertSame(current, io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask) }
+                        }
+                        invocation.withContext(
+                            snapshot,
+                            Callable {
+                                val inline = fixture.runtime.javaClass
+                                    .getDeclaredMethod("callInline", Callable::class.java)
+                                    .apply { isAccessible = true }
+                                inline.invoke(
+                                    fixture.runtime,
+                                    Callable { assertSame(current, io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask) },
+                                )
+                            },
+                        )
+                    }
+                    if (mode == "task_begin_cancel_running" || mode == "task_begin_fail_running") {
+                        bodyEntered.countDown()
+                        while (releaseBody.count != 0L) {
+                            try {
+                                releaseBody.await()
+                            } catch (_: InterruptedException) {
+                                // Cancellation is not physical completion.
+                            }
+                        }
+                    }
+                    42
+                },
+                cancellationPermit,
+            )
+            val callback = invocation.result().thenRun {
+                assertSame(invocation, io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.invocation)
+                assertSame(firstLease.get(), io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask)
+                assertEquals(1, recording.beginCalls.get())
+                assertEquals(0, recording.endCalls.get())
+                if (mode in setOf("task_begin_late", "task_begin_late_refused", "task_begin_late_fatal_end", "task_begin_fatal_pending")) {
+                    val snapshot = InvocationContextSnapshot(emptyMap()) {
+                        if (mode == "task_begin_fatal_pending") AutoCloseable { throw contextFailure } else throw contextFailure
+                    }
+                    val observed = assertFailsWith<Throwable> { invocation.withContext(snapshot, Callable { 1 }) }
+                    assertSame(contextFailure, observed)
+                }
+                callbackCalls.incrementAndGet()
+                if (mode == "task_begin_callback_blocked") {
+                    callbackEntered.countDown()
+                    check(releaseCallback.await(5, TimeUnit.SECONDS))
+                }
+            }
+            val dependent = invocation.result().thenApply<Int> { throw IllegalStateException("dependent stage only") }
+            val second = io.mazewall.enforcer.internal.execution.OwnedInvocation(
+                domain,
+                Callable {
+                    secondLease.set(checkNotNull(io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask))
+                    bodyEntries.incrementAndGet()
+                    if (mode == "task_begin_stale") {
+                        secondEntered.countDown()
+                        check(releaseSecond.await(5, TimeUnit.SECONDS))
+                    }
+                    43
+                },
+                cancellationPermit,
+            )
+
+            fun field(
+                target: Any,
+                name: String,
+            ): java.lang.reflect.Field = target.javaClass.getDeclaredField(name).apply { isAccessible = true }
+            val admission = field(domain, "admission").get(domain) as java.util.concurrent.Semaphore
+            admission.acquire()
+            @Suppress("UNCHECKED_CAST")
+            val pending = field(domain, "pending").get(domain) as MutableSet<Any>
+            check(pending.add(invocation))
+            val error = AtomicReference<Throwable?>()
+            val worker = Thread.ofPlatform().unstarted {
+                try {
+                    val owner = frozen.bootstrap.sealed
+                    val receipt = recording.contexts.prepareWorkerReceipt(owner)
+                    val registered = assertIs<LiveSetup.Ready<io.mazewall.platform.native.WorkerOwner>>(
+                        recording.contexts.registerCurrent(owner, receipt),
+                    ).value
+                    val slots = field(domain, "liveWorkers").get(domain)
+                    val slot = slots.javaClass
+                        .getDeclaredMethod("slot", Int::class.javaPrimitiveType)
+                        .apply { isAccessible = true }
+                        .invoke(slots, 0)
+                    field(slot, "thread").set(slot, Thread.currentThread())
+                    field(slot, "tid").set(slot, registered.tid)
+                    field(slot, "worker").set(slot, registered)
+                    field(slot, "registrationReserved").setBoolean(slot, true)
+                    io.mazewall.enforcer.internal.execution.RuntimeWorkerContext
+                        .enter(domain, frozen)
+                    io.mazewall.enforcer.internal.execution.RuntimeWorkerContext
+                        .bindLiveWorker(registered)
+                    try {
+                        if (mode == "task_begin_cancel_before_run" || mode == "task_begin_fail_before_run") {
+                            beforeRun.countDown()
+                            check(releaseRun.await(5, TimeUnit.SECONDS))
+                        }
+                        invocation.run()
+                        if (mode == "task_begin" || mode == "task_begin_stale") {
+                            admission.acquire()
+                            check(pending.add(second))
+                            second.run()
+                        }
+                    } finally {
+                        io.mazewall.enforcer.internal.execution.RuntimeWorkerContext
+                            .exit()
+                    }
+                } catch (problem: Throwable) {
+                    error.set(problem)
+                }
+            }
+            try {
+                if (mode == "task_begin_cancel_identity") {
+                    val foreign = io.mazewall.enforcer.internal.execution.OwnedDomain(
+                        2,
+                        DomainLimits(1, 1),
+                        (fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy.definition,
+                        preparation.environment,
+                        null,
+                        null,
+                        "synthetic-foreign-live-",
+                        frozen,
+                    )
+                    val foreignPhase = field(foreign, "phase")
+                    foreignPhase.set(foreign, foreignPhase.type.enumConstants.single { (it as Enum<*>).name == "READY" })
+                    val foreignPermit = field(foreign, "liveCancellationPermit").get(foreign)
+                    val unregistered = io.mazewall.enforcer.internal.execution
+                        .OwnedInvocation(domain, Callable { 7 }, cancellationPermit)
+                    assertFailsWith<IllegalStateException> { invocation.markLiveCancellation(Any()) }
+                    assertFailsWith<IllegalStateException> { domain.cancelLiveInvocation(invocation, Any()) }
+                    assertFailsWith<IllegalStateException> { foreign.cancelLiveInvocation(invocation, foreignPermit) }
+                    assertEquals(
+                        io.mazewall.enforcer.internal.execution.OwnedInvocation.LiveCancellation.ENDED,
+                        domain.cancelLiveInvocation(unregistered, cancellationPermit),
+                    )
+                    assertEquals("READY", (phase.get(domain) as Enum<*>).name)
+                    assertEquals("READY", (foreignPhase.get(foreign) as Enum<*>).name)
+                    assertEquals(0, recording.retireCalls.get())
+                    assertEquals(0, recording.beginCalls.get())
+                    return@withRuntime
+                }
+                if (mode == "task_begin_cancel_concurrent") {
+                    admission.acquire()
+                    check(pending.add(second))
+                    val entered = CountDownLatch(1)
+                    val release = CountDownLatch(1)
+                    val entries = AtomicInteger()
+                    recording.beforeInvalidate = {
+                        entries.incrementAndGet()
+                        entered.countDown()
+                        check(release.await(5, TimeUnit.SECONDS))
+                    }
+                    val firstCancellation = AtomicReference<CancellationDisposition>()
+                    val canceller = Thread.ofPlatform().start { firstCancellation.set(invocation.requestCancellation()) }
+                    try {
+                        assertTrue(entered.await(5, TimeUnit.SECONDS))
+                        assertEquals(CancellationDisposition.REQUESTED, second.requestCancellation())
+                        assertEquals(1, entries.get())
+                    } finally {
+                        release.countDown()
+                        canceller.join(6000)
+                    }
+                    assertFalse(canceller.isAlive)
+                    assertEquals(CancellationDisposition.REQUESTED, firstCancellation.get())
+                    assertEquals(1, recording.retireCalls.get())
+                    assertEquals(0, recording.beginCalls.get())
+                    return@withRuntime
+                }
+                if (mode == "task_begin_cancel") {
+                    val cancellationContext = AtomicReference<Any?>()
+                    invocation.result().whenComplete { _, _ ->
+                        cancellationContext.set(io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask)
+                    }
+                    assertEquals(CancellationDisposition.REQUESTED, invocation.requestCancellation())
+                    assertEquals(CancellationDisposition.ALREADY_ENDED, invocation.requestCancellation())
+                    assertNull(cancellationContext.get())
+                    assertIs<ExecutionEnd.NotStarted>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                    assertEquals(0, recording.beginCalls.get())
+                    assertEquals(1, recording.retireCalls.get())
+                    return@withRuntime
+                }
+                if (mode == "task_begin_cancel_throw") {
+                    val failure = IllegalStateException("controlled invalidation failure")
+                    val attempts = AtomicInteger()
+                    recording.beforeInvalidate = {
+                        attempts.incrementAndGet()
+                        throw failure
+                    }
+                    assertSame(failure, assertFailsWith<IllegalStateException> { invocation.requestCancellation() })
+                    assertIs<ExecutionEnd.NotStarted>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                    assertEquals(CancellationDisposition.ALREADY_ENDED, invocation.requestCancellation())
+                    assertEquals(1, attempts.get())
+                    assertEquals(0, recording.beginCalls.get())
+                    return@withRuntime
+                }
+                worker.start()
+                if (mode == "task_begin_stale") {
+                    try {
+                        assertTrue(secondEntered.await(5, TimeUnit.SECONDS))
+                        val slots = field(domain, "liveWorkers").get(domain)
+                        val slot = slots.javaClass
+                            .getDeclaredMethod("slot", Int::class.javaPrimitiveType)
+                            .apply { isAccessible = true }
+                            .invoke(slots, 0)
+                        val staleEnd = invocation.javaClass.declaredMethods
+                            .single { it.name == "endLiveTask" }
+                            .apply { isAccessible = true }
+                        assertFailsWith<java.lang.reflect.InvocationTargetException> { staleEnd.invoke(invocation, slot, firstLease.get()) }
+                        assertSame(second, field(slot, "activeTask").get(slot))
+                        assertEquals(1, recording.endCalls.get())
+                    } finally {
+                        releaseSecond.countDown()
+                    }
+                }
+                if (mode == "task_begin_cancel_before_run" || mode == "task_begin_fail_before_run") {
+                    try {
+                        assertTrue(beforeRun.await(5, TimeUnit.SECONDS))
+                        if (mode == "task_begin_fail_before_run") {
+                            domain.fail(IllegalStateException("controlled pre-claim failure"))
+                            assertEquals(0, recording.retireCalls.get())
+                        } else {
+                            assertEquals(CancellationDisposition.REQUESTED, invocation.requestCancellation())
+                        }
+                        assertEquals(0, recording.beginCalls.get())
+                    } finally {
+                        releaseRun.countDown()
+                    }
+                }
+                if (mode == "task_begin_cancel_running") {
+                    try {
+                        assertTrue(bodyEntered.await(5, TimeUnit.SECONDS))
+                        val callbackContext = AtomicReference<Pair<Any?, Any?>>()
+                        invocation.result().whenComplete { _, _ ->
+                            callbackContext.set(
+                                io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.invocation to
+                                    io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.liveTask,
+                            )
+                        }
+                        assertEquals(CancellationDisposition.REQUESTED, invocation.requestCancellation())
+                        assertNull(callbackContext.get().first)
+                        assertNull(callbackContext.get().second)
+                        assertEquals(1, recording.retireCalls.get())
+                        assertEquals(0, recording.endCalls.get())
+                        assertFalse(invocation.executionEnd().toCompletableFuture().isDone)
+                        assertEquals(0, admission.availablePermits())
+                    } finally {
+                        releaseBody.countDown()
+                    }
+                }
+                if (mode == "task_begin_fail_running") {
+                    try {
+                        assertTrue(bodyEntered.await(5, TimeUnit.SECONDS))
+                        domain.fail(IllegalStateException("controlled active-task failure"))
+                        assertEquals(1, recording.retireCalls.get())
+                        assertEquals(0, recording.endCalls.get())
+                        assertFalse(invocation.executionEnd().toCompletableFuture().isDone)
+                    } finally {
+                        releaseBody.countDown()
+                    }
+                }
+                if (mode == "task_begin_callback_blocked") {
+                    try {
+                        assertTrue(callbackEntered.await(5, TimeUnit.SECONDS))
+                        assertEquals(0, recording.endCalls.get())
+                        assertFalse(invocation.executionEnd().toCompletableFuture().isDone)
+                        assertEquals(0, admission.availablePermits())
+                    } finally {
+                        releaseCallback.countDown()
+                    }
+                }
+                worker.join(6000)
+                assertFalse(worker.isAlive)
+                when (mode) {
+                    "task_begin_fatal" -> assertSame(beginFailure, error.get())
+                    "task_begin_late_fatal_end" -> assertSame(endFailure, error.get())
+                    "task_begin_fatal_pending" -> assertSame(contextFailure, error.get())
+                    "task_begin_refused_recovery" -> assertSame(recoveryFailure, error.get())
+                    else -> error.get()?.let { throw it }
+                }
+                when (mode) {
+                    "task_begin_cancel_before_run", "task_begin_fail_before_run" -> {
+                        assertEquals(0, recording.beginCalls.get())
+                        assertEquals(0, bodyEntries.get())
+                        assertIs<ExecutionEnd.NotStarted>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                    }
+                    "task_begin" -> {
+                        assertEquals(42, invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        callback.toCompletableFuture().get(1, TimeUnit.SECONDS)
+                        assertEquals(43, second.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        assertEquals(2, bodyEntries.get())
+                        assertEquals(2, recording.beginCalls.get())
+                        assertEquals(2, recording.endCalls.get())
+                        assertEquals(1, callbackCalls.get())
+                        assertTrue(firstLease.get() !== secondLease.get())
+                    }
+                    "task_begin_throw", "task_begin_fatal" -> {
+                        val failure = assertFailsWith<ExecutionException> { invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS) }
+                        assertSame(beginFailure, failure.cause)
+                        assertEquals(0, bodyEntries.get())
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(1, recording.endCalls.get())
+                    }
+                    "task_begin_cancel_running", "task_begin_fail_running" -> {
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(1, recording.endCalls.get())
+                        assertEquals(1, recording.retireCalls.get())
+                        assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                    }
+                    "task_begin_callback_blocked" -> {
+                        assertEquals(42, invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        callback.toCompletableFuture().get(1, TimeUnit.SECONDS)
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(1, recording.endCalls.get())
+                        assertEquals(1, callbackCalls.get())
+                    }
+                    "task_begin_foreign" -> {
+                        assertFailsWith<ExecutionException> { invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS) }
+                        assertEquals(0, bodyEntries.get())
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(0, recording.endCalls.get())
+                        assertNull(firstLease.get())
+                    }
+                    "task_begin_foreign_recovered" -> {
+                        val failure = assertFailsWith<ExecutionException> { invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS) }
+                        assertSame(beginFailure, failure.cause)
+                        assertEquals(0, bodyEntries.get())
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(0, recording.endCalls.get())
+                        assertNull(firstLease.get())
+                    }
+                    "task_begin_refused_recovery" -> {
+                        val failure = assertFailsWith<ExecutionException> { invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS) }
+                        assertSame(recoveryFailure, failure.cause)
+                        assertTrue(recoveryFailure.suppressed.any { it.cause === refusalCause })
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(1, recording.taskRecoveryCalls.get())
+                        assertEquals(0, recording.endCalls.get())
+                        assertEquals(0, bodyEntries.get())
+                        assertNotNull(field(invocation, "taskReceipt").get(invocation))
+                        assertNull(firstLease.get())
+                        assertFailsWith<RejectedExecutionException> { domain.submit(Callable { 7 }) }
+                        val invalidations = recording.retireCalls.get()
+                        domain.fail(recoveryFailure)
+                        assertEquals(invalidations, recording.retireCalls.get())
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(1, recording.taskRecoveryCalls.get())
+                        assertEquals(0, recording.endCalls.get())
+                    }
+                    "task_begin_late" -> {
+                        assertEquals(42, invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        callback.toCompletableFuture().get(1, TimeUnit.SECONDS)
+                        val end = assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        assertSame(contextFailure, end.failure)
+                        assertSame(contextFailure, invocation.evidence().observedFailure)
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(1, recording.endCalls.get())
+                        assertEquals(1, callbackCalls.get())
+                    }
+                    "task_begin_late_refused", "task_begin_late_fatal_end", "task_begin_fatal_pending" -> {
+                        assertEquals(42, invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        val end = assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        val expected = if (mode == "task_begin_late_fatal_end") endFailure else contextFailure
+                        assertSame(expected, end.failure)
+                        when (mode) {
+                            "task_begin_late_fatal_end" -> assertTrue(expected.suppressed.any { it === contextFailure })
+                            "task_begin_late_refused" -> {
+                                assertSame(recording.refusedOutcome, field(invocation, "taskEnd").get(invocation))
+                                assertTrue(expected.suppressed.any { it.message?.startsWith("Live task end refused:") == true })
+                            }
+                            else -> {
+                                assertSame(recording.pendingRetireOutcome, field(invocation, "taskEnd").get(invocation))
+                                assertTrue(expected.suppressed.any { it.javaClass.simpleName == "LiveTaskEndPending" })
+                            }
+                        }
+                        assertEquals(1, recording.endCalls.get())
+                    }
+                    "task_begin_dependent", "task_begin_context_inline", "task_begin_tombstone", "task_begin_retained_frontier", "task_begin_retained_slot" -> {
+                        assertEquals(42, invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        assertFailsWith<ExecutionException> { dependent.toCompletableFuture().get(1, TimeUnit.SECONDS) }
+                        assertNull(assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS)).failure)
+                        assertEquals(1, recording.endCalls.get())
+                    }
+                    "task_begin_stale" -> {
+                        assertEquals(43, second.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        assertEquals(2, recording.beginCalls.get())
+                        assertEquals(2, recording.endCalls.get())
+                    }
+                    "task_begin_pending", "task_begin_pending_throw", "task_begin_refused" -> {
+                        assertEquals(42, invocation.result().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        assertEquals(1, recording.beginCalls.get())
+                        assertEquals(1, recording.endCalls.get())
+                        val end = assertIs<ExecutionEnd.Finished>(invocation.executionEnd().toCompletableFuture().get(1, TimeUnit.SECONDS))
+                        assertNotNull(end.failure)
+                        if (mode == "task_begin_pending_throw") {
+                            assertSame(invalidationFailure, end.failure)
+                            assertSame(recording.pendingRetireOutcome, field(invocation, "taskEnd").get(invocation))
+                        }
+                        val slots = field(domain, "liveWorkers").get(domain)
+                        val slot = slots.javaClass
+                            .getDeclaredMethod("slot", Int::class.javaPrimitiveType)
+                            .apply { isAccessible = true }
+                            .invoke(slots, 0)
+                        assertSame(invocation, field(slot, "activeTask").get(slot))
+                        assertFailsWith<RejectedExecutionException> { domain.submit(Callable { 7 }) }
+                    }
+                    else -> error("Unexpected task test mode")
+                }
+            } finally {
+                worker.join()
+                if (mode == "task_begin") {
+                    recording.workerOwner.get()?.let { recording.contexts.retireWorker(it) }
+                    ready.value.close()
+                }
+            }
+        }
+
+    @Test
     fun `reserved live registration remains counted across drain until worker joins`() =
-        withRuntime { fixture ->
+        withRuntime(canonical = true) { fixture ->
             val recording = RecordingCapture(completeCapture = true)
             val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
                 captureSyntheticWithSupport(
@@ -522,6 +2837,7 @@ class ConfinedHelperRuntimeDrainTest {
                 completeLiveRelaySetup(fixture)
                 assertTrue(entered.await(5, TimeUnit.SECONDS))
                 assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
+                assertFalse(fixture.helperPhysicallyRetired())
                 assertEquals(1, recording.registerCalls.get())
                 assertEquals(0, recording.workerRetireCalls.get())
                 assertEquals(0, recording.retireCalls.get())
@@ -675,7 +2991,7 @@ class ConfinedHelperRuntimeDrainTest {
     fun `refused live worker retirement retains installation and originals without replay`() = runSupportCloseProbe("worker_retire_refused")
 
     private fun workerRetirementIncompleteProbe(mode: String) =
-        withRuntime { fixture ->
+        withRuntime(canonical = true) { fixture ->
             skipFixtureResourceClose = true
             val recording = RecordingCapture(completeCapture = true)
             recording.workerRetirement.set(
@@ -711,6 +3027,7 @@ class ConfinedHelperRuntimeDrainTest {
                 completeLiveRelaySetup(fixture)
                 assertIs<UnsupportedOperationException>(outcome.get(5, TimeUnit.SECONDS))
                 assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+                assertFalse(fixture.helperPhysicallyRetired())
                 assertEquals(1, recording.registerCalls.get())
                 assertEquals(1, recording.workerRetireCalls.get())
                 assertFalse(recording.workerThread.get().isAlive)
@@ -2341,6 +4658,34 @@ class ConfinedHelperRuntimeDrainTest {
             assertIs<io.mazewall.enforcer.internal.execution.ScopingPreparation.State.TransferredSettled>(association.state)
             ready.value.close()
             assertEquals(3, recording.retireCalls.get())
+        }
+
+    @Test
+    fun `startup live invalidation pending retries only on later explicit drain`() =
+        withRuntime { fixture ->
+            val recording = RecordingCapture(completeCapture = true)
+            recording.pendingInvalidate.set(1)
+            val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(captureSynthetic(fixture.runtime, fixture.reviewed, fixture.resources, recording) {})
+            val association = runtimeState(fixture.runtime).javaClass.getDeclaredField("scopingPreparation").let {
+                it.isAccessible = true
+                it.get(runtimeState(fixture.runtime)) as io.mazewall.enforcer.internal.execution.ScopingPreparation
+            }
+            val failure = assertFailsWith<UnsupportedOperationException> {
+                fixture.runtime.prepare((fixture.reviewed.document.policy as CanonicalPolicyArtifact.Worker).policy, DomainLimits(1, 1), ready.value)
+            }
+            val domain = assertIs<io.mazewall.enforcer.internal.execution.ScopingPreparation.State.DomainOwned>(association.state).domain
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!domain.initialConfinedRetirementEnded() && System.nanoTime() < deadline) Thread.yield()
+            assertTrue(domain.initialConfinedRetirementEnded())
+            assertFalse(domain.retired())
+            assertEquals(1, recording.retireCalls.get(), "automatic retirement must retain early Pending")
+            fixture.resources.validate()
+            ready.value.close()
+            assertEquals(1, recording.retireCalls.get())
+            val report = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
+            assertSame(failure, report.cleanupFailure)
+            assertTrue(domain.retired())
+            assertEquals(3, recording.retireCalls.get(), "explicit drain retries invalidation then retires installation")
         }
 
     @Test

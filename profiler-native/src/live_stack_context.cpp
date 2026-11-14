@@ -1,4 +1,5 @@
 #include "live_stack_context.hpp"
+#include "live_stack_match_abi.h"
 
 #include <atomic>
 #include <cstddef>
@@ -13,6 +14,13 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free && std::atomic<bool>::i
               std::atomic<Reason>::is_always_lock_free);
 #define RECORD(T, S) static_assert(sizeof(T) == S && alignof(T) == 8)
 #define FIELD(T, F, O) static_assert(offsetof(T, F) == O)
+RECORD(mw_live_match_request_v1, 128); RECORD(mw_live_match_result_v1, 16);
+FIELD(mw_live_match_request_v1, request, 0); FIELD(mw_live_match_request_v1, expected_publication, 88);
+FIELD(mw_live_match_request_v1, kind, 96); FIELD(mw_live_match_request_v1, flags_bits, 100);
+FIELD(mw_live_match_request_v1, mode_bits, 104); FIELD(mw_live_match_request_v1, dirfd_bits, 108);
+FIELD(mw_live_match_request_v1, path_bits, 112); FIELD(mw_live_match_request_v1, reserved, 120);
+FIELD(mw_live_match_result_v1, abi_version, 0); FIELD(mw_live_match_result_v1, struct_bytes, 4);
+FIELD(mw_live_match_result_v1, status, 8); FIELD(mw_live_match_result_v1, reserved, 12);
 RECORD(mw_live_request_v1, 88); RECORD(mw_live_receipt_v1, 88);
 RECORD(mw_live_frame_v1, 16); RECORD(mw_live_snapshot_v1, 2152); RECORD(mw_live_info_v1, 64);
 #define COMMON(T) FIELD(T, abi_version, 0); FIELD(T, struct_bytes, 4); \
@@ -85,6 +93,7 @@ struct Worker {
     uint32_t installation_index = cells;
     uint64_t serial = 0, last_ended = 0;
     mw_live_snapshot_v1 payload{};
+    Arguments arguments{};
 };
 // Immortal cells and authority: no destructor, reclamation or pointer routing on Copy.
 Installation installations[cells];
@@ -268,6 +277,7 @@ Outcome register_worker(const mw_live_request_v1& q, mw_live_receipt_v1& r) noex
         POINT(RegisterCommit);
         // After this check, commit/account the incarnation even if op6 wins concurrently.
         // No failed registration may rewrite a previous incarnation's tombstone.
+        w.arguments = {};
         w.registration = q; w.registration.worker_id = id; w.registration.operation = 0;
         w.installation_index = ii; w.serial = i.serial; w.last_ended = 0;
         w.task.store(0); w.publication.store(0); w.unavailable.store(Reason::NoActiveInvocation);
@@ -300,7 +310,7 @@ Outcome task(const mw_live_request_v1& q, mw_live_receipt_v1& r) noexcept {
             if (w.last_ended != q.task_id || w.task.load()) return stale;
         } else {
             if (w.task.load() != q.task_id) return stale;
-            w.publication.store(0); w.task.store(0); w.last_ended = q.task_id;
+            w.publication.store(0); w.arguments = {}; w.task.store(0); w.last_ended = q.task_id;
             current.phase = TaskPhase::Ended;
         }
         receipt_worker(r, q); r.task_id = q.task_id;
@@ -327,7 +337,7 @@ Outcome retire_worker(const mw_live_request_v1& q, mw_live_receipt_v1& r) noexce
     if (id_of(control) != q.worker_id || !same_worker(q, w.registration) || w.installation_index != ii) return stale;
     if (control == word(q.worker_id, WorkerPhase::Registered)) return {Status::Busy, Reason::NotPhysicallyRetired};
     if (control == word(q.worker_id, WorkerPhase::Exited)) {
-        w.publication.store(0); w.task.store(0); --i.workers;
+        w.publication.store(0); w.arguments = {}; w.task.store(0); --i.workers;
         w.control.store(word(q.worker_id, WorkerPhase::Retired));
     } else if (control != word(q.worker_id, WorkerPhase::Retired)) return stale;
     receipt_worker(r, q); r.worker_capacity = r.allocated_slots = i.count;
@@ -544,7 +554,7 @@ void leave() noexcept {
     if (current.depth) --current.depth;
     if (!current.depth) current.poisoned = false;
 }
-void publish(uint32_t binding, const mw_live_frame_v1* frames, uint32_t count, Reason failure) noexcept {
+void publish(uint32_t binding, const mw_live_frame_v1* frames, uint32_t count, Reason failure, const Arguments& arguments) noexcept {
     if (current.wi == cells || current.phase != TaskPhase::Active || !current.depth) return;
     auto& w = workers[current.wi]; w.publication.store(0);
     if (current.poisoned || current.depth != 1) { poison(); return; }
@@ -583,7 +593,54 @@ void publish(uint32_t binding, const mw_live_frame_v1* frames, uint32_t count, R
     POINT(PublishLocked);
     if (w.control.load() != word(q.worker_id, WorkerPhase::Registered) || w.task.load() != current.task ||
         !same_worker(q, w.registration) || !live(current.ii, q.installation_id, w.serial).ok()) return;
-    w.payload = payload; w.publication.store(publication);
+    const bool valid_arguments = (binding == 1 && arguments.kind == ArgumentKind::Open0 && arguments.dirfd_bits == 0) ||
+        (binding == 2 && arguments.kind == ArgumentKind::Openat0);
+    w.payload = payload; w.arguments = valid_arguments ? arguments : Arguments{}; w.publication.store(publication);
+}
+
+MatchResult match_arguments(const mw_live_request_v1& input, uint64_t expected_publication, const Arguments& candidate) noexcept {
+    mw_live_request_v1 q{};
+    if (!validate(&input, sizeof(input), q, true).ok() || !semantic_id(q.invocation_id) ||
+        !semantic_id(expected_publication)) return MatchResult::Unavailable;
+    const bool valid = (candidate.kind == ArgumentKind::Open0 && candidate.dirfd_bits == 0) ||
+        candidate.kind == ArgumentKind::Openat0;
+    if (!valid || !process(q).ok() || !global().ok()) return MatchResult::Unavailable;
+    const auto wi = find_worker(q.worker_id); if (wi == cells) return MatchResult::Unavailable;
+    auto& w = workers[wi];
+    if (w.control.load() != word(q.worker_id, WorkerPhase::Registered) || !w.gate.acquire()) return MatchResult::Unavailable;
+    bool matched = false;
+    uint32_t ii = cells; uint64_t enrolled_serial = 0, task_id = 0, publication_id = 0;
+    if (w.control.load() == word(q.worker_id, WorkerPhase::Registered) && same_worker(q, w.registration) && w.installation_index < cells) {
+        ii = w.installation_index; enrolled_serial = w.serial;
+        task_id = w.task.load(); publication_id = w.publication.load();
+        const auto& out = w.payload; const auto& a = w.arguments;
+        matched = live(ii, q.installation_id, enrolled_serial).ok() && task_id == q.task_id && publication_id == expected_publication &&
+            out.worker_id == q.worker_id && out.task_id == task_id && out.installation_id == q.installation_id &&
+            out.code_generation == q.code_generation && out.process_cookie == q.process_cookie &&
+            out.process_start_ticks == q.process_start_ticks && out.tgid == q.tgid && out.tid == q.tid &&
+            out.invocation_id == q.invocation_id && out.publication_id == publication_id && !out.parent_invocation_id &&
+            out.frame_count >= 1 && out.frame_count <= MW_LIVE_MAX_FRAMES &&
+            ((out.binding == 1 && a.kind == ArgumentKind::Open0) || (out.binding == 2 && a.kind == ArgumentKind::Openat0)) &&
+            a.kind == candidate.kind && a.path_bits == candidate.path_bits && a.flags_bits == candidate.flags_bits &&
+            a.mode_bits == candidate.mode_bits && a.dirfd_bits == candidate.dirfd_bits;
+        if (matched) for (uint32_t n = 0; n < out.frame_count; ++n)
+            if (!semantic_id(out.frames[n].method_token)) { matched = false; break; }
+        if (matched) matched = live(ii, q.installation_id, enrolled_serial).ok();
+    }
+    w.gate.release();
+#ifdef MAZEWALL_LIVE_TEST
+    if (matched) {
+        POINT(MatchReleased);
+        POINT(MatchLive); if (!live(ii, q.installation_id, enrolled_serial).ok()) return MatchResult::Unavailable;
+        POINT(MatchControl); if (w.control.load() != word(q.worker_id, WorkerPhase::Registered)) return MatchResult::Unavailable;
+        POINT(MatchTask); if (w.task.load() != task_id) return MatchResult::Unavailable;
+        POINT(MatchPublication); if (w.publication.load() != publication_id) return MatchResult::Unavailable;
+    }
+#endif
+    if (!matched || !live(ii, q.installation_id, enrolled_serial).ok() ||
+        w.control.load() != word(q.worker_id, WorkerPhase::Registered) || w.task.load() != task_id ||
+        w.publication.load() != publication_id) return MatchResult::Unavailable;
+    return MatchResult::Match;
 }
 
 #ifdef MAZEWALL_LIVE_TEST
@@ -627,4 +684,41 @@ extern "C" uint32_t mazewall_live_copy_v1(const void* input, uint32_t input_byte
     auto result = validate(input, input_bytes, q, true);
     if (result.ok()) result = copy(q, out);
     auto status = finish(out, result); std::memcpy(output, &out, sizeof(out)); return status;
+}
+
+extern "C" uint32_t mazewall_live_match_arguments_v1(const void* input, uint32_t input_bytes,
+                                                      void* output, uint32_t output_bytes) {
+    using namespace mazewall::live;
+    bool safe_output = false;
+    try {
+        if (!output || (reinterpret_cast<uintptr_t>(output) & 7) || output_bytes != sizeof(mw_live_match_result_v1))
+            return MW_LIVE_MATCH_MALFORMED;
+        const auto in = reinterpret_cast<uintptr_t>(input), out = reinterpret_cast<uintptr_t>(output);
+        if (input_bytes > UINTPTR_MAX - in || output_bytes > UINTPTR_MAX - out) return MW_LIVE_MATCH_MALFORMED;
+        const auto in_end = in + input_bytes, out_end = out + output_bytes;
+        if (input_bytes && in < out_end && out < in_end) return MW_LIVE_MATCH_MALFORMED;
+        safe_output = true;
+        mw_live_match_result_v1 result{1, sizeof(result), MW_LIVE_MATCH_MALFORMED, 0};
+        if (input && !(in & 7) && input_bytes == sizeof(mw_live_match_request_v1)) {
+            mw_live_match_request_v1 wire{}; std::memcpy(&wire, input, sizeof(wire));
+            mw_live_request_v1 request{};
+            const auto& q = wire.request;
+            if (validate(&q, sizeof(q), request, true).ok() && semantic_id(q.invocation_id) &&
+                semantic_id(wire.expected_publication) && q.process_cookie && q.process_start_ticks &&
+                q.tgid && q.tgid <= INT32_MAX && q.tid && q.tid <= INT32_MAX && !wire.reserved &&
+                ((wire.kind == 1 && !wire.dirfd_bits) || wire.kind == 2)) {
+                const Arguments args{wire.kind == 1 ? ArgumentKind::Open0 : ArgumentKind::Openat0,
+                    wire.path_bits, wire.flags_bits, wire.mode_bits, wire.dirfd_bits};
+                result.status = match_arguments(request, wire.expected_publication, args) == MatchResult::Match ?
+                    MW_LIVE_MATCH_MATCH : MW_LIVE_MATCH_UNAVAILABLE;
+            }
+        }
+        std::memcpy(output, &result, sizeof(result)); return result.status;
+    } catch (...) {
+        if (safe_output) {
+            const mw_live_match_result_v1 result{1, sizeof(result), MW_LIVE_MATCH_UNAVAILABLE, 0};
+            std::memcpy(output, &result, sizeof(result)); return result.status;
+        }
+        return MW_LIVE_MATCH_MALFORMED;
+    }
 }

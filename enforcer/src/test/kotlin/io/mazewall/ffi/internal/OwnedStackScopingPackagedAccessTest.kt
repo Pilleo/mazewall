@@ -4,9 +4,60 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 
 class OwnedStackScopingPackagedAccessTest {
+    @Test
+    fun `helper fixture arguments require exact canonical inputs`() {
+        val directory = Files.createTempDirectory("helper-arguments").toRealPath()
+        val manifest = Files.createFile(directory.resolve("support.tsv"))
+        try {
+            val mode = "protected-canonical-helper"
+            val parsed = OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), directory.toString()))
+            assertEquals(manifest, parsed.manifest)
+            assertEquals(directory, parsed.applicationRoot)
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode)) }
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), directory.toString(), "extra")) }
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, "relative", directory.toString())) }
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, directory.resolve("missing").toString(), directory.toString())) }
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperArguments(arrayOf(mode, manifest.toString(), manifest.toString())) }
+        } finally {
+            Files.delete(manifest)
+            Files.delete(directory)
+        }
+    }
+
+    @Test
+    fun `helper support manifest rejects malformed and duplicate entries`() {
+        val path = Files.createTempFile("helper-support", ".jar").toRealPath()
+        try {
+            val digest = "a".repeat(64)
+            val entry = "$digest\t$path"
+            assertEquals(1, OwnedStackScopingPackagedBridge.parseHelperSupport(listOf(entry)).size)
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperSupport(emptyList()) }
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperSupport(listOf("bad\t$path")) }
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperSupport(listOf(entry, entry)) }
+            assertThrows<IllegalArgumentException> { OwnedStackScopingPackagedBridge.parseHelperSupport(listOf("$digest\trelative.jar")) }
+        } finally {
+            Files.delete(path)
+        }
+    }
+
+    @Test
+    fun `helper support manifest rejects a missing exact file`() {
+        val directory = Files.createTempDirectory("missing-helper-support")
+        try {
+            val missing = directory.resolve("absent.jar").toAbsolutePath().normalize()
+            assertThrows<IllegalArgumentException> {
+                OwnedStackScopingPackagedBridge.parseHelperSupport(listOf("${"a".repeat(64)}\t$missing"))
+            }
+        } finally {
+            Files.delete(directory)
+        }
+    }
+
     @Test
     @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "mazewall.managed.t4.fixture.classpath", matches = ".+")
     fun `managed t4 fixture proves checked original native ownership`() {
