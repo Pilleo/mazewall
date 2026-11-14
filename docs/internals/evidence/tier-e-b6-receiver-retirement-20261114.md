@@ -1,6 +1,6 @@
 # B6 receiver-retirement ownership — accepted with limits — 2026-11-14
 
-Root accepted `ACCEPT_RECEIVER_RETIREMENT_FIX_WITH_EXPLICIT_LIMITS`. This records the bounded internal receiver-lifetime fix and its captured-reader prerequisite. It does not complete B6, activate either production Live guard, or authorize self-read/v2, effects, READ, ADDFD, CONTINUE, or callbacks. See the [controller decision](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b6-receiver-retirement-implementation001/controller-decision-20261114-001.md), [independent full audit](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-manager-retirement-preparation/confined-handoff-step2-001/b6-receiver-retirement-full-independent-audit-20261114-001.md), and [scoped source review](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b6-receiver-retirement-implementation001/final-scoped-integration-review-20261114-001.md).
+Root accepted `ACCEPT_RECEIVER_RETIREMENT_FIX_WITH_EXPLICIT_LIMITS`. This records the bounded internal receiver-lifetime fix and its captured-reader prerequisite. It does not complete B6, activate either production Live guard, or authorize self-read/v2, effects, READ, ADDFD, CONTINUE, or callbacks. See the [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b6-receiver-retirement), [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b6-receiver-retirement), and [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b6-receiver-retirement).
 
 ## Ownership result
 
@@ -21,3 +21,12 @@ The 3,600-second value was only the outer budget; test deadlines and security se
 ## Remaining scope
 
 Needed 3 remains OPEN for operation-input provenance, resource/effect policy, and later review. Both production guards remain closed. No self-read producer, v2 codec, effects, READ, ADDFD, CONTINUE, callbacks, or production Live activation is released. Broad daemon access to arbitrary readable JVM memory is not approved; the private native-argument-provenance design remains a proposal without native/public boundary implementation. Real USER_NOTIF/native route, protected custody/deployment, original 20+20, skipped suites, G4/G5/P5/P6/T4/vendor/JFR, Plan A, B7/B8, and retained issues remain open or unqualified. Issue 338 remains a separate asynchronous-VM-failure follow-up.
+
+
+### Workspace-only receipt provenance
+
+The following local ignored artifacts are retained as plain-text provenance; these paths are not portable links. Their bytes were present in this workspace at handoff preparation time.
+
+- controller decision: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b6-receiver-retirement-implementation001/controller-decision-20261114-001.md`; SHA-256 `2ca490f6c214b7fe5e33e43c0bfb69a96540f65a5b28cb982583f538d5b367a8`.
+- independent full audit: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-manager-retirement-preparation/confined-handoff-step2-001/b6-receiver-retirement-full-independent-audit-20261114-001.md`; SHA-256 `8cf3c715e30880b51d25df1d94f932d16eac6312b72977c4d6fc95c191c199a1`.
+- scoped source review: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b6-receiver-retirement-implementation001/final-scoped-integration-review-20261114-001.md`; SHA-256 `a71d6fe55fea0565b12de511987087d9e05d206fa7804465dd7d4fe1e36d2e3e`.

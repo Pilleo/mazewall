@@ -1,6 +1,6 @@
 # B5 D4 worker/task lifecycle — 2026-11-14
 
-**Accepted scope:** `ACCEPT_STRUCTURAL_TASK_LIFECYCLE_WITH_B6_CLOSED`. This records a bounded structural D4 delivery under [issue 885](../backlog/issue-20261108-113622-885-b5-d4-bind-owned-worker-task-lifecycle-and-guarded.md); [issue 842](../backlog/issue-20261108-141254-842-b5-d4-bind-captured-engine-confined-helper-authori.md) remains the separate helper-authority dependency. D3 was already accepted under 075/080; see the [D3 reconciliation](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-d3-reconciliation-20261113-001.md). This does not complete B5 or enable B6.
+**Accepted scope:** `ACCEPT_STRUCTURAL_TASK_LIFECYCLE_WITH_B6_CLOSED`. This records a bounded structural D4 delivery under [issue 885](../backlog/issue-20261108-113622-885-b5-d4-bind-owned-worker-task-lifecycle-and-guarded.md); [issue 842](../backlog/issue-20261108-141254-842-b5-d4-bind-captured-engine-confined-helper-authori.md) remains the separate helper-authority dependency. D3 was already accepted under 075/080; see the [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-d4-worker-task-lifecycle). This does not complete B5 or enable B6.
 
 ## Lifecycle and recovery ownership
 
@@ -20,4 +20,12 @@ Legacy ABI002 manifest `7c46883da6b31d980307bb771371bd1001f730b373989bb00c518d2c
 
 The Live lifecycle uses a synthetic already-installed physical-worker fixture. It does not prove successful production prepare, actual helper/native provenance, protected-native execution, or B6 activation. B6 remains closed; D4 structural delivery is not full B5 qualification. Issue 752 remains `Unknown`: three `profiler.sock` `FileSystemException: Function not implemented` primaries and suppressed directory pairs at 21439/21460, 21554/21575 and 21602/21623.
 
-GREEN004's wrapper exit 95 was a collector failure before copying an empty directory; four Live execution artifacts were retained later. Preserve that as a collection failure, not a behavioral test failure. The [preimage incident record](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-manager-retirement-preparation/confined-handoff-step2-001/d4-preimage-incident-20261113-001.md) documents the unavailable intermediate `OwnedDomain.kt` bytes/hash/mode after an earlier format/write sequence. This checkpoint does not claim full per-write preimage compliance or reconstruct that intermediate. No prior attempts, issue Needed entries or historical plans are rewritten or archived.
+GREEN004's wrapper exit 95 was a collector failure before copying an empty directory; four Live execution artifacts were retained later. Preserve that as a collection failure, not a behavioral test failure. The [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-d4-worker-task-lifecycle) documents the unavailable intermediate `OwnedDomain.kt` bytes/hash/mode after an earlier format/write sequence. This checkpoint does not claim full per-write preimage compliance or reconstruct that intermediate. No prior attempts, issue Needed entries or historical plans are rewritten or archived.
+
+
+### Workspace-only receipt provenance
+
+The following local ignored artifacts are retained as plain-text provenance; these paths are not portable links. Their bytes were present in this workspace at handoff preparation time.
+
+- D3 reconciliation: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-d3-reconciliation-20261113-001.md`; SHA-256 `c25c3e0bd10fa87f4d0cc2056d6e1bd8a9e71632daa649521752e5f3201e1ff3`.
+- preimage incident record: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-manager-retirement-preparation/confined-handoff-step2-001/d4-preimage-incident-20261113-001.md`; SHA-256 `204502b60f106a891a43a644aba6cd404a09b35352bcab950ddf830e9459eed6`.

@@ -26,4 +26,11 @@ B6 remains closed. This checkpoint does not qualify worker leases, Begin/End, ca
 - Static001–003 failed their ratchet; unit001 failed the 82% threshold. These outcomes remain failed and are not relabeled.
 - Unit002 and static004 results above are the later successful focused evidence.
 
-See the [controller decision](../../../.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-history-only-helper-retirement-controller-decision-20261113-001.md).
+See the [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-history-only-helper-retirement).
+
+
+### Workspace-only receipt provenance
+
+The following local ignored artifacts are retained as plain-text provenance; these paths are not portable links. Their bytes were present in this workspace at handoff preparation time.
+
+- controller decision: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-history-only-helper-retirement-controller-decision-20261113-001.md`; SHA-256 `b74e287dc2755986ffa28a950253d7207ff17dbd9edbd4d0b2a40261217dd45d`.
