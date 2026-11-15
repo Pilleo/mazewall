@@ -78,8 +78,7 @@ public final class VerificationWorkflowInputFunctionalTest {
             }
             Files.writeString(workflow, valid + "\n# Workflow-only input invalidation control\n");
             outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
-            String mutated = valid.replace("-Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon 2>&1 | tee security-analysis.log",
-                "-Pmazewall.securitySnapshotScan=false --info --no-configuration-cache --no-daemon 2>&1 | tee security-analysis.log");
+            String mutated = valid.replace("dependencyCheckSdk", "dependencyCheckAnalyze");
             if (mutated.equals(valid)) throw new AssertionError("Security scan mutation did not change the workflow");
             Files.writeString(workflow, mutated);
             var failed = runner(project).buildAndFail();

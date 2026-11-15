@@ -562,7 +562,21 @@ jobs:
               if: steps.filter.outputs.code == 'true'
               run: |
                   set -o pipefail
-                  ./gradlew verifySecuritySnapshot dependencyCheckAnalyze -Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon 2>&1 | tee security-analysis.log
+                  ./gradlew verifySecuritySnapshot dependencyCheckSdk -Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon --no-parallel --max-workers=1 2>&1 | tee security-analysis.log
+            - name: Require SDK Security Reports
+              if: steps.filter.outputs.code == 'true'
+              run: |
+                  set -e
+                  for report in \
+                      build/reports/dependency-check-report.json \
+                      platform/build/reports/dependency-check-report.json \
+                      enforcer/build/reports/dependency-check-report.json \
+                      profiler/build/reports/dependency-check-report.json \
+                      portals/runtime/build/reports/dependency-check-report.json \
+                      portals/worker/build/reports/dependency-check-report.json \
+                      portals/codegen/build/reports/dependency-check-report.json; do
+                      test -s "$report"
+                  done
             - name: Run Demo Host Quality Gate
               if: ${{ !cancelled() }}
               run: |

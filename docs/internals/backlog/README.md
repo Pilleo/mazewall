@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 279 | *Total Resolved Issues:* 719
+*Total Active Issues:* 280 | *Total Resolved Issues:* 719
 
-Active status detail: 277 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 278 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261115-193140-602](issue-20261115-193140-602-expand-mandatory-dependency-check-coverage-to-defa.md) | Expand mandatory Dependency-Check coverage to default SDK production dependencies | high | core |
 | [issue-20261115-132820-021](issue-20261115-132820-021-decouple-mandatory-security-scans-from-nvd-updates.md) | Decouple mandatory security scans from NVD updates with fresh trusted snapshots | high | core |
 | [issue-20261115-061756-146](issue-20261115-061756-146-preserve-authenticated-concurrent-drain-completion.md) | Preserve authenticated concurrent drain completion after closure | high | enforcer |
 | [issue-20261115-054348-515](issue-20261115-054348-515-patch-current-go-vulnerability-findings-in-both-ag.md) | Patch current Go vulnerability findings in both agentless modules | high | profiler |

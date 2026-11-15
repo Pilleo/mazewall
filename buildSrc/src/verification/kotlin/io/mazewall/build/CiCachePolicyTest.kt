@@ -656,7 +656,19 @@ object CiCachePolicyTest {
         check(ciCachePolicyViolations(ci.replace("python3 scripts/test_security_snapshot.py", "true")).isNotEmpty())
         check("dependencyCheckUpdate" !in security && "NVD_API_KEY" !in security)
         check("verifySecuritySnapshot" in security && "-Pmazewall.securitySnapshotScan=true" in security)
-        check("dependencyCheckAnalyze" in security && "actions/cache/restore@" !in security)
+        check("dependencyCheckSdk" in security && "actions/cache/restore@" !in security)
+        check("--no-parallel --max-workers=1" in step(security, "Run Security Check"))
+        val reportGate = step(security, "Require SDK Security Reports")
+        for (path in listOf("build/reports/dependency-check-report.json", "platform/build/reports/dependency-check-report.json",
+            "enforcer/build/reports/dependency-check-report.json", "profiler/build/reports/dependency-check-report.json",
+            "portals/runtime/build/reports/dependency-check-report.json", "portals/worker/build/reports/dependency-check-report.json",
+            "portals/codegen/build/reports/dependency-check-report.json")) {
+            check(path in reportGate) { "Missing required SDK report: $path" }
+            check(ciCachePolicyViolations(ci.replace(path, "missing-report.json")).isNotEmpty()) { "Report gate must be enforced: $path" }
+        }
+        check(ciCachePolicyViolations(ci.replace("dependencyCheckSdk", "dependencyCheckAnalyze")).isNotEmpty()) {
+            "Security policy must reject a root-only scan"
+        }
         check("getWorkflowRunAttempt" in security && "getWorkflow" in security)
         check("security-data.yml" in security && "ci.yml" in security)
         check(securityUpdaterPolicyViolations(updater).isEmpty()) { "Valid updater rejected" }

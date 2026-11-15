@@ -2,6 +2,7 @@ import io.mazewall.build.TriageArguments
 import io.mazewall.build.VerifyDependencyState
 import io.mazewall.build.VerifySecuritySnapshotTask
 import org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension
+import org.owasp.dependencycheck.gradle.tasks.Analyze
 import org.owasp.dependencycheck.gradle.tasks.ConfiguredTask
 import java.io.File
 import java.util.Properties
@@ -482,6 +483,55 @@ val verifySecuritySnapshot =
             ),
         )
     }
+
+if (securitySnapshotScan) {
+    val ownerPaths = listOf(":", ":platform", ":enforcer", ":profiler", ":portals:runtime", ":portals:worker", ":portals:codegen")
+    val excludedRoots = setOf(":demos", ":integrations", ":tools")
+    val actualSdk =
+        allprojects
+            .map { it.path }
+            .filter { path ->
+                excludedRoots.none { excluded -> path == excluded || path.startsWith("$excluded:") }
+            }.toSet()
+    check(actualSdk == (ownerPaths + ":portals").toSet()) { "Default SDK project set changed; classify scanner ownership" }
+    project(":portals").pluginManager.withPlugin("java") {
+        error("The portals parent now has Java configurations; classify scanner ownership")
+    }
+    project(":portals").configurations.all {
+        check(name !in setOf("compileClasspath", "runtimeClasspath")) {
+            "The portals parent now has production configurations; classify scanner ownership"
+        }
+    }
+    val rootExtension = extensions.getByType<DependencyCheckExtension>()
+    var previous: TaskProvider<Analyze>? = null
+    val ownerTasks =
+        ownerPaths.map { path ->
+            val owner = project(path)
+            if (path != ":") owner.pluginManager.apply("org.owasp.dependencycheck")
+            val task = owner.tasks.named<Analyze>("dependencyCheckAnalyze")
+            val preceding = previous
+            task.configure {
+                data.directory.set(rootExtension.data.directory)
+                autoUpdate.set(false)
+                scanConfigurations.set(rootExtension.scanConfigurations)
+                failBuildOnCVSS.set(rootExtension.failBuildOnCVSS)
+                failOnError.set(rootExtension.failOnError)
+                suppressionFile.set(rootExtension.suppressionFile)
+                format.set(rootExtension.format)
+                analyzers.ossIndex.enabled.set(false)
+                outputDir.set(owner.layout.buildDirectory.dir("reports"))
+                dependsOn(verifySecuritySnapshot)
+                if (preceding != null) mustRunAfter(preceding)
+            }
+            previous = task
+            if (path == ":") ":dependencyCheckAnalyze" else "$path:dependencyCheckAnalyze"
+        }
+    tasks.register("dependencyCheckSdk") {
+        group = "verification"
+        description = "Scans the production dependencies of the default SDK projects."
+        dependsOn(ownerTasks)
+    }
+}
 
 tasks.named("dependencyCheckAnalyze").configure {
     if (securitySnapshotScan) {

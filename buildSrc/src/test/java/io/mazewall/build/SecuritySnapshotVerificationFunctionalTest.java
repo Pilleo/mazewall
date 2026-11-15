@@ -226,6 +226,34 @@ public final class SecuritySnapshotVerificationFunctionalTest {
                 assert !extension.autoUpdate.get() : 'Scan extension must not update'
                 assert !scanner.autoUpdate.get() : 'Actual scan task must not update'
                 assert scanner.taskDependencies.getDependencies(scanner).any { it.name == 'verifySecuritySnapshot' }
+                def selected = [':', ':platform', ':enforcer', ':profiler', ':portals:runtime', ':portals:worker', ':portals:codegen']
+                def excludedRoots = [':demos', ':integrations', ':tools']
+                def actualSdk = root.allprojects.findAll { child ->
+                    !excludedRoots.any { excluded -> child.path == excluded || child.path.startsWith(excluded + ':') }
+                }.collect { it.path } as Set
+                assert actualSdk == ((selected + [':portals']) as Set) : 'Default SDK project set changed; review scan scope'
+                def parent = root.project(':portals')
+                assert !parent.plugins.hasPlugin('java')
+                assert parent.configurations.findByName('compileClasspath') == null
+                assert parent.configurations.findByName('runtimeClasspath') == null
+                def lifecycle = root.tasks.named('dependencyCheckSdk').get()
+                def expectedTasks = selected.collect { (it == ':' ? '' : it) + ':dependencyCheckAnalyze' } as Set
+                assert (lifecycle.dependsOn.flatten() as Set) == expectedTasks
+                def reportDirs = [] as Set
+                selected.each { path ->
+                    def owner = root.project(path)
+                    def task = owner.tasks.named('dependencyCheckAnalyze').get()
+                    assert !task.autoUpdate.get()
+                    assert task.dependsOn.flatten().any { dependency ->
+                        dependency instanceof CharSequence ? dependency.toString() == ':verifySecuritySnapshot' : dependency.name == 'verifySecuritySnapshot'
+                    }
+                    assert (task.scanConfigurations.get() as Set) == (['compileClasspath', 'runtimeClasspath'] as Set)
+                    assert task.failBuildOnCVSS.get() == 7.0f && task.failOnError.get()
+                    assert task.suppressionFile.get() == extension.suppressionFile.get()
+                    assert task.data.directory.get() == extension.data.directory.get()
+                    assert !task.analyzers.ossIndex.enabled.get()
+                    assert reportDirs.add(task.outputDir.get().asFile.canonicalPath)
+                }
             }
             """.formatted(repository.toRealPath().toUri().toASCIIString()));
         var runner = GradleRunner.create().withProjectDir(repository.toFile())
@@ -234,6 +262,25 @@ public final class SecuritySnapshotVerificationFunctionalTest {
         String output = runner.build().getOutput();
         if (!output.contains(":verifySecuritySnapshot") || !output.contains(":dependencyCheckAnalyze")) {
             throw new AssertionError("Scan must schedule the verifier before the actual analyzer: " + output);
+        }
+        String sdkGraph = GradleRunner.create().withProjectDir(repository.toFile())
+            .withArguments("dependencyCheckSdk", "--dry-run", "--offline", "--no-parallel", "--max-workers=1", "--no-configuration-cache",
+                "-Pmazewall.securitySnapshotScan=true", "--init-script", init.toString(), "--gradle-user-home", gradleUserHome())
+            .build().getOutput();
+        var scheduled = sdkGraph.lines().map(String::trim).filter(line -> line.startsWith(":") && line.endsWith(" SKIPPED"))
+            .map(line -> line.substring(0, line.indexOf(' '))).toList();
+        var expectedOrder = java.util.List.of(":verifySecuritySnapshot", ":dependencyCheckAnalyze", ":platform:dependencyCheckAnalyze",
+            ":enforcer:dependencyCheckAnalyze", ":profiler:dependencyCheckAnalyze", ":portals:runtime:dependencyCheckAnalyze",
+            ":portals:worker:dependencyCheckAnalyze", ":portals:codegen:dependencyCheckAnalyze", ":dependencyCheckSdk");
+        int previous = -1;
+        for (String expected : expectedOrder) {
+            int position = scheduled.indexOf(expected);
+            if (position <= previous) throw new AssertionError("SDK scan graph is missing or reordered " + expected + ": " + sdkGraph);
+            previous = position;
+        }
+        if (scheduled.stream().anyMatch(path -> path.contains("dependencyCheckAggregate") || path.startsWith(":demos:")
+            || path.startsWith(":integrations:") || path.startsWith(":tools:"))) {
+            throw new AssertionError("SDK graph includes an excluded task: " + sdkGraph);
         }
         var invalid = GradleRunner.create().withProjectDir(repository.toFile())
             .withArguments("help", "--offline", "--no-configuration-cache", "-Pmazewall.securitySnapshotScan=invalid",
@@ -283,21 +330,44 @@ public final class SecuritySnapshotVerificationFunctionalTest {
             Files.writeString(init, """
                 gradle.projectsEvaluated {
                     if (gradle.rootProject.projectDir.canonicalFile != new File(new URI('%s')).canonicalFile) return
-                    def task = gradle.rootProject.tasks.named('dependencyCheckAnalyze').get()
-                    task.nvd.endpoint.set('http://127.0.0.1:%d/')
+                    [gradle.rootProject, gradle.rootProject.project(':profiler')].each { owner ->
+                        owner.tasks.named('dependencyCheckAnalyze').get().nvd.endpoint.set('http://127.0.0.1:%d/')
+                    }
                 }
                 """.formatted(repository.toRealPath().toUri().toASCIIString(), listener.getLocalPort()));
-            var result = GradleRunner.create().withProjectDir(repository.toFile())
-                .withEnvironment(java.util.Map.of("CI", "true", "GRADLE_USER_HOME", scratch.toString(),
-                    "JAVA_HOME", System.getProperty("java.home"), "PATH", "/usr/bin:/bin", "HOME", scratch.toString()))
-                .withArguments("dependencyCheckAnalyze", "--offline", "--no-configuration-cache",
+            for (String task : new String[] {":dependencyCheckAnalyze", ":profiler:dependencyCheckAnalyze"}) {
+                var result = GradleRunner.create().withProjectDir(repository.toFile())
+                    .withEnvironment(java.util.Map.of("CI", "true", "GRADLE_USER_HOME", scratch.toString(),
+                        "JAVA_HOME", System.getProperty("java.home"), "PATH", "/usr/bin:/bin", "HOME", scratch.toString()))
+                    .withArguments(task, "--offline", "--no-configuration-cache",
+                        "-Pmazewall.securitySnapshotScan=true", "--init-script", init.toString(),
+                        "--gradle-user-home", gradleUserHome()).buildAndFail();
+                String output = result.getOutput();
+                if (task.equals(":profiler:dependencyCheckAnalyze") &&
+                    (output.contains("you can only specify one of scanProjects or skipProjects") ||
+                     !output.contains("Unable to access the local database.") ||
+                     !output.contains("Verifying dependencies for project profiler"))) {
+                    throw new AssertionError("Owner scan did not reach the expected incomplete test database failure: " + output);
+                }
+                var verified = result.task(":verifySecuritySnapshot");
+                var analyzed = result.task(task);
+                if (verified == null || verified.getOutcome() != org.gradle.testkit.runner.TaskOutcome.SUCCESS
+                    || analyzed == null || analyzed.getOutcome() != org.gradle.testkit.runner.TaskOutcome.FAILED) {
+                    throw new AssertionError("Keyless " + task + " did not execute after verification: " + result.getOutput());
+                }
+            }
+            Path missing = Files.createDirectory(scratch.resolve("missing-home"));
+            var missingResult = GradleRunner.create().withProjectDir(repository.toFile())
+                .withEnvironment(java.util.Map.of("CI", "true", "GRADLE_USER_HOME", missing.toString(),
+                    "JAVA_HOME", System.getProperty("java.home"), "PATH", "/usr/bin:/bin", "HOME", missing.toString()))
+                .withArguments(":profiler:dependencyCheckAnalyze", "--offline", "--no-configuration-cache",
                     "-Pmazewall.securitySnapshotScan=true", "--init-script", init.toString(),
                     "--gradle-user-home", gradleUserHome()).buildAndFail();
-            var verified = result.task(":verifySecuritySnapshot");
-            var analyzed = result.task(":dependencyCheckAnalyze");
-            if (verified == null || verified.getOutcome() != org.gradle.testkit.runner.TaskOutcome.SUCCESS
-                || analyzed == null || analyzed.getOutcome() != org.gradle.testkit.runner.TaskOutcome.FAILED) {
-                throw new AssertionError("Keyless analyzer did not execute after verification: " + result.getOutput());
+            var missingVerification = missingResult.task(":verifySecuritySnapshot");
+            var missingOwner = missingResult.task(":profiler:dependencyCheckAnalyze");
+            if (missingVerification == null || missingVerification.getOutcome() != org.gradle.testkit.runner.TaskOutcome.FAILED
+                || (missingOwner != null && missingOwner.getOutcome() != org.gradle.testkit.runner.TaskOutcome.SKIPPED)) {
+                throw new AssertionError("Missing snapshot must prevent owner analysis: " + missingResult.getOutput());
             }
             try {
                 listener.accept().close();

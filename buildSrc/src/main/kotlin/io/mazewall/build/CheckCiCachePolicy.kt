@@ -48,7 +48,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
             CiCacheViolation.DEPENDENCY_CHECK_DATA -> !hasExclusiveSecurityCache(workflow, security)
             CiCacheViolation.SECURITY_LIFECYCLE -> !hasCompletedSecurityLifecycle(security)
             CiCacheViolation.HOST_DEPENDENCY_CHECK -> workflowStep(security, "Run Security Check").lines().map(String::trim)
-                .filter { it.startsWith("./gradlew") } != listOf("./gradlew verifySecuritySnapshot dependencyCheckAnalyze -Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon 2>&1 | tee security-analysis.log")
+                .filter { it.startsWith("./gradlew") } != listOf("./gradlew verifySecuritySnapshot dependencyCheckSdk -Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon --no-parallel --max-workers=1 2>&1 | tee security-analysis.log")
             CiCacheViolation.CONTAINER_DEPENDENCY_CHECK -> "run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze" in workflow
             CiCacheViolation.IMMUTABLE_NVD_CACHE -> "key: nvd-database-" in workflow
             CiCacheViolation.CONTAINER_CACHE_IDENTITY -> containerJobs.withIndex().any { (index, job) ->
@@ -349,13 +349,19 @@ private fun hasCompletedSecurityLifecycle(security: String): Boolean {
     val download = workflowStep(security, "Download Retained Security Snapshot")
     val restore = workflowStep(security, "Restore Retained Security Snapshot")
     val scan = workflowStep(security, "Run Security Check")
+    val reports = workflowStep(security, "Require SDK Security Reports")
     return "continue-on-error:" !in security && "dependencyCheckUpdate" !in security && "NVD_API_KEY" !in security &&
         "- '.github/workflows/security-data.yml'" in workflowStep(security, "Check file changes") &&
         controls.trimIndent().trim() == "if: steps.filter.outputs.code == 'true'\nrun: python3 scripts/test_security_snapshot.py" &&
         listOf("getWorkflow", "getWorkflowRunAttempt", "security-data.yml", "ci.yml", "error.status !== 404", "throw error", "scripts/security_snapshot.py", "origin.repository_id !== repositoryId", "origin.head_repository_id !== repositoryId", "origin.head_branch !== defaultBranch", "!trustedWorkflow", "run.head_sha !== origin.head_sha", "Number(match[2]) > run.run_attempt").all { it in selector } &&
         listOf("archiveSize > 2147483648", "bytes > archiveSize", "bytes !== archiveSize", "parseSuccessResponseBody: false", "flags: 'wx'").all { it in download } &&
         listOf("SNAPSHOT_KEY", "SNAPSHOT_DIGEST", "scripts/security_snapshot.py restore").all { it in restore } &&
-        scan.lines().map(String::trim).firstOrNull { it.startsWith("if:") } == "if: steps.filter.outputs.code == 'true'" && "verifySecuritySnapshot dependencyCheckAnalyze" in scan &&
+        scan.lines().map(String::trim).firstOrNull { it.startsWith("if:") } == "if: steps.filter.outputs.code == 'true'" && "verifySecuritySnapshot dependencyCheckSdk" in scan &&
+        reports.lines().map(String::trim).firstOrNull { it.startsWith("if:") } == "if: steps.filter.outputs.code == 'true'" &&
+        listOf("build/reports/dependency-check-report.json", "platform/build/reports/dependency-check-report.json",
+            "enforcer/build/reports/dependency-check-report.json", "profiler/build/reports/dependency-check-report.json",
+            "portals/runtime/build/reports/dependency-check-report.json", "portals/worker/build/reports/dependency-check-report.json",
+            "portals/codegen/build/reports/dependency-check-report.json", "set -e", "test -s \"${'$'}report\"").all { it in reports } &&
         "-Pmazewall.securitySnapshotScan=true" in scan && "--no-configuration-cache" in scan &&
         security.indexOf("- name: Select Retained Security Snapshot") < security.indexOf("- name: Download Retained Security Snapshot") &&
         security.indexOf("- name: Download Retained Security Snapshot") < security.indexOf("- name: Restore Retained Security Snapshot") &&
