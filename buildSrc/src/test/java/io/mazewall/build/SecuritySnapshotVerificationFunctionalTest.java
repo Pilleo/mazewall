@@ -66,7 +66,19 @@ public final class SecuritySnapshotVerificationFunctionalTest {
                         try { verify.invoke(null, dir.toPath(), driver, props, verificationTime) }
                         catch (java.lang.reflect.InvocationTargetException failure) {
                             assert failure.cause instanceof IllegalArgumentException
-                            assert failure.cause.message == 'Invalid security snapshot'
+                            def expectedCode = [stale: 'STALE', future: 'TIME_ORDER', modifiedFuture: 'TIME_ORDER',
+                                modifiedAfterCheck: 'TIME_ORDER', malformed: 'METADATA', malformedModified: 'METADATA',
+                                missingChecked: 'METADATA', missingModified: 'METADATA', wrongSchema: 'SCHEMA', empty: 'EMPTY_CVES'][name]
+                            assert expectedCode != null
+                            def message = failure.cause.message
+                            assert message.startsWith('Invalid security snapshot: ' + expectedCode)
+                            assert failure.cause.cause == null && failure.cause.stackTrace.length == 0 && failure.cause.suppressed.length == 0
+                            assert !message.contains(props.getProperty('password')) && !message.contains(dir.absolutePath)
+                            if (name == 'stale') {
+                                assert message.contains('schema=5.6') && message.contains('cveCount=1')
+                                assert message.contains('checked=2026-11-15T07:59:59Z')
+                                assert message.contains('modified=2026-11-14T00:00:00Z')
+                            }
                             accepted = false
                         }
                         assert accepted == expected : "Unexpected verdict: $name"
@@ -74,25 +86,121 @@ public final class SecuritySnapshotVerificationFunctionalTest {
                         assert mtime == java.nio.file.Files.getLastModifiedTime(file) : "Database mtime changed: $name"
                         assert dir.list().toList().sort() == ['odc.mv.db'] : "Unexpected DB side files: $name"
                     }
-                    def reject = { path ->
+                    def reject = { path, code ->
                         try { verify.invoke(null, path, driver, props, now); assert false : 'Invalid path accepted' }
                         catch (java.lang.reflect.InvocationTargetException failure) {
                             assert failure.cause instanceof IllegalArgumentException
-                            assert failure.cause.message == 'Invalid security snapshot'
+                            assert failure.cause.message == 'Invalid security snapshot: ' + code
+                            assert failure.cause.cause == null && failure.cause.stackTrace.length == 0 && failure.cause.suppressed.length == 0
+                            assert !failure.cause.message.contains(props.getProperty('password'))
+                            assert !failure.cause.message.contains(path.toString())
                         }
                     }
-                    reject(file('missing').toPath())
+                    reject(file('missing').toPath(), 'PATH_OWNERSHIP')
                     def corrupt = file('corrupt'); assert corrupt.mkdir()
                     new File(corrupt, 'odc.mv.db').bytes = [1, 2, 3] as byte[]
-                    reject(corrupt.toPath())
+                    reject(corrupt.toPath(), 'DATABASE')
                     def nonregular = file('nonregular'); assert nonregular.mkdir()
                     assert new File(nonregular, 'odc.mv.db').mkdir()
-                    reject(nonregular.toPath())
+                    reject(nonregular.toPath(), 'PATH_OWNERSHIP')
                     def symlink = file('linked').toPath()
                     java.nio.file.Files.createSymbolicLink(symlink, file('fresh').toPath())
-                    reject(symlink)
+                    reject(symlink, 'PATH_OWNERSHIP')
                     def unsafe = file('unsafe;MODE=MySQL'); assert unsafe.mkdir()
-                    reject(unsafe.toPath())
+                    reject(unsafe.toPath(), 'PATH_OWNERSHIP')
+                    def wrongPassword = new Properties(); wrongPassword.putAll(props)
+                    wrongPassword.setProperty('password', 'secret-unique-do-not-log')
+                    try { verify.invoke(null, file('fresh').toPath(), driver, wrongPassword, now); assert false }
+                    catch (java.lang.reflect.InvocationTargetException failure) {
+                        assert failure.cause.message == 'Invalid security snapshot: DATABASE'
+                        assert failure.cause.cause == null && failure.cause.stackTrace.length == 0 && failure.cause.suppressed.length == 0
+                        assert !failure.cause.message.contains('secret-unique-do-not-log')
+                    }
+                    def closingDriver = java.lang.reflect.Proxy.newProxyInstance(
+                        java.sql.Driver.class.classLoader, [java.sql.Driver] as Class[],
+                        { proxy, method, args ->
+                            def value
+                            try { value = method.invoke(driver, args) }
+                            catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.cause }
+                            if (method.name != 'connect' || value == null) return value
+                            def connection = value
+                            return java.lang.reflect.Proxy.newProxyInstance(
+                                java.sql.Connection.class.classLoader, [java.sql.Connection] as Class[],
+                                { inner, connectionMethod, connectionArgs ->
+                                    try {
+                                        def result = connectionMethod.invoke(connection, connectionArgs)
+                                        if (connectionMethod.name == 'close') throw new java.sql.SQLException('secret-close-must-not-escape')
+                                        return result
+                                    } catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.cause }
+                                } as java.lang.reflect.InvocationHandler)
+                        } as java.lang.reflect.InvocationHandler)
+                    try { verify.invoke(null, file('stale').toPath(), closingDriver, props, now); assert false }
+                    catch (java.lang.reflect.InvocationTargetException failure) {
+                        assert failure.cause.message.startsWith('Invalid security snapshot: STALE')
+                        assert failure.cause.cause == null && failure.cause.stackTrace.length == 0
+                        assert failure.cause.suppressed.length == 0
+                        assert !failure.cause.message.contains('secret-close-must-not-escape')
+                    }
+                    def failingDriver = { failure ->
+                        java.lang.reflect.Proxy.newProxyInstance(java.sql.Driver.class.classLoader, [java.sql.Driver] as Class[],
+                            { proxy, method, args -> throw failure } as java.lang.reflect.InvocationHandler)
+                    }
+                    try { verify.invoke(null, file('fresh').toPath(), failingDriver(new LinkageError('synthetic-secret-linkage')), props, now); assert false }
+                    catch (java.lang.reflect.InvocationTargetException failure) {
+                        assert failure.cause.message == 'Invalid security snapshot: DATABASE'
+                        assert failure.cause.cause == null && failure.cause.stackTrace.length == 0 && failure.cause.suppressed.length == 0
+                    }
+                    def fatal = new InternalError('synthetic-fatal')
+                    try { verify.invoke(null, file('fresh').toPath(), failingDriver(fatal), props, now); assert false }
+                    catch (java.lang.reflect.InvocationTargetException failure) { assert failure.cause.is(fatal) }
+                    def taskType = Class.forName('io.mazewall.build.VerifySecuritySnapshotTask')
+                    def task = tasks.create('verifyTaskDiagnostics', taskType)
+                    task.dataDirectory.set(file('stale').absolutePath)
+                    task.username.set(props.getProperty('user')); task.password.set(props.getProperty('password'))
+                    task.connectionString.set('jdbc:h2:file:%%s;AUTOCOMMIT=ON;CACHE_SIZE=65536;RETENTION_TIME=1000;MAX_COMPACT_TIME=10000;')
+                    task.driverName.set('org.h2.Driver')
+                    task.driverClasspath.from(new File(driver.class.protectionDomain.codeSource.location.toURI()))
+                    try { task.verifySnapshot(); assert false : 'Stale task accepted' }
+                    catch (IllegalArgumentException failure) {
+                        assert failure.message.startsWith('Invalid security snapshot: STALE')
+                        assert failure.cause == null && failure.stackTrace.length == 0 && failure.suppressed.length == 0
+                        assert !failure.message.contains(props.getProperty('password'))
+                    }
+                    def badJar = file('bad-driver.jar')
+                    new java.util.jar.JarOutputStream(new FileOutputStream(badJar)).withCloseable { jar ->
+                        jar.putNextEntry(new java.util.jar.JarEntry('org/h2/Driver.class'))
+                        jar.write([0, 1, 2, 3] as byte[]); jar.closeEntry()
+                    }
+                    task.driverClasspath.setFrom(badJar)
+                    try { task.verifySnapshot(); assert false : 'Bad driver class accepted' }
+                    catch (IllegalArgumentException failure) {
+                        assert failure.message == 'Invalid security snapshot: CONFIGURATION'
+                        assert failure.cause == null && failure.stackTrace.length == 0 && failure.suppressed.length == 0
+                    }
+                    def fatalClasses = file('fatal-driver-classes'); assert fatalClasses.mkdir()
+                    def fatalSource = file('fatal-driver-src/org/h2/Driver.java')
+                    assert fatalSource.parentFile.mkdirs()
+                    fatalSource.text = 'package org.h2; public final class Driver implements java.sql.Driver {' +
+                        'public Driver() { throw new InternalError("synthetic-fatal-constructor"); }' +
+                        'public java.sql.Connection connect(String u, java.util.Properties p) { return null; }' +
+                        'public boolean acceptsURL(String u) { return false; }' +
+                        'public java.sql.DriverPropertyInfo[] getPropertyInfo(String u, java.util.Properties p) { return null; }' +
+                        'public int getMajorVersion() { return 0; }' +
+                        'public int getMinorVersion() { return 0; }' +
+                        'public boolean jdbcCompliant() { return false; }' +
+                        'public java.util.logging.Logger getParentLogger() { return java.util.logging.Logger.getGlobal(); }' +
+                        '}'
+                    def compiler = javax.tools.ToolProvider.systemJavaCompiler
+                    assert compiler != null && compiler.run(null, null, null, '-d', fatalClasses.absolutePath, fatalSource.absolutePath) == 0
+                    task.driverClasspath.setFrom(fatalClasses)
+                    try { task.verifySnapshot(); assert false : 'Fatal constructor swallowed' }
+                    catch (InternalError fatalConstructor) { assert fatalConstructor.message == 'synthetic-fatal-constructor' }
+                    task.connectionString.set('jdbc:h2:file:secret-unique-do-not-log')
+                    try { task.verifySnapshot(); assert false : 'Unsafe connection accepted' }
+                    catch (IllegalArgumentException failure) {
+                        assert failure.message == 'Invalid security snapshot: CONFIGURATION'
+                        assert failure.cause == null && failure.stackTrace.length == 0 && failure.suppressed.length == 0
+                    }
                 }
             }
             """.formatted(classes));

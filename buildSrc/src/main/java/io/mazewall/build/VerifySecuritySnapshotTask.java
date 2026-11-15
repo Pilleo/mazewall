@@ -36,14 +36,22 @@ public abstract class VerifySecuritySnapshotTask extends DefaultTask {
                 catch (java.net.MalformedURLException failure) { throw new IllegalArgumentException(); }
             }).toArray(java.net.URL[]::new);
             try (var loader = new URLClassLoader(urls, ClassLoader.getPlatformClassLoader())) {
-                Driver driver = (Driver) Class.forName("org.h2.Driver", true, loader).getDeclaredConstructor().newInstance();
+                Driver driver;
+                try {
+                    driver = (Driver) Class.forName("org.h2.Driver", true, loader).getDeclaredConstructor().newInstance();
+                } catch (java.lang.reflect.InvocationTargetException failure) {
+                    if (failure.getCause() instanceof Error error) throw error;
+                    throw failure;
+                }
                 Properties credentials = new Properties();
                 credentials.setProperty("user", getUsername().get());
                 credentials.setProperty("password", getPassword().get());
                 SecuritySnapshotVerifier.verify(Path.of(getDataDirectory().get()), driver, credentials, Instant.now());
             }
-        } catch (Exception failure) {
-            throw new IllegalArgumentException("Invalid security snapshot");
+        } catch (SecuritySnapshotVerifier.SnapshotFailure failure) {
+            throw failure.fresh();
+        } catch (Exception | LinkageError failure) {
+            throw SecuritySnapshotVerifier.failure(SecuritySnapshotVerifier.Reason.CONFIGURATION);
         }
     }
 }
