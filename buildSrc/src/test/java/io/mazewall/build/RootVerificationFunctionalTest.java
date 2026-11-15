@@ -17,7 +17,15 @@ final class RootVerificationFunctionalTest {
             Path repository = rootBuild.getParent();
             Path fixture = Files.createTempDirectory("root-verification-");
             System.out.println("Root verification fixture: " + fixture);
+            Files.createDirectory(fixture.resolve("empty-plugin-repository"));
+            Path testKitRoot = Path.of(System.getProperty("org.gradle.testkit.dir"));
+            Files.createDirectories(testKitRoot);
+            Path coldTestKit = Files.createTempDirectory(testKitRoot, "root-verification-cold-");
+            System.out.println("Root verification isolated cold TestKit: " + coldTestKit);
             write(fixture, "settings.gradle.kts", """
+                pluginManagement {
+                    repositories { maven { url = uri(rootDir.resolve("empty-plugin-repository")) } }
+                }
                 rootProject.name = "root-verification-fixture"
                 include(":integrations:spring:java-leaf", ":integrations:spring:starter", ":integrations:koog", ":core", ":portals:leaf")
                 """);
@@ -43,11 +51,11 @@ final class RootVerificationFunctionalTest {
                 import java.util.jar.JarFile
                 plugins {
                     java
-                    alias(libs.plugins.kotlin) apply false
-                    alias(libs.plugins.detekt)
+                    id("org.jetbrains.kotlin.jvm") apply false
+                    id("dev.detekt")
                     id("com.github.spotbugs")
                     id("io.mazewall.spotbugs-toolchain")
-                    alias(libs.plugins.ktlint) apply false
+                    id("org.jlleitschuh.gradle.ktlint") apply false
                 }
                 allprojects { repositories { mavenCentral() } }
                 sourceSets { create("sharedTest") }
@@ -97,7 +105,7 @@ final class RootVerificationFunctionalTest {
                 }
                 """);
             for (String leaf : List.of("integrations/koog", "core", "portals/leaf")) {
-                write(fixture, leaf + "/build.gradle.kts", "plugins {\n    alias(libs.plugins.kotlin)\n    alias(libs.plugins.ktlint)\n}\n");
+                write(fixture, leaf + "/build.gradle.kts", "plugins {\n    id(\"org.jetbrains.kotlin.jvm\")\n    id(\"org.jlleitschuh.gradle.ktlint\")\n}\n");
                 write(fixture, leaf + "/src/main/kotlin/io/mazewall/Answer.kt", """
                     package io.mazewall
 
@@ -153,7 +161,7 @@ final class RootVerificationFunctionalTest {
                 """);
             write(fixture, "portals/build.gradle.kts", "plugins { base }\n");
 
-            BuildResult selected = run(fixture, false,
+            BuildResult selected = run(fixture, coldTestKit, false,
                 ":integrations:build", ":core:build", ":portals:build", ":unitCheck", ":kernelCheck",
                 ":integrations:spring:java-leaf:verifyCoverageSelection");
             assertQuality(selected);
@@ -180,7 +188,7 @@ final class RootVerificationFunctionalTest {
                     """);
                 Path aux = fixture.resolve("integrations/spring/java-leaf/build/custom-auxclasspath.txt");
                 Files.writeString(aux, "/stale/valid-looking.jar\n".repeat(2000) + "STALE_TAIL");
-                BuildResult rerun = run(fixture, false, ":integrations:spring:java-leaf:spotbugsMain", "--rerun");
+                BuildResult rerun = run(fixture, coldTestKit, false, ":integrations:spring:java-leaf:spotbugsMain", "--rerun");
                 outcome(rerun, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.SUCCESS);
                 VerifySpotBugsReport.validate(fixture.resolve("integrations/spring/java-leaf/build/reports/spotbugs/main.xml"));
                 String expected = Files.readString(fixture.resolve("integrations/spring/java-leaf/build/expected-auxclasspath.txt"));
@@ -201,7 +209,7 @@ final class RootVerificationFunctionalTest {
                     """);
                 for (String marker : List.of("Configuration cache entry stored.", "Reusing configuration cache.")) {
                     Files.writeString(aux, "/stale/valid-looking.jar\n".repeat(2000) + "STALE_TAIL");
-                    BuildResult cached = run(fixture, false, ":integrations:spring:java-leaf:spotbugsMain", "--rerun", "--configuration-cache");
+                    BuildResult cached = run(fixture, coldTestKit, false, ":integrations:spring:java-leaf:spotbugsMain", "--rerun", "--configuration-cache");
                     outcome(cached, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.SUCCESS);
                     contains(cached, marker);
                     String rewritten = Files.readString(aux);
@@ -216,7 +224,7 @@ final class RootVerificationFunctionalTest {
                     violationRules { rule { limit { minimum = "0.99".toBigDecimal() } } }
                 }
                 """, java.nio.file.StandardOpenOption.APPEND);
-            BuildResult coverageFailure = run(fixture, true,
+            BuildResult coverageFailure = run(fixture, coldTestKit, true,
                 ":integrations:spring:java-leaf:jacocoKernelCoverageVerification");
             outcome(coverageFailure, ":integrations:spring:java-leaf:jacocoKernelCoverageVerification", TaskOutcome.FAILED);
             if (!coverageFailure.getOutput().contains("instructions covered ratio")) {
@@ -228,7 +236,7 @@ final class RootVerificationFunctionalTest {
                     violationRules { rule { limit { minimum = "0.99".toBigDecimal() } } }
                 }
                 """, java.nio.file.StandardOpenOption.APPEND);
-            BuildResult hostCoverageFailure = run(fixture, true, ":unitCheck");
+            BuildResult hostCoverageFailure = run(fixture, coldTestKit, true, ":unitCheck");
             outcome(hostCoverageFailure, ":integrations:spring:java-leaf:jacocoTestCoverageVerification", TaskOutcome.FAILED);
             Files.writeString(leafBuild, passingBuild);
             // Grouping projects never acquire fake source sets, analyzers or coverage gates.
@@ -256,7 +264,7 @@ final class RootVerificationFunctionalTest {
                         }
                     }
                     """.formatted(namespace));
-                BuildResult javaFailure = run(fixture, true, ":unitCheck");
+                BuildResult javaFailure = run(fixture, coldTestKit, true, ":unitCheck");
                 outcome(javaFailure, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.FAILED);
                 Files.delete(fixture.resolve(brokenPath));
             }
@@ -266,7 +274,7 @@ final class RootVerificationFunctionalTest {
             write(fixture, "core/src/main/kotlin/io/mazewall/enforcer/diagnostics/MazewallEvents.kt",
                     eventSeam.replace("var failOnListenerError: Boolean = false",
                             "var failOnListenerError: Boolean = false\n    var unrelatedState: Boolean = false"));
-            BuildResult unlistedState = run(fixture, true, ":core:spotbugsMain");
+            BuildResult unlistedState = run(fixture, coldTestKit, true, ":core:spotbugsMain");
             outcome(unlistedState, ":core:spotbugsMain", TaskOutcome.FAILED);
             if (!Files.readString(fixture.resolve("core/build/reports/spotbugs/main.xml")).contains("unrelatedState")) {
                 throw new AssertionError("Exact-field exception hid unrelated singleton state: " + unlistedState.getOutput());
@@ -286,7 +294,7 @@ final class RootVerificationFunctionalTest {
                     auxClassPaths.setFrom(configurations.named("compileClasspath"))
                 }
                 """);
-            BuildResult incomplete = run(fixture, true, ":integrations:spring:java-leaf:spotbugsMain");
+            BuildResult incomplete = run(fixture, coldTestKit, true, ":integrations:spring:java-leaf:spotbugsMain");
             outcome(incomplete, ":integrations:spring:java-leaf:spotbugsMain", TaskOutcome.FAILED);
             contains(incomplete, "Incomplete SpotBugs analysis");
             if (!Files.readString(fixture.resolve("integrations/spring/java-leaf/build/reports/spotbugs/main.xml"))
@@ -322,7 +330,7 @@ final class RootVerificationFunctionalTest {
                     public static int nullArgument() { return needsValue(null); }
                 }
                 """);
-            BuildResult reachable = run(fixture, true, ":core:spotbugsMain");
+            BuildResult reachable = run(fixture, coldTestKit, true, ":core:spotbugsMain");
             outcome(reachable, ":core:spotbugsMain", TaskOutcome.FAILED);
             Path controlReport = fixture.resolve("core/build/reports/spotbugs/main.xml");
             VerifySpotBugsReport.validate(controlReport);
@@ -351,7 +359,7 @@ final class RootVerificationFunctionalTest {
             Path javaTest = fixture.resolve("integrations/spring/java-leaf/src/test/java/io/mazewall/AnswerTest.java");
             String passingTest = Files.readString(javaTest);
             Files.writeString(javaTest, passingTest.replace("assertEquals(42,", "assertEquals(0,"));
-            BuildResult testFailure = run(fixture, true, ":unitCheck");
+            BuildResult testFailure = run(fixture, coldTestKit, true, ":unitCheck");
             outcome(testFailure, ":integrations:spring:java-leaf:test", TaskOutcome.FAILED);
             Files.writeString(javaTest, passingTest);
 
@@ -362,11 +370,11 @@ final class RootVerificationFunctionalTest {
                     TODO("unfinished implementation")
                 }
                 """);
-            BuildResult kotlinFailure = run(fixture, true, ":unitCheck");
+            BuildResult kotlinFailure = run(fixture, coldTestKit, true, ":unitCheck");
             outcome(kotlinFailure, ":integrations:koog:detektMain", TaskOutcome.FAILED);
             Files.delete(fixture.resolve("integrations/koog/src/main/kotlin/io/mazewall/Broken.kt"));
             write(fixture, "core/src/main/kotlin/io/mazewall/Answer.kt", "package io.mazewall\nobject Answer{fun value():Int=42}\n");
-            BuildResult styleFailure = run(fixture, true, ":unitCheck");
+            BuildResult styleFailure = run(fixture, coldTestKit, true, ":unitCheck");
             outcome(styleFailure, ":core:ktlintMainSourceSetCheck", TaskOutcome.FAILED);
             System.out.println("Root verification: implicit/explicit groups, Java tests/SpotBugs, Kotlin Detekt, core and lazy aggregates passed.");
         } catch (Exception failure) {
@@ -699,6 +707,10 @@ final class RootVerificationFunctionalTest {
     }
 
     private static BuildResult run(Path fixture, boolean fail, String... tasks) throws java.net.URISyntaxException {
+        return run(fixture, null, fail, tasks);
+    }
+
+    private static BuildResult run(Path fixture, Path testKit, boolean fail, String... tasks) throws java.net.URISyntaxException {
         var arguments = new java.util.ArrayList<>(List.of(tasks));
         arguments.addAll(List.of("--offline", "--max-workers=2", "--stacktrace"));
         if (!arguments.contains("--configuration-cache")) arguments.add("--no-configuration-cache");
@@ -706,7 +718,12 @@ final class RootVerificationFunctionalTest {
                 classpathEntry(SpotBugsToolchainPlugin.class),
                 classpathEntry(com.github.spotbugs.snom.SpotBugsTask.class),
                 new java.io.File("build/resources/main").getAbsoluteFile());
-        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withPluginClasspath(pluginClasspath).withArguments(arguments).forwardOutput();
+        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments).forwardOutput();
+        if (testKit != null) {
+            runner.withPluginClasspath().withTestKitDir(testKit.toFile());
+        } else {
+            runner.withPluginClasspath(pluginClasspath);
+        }
         return fail ? runner.buildAndFail() : runner.build();
     }
 

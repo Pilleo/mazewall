@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 274 | *Total Resolved Issues:* 719
+*Total Active Issues:* 275 | *Total Resolved Issues:* 719
 
-Active status detail: 272 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 273 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261115-003718-858](issue-20261115-003718-858-make-enforcer-functional-test-fixtures-configurati.md) | Make enforcer functional-test fixtures configuration-cache safe and offline | medium | enforcer |
 | [issue-20261114-192453-295](issue-20261114-192453-295-add-a-native-only-wrapper-for-private-argument-mat.md) | Duplicate native match-wrapper proposal deferred in favor of issue 192340 | high | profiler |
 | [issue-20261114-192340-328](issue-20261114-192340-328-add-a-native-only-wrapper-for-private-argument-mat.md) | Add a native-only wrapper for private argument matching | high | profiler |
 | [issue-20261114-174301-368](issue-20261114-174301-368-bind-native-open-arguments-to-the-live-publication.md) | Bind native open arguments to the live publication | high | profiler |

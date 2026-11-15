@@ -1,5 +1,7 @@
 # Tier E pause and resume handoff — 2026-11-14
 
+> **Repository CI note (2026-11-15):** [PR 567 build-fixture corrections](pr567-ci-fixture-corrections-20261115.md) records focused local passes; a genuinely cold offline analysis fixture, the full quality gate, and fresh PR CI remain pending. This note concerns Gradle/test fixtures only and does not change Tier E acceptance, security limits, or historical results.
+
 This is the durable continuation record for a paused Tier E effort. It summarizes bounded accepted evidence, the current security boundary, retained qualification gaps, reproducibility limits, and the proposed next step. It does not release implementation or activate either production Live guard. All status below is historical evidence as of the stated checkpoints; it is not a statement that those tests have just been rerun against this checkout.
 
 ## Resume gate and current security boundary

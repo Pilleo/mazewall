@@ -170,6 +170,11 @@ tasks.register<JavaExec>("failureTriageTest") {
 tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "btfRelocationTest", "nativeDiscoveryTest", "coreLaneTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
+    if (name == "verificationActionsTest") {
+        val metadata = tasks.named("pluginUnderTestMetadata")
+        dependsOn(metadata)
+        classpath += files(metadata)
+    }
     // Cache transport is not verification input: host/container homes intentionally differ.
     jvmArgumentProviders.add(TestKitJvmArguments(gradle.gradleUserHomeDir))
     doFirst {

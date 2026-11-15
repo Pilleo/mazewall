@@ -354,6 +354,7 @@ val managedLayoutFixtureJar =
         }
     }
 
+val managedFixturePlatformJar = platformJar
 tasks.named<Test>("test") {
     filter {
         excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture proves checked original native ownership")
@@ -361,32 +362,14 @@ tasks.named<Test>("test") {
         excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects duplicate nested helper class")
     }
     dependsOn(platformJar, tasks.named("jar"), managedLayoutFixtureJar)
-    inputs.files(platformJar, tasks.named<Jar>("jar").flatMap { it.archiveFile }, managedLayoutFixtureJar.flatMap { it.archiveFile }, configurations.runtimeClasspath)
-    doFirst {
-        val runtime = configurations.runtimeClasspath.get().files
-
-        fun dependency(name: String) = runtime.single { it.name == name }.canonicalPath
-        val ordered =
-            listOf(
-                platformJar.get().asFile.canonicalPath,
-                tasks
-                    .named<Jar>("jar")
-                    .get()
-                    .archiveFile
-                    .get()
-                    .asFile.canonicalPath,
-                dependency("kotlin-stdlib-2.4.20-Beta1.jar"),
-                dependency("kotlinx-serialization-core-jvm-1.9.0.jar"),
-                dependency("kotlinx-serialization-json-jvm-1.9.0.jar"),
-                dependency("annotations-13.0.jar"),
-                managedLayoutFixtureJar
-                    .get()
-                    .archiveFile
-                    .get()
-                    .asFile.canonicalPath,
-            )
-        systemProperty("mazewall.managed.fixture.classpath", ordered.joinToString(File.pathSeparator))
-    }
+    jvmArgumentProviders.add(
+        objects.newInstance(io.mazewall.build.ManagedFixtureClasspathArgumentProvider::class.java).apply {
+            getPlatformJar().set(managedFixturePlatformJar)
+            getEnforcerJar().set(tasks.named<Jar>("jar").flatMap { it.archiveFile })
+            getFixtureJar().set(managedLayoutFixtureJar.flatMap { it.archiveFile })
+            getRuntimeFiles().from(configurations.runtimeClasspath)
+        },
+    )
 }
 
 // Explicit fixture-only task. It is not wired into test, check, or production classpaths.
