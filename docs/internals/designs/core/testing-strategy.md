@@ -347,11 +347,11 @@ owned-Git fixtures and workflow-policy mutations. These checks also run in manda
 `verificationActionsTest`, whose inputs include the helper. The policy fixtures
 retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
-unsafe required-check joins. They execute the extracted join shell command for
-all 625 core/mutation/security/build-logic combinations with Go fixed to success,
-then every Go and optional-integration result with the other prerequisites successful. Only six literal
-successes pass. Existing security125/legacy25 projections fix the extra results
-explicitly to success. Actual security metadata/eligibility/ownership/task shells,
+unsafe required-check joins. The 625-result projection varies core, mutation, security and build-logic outcomes
+with Go, optional integration and confined-helper results fixed to success. Separate
+controls vary Go, optional-integration and confined-helper results with the other
+prerequisites successful. The literal required join accepts only seven `success`
+results; these bounded projections are not an exhaustive seven-lane combination. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
 calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
@@ -437,76 +437,25 @@ it neither substitutes container termination for a collector join nor extends an
 native or JVM deadline. The standalone comparison retains `docker run --rm` and
 signals its container by identity; it does not signal a saved numeric host PID.
 
-Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
-container's separate data mount. The security lane alone owns its data-only cache
-and retained snapshot artifacts; setup-gradle excludes that directory. Compatibility keys include OS, architecture
-and the actual catalog scanner version, with unique run-ID/attempt snapshots and
-only the compatible restore prefix. No previous matched key is overwritten, no
-cross-version/container fallback is allowed, and a cache hit never skips analysis.
-Dependency-Check 13.0.0's task data-directory property is explicitly bound to the
-configured extension directory, so update and analysis cannot silently use its
-separate default `11.0` directory. Old scanner/database versions are not migrated
-by copying their databases across compatibility prefixes.
+### Security snapshot trust and dependency analysis
 
-On a genuine cache miss (empty matched key, not the exact-hit boolean), the lane
-looks for the newest compatible, non-expired completed snapshot artifact. Artifacts
-are retained for 14 days outside the evictable build-cache quota. Default-branch
-consumers accept only same-repository default-branch push artifacts from this CI
-workflow; PRs may additionally consume their own PR's artifacts, never another PR's.
-Source run/repository/commit/attempt metadata and the exact compatibility prefix
-are checked. Overall workflow success is not required: a completed database remains
-usable when a later analysis or another job failed. Deleted-fork metadata is rejected.
-API/download errors are failures, not evidence that no snapshot exists.
+The security workflow separates NVD updates from mandatory analysis. The default-branch-only `security-data.yml` updater runs hourly or by manual dispatch and uses a non-cancelling publication group. It can use the security-data cache as an update seed, but a cache entry alone is never evidence of trust or freshness. Until a trusted updater artifact is available, only an eligible same-repository default-branch `push` artifact from the legacy CI workflow can serve as bootstrap; absence of a fresh qualifying snapshot keeps the required security check red.
 
-Snapshots contain a versioned compatibility manifest and SHA-256/size inventory of
-all database files, including hidden cache files. Preparation and restoration reject
-links, foreign ownership, non-regular files, missing/empty `odc.mv.db`, more than
-10,000 entries, more than 2 GiB of data or a manifest larger than 2 MiB. Restoration
-first requires the downloaded ZIP's SHA-256 to match GitHub's recorded artifact
-digest, before extraction; an internally consistent replacement manifest is not
-sufficient. Downloads are streamed and bounded by their recorded archive size,
-with missing/mismatched digests, truncation, unsafe ZIP paths and non-regular entries
-remaining blocking failures. Restoration checks the inventory before admitting data through an owned temporary directory;
-existing nonempty data is never overwritten. Snapshot age is not a freshness waiver:
-the normal updater must still succeed before real analysis. With neither a compatible
-cache nor retained artifact, the cold path seeds from Dependency-Check's
-[maintainer-published NVD feed](https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/cache.properties),
-then requires a separate live NVD API update with `nvd.api.check.validforhours=0`.
-The seed alone is never accepted as fresh security data. Warm updates retain the
-normal validity window. API requests use 500 records per page to bound response
-size; every page is still consumed, with no CVE filtering or retry-count increase.
+The updater forces a live NVD check with Dependency-Check 13.0.0's `validForHours=0` and 500 results per page. It rejects logs containing `Failed to process CVE-`, verifies caller ownership and the actual database, then prepares and uploads the immutable 14-day snapshot. Upload, cache save, and exact cache lookup assertions run only after successful update, ownership, and H2 verification; a failed, cancelled, or incomplete update never publishes a snapshot. The artifact carries its compatibility key and file inventory, and publication retains the existing size, SHA-256, bounded ZIP, ownership, path, and no-overwrite protections. A completed producing attempt may remain eligible when a later unrelated job fails because its artifact was already guarded by successful update and verification.
 
-The independent security job has a bounded 180-minute cold budget, including a
-150-minute `dependencyCheckUpdate` step covering both seed and forced live refresh
-when cold. This separates bootstrap from already successful native work; it is not
-a latency guarantee, and seed/API errors remain blocking.
-After a successful update, caller ownership is checked before explicit snapshot
-save and a separate retained-artifact upload. Artifact preparation/publication has
-its own success guard and nonempty artifact-ID assertion before analysis; persistence
-failures leave the lane red. Failed/cancelled updates and foreign ownership never publish a snapshot;
-there is no permission repair or partial-database resume assumption.
-An updater or analyzer that logs `Failed to process CVE-` is rejected even if
-Gradle exits successfully, including an implicit refresh at the validity-window
-boundary. Omitted records are not a completed database. This guards the known
-[NVD record-processing failure](../../backlog/issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md)
-without suppressing CVEs or modifying upstream data.
+Consumers accept only artifacts from the same repository and default branch, produced by the explicitly identified updater on `schedule`/`workflow_dispatch` or by legacy CI on `push`. Selection checks workflow ID, event, branch, repository/head repository, commit, completed producing attempt, artifact/run/attempt identity, scanner/OS/architecture compatibility, expiry, size, and GitHub's archive digest. PR and fork artifacts are rejected. The mutable data cache is not a substitute for a trusted artifact, and neither cache age nor artifact upload time proves that NVD data is fresh. A PR-owned cache or artifact cannot establish a usable snapshot.
 
-Because cache/save may warn and exit successfully after upload failure, a supported
-lookup-only restore checks the identical new primary key/path without fallback,
-with fail-on-cache-miss. An explicit assertion also requires literal `cache-hit ==
-true`, rejecting false/unset/nonexact results even when unavailable cache features
-return without an action error. This proves membership only, not archive integrity,
-retention or successful future restoration. Missing/evicted/not-yet-visible data
-fails closed rather than invoking a retry or accepting warning-only upload success.
+Before analysis, `verifySecuritySnapshot` opens the configured Dependency-Check 13.0.0 H2 database using the scanner's existing driver, on the same configured data directory the plugin tasks use. The verifier uses an existing-file/read-only H2 connection; it does not create or modify the database. It rejects a noncanonical connection configuration, unsafe or symlinked paths, missing/empty database, foreign ownership, incompatible schema, absent or ambiguous metadata, or zero actual CVE rows. It requires schema 5.6 and parseable `nvd.api.last.checked` and `nvd.api.last.modified` timestamps, with `lastModified <= lastChecked <= now` and `now - lastChecked <= 4 hours`. Freshness comes from the database check timestamp, not archive age or file modification time. The timestamp and database checks do not replace the updater's successful forced refresh and CVE-omission guard.
 
-After successful update and ownership, `dependencyCheckAnalyze` runs even if save,
-lookup or assertion failed, unless cancelled. Persistence failures keep the job
-red; successful analysis cannot erase them. Failed update/ownership prevents data
-use/save/analysis. Existing CVSS 7 threshold, suppression/configuration/demo/OSSIndex
-selection, normal freshness checks and scanner errors remain unchanged. Missing or
-blank NVD credentials and docs-only changes retain the existing no-scan policy;
-an eligible-key flag or a green skipped job is not evidence of executed analysis.
-Always-scheduled ownership and diagnostics retain update/analysis logs and reports.
+For security-eligible code changes, CI restores/selects only trusted snapshot data, verifies ownership, then runs `verifySecuritySnapshot dependencyCheckAnalyze` in scan mode. Scan mode disables auto-update both on the Dependency-Check extension and configured tasks and removes the CI NVD-key skip for that mode; the PR scan is keyless and performs no NVD connection. A failed or missing verifier keeps analysis from proceeding. Preserve the existing CVSS 7 threshold, scanner error behavior, suppressions, analyzer selection, mandatory result, and failure/cancellation propagation. Existing docs-only filtering is unchanged.
+
+Focused local evidence: the Python snapshot/selector suite passed seven tests in GREEN001, including malformed and out-of-range producer-attempt metadata, pre-attempt trust bounds, and fail-closed handling of genuine GitHub API errors. The real Dependency-Check/H2 verifier and keyless task-wiring contract passed in GREEN003, including entry into the expected network-free downstream failure rather than an NVD connection. Policy GREEN004 passed its 625-result projection, separate Go/optional/confined-helper join controls, cache/workflow-input invalidation, and failure-marker controls; root ktlint and the warning ratchet passed in GREEN003. Independent source-level selector review 004 found no blocker. Full001 was intentionally interrupted at exit 137 while addressing the bounded availability issue; it is not a completed full build. These fixtures and reviews are not a live scan or a trusted producer run.
+
+No qualified fresh snapshot or successful security scan has yet been recorded. The controller-approved historical master attempt 2 restored prior data but failed `dependencyCheckUpdate` with NVD HTTP 503; the mandatory scan was skipped, the aggregate failed, and package publication was skipped. The carried-forward Optional acceptance failure was from October 31 and was not re-executed in that attempt. This is an upstream update failure with no scan result. The later Full003 local incremental quality gate passed, but no fresh required CI, trusted seed, or successful security scan is established. Do not treat this lifecycle text or its focused fixtures as a successful seed or completed scan.
+
+Full003 completed the offline incremental Gradle build in 15m08s: 238 actionable tasks, 52 executed, one from cache, 185 up-to-date, and configuration cache reused. Enforcer integration and FreshJvm integration executed 244 tests (2 skips) and 120 (1 skip), both with zero failures/errors. Enforcer unit output (1,639 tests, 2 skips) was up-to-date, not a fresh execution. `buildLogicCheck`, warning ratchet, and enforcer kernel coverage verification executed; nested `verificationActionsTest` and unit coverage verification were up-to-date. The run retired cleanly with source/index/HEAD unchanged. This incremental build does not qualify a live NVD scan or fresh trusted snapshot.
+
+The run retained three profiler socket `Function not implemented` shutdown exceptions and three suppressed directory exceptions; issue 752 and individual profiler-child retirement remain unknown. A post-build user-preferences-directory IOException was recorded without inferring an additional consequence. Fresh remote CI remains pending. Full003 report: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/ci-pr567-20261115-001/nvd-decoupling001/full-proposal003/report.md` (SHA-256 `bc075a2cb59de2a26593b353b9e3bef99ab8bdb1d8f05da7e4dd90b5636e40d5`).
 
 ### Optional integration feedback and diagnostics
 
@@ -558,8 +507,8 @@ collection. The workflow-policy regression rejects removal of failure-time uploa
 
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]`
-and `if: always()`; its shell requires all six results to equal `success`.
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]`
+and `if: always()`; its shell requires all seven results to equal `success`.
 Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
@@ -675,7 +624,7 @@ independent Gradle fixture.
 ## Optional global benchmarks
 
 `.github/workflows/benchmarks.yml` is a separate `workflow_dispatch`-only workflow,
-not a PR/push/scheduled trigger or a prerequisite of the six-lane required join or
+not a PR/push/scheduled trigger or a prerequisite of the seven-lane required join or
 publication. It runs the existing integration-boundary harness unchanged on
 Linux/JDK25. No performance threshold, comparison bot or new benchmark framework
 is added. See the [operator recipe and evidence inventory](../../../../benchmarks/integration-boundaries/README.md#optional-global-benchmark-job).

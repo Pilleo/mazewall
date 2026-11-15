@@ -52,6 +52,11 @@ public final class VerificationWorkflowInputFunctionalTest {
             Files.createDirectories(workflow.getParent());
             String valid = Files.readString(repository.resolve(".github/workflows/ci.yml"));
             Files.writeString(workflow, valid);
+            Files.copy(repository.resolve(".github/workflows/security-data.yml"), fixture.resolve(".github/workflows/security-data.yml"));
+            Files.createDirectories(fixture.resolve("scripts"));
+            for (String name : new String[] {"security_snapshot.py", "test_security_snapshot.py"}) {
+                Files.copy(repository.resolve("scripts").resolve(name), fixture.resolve("scripts").resolve(name));
+            }
             Path helper = fixture.resolve("scripts/ci_cache_key.sh");
             Files.createDirectories(helper.getParent());
             Files.copy(repository.resolve("scripts/ci_cache_key.sh"), helper);
@@ -65,9 +70,18 @@ public final class VerificationWorkflowInputFunctionalTest {
             outcome(TaskOutcome.UP_TO_DATE, runner(project).build().task(":verificationActionsTest").getOutcome());
             Files.writeString(verificationMetadata, Files.readString(verificationMetadata) + "\n<!-- Metadata-only input invalidation control -->\n");
             outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
+            for (Path input : new Path[] {fixture.resolve(".github/workflows/security-data.yml"),
+                fixture.resolve("scripts/security_snapshot.py"), fixture.resolve("scripts/test_security_snapshot.py")}) {
+                Files.writeString(input, Files.readString(input) + "\n# Input invalidation control\n");
+                outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
+                outcome(TaskOutcome.UP_TO_DATE, runner(project).build().task(":verificationActionsTest").getOutcome());
+            }
             Files.writeString(workflow, valid + "\n# Workflow-only input invalidation control\n");
             outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
-            Files.writeString(workflow, valid.replace("timeout-minutes: 180", "timeout-minutes: 90"));
+            String mutated = valid.replace("-Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon 2>&1 | tee security-analysis.log",
+                "-Pmazewall.securitySnapshotScan=false --info --no-configuration-cache --no-daemon 2>&1 | tee security-analysis.log");
+            if (mutated.equals(valid)) throw new AssertionError("Security scan mutation did not change the workflow");
+            Files.writeString(workflow, mutated);
             var failed = runner(project).buildAndFail();
             outcome(TaskOutcome.FAILED, failed.task(":verificationActionsTest").getOutcome());
             if (!failed.getOutput().contains("Actual workflow must satisfy the completed-data policy") || Files.exists(marker)) {

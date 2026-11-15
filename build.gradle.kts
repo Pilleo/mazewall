@@ -1,8 +1,10 @@
 import io.mazewall.build.TriageArguments
 import io.mazewall.build.VerifyDependencyState
+import io.mazewall.build.VerifySecuritySnapshotTask
 import org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension
 import org.owasp.dependencycheck.gradle.tasks.ConfiguredTask
 import java.io.File
+import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
 
@@ -412,7 +414,22 @@ tasks.register<Test>("optionalIntegrationCheck") {
     outputs.cacheIf { false }
 }
 
+fun securityMode(name: String): Boolean =
+    when (providers.gradleProperty(name).orNull) {
+        null, "false" -> false
+        "true" -> true
+        else -> error("$name must be true or false")
+    }
+val securitySnapshotScan = securityMode("mazewall.securitySnapshotScan")
+val securitySnapshotUpdate = securityMode("mazewall.securitySnapshotUpdate")
+require(!(securitySnapshotScan && securitySnapshotUpdate)) { "Security snapshot scan and update modes cannot be combined" }
+
 dependencyCheck {
+    if (securitySnapshotScan) autoUpdate = false
+    if (securitySnapshotUpdate) {
+        nvd.validForHours.set(0)
+        nvd.resultsPerPage.set(500)
+    }
     failBuildOnCVSS = 7.0f
     format = "ALL"
     suppressionFile = "$rootDir/config/dependency-check/suppressions.xml"
@@ -434,11 +451,45 @@ dependencyCheck {
 tasks.withType<ConfiguredTask>().configureEach {
     val extension = project.extensions.getByType<DependencyCheckExtension>()
     data.directory.set(extension.data.directory)
+    if (securitySnapshotScan) autoUpdate.set(false)
+    if (securitySnapshotUpdate) {
+        nvd.validForHours.set(0)
+        nvd.resultsPerPage.set(500)
+    }
 }
 
+val scannerRuntime = ConfiguredTask::class.java.classLoader
+val scannerDefaults =
+    Properties().apply {
+        scannerRuntime.getResourceAsStream("dependencycheck.properties").use { input ->
+            requireNotNull(input) { "Missing scanner defaults" }
+            load(input)
+        }
+    }
+val h2Driver = Class.forName("org.h2.Driver", false, scannerRuntime)
+val securityData = extensions.getByType<DependencyCheckExtension>().data
+val verifySecuritySnapshot =
+    tasks.register<VerifySecuritySnapshotTask>("verifySecuritySnapshot") {
+        dataDirectory.set(securityData.directory)
+        username.set(securityData.username.orElse(scannerDefaults.getProperty("data.user")))
+        password.set(securityData.password.orElse(scannerDefaults.getProperty("data.password")))
+        connectionString.set(securityData.connectionString.orElse(scannerDefaults.getProperty("data.connection_string")))
+        driverName.set(securityData.driver.orElse(scannerDefaults.getProperty("data.driver_name")))
+        driverClasspath.from(
+            files(
+                h2Driver.protectionDomain.codeSource.location
+                    .toURI(),
+            ),
+        )
+    }
+
 tasks.named("dependencyCheckAnalyze").configure {
-    onlyIf("NVD API Key is required for CI performance") {
-        System.getenv("CI") != "true" || !System.getenv("NVD_API_KEY").isNullOrBlank()
+    if (securitySnapshotScan) {
+        dependsOn(verifySecuritySnapshot)
+    } else {
+        onlyIf("NVD API Key is required for CI performance") {
+            System.getenv("CI") != "true" || !System.getenv("NVD_API_KEY").isNullOrBlank()
+        }
     }
 }
 

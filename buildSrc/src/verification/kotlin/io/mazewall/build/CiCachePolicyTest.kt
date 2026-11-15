@@ -8,11 +8,10 @@ import java.util.concurrent.TimeUnit
 object CiCachePolicyTest {
     @JvmStatic
     fun run() {
+        verifyDecoupledSecurityContract()
         verifyCoreIntegrationCompilationOverlay()
         verifyOptionalJoin()
         verifyOptionalDiagnostics()
-        verifySecuritySnapshotRecovery()
-        verifyCompletedSecurityLifecycle()
         verifyBuildLogicLane()
         verifyGoLane()
         val valid = """
@@ -87,6 +86,7 @@ object CiCachePolicyTest {
                                   code:
                                       - '**/*.kt'
                                       - '.github/workflows/ci.yml'
+                                      - '.github/workflows/security-data.yml'
                         - name: Setup Gradle
                           uses: gradle/actions/setup-gradle@v6
                           with:
@@ -151,6 +151,7 @@ object CiCachePolicyTest {
                                   code:
                                       - '**/*.kt'
                                       - '.github/workflows/ci.yml'
+                                      - '.github/workflows/security-data.yml'
                         - name: Setup Gradle
                           uses: gradle/actions/setup-gradle@v6
                           with:
@@ -224,7 +225,7 @@ object CiCachePolicyTest {
         }
         expectViolations("independent bounded graph", valid)
         expectViolations("PR cache writes", valid.replace("cache-read-only: false", "cache-read-only: true"), "PR_CACHE_WRITES", "BUILD_LOGIC_VALIDATION")
-        expectViolations("Dependency-Check data", valid.replace("dependency-check-data", "caches"), "DEPENDENCY_CHECK_DATA", "SECURITY_LIFECYCLE")
+        expectViolations("Dependency-Check data", valid.replace("dependency-check-data", "caches"), "DEPENDENCY_CHECK_DATA")
         expectViolations("host Dependency-Check", valid.replace("--no-configuration-cache", "--configuration-cache"), "SECURITY_LIFECYCLE", "HOST_DEPENDENCY_CHECK")
         expectViolations("container Dependency-Check", valid + "\nrun: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze", "CONTAINER_DEPENDENCY_CHECK")
         expectViolations("mutable NVD cache", valid + "\nkey: nvd-database-20261014", "IMMUTABLE_NVD_CACHE")
@@ -481,7 +482,7 @@ object CiCachePolicyTest {
         val workflow = repository.resolve(".github/workflows/ci.yml").readText()
         val lane = job(workflow, "build-logic-validation")
         check(lane.isNotEmpty()) { "Missing independent build-logic-validation lane" }
-        check(ciCachePolicyViolations(workflow).isEmpty()) { "Actual workflow must satisfy build-logic policy" }
+        check(ciCachePolicyViolations(workflow).isEmpty()) { "Actual workflow policy violations: ${ciCachePolicyViolations(workflow)}" }
         val mutations = listOf(
             lane to "",
             "    build-logic-validation:\n" to "    build-logic-validation:\n        needs: [core-quality]\n",
@@ -633,530 +634,49 @@ object CiCachePolicyTest {
         return process.exitValue() == 0
     }
 
-    private fun verifySecuritySnapshotRecovery() {
+    private fun verifyDecoupledSecurityContract() {
         val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
-        val security = job(repository.resolve(".github/workflows/ci.yml").readText(), "security-check")
-        val selection = step(security, "Select Retained Security Snapshot")
-        check(selection.isNotEmpty()) { "A missing NVD cache must recover a compatible retained snapshot before cold bootstrap" }
-        val selectionCondition = selection.lineSequence().map(String::trim).first { it.startsWith("if: ") }.removePrefix("if: ")
-        for (code in listOf(false, true)) for (eligible in listOf(false, true)) {
-            for ((matched, exact) in listOf("" to false, "dc-data-v1-Linux-X64-dc10.0.4_90-1" to false, "dc-data-v1-Linux-X64-dc10.0.4_100-1" to true)) {
-                val expression = selectionCondition.replace("steps.filter.outputs.code", "'$code'")
-                    .replace("steps.security_metadata.outputs.eligible", "'$eligible'")
-                    .replace("steps.security_restore.outputs.cache-matched-key", "'$matched'")
-                    .replace("steps.security_restore.outputs.cache-hit", "'$exact'")
-                check(shellSucceeds("[[ $expression ]]") == (code && eligible && matched.isEmpty())) {
-                    "Artifact recovery must distinguish a prefix cache hit from a genuine miss"
-                }
+        val updaterFile = repository.resolve(".github/workflows/security-data.yml")
+        check(updaterFile.isFile) { "Missing trusted security data updater" }
+        val updater = updaterFile.readText()
+        val ci = repository.resolve(".github/workflows/ci.yml").readText()
+        val security = job(ci, "security-check")
+        check("workflow_dispatch:" in updater && "schedule:" in updater)
+        check("github.event.repository.default_branch" in updater)
+        check("cancel-in-progress: false" in updater)
+        check("-Pmazewall.securitySnapshotUpdate=true" in updater && "nvd.api.results.per.page=500" in updater)
+        check("check-records security-update.log" in updater && "verifySecuritySnapshot" in updater)
+        check("!cancelled()" in updater && "actions/upload-artifact@" in updater)
+        check("actions/cache/save@" in updater && "lookup-only: true" in updater)
+        val filter = step(security, "Check file changes")
+        check("- '.github/workflows/security-data.yml'" in filter) { "Updater changes must trigger security validation" }
+        val controls = step(security, "Test Security Snapshot Controls")
+        check("python3 scripts/test_security_snapshot.py" in controls && "steps.filter.outputs.code == 'true'" in controls)
+        check(ciCachePolicyViolations(ci.replace("- '.github/workflows/security-data.yml'", "- 'README.md'")).isNotEmpty())
+        check(ciCachePolicyViolations(ci.replace("python3 scripts/test_security_snapshot.py", "true")).isNotEmpty())
+        check("dependencyCheckUpdate" !in security && "NVD_API_KEY" !in security)
+        check("verifySecuritySnapshot" in security && "-Pmazewall.securitySnapshotScan=true" in security)
+        check("dependencyCheckAnalyze" in security && "actions/cache/restore@" !in security)
+        check("getWorkflowRunAttempt" in security && "getWorkflow" in security)
+        check("security-data.yml" in security && "ci.yml" in security)
+        check(securityUpdaterPolicyViolations(updater).isEmpty()) { "Valid updater rejected" }
+        for (required in listOf(
+            "schedule:", "workflow_dispatch:", "github.event.repository.default_branch", "cancel-in-progress: false",
+            "-Pmazewall.securitySnapshotUpdate=true", "check-records security-update.log", "verifySecuritySnapshot",
+            "!cancelled()", "steps.security_update.outcome == 'success'", "steps.updated_ownership.outcome == 'success'",
+            "steps.verified_snapshot.outcome == 'success'", "steps.security_artifact_prepare.outcome == 'success'",
+            "lookup-only: true", "fail-on-cache-miss: true", "test \"${'$'}{CACHE_HIT:-}\" = true",
+        )) {
+            check(securityUpdaterPolicyViolations(updater.replace(required, "removed-contract")).isNotEmpty()) {
+                "Updater policy accepted removal of $required"
             }
         }
-        val scratch = Files.createTempDirectory("ci-security-recovery-").toFile()
-        try {
-            val preparation = shell(step(security, "Prepare Security Snapshot Tools"))
-            check(preparation.isNotBlank()) { "Missing executable snapshot integrity validation" }
-            val runnerTemp = scratch.resolve("runner-temp").apply { mkdir() }
-            val prepare = ProcessBuilder("bash", "-euo", "pipefail", "-c", preparation).apply {
-                environment()["RUNNER_TEMP"] = runnerTemp.path
-            }.inheritIO().start()
-            check(prepare.waitFor(5, TimeUnit.SECONDS) && prepare.exitValue() == 0)
-            val controls = scratch.resolve("selection.py").apply {
-                writeText("""
-                    import json, os, pathlib, subprocess, sys
-                    root, tool = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
-                    prefix = 'dc-data-v1-Linux-X64-dc10.0.4_'
-                    def run(ident, **changes):
-                        return dict(id=ident, workflow_id=7, event='push', head_branch='master', head_sha='abc',
-                                    repository={'id': 11}, head_repository={'id': 11}, pull_requests=[], run_attempt=2,
-                                    status='completed', conclusion='failure') | changes
-                    def artifact(ident, run_id, **changes):
-                        return dict(id=ident, name=f'security-snapshot-{prefix}{run_id}-1', expired=False,
-                                    size_in_bytes=123, digest='sha256:' + 'a' * 64,
-                                    created_at='2026-10-21T10:00:00Z', expires_at='2099-01-01T00:00:00Z',
-                                    workflow_run=dict(id=run_id, repository_id=11, head_repository_id=11,
-                                                      head_branch='master', head_sha='abc')) | changes
-                    def choose(candidates, current=None, expected_exit=0):
-                        output = root / 'selection-output'
-                        output.write_text('')
-                        payload = root / 'candidates.json'
-                        payload.write_text(json.dumps(dict(repository_id=11, default_branch='master', pr_number=554,
-                                                           current=current or run(100), candidates=candidates)))
-                        result = subprocess.run([sys.executable, str(tool), 'select', str(payload)], capture_output=True,
-                                                text=True, env=dict(os.environ, GITHUB_OUTPUT=str(output), SNAPSHOT_PREFIX=prefix), timeout=5)
-                        assert result.returncode == expected_exit, result.stdout + result.stderr
-                        return dict(line.split('=', 1) for line in output.read_text().splitlines())
-                    good = artifact(201, 90)
-                    assert choose([]) == {}
-                    assert choose([dict(artifact=good, run=run(90))]) == dict(artifact_id='201', run_id='90', key=prefix + '90-1', digest='sha256:' + 'a' * 64, size='123')
-                    newer = artifact(202, 91, created_at='2026-10-21T11:00:00Z', digest='sha256:' + 'b' * 64, size_in_bytes=124)
-                    newest = choose([dict(artifact=good, run=run(90)), dict(artifact=newer, run=run(91))])
-                    assert newest['artifact_id'] == '202' and newest['digest'] == 'sha256:' + 'b' * 64 and newest['size'] == '124'
-                    for digest in [None, '', 'md5:' + 'a' * 32, 'sha256:' + 'a' * 63, 'sha256:' + 'z' * 64]:
-                        assert choose([dict(artifact=good, run=run(90)), dict(artifact=newer | dict(digest=digest), run=run(91))], expected_exit=1) == {}
-                    for changes in [
-                        dict(expired=True), dict(size_in_bytes=0), dict(size_in_bytes=2147483649),
-                        dict(created_at='invalid'), dict(expires_at='2000-01-01T00:00:00Z'),
-                        dict(name=good['name'].replace('10.0.4_', '10.0.4-rc1_')),
-                        dict(name=good['name'].replace('X64', 'ARM64')), dict(name=good['name'].replace('Linux', 'Windows')),
-                        dict(name=good['name'].replace('90-1', '90-0')), dict(name=good['name'] + '-incomplete')
-                    ]:
-                        assert choose([dict(artifact=good | changes, run=run(90))]) == {}, changes
-                    for changes in [
-                        dict(workflow_id=8), dict(repository={'id': 12}), dict(head_repository={'id': 12}),
-                        dict(head_repository=None), dict(head_branch='feature'), dict(event='workflow_dispatch'),
-                        dict(head_sha='different'), dict(run_attempt=0),
-                        dict(event='pull_request', head_branch='feature', pull_requests=[{'number': 554}])
-                    ]:
-                        assert choose([dict(artifact=good, run=run(90, **changes))]) == {}, changes
-                    pr = run(100, event='pull_request', head_branch='feature', head_repository={'id': 12}, pull_requests=[{'number': 554}])
-                    own_pr = pr | dict(id=90)
-                    pr_artifact = artifact(201, 90, workflow_run=dict(id=90, repository_id=11,
-                                          head_repository_id=12, head_branch='feature', head_sha='abc'))
-                    assert choose([dict(artifact=pr_artifact, run=own_pr)], pr)['artifact_id'] == '201'
-                    assert choose([dict(artifact=pr_artifact, run=own_pr | dict(pull_requests=[{'number': 555}]))], pr) == {}
-                    assert choose([dict(artifact=good, run=run(90))], pr)['artifact_id'] == '201'
-                    assert choose([dict(artifact=pr_artifact, run=own_pr)]) == {}
-                    print('Retained snapshot selection: recovery, newest, scope, compatibility and deleted fork passed.')
-                """.trimIndent())
+        for (required in listOf("verifySecuritySnapshot", "-Pmazewall.securitySnapshotScan=true")) {
+            check(ciCachePolicyViolations(ci.replace(required, "removed-security-contract")).isNotEmpty()) {
+                "Security policy accepted removal of $required"
             }
-            val process = ProcessBuilder("python3", controls.path, scratch.path, runnerTemp.resolve("security-snapshot.py").path)
-                .inheritIO().start()
-            check(process.waitFor(20, TimeUnit.SECONDS)) { "Snapshot selection controls timed out" }
-            check(process.exitValue() == 0) { "Retained snapshot selection controls failed" }
-
-            val integrity = scratch.resolve("integrity.py").apply {
-                writeText("""
-                    import hashlib, itertools, json, os, pathlib, shutil, stat, subprocess, sys, zipfile
-                    root = pathlib.Path(sys.argv[1])
-                    tool = pathlib.Path(sys.argv[2])
-                    source = root / 'database'
-                    source.mkdir()
-                    (source / 'odc.mv.db').write_bytes(b'fixture database, not a real scanner pass')
-                    (source / 'cache').mkdir()
-                    (source / 'cache' / '.state').write_bytes(b'preserved hidden file')
-                    artifact = root / 'artifact'
-                    destination = root / 'restored'
-                    archive_ids = itertools.count()
-                    def archive_snapshot(directory):
-                        path = root / f'input-{next(archive_ids)}.zip'
-                        with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as archive:
-                            for entry in directory.rglob('*'):
-                                if entry.is_file():
-                                    archive.write(entry, entry.relative_to(directory).as_posix())
-                        return path
-                    def invoke(mode, src, dst, key='dc-data-v1-Linux-X64-dc10.0.4_90-1', digest=None):
-                        env = dict(os.environ, SNAPSHOT_KEY=key)
-                        if mode == 'restore':
-                            if src.is_dir():
-                                src = archive_snapshot(src)
-                            if digest is None:
-                                with src.open('rb') as stream:
-                                    digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
-                        if digest is not None:
-                            env['SNAPSHOT_DIGEST'] = digest
-                        result = subprocess.run([sys.executable, str(tool), mode, str(src), str(dst)], env=env,
-                                                capture_output=True, text=True, timeout=5)
-                        return result.returncode, result.stdout + result.stderr
-                    code, log = invoke('pack', source, artifact)
-                    assert code == 0, log
-                    code, log = invoke('restore', artifact, destination)
-                    assert code == 0, log
-                    assert (destination / 'odc.mv.db').read_bytes() == (source / 'odc.mv.db').read_bytes()
-                    assert (destination / 'cache' / '.state').read_bytes() == b'preserved hidden file'
-                    assert not (destination / 'manifest.json').exists()
-                    for digest in ['', 'md5:' + 'a' * 32, 'sha256:' + '0' * 64]:
-                        assert invoke('restore', artifact, root / 'invalid-service-digest', digest=digest)[0] != 0
-                        assert not (root / 'invalid-service-digest').exists()
-                    original_archive = root / 'service-original.zip'
-                    with zipfile.ZipFile(original_archive, 'w', zipfile.ZIP_DEFLATED) as archive:
-                        for path in artifact.rglob('*'):
-                            if path.is_file():
-                                archive.write(path, path.relative_to(artifact).as_posix())
-                    service_digest = 'sha256:' + hashlib.sha256(original_archive.read_bytes()).hexdigest()
-                    original_database = (artifact / 'data' / 'odc.mv.db').read_bytes()
-                    original_manifest = (artifact / 'manifest.json').read_bytes()
-                    replacement = b'changed data with a self-consistent manifest'
-                    (artifact / 'data' / 'odc.mv.db').write_bytes(replacement)
-                    forged = json.loads(original_manifest)
-                    forged['files']['odc.mv.db'] = dict(size=len(replacement), sha256=hashlib.sha256(replacement).hexdigest())
-                    (artifact / 'manifest.json').write_text(json.dumps(forged))
-                    assert invoke('restore', artifact, root / 'service-mismatch', digest=service_digest)[0] != 0, 'A GitHub archive digest mismatch must block even a self-consistent replacement'
-                    assert not (root / 'service-mismatch').exists()
-                    (artifact / 'data' / 'odc.mv.db').write_bytes(original_database)
-                    (artifact / 'manifest.json').write_bytes(original_manifest)
-                    for name in ['../escape', str(root / 'absolute-escape'), 'data/../../escape', 'data\\escape']:
-                        archive_path = archive_snapshot(artifact)
-                        with zipfile.ZipFile(archive_path, 'a') as archive:
-                            archive.writestr(name, b'escape')
-                        assert invoke('restore', archive_path, root / 'unsafe-archive')[0] != 0
-                        assert not (root / 'unsafe-archive').exists()
-                    assert not (root / 'escape').exists()
-                    assert not (root / 'absolute-escape').exists()
-                    for kind in [stat.S_IFLNK, stat.S_IFIFO]:
-                        archive_path = root / f'nonregular-{kind}.zip'
-                        with zipfile.ZipFile(archive_path, 'w') as archive:
-                            for path in artifact.rglob('*'):
-                                if path.is_file():
-                                    name = path.relative_to(artifact).as_posix()
-                                    if name == 'data/cache/.state':
-                                        entry = zipfile.ZipInfo(name)
-                                        entry.external_attr = (kind | 0o777) << 16
-                                        archive.writestr(entry, path.read_bytes())
-                                    else:
-                                        archive.write(path, name)
-                        assert invoke('restore', archive_path, root / 'archive-nonregular')[0] != 0
-                        assert not (root / 'archive-nonregular').exists()
-                    oversized = root / 'oversized.zip'
-                    with oversized.open('wb') as stream:
-                        stream.truncate(2147483649)
-                    assert invoke('restore', oversized, root / 'oversized', digest='sha256:' + '0' * 64)[0] != 0
-                    assert not (root / 'oversized').exists()
-                    assert invoke('restore', artifact, root / 'wrong-version', 'dc-data-v1-Linux-X64-dc11.0.0_90-1')[0] != 0
-                    assert not (root / 'wrong-version').exists()
-                    assert invoke('restore', artifact, destination)[0] != 0
-                    assert (destination / 'odc.mv.db').read_bytes() == (source / 'odc.mv.db').read_bytes()
-                    original = (artifact / 'data' / 'odc.mv.db').read_bytes()
-                    for payload in [b'corrupted', b'X' * len(original)]:
-                        (artifact / 'data' / 'odc.mv.db').write_bytes(payload)
-                        assert invoke('restore', artifact, root / 'corrupt')[0] != 0
-                        assert not (root / 'corrupt').exists()
-                    (artifact / 'data' / 'odc.mv.db').write_bytes(original)
-                    extra = artifact / 'data' / 'unexpected'
-                    extra.write_bytes(b'extra')
-                    assert invoke('restore', artifact, root / 'extra')[0] != 0
-                    extra.unlink()
-                    link = source / 'symlink'
-                    link.symlink_to(source / 'odc.mv.db')
-                    assert invoke('pack', source, root / 'symlink-artifact')[0] != 0
-                    link.unlink()
-                    manifest = artifact / 'manifest.json'
-                    valid = manifest.read_bytes()
-                    manifest.write_text('{invalid json')
-                    assert invoke('restore', artifact, root / 'invalid')[0] != 0
-                    manifest.write_bytes(valid)
-                    shutil.rmtree(artifact / 'data' / 'cache')
-                    assert invoke('restore', artifact, root / 'incomplete')[0] != 0
-                    empty = root / 'empty'
-                    empty.mkdir()
-                    assert invoke('pack', empty, root / 'empty-artifact')[0] != 0
-                    print('Snapshot integrity: service digest, round trip, hidden files, path/type/size rejection, corruption and no-overwrite passed.')
-                """.trimIndent())
-            }
-            val validation = ProcessBuilder("python3", integrity.path, scratch.path, runnerTemp.resolve("security-snapshot.py").path)
-                .inheritIO().start()
-            check(validation.waitFor(20, TimeUnit.SECONDS)) { "Snapshot integrity controls timed out" }
-            check(validation.exitValue() == 0) { "Snapshot integrity controls failed" }
-        } finally {
-            scratch.deleteRecursively()
         }
     }
-
-    private fun verifyCompletedSecurityLifecycle() {
-        val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
-        val workflow = repository.resolve(".github/workflows/ci.yml").readText()
-        val security = job(workflow, "security-check")
-        check(security.isNotEmpty()) { "Missing independent completed-data security lifecycle" }
-        verifyPersistenceProof(workflow, security)
-        val violations = ciCachePolicyViolations(workflow)
-        check(violations.isEmpty()) { "Actual workflow must satisfy the completed-data policy: $violations" }
-        val mutations = listOf(
-            security to "",
-            "    security-check:\n" to "    security-check:\n        needs: [core-quality]\n",
-            "    security-check:\n" to "    security-check:\n        if: false\n",
-            "    security-check:\n" to "    security-check:\n        continue-on-error: true\n",
-            "timeout-minutes: 180" to "timeout-minutes: 90",
-            "timeout-minutes: 150" to "timeout-minutes: 90",
-            "gradle-home-cache-excludes: dependency-check-data" to "gradle-home-cache-includes: dependency-check-data",
-            "dc-data-v1-" to "dc-data-v0-",
-            "{version}_" to "unversioned-",
-            "{version}_" to "{version}-",
-            "{os.environ['RUNNER_ARCH']}" to "any-arch",
-            "{os.environ['GITHUB_RUN_ATTEMPT']}" to "1",
-            "tomllib.load(catalog)" to "{}",
-            "re.fullmatch" to "re.match",
-            "unicodedata.category(char)" to "char",
-            "dependencyCheckUpdate --info" to "help --info",
-            "dependencyCheckAnalyze --info" to "help --info",
-            "set -o pipefail" to "set +o pipefail",
-            "Verify Updated Security Ownership" to "Omit Updated Security Ownership",
-            "Verify Restored Security Ownership" to "Omit Restored Security Ownership",
-            "Verify Final Security Ownership" to "Omit Final Security Ownership",
-            ":demos:vulnerable-web-app:unitCheck" to ":help",
-            "test_shared_image_is_built_once_for_all_three_modes" to "omitted_image_regression",
-            "NVD_API_KEY: \${{ secrets.NVD_API_KEY }}" to "NVD_API_KEY: unused",
-            "steps.security_update.outcome == 'success'" to "steps.security_update.outcome != 'cancelled'",
-            "steps.updated_ownership.outcome == 'success'" to "steps.updated_ownership.outcome != 'failure'",
-            "steps.restored_ownership.outcome == 'success'" to "steps.restored_ownership.outcome != 'failure'",
-            "key: \${{ steps.security_metadata.outputs.key }}" to "key: \${{ steps.security_restore.outputs.cache-matched-key }}",
-            "key: \${{ steps.security_restore.outputs.cache-primary-key }}" to "key: \${{ steps.security_restore.outputs.cache-matched-key }}",
-            "restore-keys: \${{ steps.security_metadata.outputs.prefix }}" to "restore-keys: dc-data-v1-",
-            "!cancelled() && steps.security_update" to "always() && steps.security_update",
-            "!cancelled() && steps.security_update" to "steps.security_update",
-            "if: steps.filter.outputs.code == 'true' && steps.security_metadata.outputs.eligible == 'true'" to "if: steps.security_restore.outputs.cache-hit != 'true'",
-            "find \"\$path\" -xdev ! -user" to "find \"\$path\" -xdev -user",
-            "steps.security_restore.outputs.cache-matched-key == ''" to "steps.security_restore.outputs.cache-hit != 'true'",
-            "actions: read" to "actions: write",
-            "request: {parseSuccessResponseBody: false}" to "request: {parseSuccessResponseBody: true}",
-            "archiveSize > 2147483648" to "archiveSize > 8589934592",
-            "SNAPSHOT_DIGEST: \${{ steps.security_artifact.outputs.digest }}" to "SNAPSHOT_DIGEST: unverified",
-            "retention-days: 14" to "retention-days: 1",
-            "include-hidden-files: true" to "include-hidden-files: false",
-            "if-no-files-found: error" to "if-no-files-found: ignore",
-            "steps.security_artifact_prepare.outcome == 'success'" to "steps.security_artifact_prepare.outcome != 'failure'",
-            "steps.security_artifact_download.outcome == 'success'" to "steps.security_artifact_download.outcome != 'failure'",
-            "-Dnvd.api.results.per.page=500" to "-Dnvd.api.results.per.page=2000",
-            "-Dnvd.api.check.validforhours=0" to "-Dnvd.api.check.validforhours=48",
-            "https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/" to "https://untrusted.invalid/",
-            "python3 \"\$RUNNER_TEMP/security-snapshot.py\" check-records security-update.log" to "true",
-            "python3 \"\$RUNNER_TEMP/security-snapshot.py\" check-records security-analysis.log" to "true",
-        )
-        for ((from, to) in mutations) {
-            check(from in workflow) { "Ineffective security mutation: $from" }
-            check(ciCachePolicyViolations(workflow.replace(from, to)).isNotEmpty()) { "Unsafe security lifecycle accepted: $from" }
-        }
-        for (name in listOf("Prepare Security Snapshot Tools", "Select Retained Security Snapshot", "Download Retained Security Snapshot")) {
-            val original = step(security, name)
-            val ignoredFailure = original.trimEnd() + "\n              continue-on-error: true\n"
-            check(ciCachePolicyViolations(workflow.replace(original, ignoredFailure)).isNotEmpty()) { "$name cannot allow integrity/API errors after its script body" }
-        }
-        val metadata = step(security, "Compute Security Data Metadata")
-        val metadataShell = shell(metadata)
-        val scratch = Files.createTempDirectory("ci-security-policy-").toFile()
-        try {
-            val catalog = scratch.resolve("gradle/libs.versions.toml")
-            catalog.parentFile.mkdirs()
-            val output = scratch.resolve("outputs")
-            fun metadataResult(key: String?, version: String = "10.0.4", attempt: String = "1", os: String = "Linux", arch: String = "X64"): Pair<Int, Map<String, String>> {
-                catalog.writeText("[versions]\ndependencyCheck = \"$version\"\n")
-                output.writeText("")
-                val builder = ProcessBuilder("bash", "-e", "-o", "pipefail", "-c", metadataShell).directory(scratch)
-                builder.environment().apply {
-                    remove("NVD_API_KEY")
-                    if (key != null) put("NVD_API_KEY", key)
-                    put("GRADLE_USER_HOME", scratch.resolve("actual-gradle-home").path)
-                    put("GITHUB_OUTPUT", output.path)
-                    put("RUNNER_OS", os)
-                    put("RUNNER_ARCH", arch)
-                    put("GITHUB_RUN_ID", "123")
-                    put("GITHUB_RUN_ATTEMPT", attempt)
-                }
-                val process = builder.redirectErrorStream(true).start()
-                val log = process.inputStream.bufferedReader().readText()
-                check(process.waitFor(5, TimeUnit.SECONDS)) { "Metadata shell timed out" }
-                check(key.isNullOrEmpty() || key !in log + output.readText()) { "Metadata exposed key material" }
-                return process.exitValue() to output.readLines().filter(String::isNotEmpty).associate { it.substringBefore('=') to it.substringAfter('=') }
-            }
-            val isolatedSnapshots = listOf(
-                metadataResult("normal", "10.0.4"),
-                metadataResult("normal", "10.0.4-rc1"),
-                metadataResult("normal", os = "Windows"),
-                metadataResult("normal", arch = "ARM64"),
-            ).map { (exit, outputs) ->
-                check(exit == 0) { "Accepted version/platform metadata must succeed" }
-                outputs
-            }
-            check(isolatedSnapshots[1]["prefix"] == "dc-data-v1-Linux-X64-dc10.0.4-rc1_")
-            check(isolatedSnapshots[1]["key"] == "dc-data-v1-Linux-X64-dc10.0.4-rc1_123-1")
-            for ((index, snapshot) in isolatedSnapshots.withIndex()) {
-                val prefix = snapshot.getValue("prefix")
-                check(snapshot.getValue("key").startsWith(prefix))
-                for ((otherIndex, other) in isolatedSnapshots.withIndex()) {
-                    if (index != otherIndex) check(!other.getValue("key").startsWith(prefix)) {
-                        "Cross-version/platform cache collision: prefix=$prefix key=${other.getValue("key")}"
-                    }
-                }
-            }
-            for (key in listOf(null, "", " \t\r\n", "\u00a0\u2007\u202f", "\u001c\u001f\u2028\u2029", "key-without-logging", "\u0085")) {
-                val (exit, outputs) = metadataResult(key)
-                check(exit == 0 && outputs["eligible"] == (!key.isNullOrBlank()).toString()) { "Kotlin blank eligibility mismatch" }
-                check(outputs["data_dir"] == scratch.resolve("actual-gradle-home/dependency-check-data").path)
-                check(outputs["prefix"] == "dc-data-v1-Linux-X64-dc10.0.4_")
-                check(outputs["key"] == "dc-data-v1-Linux-X64-dc10.0.4_123-1")
-            }
-            check(metadataResult("normal", "11.0.0").second["prefix"] == "dc-data-v1-Linux-X64-dc11.0.0_")
-            check(metadataResult("normal", attempt = "2").second["key"] == "dc-data-v1-Linux-X64-dc10.0.4_123-2")
-            for (version in listOf("../10.0.4", "10.0.4 unsafe", "10.0.4/other", "10.0.4_rc1", "")) check(metadataResult("normal", version).first != 0)
-            val home = scratch.resolve("owned-home").apply { mkdirs() }
-            home.resolve("dependency-check-data").mkdirs()
-            val ownedWorkspace = scratch.resolve("owned-workspace").apply { mkdirs() }
-            val runnerTemp = scratch.resolve("runner-temp").apply { mkdirs() }
-            fun executeControl(command: String, workspace: String = ownedWorkspace.path, updateOutput: String = "", failPhase: String = ""): Int {
-                val process = ProcessBuilder("bash", "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", command)
-                    .directory(scratch).redirectErrorStream(true).apply {
-                        environment()["GITHUB_WORKSPACE"] = workspace
-                        environment()["GRADLE_USER_HOME"] = home.path
-                        environment()["RUNNER_TEMP"] = runnerTemp.path
-                        environment()["UPDATE_OUTPUT"] = updateOutput
-                        environment()["FAIL_PHASE"] = failPhase
-                    }.start()
-                val log = process.inputStream.bufferedReader().readText()
-                check(process.waitFor(5, TimeUnit.SECONDS)) { "Actual control shell timed out: $log" }
-                return process.exitValue()
-            }
-            check(executeControl(shell(step(security, "Prepare Security Snapshot Tools"))) == 0)
-            val callerOwned = scratch.resolve("caller-owned").apply { writeText("owned fixture\n") }
-            val callerUid = Files.getAttribute(callerOwned.toPath(), "unix:uid") as Int
-            val rejectsCallerOwned = runCatching { foreignOwnershipFixture(callerUid, listOf(callerOwned)) }.isFailure
-            val rootOwned = listOf(File("/etc/hostname"), File("/etc/passwd")).firstOrNull {
-                it.canRead() && Files.getAttribute(it.toPath(), "unix:uid") == 0
-            } ?: error("No readable UID 0 fixture for the modeled ownership-selection control")
-            val rootAlternative = if (callerUid == 0) scratch.resolve("foreign-owned").apply {
-                writeText("temporary foreign ownership\n")
-                Files.setAttribute(toPath(), "unix:uid", 1)
-            } else callerOwned
-            val rejectsRootOwned = foreignOwnershipFixture(0, listOf(rootOwned, rootAlternative)) == rootAlternative
-            check(rejectsCallerOwned && rejectsRootOwned) {
-                "Foreign fixture selection: reject caller-owned=$rejectsCallerOwned; UID 0 rejects root-owned=$rejectsRootOwned"
-            }
-            val foreign = foreignOwnershipFixture(callerUid, listOf(callerOwned, rootAlternative, rootOwned))
-            check(Files.getAttribute(foreign.toPath(), "unix:uid") != callerUid)
-            for (name in listOf("Verify Restored Security Ownership", "Verify Updated Security Ownership", "Verify Final Security Ownership")) {
-                check(executeControl(shell(step(security, name))) == 0) { "Caller-owned paths must pass $name" }
-                check(executeControl(shell(step(security, name)), foreign.path) != 0) { "Foreign-owned paths must fail $name" }
-            }
-            println("Actual ownership shell passed positive/negative controls for UID $callerUid; UID 0 fixture selection checked separately.")
-            val gradlew = scratch.resolve("gradlew")
-            gradlew.writeText("""
-                #!/bin/sh
-                printf '%s\n' "${'$'}*" >> actual-argv
-                printf '%s\n' "${'$'}{UPDATE_OUTPUT:-}"
-                case "${'$'}*" in *nvd.api.datafeed.url=*) phase=seed ;; *) phase=api ;; esac
-                if [ "${'$'}{FAIL_PHASE:-}" = all ] || [ "${'$'}{FAIL_PHASE:-}" = "${'$'}phase" ]; then exit 7; fi
-            """.trimIndent() + "\n")
-            check(gradlew.setExecutable(true))
-            val calls = scratch.resolve("actual-argv")
-            val database = home.resolve("dependency-check-data/odc.mv.db")
-            val command = shell(step(security, "Update Security Data"))
-            val base = "dependencyCheckUpdate --info --no-configuration-cache --no-daemon"
-            val seed = "$base -Dnvd.api.datafeed.url=https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/nvdcve-{0}.json.gz"
-            val api = "$base -Dnvd.api.results.per.page=500"
-            val forcedApi = "$api -Dnvd.api.check.validforhours=0"
-            fun update(data: String?, failure: String = "", output: String = ""): Pair<Int, List<String>> {
-                if (data == null) database.delete() else database.writeText(data)
-                calls.writeText("")
-                scratch.resolve("security-update.log").writeText("Failed to process CVE-old-run\n")
-                val exit = executeControl(command, updateOutput = output, failPhase = failure)
-                return exit to calls.readLines()
-            }
-            check(update("existing database") == (0 to listOf(api))) { "Warm data must use the normal complete API update with bounded pages" }
-            check(update(null) == (0 to listOf(seed, forcedApi))) { "Cold bootstrap must seed, then force a live NVD refresh" }
-            check(update("") == (0 to listOf(seed, forcedApi))) { "An empty database is not a warm cache" }
-            check(update(null, "seed") == (7 to listOf(seed))) { "Failed seed must stop before API refresh" }
-            check(update(null, "api") == (7 to listOf(seed, forcedApi))) { "Failed live refresh must remain blocking" }
-            check(update("existing database", "api") == (7 to listOf(api))) { "Warm API failure must remain blocking" }
-            for (cve in listOf("CVE-2026-6785", "CVE-2026-6786")) {
-                val incomplete = "Failed to process $cve\nBUILD SUCCESSFUL"
-                val cold = update(null, output = incomplete)
-                check(cold.first != 0 && cold.second == listOf(seed)) { "Dropped $cve must stop before API refresh or publication" }
-                check(update("existing database", output = incomplete).first != 0) { "A successful updater exit must not publish data after dropping $cve" }
-            }
-            check(update("existing database", output = "Completed processing batch 1/1 (100%)").first == 0)
-            for ((failure, expected) in listOf("" to 0, "all" to 7)) {
-                calls.writeText("")
-                check(executeControl(shell(step(security, "Run Security Check")), failPhase = failure) == expected)
-                check(calls.readLines() == listOf("dependencyCheckAnalyze --info --no-configuration-cache --no-daemon -Dnvd.api.results.per.page=500")) {
-                    "An implicit analysis refresh must also use bounded NVD API pages"
-                }
-            }
-            check(executeControl(shell(step(security, "Run Security Check")), updateOutput = "Failed to process CVE-2026-6785\nBUILD SUCCESSFUL") != 0) {
-                "An implicit NVD refresh during analysis must not silently drop a CVE"
-            }
-        } finally {
-            scratch.deleteRecursively()
-        }
-        val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
-        val results = listOf("success", "failure", "cancelled", "skipped", "")
-        for (core in results) for (mutation in results) for (securityResult in results) {
-            val command = join.replace("\${{ needs.core-quality.result }}", core)
-                .replace("\${{ needs.mutation-tests.result }}", mutation).replace("\${{ needs.security-check.result }}", securityResult)
-                .replace("\${{ needs.build-logic-validation.result }}", "success")
-                .replace("\${{ needs.go-validation.result }}", "success")
-                .replace("\${{ needs.optional-integrations.result }}", "success")
-                .replace("\${{ needs.confined-helper-kernel.result }}", "success")
-            check("\${{" !in command) { "Unresolved security join expression" }
-            check(shellSucceeds(command) == (core == "success" && mutation == "success" && securityResult == "success")) {
-                "Actual 125-way join failed: $core/$mutation/$securityResult"
-            }
-        }
-        fun condition(name: String, code: Boolean, eligible: Boolean, cancelled: Boolean, update: String, owned: String, restored: String = "success", priorSuccess: Boolean = true, prepared: String = "success"): Boolean {
-            var expression = step(security, name).lineSequence().map(String::trim).first { it.startsWith("if: ") }.removePrefix("if: ")
-                .removePrefix("\${{ ").removeSuffix(" }}")
-            for ((from, to) in mapOf(
-                "steps.filter.outputs.code" to "'$code'", "steps.security_metadata.outputs.eligible" to "'$eligible'",
-                "steps.security_update.outcome" to "'$update'", "steps.updated_ownership.outcome" to "'$owned'",
-                "steps.restored_ownership.outcome" to "'$restored'", "!cancelled()" to "'$cancelled' != 'true'", "always()" to "'true' == 'true'",
-                "steps.security_artifact_prepare.outcome" to "'$prepared'",
-            )) expression = expression.replace(from, to)
-            val hasStatus = "cancelled()" in step(security, name) || "always()" in step(security, name) || "success()" in step(security, name)
-            return (hasStatus || priorSuccess) && shellSucceeds("[[ $expression ]]")
-        }
-        for (code in listOf(false, true)) for (eligible in listOf(false, true)) for (cancelled in listOf(false, true)) {
-            for (update in results) for (owned in results) {
-                val expected = code && eligible && !cancelled && update == "success" && owned == "success"
-                for (priorSuccess in listOf(false, true)) {
-                    for (name in listOf("Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot", "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot", "Run Security Check")) {
-                        check(condition(name, code, eligible, cancelled, update, owned, priorSuccess = priorSuccess) == expected) { "Actual $name condition failed" }
-                    }
-                }
-            }
-        }
-        for (restored in results) check(condition("Update Security Data", true, true, false, "", "", restored) == (restored == "success"))
-        for (prepared in results) {
-            check(condition("Upload Completed Security Artifact", true, true, false, "success", "success", prepared = prepared) == (prepared == "success")) {
-                "Incomplete preparation must never publish a snapshot"
-            }
-        }
-        for (failedStep in listOf("Prepare Completed Security Artifact", "Upload Completed Security Artifact", "Require Retained Security Snapshot", "Save Completed Security Data", "Look Up Completed Security Snapshot", "Require Completed Security Snapshot")) {
-            for (analysis in listOf("success", "failure")) {
-                check(condition("Run Security Check", true, true, false, "success", "success", priorSuccess = false)) { "$failedStep failure must not prevent $analysis analysis" }
-                check("continue-on-error:" !in step(security, failedStep)) { "$failedStep failure must not be allowed" }
-            }
-        }
-        println("Actual security metadata, eligibility, lifecycle conditions and all 125 join triples passed (no scanner/network).")
-    }
-
-    private fun verifyPersistenceProof(workflow: String, security: String) {
-        val artifactAssertion = shell(step(security, "Require Retained Security Snapshot"))
-        check(artifactAssertion.isNotBlank()) { "Missing retained-snapshot publication assertion" }
-        for (id in listOf("1", "1234567890123")) check(shellSucceeds(artifactAssertion, mapOf("ARTIFACT_ID" to id)))
-        for (id in listOf("", "0", "-1", "true", "123x", "123\n456")) {
-            check(!shellSucceeds(artifactAssertion, mapOf("ARTIFACT_ID" to id))) { "Snapshot publication accepted invalid ID '$id'" }
-        }
-        check(!shellSucceeds("unset ARTIFACT_ID\n$artifactAssertion"))
-        val lookup = step(security, "Look Up Completed Security Snapshot")
-        val assertion = step(security, "Require Completed Security Snapshot")
-        check(lookup.isNotEmpty() && assertion.isNotEmpty()) { "Missing exact completed-snapshot lookup and literal-true assertion" }
-        val assertionShell = shell(assertion)
-        check(shellSucceeds(assertionShell, mapOf("CACHE_HIT" to "true")))
-        for (value in listOf("", "false", "True", "TRUE", "true ", "nonexact")) {
-            check(!shellSucceeds(assertionShell, mapOf("CACHE_HIT" to value))) { "Snapshot assertion accepted nonexact hit '$value'" }
-        }
-        check(!shellSucceeds("unset CACHE_HIT\n$assertionShell")) { "Snapshot assertion accepted unset output" }
-        val proofMutations = listOf(
-            lookup to "",
-            assertion to "",
-            lookup to lookup.replace("steps.security_restore.outputs.cache-primary-key", "steps.security_restore.outputs.cache-matched-key"),
-            lookup to lookup.replace("steps.security_metadata.outputs.data_dir", "github.workspace"),
-            lookup to lookup.replace("lookup-only: true", "lookup-only: false"),
-            lookup to lookup.replace("fail-on-cache-miss: true", "fail-on-cache-miss: false"),
-            lookup to lookup.replace("fail-on-cache-miss: true", "fail-on-cache-miss: true\n                  restore-keys: dc-data-v1-"),
-            lookup to lookup.replace("!cancelled()", "success()"),
-            lookup to lookup.replace("!cancelled()", "!cancelled() && steps.security_save.outcome == 'success'"),
-            assertion to assertion.replace("!cancelled()", "success()"),
-            assertion to assertion.replace("!cancelled()", "!cancelled() && steps.security_snapshot_lookup.outcome == 'success'"),
-            assertion to assertion.replace("= true", "!= false"),
-            assertion to assertion.replace("CACHE_HIT: \${{ steps.security_snapshot_lookup.outputs.cache-hit }}", "CACHE_HIT: true"),
-            assertion to assertion.replace("run: test", "continue-on-error: true\n              run: test"),
-        )
-        for ((from, to) in proofMutations) {
-            check(from != to && from in workflow) { "Ineffective persistence-proof mutation" }
-            check(ciCachePolicyViolations(workflow.replace(from, to)).isNotEmpty()) { "Unsafe/missing completed-snapshot proof accepted" }
-        }
-        println("Actual snapshot assertion accepts only literal true; absent/wrong/skipped persistence proof rejected (no real cache calls).")
-    }
-
-    private fun foreignOwnershipFixture(callerUid: Int, candidates: List<File>): File =
-        candidates.firstOrNull { it.isFile && it.canRead() && Files.getAttribute(it.toPath(), "unix:uid") != callerUid }
-            ?: error("No readable foreign-owned fixture for UID $callerUid; ownership controls cannot run in this namespace")
 
     private fun job(workflow: String, name: String): String =
         Regex("(?ms)^    $name:\\n.*?(?=^    [a-zA-Z0-9_-]+:|\\z)").find(workflow)?.value.orEmpty()

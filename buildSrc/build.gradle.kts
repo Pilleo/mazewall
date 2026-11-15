@@ -139,7 +139,20 @@ tasks.register<JavaExec>("ciCachePolicyTest") {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
+    inputs.files(
+        layout.projectDirectory.file("../.github/workflows/ci.yml"),
+        layout.projectDirectory.file("../.github/workflows/security-data.yml"),
+        layout.projectDirectory.file("../scripts/security_snapshot.py"),
+        layout.projectDirectory.file("../scripts/test_security_snapshot.py"),
+    ).withPropertyName("securitySnapshotPolicyInputs").withPathSensitivity(PathSensitivity.RELATIVE)
 }
+tasks.register<JavaExec>("securitySnapshotVerificationTest") {
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    mainClass.set("io.mazewall.build.SecuritySnapshotVerificationFunctionalTest")
+    jvmArgumentProviders.add(TestKitJvmArguments(gradle.gradleUserHomeDir))
+}
+
 tasks.register<JavaExec>("pitestLimitsTest") {
     mainClass.set("io.mazewall.build.PitestLimitsFunctionalTest")
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
@@ -161,6 +174,11 @@ val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest"
     inputs.file(layout.projectDirectory.file("../.github/workflows/ci.yml"))
         .withPropertyName("ciCachePolicyWorkflow")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(
+        layout.projectDirectory.file("../.github/workflows/security-data.yml"),
+        layout.projectDirectory.file("../scripts/security_snapshot.py"),
+        layout.projectDirectory.file("../scripts/test_security_snapshot.py"),
+    ).withPropertyName("securitySnapshotPolicyInputs").withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file(successMarker)
     args(successMarker.get().asFile.absolutePath)
     doFirst { successMarker.get().asFile.delete() }

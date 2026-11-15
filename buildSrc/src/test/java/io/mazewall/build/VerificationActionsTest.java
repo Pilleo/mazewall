@@ -58,6 +58,11 @@ public final class VerificationActionsTest {
         equal(true, malformedRejected);
         verifiesFreshJvmClassMetadata();
         CiCachePolicyTest.run();
+        try {
+            SecuritySnapshotVerificationFunctionalTest.verify();
+        } catch (Exception failure) {
+            throw new AssertionError("Security snapshot verifier contract failed", failure);
+        }
         VerificationWorkflowInputFunctionalTest.verify(rootBuild.getParent());
         CiCacheKeyFunctionalTest.verify(rootBuild.getParent());
         PitestLimitsFunctionalTest.verify(rootBuild.getParent());
