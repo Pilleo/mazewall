@@ -135,9 +135,13 @@ tasks.register<JavaExec>("pitestLimitsTest") {
 
 val verificationActionsTest = tasks.register<JavaExec>("verificationActionsTest") {
     val successMarker = verificationActionsMarker
+    systemProperty("mazewall.test.outerOffline", gradle.startParameter.isOffline.toString())
     mainClass.set("io.mazewall.build.VerificationActionsTest")
     inputs.file(layout.projectDirectory.file("settings.gradle.kts"))
         .withPropertyName("verificationSettings")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(layout.projectDirectory.file("../gradle/verification-metadata.xml"))
+        .withPropertyName("fixtureDependencyVerificationMetadata")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.file(layout.projectDirectory.file("../scripts/ci_cache_key.sh"))
         .withPropertyName("containerCacheKeyHelper")

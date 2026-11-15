@@ -11,10 +11,12 @@ target_files:
   - "buildSrc/src/test/java/io/mazewall/build/RootVerificationFunctionalTest.java"
   - "buildSrc/build.gradle.kts"
   - "buildSrc/src/main/java/io/mazewall/build/ManagedFixtureClasspathArgumentProvider.java"
+  - "buildSrc/src/test/java/io/mazewall/build/VerificationWorkflowInputFunctionalTest.java"
 target_symbols:
   - "test"
   - "RootVerificationFunctionalTest"
   - "ManagedFixtureClasspathArgumentProvider"
+  - "VerificationWorkflowInputFunctionalTest"
 open_questions: false
 ---
 
@@ -26,7 +28,7 @@ PR 567 CI exposed two build-fixture failures. The `:enforcer:test` configuration
 **Needed:**
 1. Remove non-serializable Gradle `Project`/script captures from enforcer test configuration and demonstrate a real `:enforcer:test` configuration-cache store followed by a cache-reusing replay.
 2. Keep the exact seven-JAR root-verification fixture working with configuration cache, and make its plugin provisioning self-contained for offline execution.
-3. Add or repair a genuinely cold offline plugin-provisioning fixture that runs real dependency/plugin analysis, rather than only checking plugin presence or relying on a warm cache.
+3. Add or repair a genuinely cold offline plugin-provisioning fixture that runs real dependency/plugin analysis, rather than only checking plugin presence or relying on a warm cache. The extracted JavaExec production registration must copy the declared required `gradle/verification-metadata.xml` into the fixture; test that changing only its checksum input invalidates the task before the existing workflow cases.
 4. Run focused fixture and configuration-cache checks, then one full CI-equivalent quality gate. Preserve normal security scanning and report upstream NVD availability separately if it fails again.
 
 The approved `ManagedFixtureClasspathArgumentProvider` is the only additional helper currently in scope. Any further helper or test file requires an issue target update before that file is changed. Keep the issue open until the listed verification succeeds.
@@ -39,3 +41,11 @@ The approved `ManagedFixtureClasspathArgumentProvider` is the only additional he
 The bounded local checks passed: `:enforcer:test --rerun` stored and reused the configuration cache across two invocations, with 16 selected tests and no skips/failures/errors. The offline build-logic GREEN002 fixture also exited successfully with real Java/Kotlin, Detekt, SpotBugs, coverage, and triage controls. Its plugin IDs were versionless and a separate read-only dependency cache was present, so this does not close the cold artifact-closure requirement or prove normal versioned alias resolution. See [the durable focused evidence](../evidence/pr567-ci-fixture-corrections-20261115.md).
 
 **Still open:** run the fixture from a genuinely cold offline TestKit state with all currently required analysis, JUnit, and JaCoCo artifacts provisioned; run the one full quality gate; then review fresh PR CI. The earlier PR 567 security job failed during NVD database update with HTTP 503 before scanning, so it yielded no vulnerability result and must be rerun normally. Preserve the security gate. This issue remains OPEN until these checks are complete.
+
+## Verification follow-up — 2026-11-15
+
+Build-logic GREEN006 passed the actual workflow-input suite: the production JavaExec registration copies the unchanged `gradle/verification-metadata.xml`, and checksum-only input invalidation is tested before the existing workflow cases. The fixture used an explicit online preparation phase for 101 selected configurations, then ran real Java/Kotlin, Detekt, SpotBugs, coverage, and 14 triage cases offline in fresh synthetic projects with an empty plugin repository. It reused the same task-owned TestKit cache, so this does not prove execution from a newly empty cache without preparation. JaCoCo 0.8.14 and ktlint 1.7 were restored from repository-declared inputs. Earlier failed preparation attempts remain documented in the [focused evidence](../evidence/pr567-ci-fixture-corrections-20261115.md).
+
+PR run 43663609264 passed the core cache prime/reuse segment but remains red: it next exposed unavailable offline Detekt CLI and its kernel lane reported 19/244 failures. The security job's NVD update again returned HTTP 503, so the vulnerability scan was skipped and no scan result exists. These are not grounds to bypass, skip, or weaken checks.
+
+**Still required:** a fresh remote PR run after the follow-up corrections, successful full quality gate, and closure of the genuinely cold/offline artifact-availability requirement. This issue remains OPEN; GREEN006 is a focused fixture result, not an all-CI-green claim.

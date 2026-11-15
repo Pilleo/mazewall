@@ -42,3 +42,25 @@ Raw runner logs and local manifests remain workspace-only, ignored receipts, not
 - Independent focused cross-audit: `f2f3d57da508d9392269b7d1eb82b884edd58814d113586a32782414a1fcf909`.
 
 The original 4,823-test Tier E full-gate figure in the pause handoff is historical evidence for its own source snapshot only, not verification of this CI correction.
+
+## Follow-up verification — GREEN006 and PR run 43663609264
+
+The next fixture iteration, GREEN006, passed with the declared `gradle/verification-metadata.xml` copied unchanged into the fixture. `VerificationWorkflowInputFunctionalTest` now exercises the production JavaExec registration and verifies that changing only the checksum input invalidates the task before the existing workflow cases. The actual suite passed.
+
+GREEN006 used an explicit online preparation phase to resolve 101 selected existing fixture configurations under the repository's root verification-metadata scope; all subsequent fixture analyses and controls ran offline. Each run created a fresh synthetic project with an empty plugin repository, while reusing the same task-owned TestKit cache. No new cache copy or altered metadata, catalog, or lockfile was used. Real Java/Kotlin, Detekt, SpotBugs, coverage checks, and 14 triage cases ran. This is bounded evidence for that prepared-offline fixture path; it is not proof that a newly empty TestKit cache can execute without the explicit preparation phase.
+
+The run restored the repository-declared JaCoCo 0.8.14 and ktlint 1.7 inputs after earlier attempts drifted to incompatible defaults. The retained preparation failures remain part of the history:
+
+- preparation 001 failed its unused ABI-compatibility version listing;
+- preparation 002 exposed the missing required checksum input in the toy fixture;
+- preparation 003 strictly rejected JaCoCo default 0.8.15;
+- preparation 004 strictly rejected ktlint default 1.5;
+- preparation 005 correctly refused to proceed when offline ktlint 1.7 artifacts were unavailable, rather than copying a cache.
+
+These failed packets are not erased or relabeled by GREEN006.
+
+PR run 43663609264 no longer failed on the Detekt plugin marker; it next exposed that Detekt CLI was unavailable to the offline fixture. The local explicit preparation path addresses that dependency gap, but the PR run remains red. Its core cache host segment passed cache priming and reuse, while the kernel lane reported 19/244 failures requiring a separate CI environment investigation. Do not skip or waive those checks. In the security job, the NVD database update again failed with HTTP 503 and the vulnerability scan was skipped; this is an upstream availability failure, not a clean scan or a vulnerability finding.
+
+A fresh remote PR run after the corrections and the full quality gate are still **pending**. Keep issue 858 OPEN; do not claim all CI is green. No security workflow, credential handling, production behavior, or security policy was weakened.
+
+Workspace-only receipt provenance (not portable inputs): `buildlogic-preparation-green006/build.log` SHA-256 `b1553df2fc218e1d3fd1d5503c758e21064bf33643bdf590b97ceafc18216886`; its before/after source manifests match, SHA-256 `cfd533ee1125577da867a58a24ecbd6cc68ed95bb90474814409c192b7b0d424`. The PR run receipts are `core-followup.log` SHA-256 `9d74035b2f242cd0cb1e41f3bd6ee3059f8756d162110ba12071886e1771341d` and `security-followup.log` SHA-256 `703ceef6569f8c3c59b9907fe2c12d7b5d9e269c2efeb066c6597eaab59df04a` under the existing ignored CI evidence directory.
