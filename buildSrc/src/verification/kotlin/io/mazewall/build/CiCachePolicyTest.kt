@@ -658,11 +658,6 @@ object CiCachePolicyTest {
         check("verifySecuritySnapshot" in security && "-Pmazewall.securitySnapshotScan=true" in security)
         check("dependencyCheckSdk" in security && "actions/cache/restore@" !in security)
         check("--no-parallel --max-workers=1" in step(security, "Run Security Check"))
-        val diagnosticInit = "--init-script scripts/ci/security-scan-failure-diagnostics.init.gradle"
-        check(diagnosticInit in step(security, "Run Security Check"))
-        check(ciCachePolicyViolations(ci.replace(diagnosticInit, "")).isNotEmpty()) {
-            "Security policy must require the temporary failure diagnostics"
-        }
         val reportGate = step(security, "Require SDK Security Reports")
         for (path in listOf("build/reports/dependency-check-report.json", "platform/build/reports/dependency-check-report.json",
             "enforcer/build/reports/dependency-check-report.json", "profiler/build/reports/dependency-check-report.json",

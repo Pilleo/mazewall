@@ -562,7 +562,7 @@ jobs:
               if: steps.filter.outputs.code == 'true'
               run: |
                   set -o pipefail
-                  ./gradlew verifySecuritySnapshot dependencyCheckSdk -Pmazewall.securitySnapshotScan=true --init-script scripts/ci/security-scan-failure-diagnostics.init.gradle --info --no-configuration-cache --no-daemon --no-parallel --max-workers=1 2>&1 | tee security-analysis.log
+                  ./gradlew verifySecuritySnapshot dependencyCheckSdk -Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon --no-parallel --max-workers=1 2>&1 | tee security-analysis.log
             - name: Require SDK Security Reports
               if: steps.filter.outputs.code == 'true'
               run: |

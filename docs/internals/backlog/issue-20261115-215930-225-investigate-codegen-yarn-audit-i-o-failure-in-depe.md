@@ -9,10 +9,9 @@ target_modules:
   - "portals/codegen"
   - "buildSrc"
 target_files:
+  - "build.gradle.kts"
+  - "portals/codegen/build.gradle.kts"
   - ".github/workflows/ci.yml"
-  - "scripts/ci/security-scan-failure-diagnostics.init.gradle"
-  - "buildSrc/src/main/kotlin/io/mazewall/build/CheckCiCachePolicy.kt"
-  - "buildSrc/src/verification/kotlin/io/mazewall/build/CiCachePolicyTest.kt"
 target_symbols:
   - "dependencyCheckAnalyze"
 open_questions: true
@@ -21,14 +20,14 @@ open_questions: true
 # 🟡 [Severity: MEDIUM]: Investigate Codegen Yarn Audit I/O failure in Dependency-Check CI
 
 **Context:**
-In CI run 43760530358, Security job 132954093915 verified trusted artifact 14176351241 at 2026-11-15T20:53:38Z. The first six owner Analyze tasks completed with report inventory counts 2/2/6/5/4/6 and no listed findings, then Codegen Yarn Audit failed with a generic I/O label. Exact cause is UNKNOWN and no HTTP status is confirmed; no Codegen report was produced. The cache-verified Kotlin Gradle plugin JAR contains yarn.lock but no sibling package manifest; this does not prove the failure cause, and independent upstream Yarn Classic API reports are not evidence for this task. Scope is Gradle SCA integration and CI diagnostics only; no application code. Node/Yarn analyzer remains unchanged. A temporary read-only init script adds bounded synthetic diagnostics and is required by CI policy/input checks for one real CI observation; the five synthetic controls preserve failure identity and safe labels, but do not prove the cause of the real Yarn failure. Remove the temporary observer after classifying that failure. Its `--init-script` wiring does not change the Gradle task, settings, or analyzer result handling. A codegen-only Yarn exception proposal is unapplied, the user decision is pending, and no exception is approved. Preserve keyless scans, trusted four-hour snapshot gate, thresholds, failures and checks by default.
+In CI run `43760530358`, Security job `132954093915` verified trusted artifact `14176351241` at `2026-11-15T20:53:38Z`; the first six owner Analyze tasks completed with report inventory counts `2/2/6/5/4/6` and no listed findings, then Codegen Yarn Audit failed with a generic I/O label. A later run, `43771830610` / Security job `132989220151`, verified the same trusted artifact at `2026-11-15T22:55:02Z` (database `last.checked` `19:06:34Z`, age 3h48, within the unchanged four-hour gate); six owner analyses succeeded and Codegen Yarn Audit failed at 22:55:46. The bounded read-only observer reported `YARN_PACKAGE_JSON_MISSING` and a `NoSuchFileException` whose filename was the basename `package.json` in a Yarn context. It did not expose the exact resolved path or an HTTP status. A cached Kotlin Gradle plugin JAR contains `yarn.lock` without a sibling package manifest, but that does not prove the exception came from that exact sibling path. The actual missing-manifest path and why the analyzer requests it remain to be established; unrelated upstream Yarn Classic API incidents are not evidence of this failure. The temporary observer and its CI/policy wiring have been removed after this one observation; raw CI evidence and private copies are retained. Scope remains Gradle SCA/CI investigation only, with no application-code change or analyzer exception approved. The pending codegen-only exception proposal has not been approved, so all existing checks remain enabled. Preserve keyless scans, the trusted four-hour snapshot gate, thresholds, and failure propagation.
 
 **Needed:**
-1. Retain and inspect the exact failing CI log plus Gradle task context, then identify the concrete failure boundary without inferring a network/API cause or reporting an HTTP status unless observed.
-2. Reproduce the confirmed lifecycle with the actual Kotlin Gradle tooling lock and bounded Gradle diagnostics; make any eventual correction only at the build/CI SCA boundary, with no analyzer changes unless separately approved.
+1. Inspect the retained run `43771830610` task output and analyzer context to identify the exact path resolution that raised `NoSuchFileException`; distinguish an expected missing manifest from an incorrect/missing project input without assuming a Kotlin Gradle plugin sibling path or network/API failure.
+2. Reproduce only the evidenced Codegen lifecycle with the actual Kotlin Gradle tooling lock and bounded diagnostics; make any eventual correction only at the build/CI SCA boundary, with no analyzer changes unless separately approved.
 3. Keep the existing mandatory checks, report guard, keyless execution, trusted four-hour freshness gate, thresholds, and failure propagation in force. An exception proposal remains unapplied pending the user's decision.
 4. Re-run Codegen and the seven-owner CI report guards; require the Codegen report and complete report inventory before claiming SDK scan coverage.
-5. Remove the temporary diagnostic init script and its workflow/policy wiring after the one required CI observation has been classified; preserve the raw CI evidence and do not infer an analyzer change or exception from the synthetic controls.
+5. The one-run diagnostic init script and its workflow/policy wiring have been removed. Do not restore them or infer an analyzer change or exception from the synthetic controls without renewed approval.
 
 ---
 <!-- id: issue-20261115-215930-225-investigate-codegen-yarn-audit-i-o-failure-in-depe  file: issue-20261115-215930-225-investigate-codegen-yarn-audit-i-o-failure-in-depe.md -->
