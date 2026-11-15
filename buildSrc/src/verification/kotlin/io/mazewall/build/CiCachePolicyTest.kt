@@ -211,10 +211,10 @@ object CiCachePolicyTest {
             legacy
                 .replace("    core-quality:\n", optionalUpload + "\n    core-quality:\n")
                 .replace("    optional-integrations:\n", securityFixture.trimEnd() + "\n" + actualBuildLogic.trimEnd() + "\n" + actualGo.trimEnd() + "\n    optional-integrations:\n")
-                .replace("needs: [core-quality, mutation-tests]", "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]")
+                .replace("needs: [core-quality, mutation-tests]", "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]")
                 .replace(
                     "test \"\${{ needs.mutation-tests.result }}\" = success",
-                    "test \"\${{ needs.mutation-tests.result }}\" = success && test \"\${{ needs.security-check.result }}\" = success && test \"\${{ needs.build-logic-validation.result }}\" = success && test \"\${{ needs.go-validation.result }}\" = success && test \"\${{ needs.optional-integrations.result }}\" = success",
+                    "test \"\${{ needs.mutation-tests.result }}\" = success && test \"\${{ needs.security-check.result }}\" = success && test \"\${{ needs.build-logic-validation.result }}\" = success && test \"\${{ needs.go-validation.result }}\" = success && test \"\${{ needs.optional-integrations.result }}\" = success && test \"\${{ needs.confined-helper-kernel.result }}\" = success",
                 )
         }
         val failures = mutableListOf<String>()
@@ -349,7 +349,7 @@ object CiCachePolicyTest {
         val joinJob = valid.substring(joinStart, valid.indexOf("    publish:\n"))
         for ((from, to) in listOf(
             "name: Build, Test, Security Scan & Publish" to "name: Renamed required check",
-            "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]" to "needs: [core-quality]",
+            "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]" to "needs: [core-quality]",
             "if: always()" to "if: success()",
             "if: always()" to "if: always() && !cancelled()",
             "&& test" to "|| test",
@@ -380,6 +380,7 @@ object CiCachePolicyTest {
                     .replace("${'$'}{{ needs.build-logic-validation.result }}", "success")
                     .replace("${'$'}{{ needs.go-validation.result }}", "success")
                     .replace("${'$'}{{ needs.optional-integrations.result }}", "success")
+                    .replace("${'$'}{{ needs.confined-helper-kernel.result }}", "success")
                 check("\${{" !in command) { "Unresolved legacy join expression" }
                 check(shellSucceeds(command) == (core == "success" && mutation == "success")) {
                     "Actual required-check shell join must fail closed for core=$core mutation=$mutation"
@@ -446,7 +447,7 @@ object CiCachePolicyTest {
         val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
         for (result in listOf("success", "failure", "cancelled", "skipped", "")) {
             var command = join
-            for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation")) {
+            for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation", "confined-helper-kernel")) {
                 command = command.replace("\${{ needs.$name.result }}", "success")
             }
             command = command.replace("\${{ needs.optional-integrations.result }}", result)
@@ -531,6 +532,7 @@ object CiCachePolicyTest {
                 .replace("\${{ needs.build-logic-validation.result }}", buildLogic)
                 .replace("\${{ needs.go-validation.result }}", "success")
                 .replace("\${{ needs.optional-integrations.result }}", "success")
+                .replace("\${{ needs.confined-helper-kernel.result }}", "success")
             check("\${{" !in command) { "Unresolved four-way join expression" }
             check(shellSucceeds(command) == (core == "success" && mutation == "success" && security == "success" && buildLogic == "success")) {
                 "Actual 625-way join failed: $core/$mutation/$security/$buildLogic"
@@ -538,16 +540,24 @@ object CiCachePolicyTest {
             checked++
         }
         check(checked == 625)
-        val prerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation", "optional-integrations")
+        val prerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation", "optional-integrations", "confined-helper-kernel")
         for (prerequisite in prerequisites) {
             val removedNeed = workflow.replace(
-                "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]",
+                "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]",
                 "needs: [${prerequisites.filter { it != prerequisite }.joinToString(", ")}]",
             )
             check(removedNeed != workflow && ciCachePolicyViolations(removedNeed).isNotEmpty()) { "Missing join prerequisite accepted: $prerequisite" }
             val removedResult = workflow.replace(" && test \"\${{ needs.$prerequisite.result }}\" = success", "")
                 .replace("test \"\${{ needs.$prerequisite.result }}\" = success && ", "")
             check(removedResult != workflow && ciCachePolicyViolations(removedResult).isNotEmpty()) { "Missing literal success accepted: $prerequisite" }
+        }
+        for (result in results) {
+            var command = join
+            for (name in prerequisites.filter { it != "confined-helper-kernel" }) {
+                command = command.replace("\${{ needs.$name.result }}", "success")
+            }
+            command = command.replace("\${{ needs.confined-helper-kernel.result }}", result)
+            check("\${{" !in command && shellSucceeds(command) == (result == "success")) { "Private lane result must be required: $result" }
         }
         println("Actual four-result projection: 625 tuples with Go/integration success; unsafe build-logic lanes rejected.")
     }
@@ -603,7 +613,7 @@ object CiCachePolicyTest {
         val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
         for (result in listOf("success", "failure", "cancelled", "skipped", "")) {
             var actual = join
-            for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "optional-integrations")) {
+            for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "optional-integrations", "confined-helper-kernel")) {
                 actual = actual.replace("\${{ needs.$name.result }}", "success")
             }
             actual = actual.replace("\${{ needs.go-validation.result }}", result)
@@ -1061,6 +1071,7 @@ object CiCachePolicyTest {
                 .replace("\${{ needs.build-logic-validation.result }}", "success")
                 .replace("\${{ needs.go-validation.result }}", "success")
                 .replace("\${{ needs.optional-integrations.result }}", "success")
+                .replace("\${{ needs.confined-helper-kernel.result }}", "success")
             check("\${{" !in command) { "Unresolved security join expression" }
             check(shellSucceeds(command) == (core == "success" && mutation == "success" && securityResult == "success")) {
                 "Actual 125-way join failed: $core/$mutation/$securityResult"

@@ -237,7 +237,8 @@ jobs:
               run: |
                   set -o pipefail
                   # unitCheck already ran on the host for this exact checkout.
-                  ./scripts/run_containerized_tests.sh :kernelCheck assemble 2>&1 | tee build.log
+                  ./scripts/run_containerized_tests.sh :kernelCheck assemble -PmazewallKernelLane=BASELINE 2>&1 | tee build.log
+                  python3 scripts/verify_confined_helper_results.py baseline --results enforcer/build/test-results/integrationTest
             - name: Run Vulnerability Exploitation Demo
               if: steps.filter.outputs.code == 'true'
               run: ./scripts/run_vulnerable_app_demo.sh
@@ -883,10 +884,33 @@ jobs:
                       build/reports/ci-resources/go.json
                       build/reports/ci-resources/go.log
                   if-no-files-found: ignore
+    confined-helper-kernel:
+        name: Confined Helper Kernel
+        runs-on: ubuntu-26.04
+        timeout-minutes: 90
+        permissions:
+            contents: read
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Build and Run Confined Helper Kernel
+              run: |
+                  set -euo pipefail
+                  docker --host unix:///var/run/docker.sock build -t mazewall-confined-ci -f infra/dev/Containerfile .
+                  image=$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' mazewall-confined-ci)
+                  mkdir -p "$RUNNER_TEMP/mazewall-confined-gradle"
+                  ./scripts/run_confined_helper_tests.sh --image "$image" --gradle-home "$RUNNER_TEMP/mazewall-confined-gradle"
+            - name: Upload Confined Helper Evidence
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: confined-helper-kernel-evidence
+                  path: build/reports/confined-helper-*
+                  if-no-files-found: warn
     build-test-publish:
         # Keep the required check stable and fail closed for every skipped/failed lane.
         name: Build, Test, Security Scan & Publish
-        needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]
+        needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]
         if: always()
         runs-on: ubuntu-26.04
         permissions:
@@ -895,7 +919,7 @@ jobs:
             container_cache_hash: ${{ needs.core-quality.outputs.container_cache_hash }}
         steps:
             - name: Require Core and Mutation Success
-              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && test "${{ needs.go-validation.result }}" = success && test "${{ needs.optional-integrations.result }}" = success
+              run: test "${{ needs.core-quality.result }}" = success && test "${{ needs.mutation-tests.result }}" = success && test "${{ needs.security-check.result }}" = success && test "${{ needs.build-logic-validation.result }}" = success && test "${{ needs.go-validation.result }}" = success && test "${{ needs.optional-integrations.result }}" = success && test "${{ needs.confined-helper-kernel.result }}" = success
     publish:
         name: Publish Verified Packages
         needs: [optional-integrations, build-test-publish]

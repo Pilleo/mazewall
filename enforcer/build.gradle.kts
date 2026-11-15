@@ -160,9 +160,30 @@ fun Test.configureEnforcerIntegrationPrerequisites() {
     // cliTestPatterns logic above) because CLI --tests patterns are not visible here.
 }
 
+// BEGIN confined helper CI routing
+val mazewallKernelLane = providers.gradleProperty("mazewallKernelLane").orElse("ALL").get()
+require(mazewallKernelLane in setOf("ALL", "BASELINE", "CONFINED")) {
+    "Invalid mazewallKernelLane: $mazewallKernelLane"
+}
+val confinedHelperClasses =
+    listOf(
+        "io.mazewall.enforcer.api.execution.ConfinedHelperReadinessIntegrationTest",
+        "io.mazewall.ffi.networking.ConfinedHelperProcessIntegrationTest",
+        "io.mazewall.landlock.OwnedProcFdReopenKernelTest",
+    )
+
+fun Test.configureConfinedHelperLane() {
+    inputs.property("mazewallKernelLane", mazewallKernelLane)
+    when (mazewallKernelLane) {
+        "BASELINE" -> filter { confinedHelperClasses.forEach { excludeTestsMatching(it) } }
+        "CONFINED" -> filter { confinedHelperClasses.forEach { includeTestsMatching(it) } }
+    }
+}
+// END confined helper CI routing
 val integrationTest =
     tasks.register<Test>("integrationTest") {
         configureEnforcerIntegrationPrerequisites()
+        configureConfinedHelperLane()
         description = "Kernel tests that do not install on the JUnit worker JVM"
         useJUnitPlatform {
             excludeTags("needs-fresh-jvm")

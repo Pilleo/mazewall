@@ -74,36 +74,7 @@ final class RootVerificationFunctionalTest {
                         }
                     }
                 }
-                tasks.register("prepareFixtureDependencies") {
-                    doLast {
-                        var count = 0
-                        rootProject.allprojects.sortedBy { it.path }.forEach { project ->
-                            project.extensions.findByType(org.gradle.testing.jacoco.plugins.JacocoPluginExtension::class.java)?.let {
-                                check(it.toolVersion == rootProject.extensions
-                                    .getByType<org.gradle.api.artifacts.VersionCatalogsExtension>()
-                                    .named("libs").findVersion("jacoco").get().requiredVersion)
-                            }
-                            // Prepare fixture build and analysis inputs, not the unused Kotlin ABI validation compatibility backend.
-                            project.configurations.filter {
-                                val name = it.name
-                                it.isCanBeResolved && (
-                                    name in setOf("compileClasspath", "runtimeClasspath", "annotationProcessor",
-                                        "detekt", "detektPlugins", "jacocoAgent", "jacocoAnt", "spotbugs",
-                                        "spotbugsPlugins", "spotbugsPatchCompiler", "spotbugsPatchedSources", "spotbugsSlf4j") ||
-                                    name.endsWith("CompileClasspath") || name.endsWith("RuntimeClasspath") ||
-                                    name.endsWith("AnnotationProcessor") || name.startsWith("kotlinCompiler") ||
-                                    name.startsWith("ktlint")
-                                )
-                            }.sortedBy { it.name }.forEach { configuration ->
-                                println("Preparing fixture configuration ${project.path}:${configuration.name}")
-                                configuration.resolve()
-                                count++
-                            }
-                        }
-                        println("Prepared $count fixture configurations")
-                        check(count > 0)
-                    }
-                }
+                """ + dependencyPreparationTask() + """
                 sourceSets { create("sharedTest") }
                 """ + convention(source) + """
                 // Existing cross-module build scripts query Java providers before child evaluation.
@@ -453,6 +424,8 @@ final class RootVerificationFunctionalTest {
             write(fixture, "settings.gradle.kts", "rootProject.name = \"failure-triage-fixture\"\ninclude(\":leaf\", \":peer\", \":unused\", \":profiler\")\n");
             write(fixture, "gradle.properties", "org.gradle.caching=true\n");
             write(fixture, "gradle/libs.versions.toml", Files.readString(repository.resolve("gradle/libs.versions.toml")));
+            Files.copy(repository.resolve("gradle/verification-metadata.xml"),
+                fixture.resolve("gradle/verification-metadata.xml"));
             write(fixture, "buildSrc/build.gradle", "plugins { id 'java-gradle-plugin' }\n");
             write(fixture, "buildSrc/src/main/java/io/mazewall/build/TestFailureTriage.java",
                 Files.readString(repository.resolve("buildSrc/src/main/java/io/mazewall/build/TestFailureTriage.java")));
@@ -467,7 +440,7 @@ final class RootVerificationFunctionalTest {
                 plugins { java; alias(libs.plugins.kotlin) apply false }
                 allprojects { repositories { mavenCentral() } }
                 tasks.register("nonTestFailure") { doLast { throw GradleException("CONTROLLED_NON_TEST_FAILURE") } }
-                """ + source.substring(start, end);
+                """ + dependencyPreparationTask() + source.substring(start, end);
             write(fixture, "build.gradle.kts", build);
             write(fixture, "profiler/build.gradle.kts", """
                 plugins { alias(libs.plugins.kotlin) }
@@ -512,6 +485,7 @@ final class RootVerificationFunctionalTest {
                 """);
             write(fixture, "unused/build.gradle.kts", "plugins { java }\n");
 
+            prepareFixtureDependencies(fixture, null);
             write(fixture, "leaf/mode.txt", "fail");
             BuildResult first = triageRun(fixture, "cc-first", true, true, false, ":leaf:test");
             xmlCounts(fixture, 1, 1);
@@ -757,7 +731,7 @@ final class RootVerificationFunctionalTest {
         return run(fixture, null, fail, tasks);
     }
 
-    private static void prepareFixtureDependencies(Path fixture, Path testKit) {
+    private static void prepareFixtureDependencies(Path fixture, Path testKit) throws java.net.URISyntaxException {
         String offline = System.getProperty("mazewall.test.outerOffline");
         if (!"true".equals(offline) && !"false".equals(offline)) {
             throw new IllegalStateException("Missing or invalid outer Gradle offline mode");
@@ -765,8 +739,9 @@ final class RootVerificationFunctionalTest {
         var arguments = new java.util.ArrayList<>(List.of(
                 "prepareFixtureDependencies", "--max-workers=2", "--stacktrace", "--no-configuration-cache"));
         if (Boolean.parseBoolean(offline)) arguments.add("--offline");
-        BuildResult result = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments)
-                .withPluginClasspath().withTestKitDir(testKit.toFile()).forwardOutput().build();
+        GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments).forwardOutput();
+        configurePluginClasspath(runner, testKit);
+        BuildResult result = runner.build();
         outcome(result, ":prepareFixtureDependencies", TaskOutcome.SUCCESS);
     }
 
@@ -774,17 +749,55 @@ final class RootVerificationFunctionalTest {
         var arguments = new java.util.ArrayList<>(List.of(tasks));
         arguments.addAll(List.of("--offline", "--max-workers=2", "--stacktrace"));
         if (!arguments.contains("--configuration-cache")) arguments.add("--no-configuration-cache");
-        var pluginClasspath = List.of(
-                classpathEntry(SpotBugsToolchainPlugin.class),
-                classpathEntry(com.github.spotbugs.snom.SpotBugsTask.class),
-                new java.io.File("build/resources/main").getAbsoluteFile());
         GradleRunner runner = GradleRunner.create().withProjectDir(fixture.toFile()).withArguments(arguments).forwardOutput();
+        configurePluginClasspath(runner, testKit);
+        return fail ? runner.buildAndFail() : runner.build();
+    }
+
+    private static void configurePluginClasspath(GradleRunner runner, Path testKit) throws java.net.URISyntaxException {
         if (testKit != null) {
             runner.withPluginClasspath().withTestKitDir(testKit.toFile());
         } else {
-            runner.withPluginClasspath(pluginClasspath);
+            runner.withPluginClasspath(List.of(
+                    classpathEntry(SpotBugsToolchainPlugin.class),
+                    classpathEntry(com.github.spotbugs.snom.SpotBugsTask.class),
+                    new java.io.File("build/resources/main").getAbsoluteFile()));
         }
-        return fail ? runner.buildAndFail() : runner.build();
+    }
+
+    private static String dependencyPreparationTask() {
+        return """
+                tasks.register("prepareFixtureDependencies") {
+                    doLast {
+                        var count = 0
+                        rootProject.allprojects.sortedBy { it.path }.forEach { project ->
+                            project.extensions.findByType(org.gradle.testing.jacoco.plugins.JacocoPluginExtension::class.java)?.let {
+                                check(it.toolVersion == rootProject.extensions
+                                    .getByType<org.gradle.api.artifacts.VersionCatalogsExtension>()
+                                    .named("libs").findVersion("jacoco").get().requiredVersion)
+                            }
+                            // Prepare fixture build and analysis inputs, not the unused Kotlin ABI validation compatibility backend.
+                            project.configurations.filter {
+                                val name = it.name
+                                it.isCanBeResolved && (
+                                    name in setOf("compileClasspath", "runtimeClasspath", "annotationProcessor",
+                                        "detekt", "detektPlugins", "jacocoAgent", "jacocoAnt", "spotbugs",
+                                        "spotbugsPlugins", "spotbugsPatchCompiler", "spotbugsPatchedSources", "spotbugsSlf4j") ||
+                                    name.endsWith("CompileClasspath") || name.endsWith("RuntimeClasspath") ||
+                                    name.endsWith("AnnotationProcessor") || name.startsWith("kotlinCompiler") ||
+                                    name.startsWith("ktlint")
+                                )
+                            }.sortedBy { it.name }.forEach { configuration ->
+                                println("Preparing fixture configuration ${project.path}:${configuration.name}")
+                                configuration.resolve()
+                                count++
+                            }
+                        }
+                        println("Prepared $count fixture configurations")
+                        check(count > 0)
+                    }
+                }
+            """;
     }
 
     private static String convention(String source) {

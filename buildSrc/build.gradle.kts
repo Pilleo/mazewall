@@ -100,6 +100,18 @@ tasks.register<JavaExec>("friendPathCacheTest") {
     mainClass.set("io.mazewall.build.FriendPathCacheFunctionalTest")
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
 }
+
+tasks.register<JavaExec>("confinedHelperLaneTest") {
+    mainClass.set("io.mazewall.build.ConfinedHelperLaneFunctionalTest")
+    systemProperty("mazewall.test.outerOffline", gradle.startParameter.isOffline.toString())
+    inputs.file(layout.projectDirectory.file("../gradle/verification-metadata.xml"))
+        .withPropertyName("fixtureDependencyVerificationMetadata")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(layout.projectDirectory.file("../gradle/libs.versions.toml"))
+        .withPropertyName("fixtureVersionCatalog")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+}
 tasks.register<JavaExec>("btfRelocationTest") {
     mainClass.set("io.mazewall.build.BtfRelocationFunctionalTest")
     args(layout.projectDirectory.dir("..").asFile.absolutePath)
@@ -166,12 +178,17 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
 val failureTriageMarker = layout.buildDirectory.file("verification/failure-triage.success")
 tasks.register<JavaExec>("failureTriageTest") {
     mainClass.set("io.mazewall.build.VerificationActionsTest")
+    systemProperty("mazewall.test.outerOffline", gradle.startParameter.isOffline.toString())
+    inputs.property("outerOffline", gradle.startParameter.isOffline)
+    inputs.file(layout.projectDirectory.file("../gradle/verification-metadata.xml"))
+        .withPropertyName("fixtureDependencyVerificationMetadata")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     outputs.file(failureTriageMarker)
     args(failureTriageMarker.get().asFile.absolutePath, "--failure-triage")
     doFirst { failureTriageMarker.get().asFile.delete() }
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "btfRelocationTest", "nativeDiscoveryTest", "coreLaneTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "failureTriageTest", "testKitCacheTest", "testHealthCacheTest", "friendPathCacheTest", "confinedHelperLaneTest", "btfRelocationTest", "nativeDiscoveryTest", "coreLaneTest", "pitestLimitsTest", "buildLogicGateTest") }.configureEach {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath
     if (name == "verificationActionsTest") {
@@ -216,7 +233,7 @@ tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest"
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
-tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "friendPathCacheTest") }.configureEach {
+tasks.withType<JavaExec>().matching { it.name in setOf("verificationActionsTest", "friendPathCacheTest", "confinedHelperLaneTest") }.configureEach {
     inputs.file(layout.projectDirectory.file("../enforcer/build.gradle.kts"))
         .withPropertyName("friendPathConvention")
         .withPathSensitivity(PathSensitivity.RELATIVE)
