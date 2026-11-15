@@ -403,7 +403,8 @@ public class ManagedRuntime private constructor(
         ): Boolean =
             synchronized(lock) {
             authenticate(candidatePermit)
-            control === legacyControl && phase == Phase.DRAINING
+            check(control === legacyControl && (phase == Phase.DRAINING || phase == Phase.CLOSED))
+            phase == Phase.DRAINING
         }
 
         fun mayReleaseScoping(
@@ -421,8 +422,26 @@ public class ManagedRuntime private constructor(
             deadline: Deadline,
         ) {
             authenticate(candidatePermit)
-            synchronized(lock) { check(control === legacyControl && phase == Phase.DRAINING) }
-            runtimeOwner.awaitHelperSweep(control, deadline)
+            synchronized(lock) {
+                check(control === legacyControl && (phase == Phase.DRAINING || phase == Phase.CLOSED))
+                if (phase == Phase.CLOSED) return
+            }
+            val sweep = runtimeOwner.awaitHelperSweep(control, deadline)
+            try {
+                sweep?.get(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
+                if (manager.isShutdown) {
+                    manager.awaitTermination(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
+                    managerThread.get()?.let(deadline::join)
+                }
+            } catch (_: TimeoutException) {
+                // Caller budget expires without cancelling the retained sweep.
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (_: ExecutionException) {
+                // The manager recorded the failure before completing the future.
+            } catch (_: CancellationException) {
+                // The bounded manager rejected this sweep.
+            }
         }
 
         fun awaitScopingDrainRelease(
@@ -432,7 +451,10 @@ public class ManagedRuntime private constructor(
             deadline: Deadline,
         ) {
             authenticate(candidatePermit)
-            synchronized(lock) { check(control === legacyControl && phase == Phase.DRAINING && scopingPreparation === preparation) }
+            synchronized(lock) {
+                check(control === legacyControl && scopingPreparation === preparation && (phase == Phase.DRAINING || phase == Phase.CLOSED))
+                if (phase == Phase.CLOSED) return
+            }
             requestScopingRelease(candidatePermit, preparation)?.get(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
         }
 
@@ -481,7 +503,8 @@ public class ManagedRuntime private constructor(
             val reserved = synchronized(lock) {
                 check(scopingPreparation === preparation)
                 val state = preparation.state as? ScopingPreparation.State.Retiring
-                if (state == null ||
+                if (phase == Phase.CLOSED ||
+                    state == null ||
                     (
                         !state.retained.inFlight &&
                         (
@@ -2040,6 +2063,7 @@ public class ManagedRuntime private constructor(
                 outcome
             } else {
                 synchronized(lock) {
+                if (shared.checkedUnknown) return@synchronized DrainReport.Incomplete(0, 0, shared.checkedRawFailure)
                 val history = transferredScopingHistory(scopingPreparation?.state)
                 if (history != null) {
                     DrainReport.Incomplete(0, 0, history)
@@ -2100,6 +2124,7 @@ public class ManagedRuntime private constructor(
         val outcome = DrainLifecycle.evaluate(owner.operations.managerTerminated(opsPermit) && !managerLive, managerLive, observations)
         if (outcome != DrainReport.Complete) return outcome
         return synchronized(shared.lock) {
+            if (shared.checkedUnknown) return@synchronized DrainReport.Incomplete(0, 0, shared.checkedRawFailure)
             val history = transferredScopingHistory(shared.scopingPreparation?.state)
             if (history == null) {
                 DrainReport.Complete
@@ -2377,12 +2402,13 @@ public class ManagedRuntime private constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // The manager must retain a detached sweep's fatal failure before its future completes.
-    private fun awaitHelperSweep(control: RuntimeLegacyControl, deadline: Deadline) {
-        check(operations.mayAwaitHelperSweep(operationsPermit, control))
+    private fun awaitHelperSweep(control: RuntimeLegacyControl, deadline: Deadline): Future<*>? {
+        if (!operations.mayAwaitHelperSweep(operationsPermit, control)) return null
         val liveRetryEligible = synchronized(lock) { domains.values.toList() }.filter { it.initialLiveRetirementEnded() }.toSet()
         var launch: FutureTask<Unit>? = null
         var prior: Future<*>? = null
         val sweep = synchronized(lock) {
+            if (!operations.mayAwaitHelperSweep(operationsPermit, control)) return null
             if (!manager.isShutdown && !manager.isTerminated && deadline.remainingNanos() > 0) {
                 val previous = helperDrainSweep
                 if (previous == null || previous.isDone) {
@@ -2409,21 +2435,7 @@ public class ManagedRuntime private constructor(
                 task.cancel(false)
             }
         }
-        try {
-            sweep?.get(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
-            if (manager.isShutdown) {
-                manager.awaitTermination(deadline.remainingNanos(), TimeUnit.NANOSECONDS)
-                managerThread.get()?.let(deadline::join)
-            }
-        } catch (_: TimeoutException) {
-            // Caller budget expires without cancelling the retained sweep.
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        } catch (_: ExecutionException) {
-            // The manager recorded the failure before completing the future.
-        } catch (_: CancellationException) {
-            // The bounded manager rejected this sweep.
-        }
+        return sweep
     }
 
     @Suppress("TooGenericExceptionCaught") // The manager retains failures and the same domain owners instead of replacing cleanup execution.

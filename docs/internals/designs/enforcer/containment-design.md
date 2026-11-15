@@ -1146,6 +1146,8 @@ the runtime gate, then joined outside it. A historical cleanup failure remains
 Incomplete even after successful release with zero live workers. Queued preparation
 cancellation settles admission at the original task's run boundary.
 
+An already-admitted concurrent drain that observes `CLOSED` must authenticate the original runtime, control and preparation identities and observe the retained terminal result. Closure permits no new release or helper-sweep effects; retained unknown outcomes and history remain incomplete.
+
 The [D2 issue](../../backlog/issue-20261105-175119-373-b4-d2-integrate-pre-install-confined-helper-readin.md)
 records 228 passing connected host cases and rootful006's eight passing isolated
 cases (zero skips/aborts/failures), including actual repeated drain, helper loss,

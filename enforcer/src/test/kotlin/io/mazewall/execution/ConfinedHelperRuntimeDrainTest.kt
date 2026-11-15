@@ -1,6 +1,7 @@
 package io.mazewall.enforcer.api.execution
 
 import io.mazewall.enforcer.api.*
+import io.mazewall.enforcer.internal.execution.Deadline
 import io.mazewall.enforcer.internal.execution.HelperSupportLifetime
 import io.mazewall.enforcer.internal.execution.LiveValidationTransport
 import io.mazewall.enforcer.internal.execution.LiveWorkerSlot
@@ -6856,8 +6857,37 @@ class ConfinedHelperRuntimeDrainTest {
             var two: Thread? = null
             try {
                 assertTrue(arrived.await(5, TimeUnit.SECONDS))
-                one = Thread.ofPlatform().start { first.complete(fixture.runtime.drain(Duration.ofSeconds(4))) }
-                two = Thread.ofPlatform().start { second.complete(fixture.runtime.drain(Duration.ofSeconds(4))) }
+
+                fun startDrain(result: CompletableFuture<DrainReport>): Thread =
+                    Thread.ofPlatform().start {
+                    try {
+                        result.complete(fixture.runtime.drain(Duration.ofSeconds(4)))
+                    } catch (failure: Throwable) {
+                        result.completeExceptionally(failure)
+                    }
+                }
+                val control = ManagedRuntime::class.java.getDeclaredField("legacyControl").let {
+                    it.isAccessible = true
+                    it.get(fixture.runtime)
+                }
+                val lock = ManagedRuntime::class.java.getDeclaredField("lock").let {
+                    it.isAccessible = true
+                    it.get(fixture.runtime)
+                }
+                val participants = control.javaClass.getDeclaredField("participants").apply { isAccessible = true }
+
+                one = startDrain(first)
+                two = startDrain(second)
+                val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+                while (synchronized(lock) { participants.getInt(control) } < 2 && System.nanoTime() < until && !first.isDone && !second.isDone) {
+                    Thread.yield()
+                }
+                assertFalse(first.isDone || second.isDone, "A drain exited before both callers joined")
+                assertEquals(
+                    2,
+                    synchronized(lock) { participants.getInt(control) },
+                    "Both original callers must join before construction is released",
+                )
                 assertFailsWith<java.util.concurrent.TimeoutException> { first.get(100, TimeUnit.MILLISECONDS) }
                 assertFailsWith<java.util.concurrent.TimeoutException> { second.get(100, TimeUnit.MILLISECONDS) }
                 release.countDown()
@@ -6871,6 +6901,181 @@ class ConfinedHelperRuntimeDrainTest {
                 one?.join(6000)
                 two?.join(6000)
                 assertFalse(caller.isAlive || one?.isAlive == true || two?.isAlive == true)
+            }
+        }
+
+    private fun withClosedDrainBoundary(body: (ManagedRuntime, Any, Any, Any, Any, RecordingCapture, RuntimeFixture) -> Unit) =
+        withRuntime { fixture ->
+        val recording = RecordingCapture(completeCapture = true)
+        val ready = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+            captureSynthetic(fixture.runtime, fixture.reviewed, fixture.resources, recording) {},
+        )
+        val shared = runtimeState(fixture.runtime)
+        val preparation = shared.javaClass.getDeclaredField("scopingPreparation").let {
+            it.isAccessible = true
+            it.get(shared)
+        }
+        ready.value.close()
+        assertIs<DrainReport.Complete>(fixture.runtime.drain(timeout))
+
+        fun field(name: String): Any =
+            ManagedRuntime::class.java.getDeclaredField(name).let {
+                it.isAccessible = true
+                it.get(fixture.runtime)
+            }
+        body(
+            fixture.runtime,
+            field("operations"),
+            field("operationsPermit"),
+            field("legacyControl"),
+            preparation,
+            recording,
+            fixture,
+        )
+    }
+
+    private fun drainBoundaryMethod(
+        operations: Any,
+        name: String,
+    ): java.lang.reflect.Method =
+        operations.javaClass.declaredMethods
+            .single { it.name == name }
+            .apply { isAccessible = true }
+
+    @Test
+    fun `closed original scoping release boundary observes without effects`() =
+        withClosedDrainBoundary { runtime, operations, permit, control, preparation, recording, fixture ->
+            val before = recording.retireCalls.get()
+            val reaps = fixture.relay.reaps.get()
+            val tasks = fixture.manager.taskCount
+            drainBoundaryMethod(operations, "awaitScopingDrainRelease").invoke(
+                operations,
+                permit,
+                control,
+                preparation,
+                Deadline(timeout),
+            )
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
+            assertEquals(before, recording.retireCalls.get())
+            assertEquals(reaps, fixture.relay.reaps.get())
+            assertEquals(tasks, fixture.manager.taskCount)
+        }
+
+    @Test
+    fun `closed original confined sweep boundary observes without effects`() =
+        withClosedDrainBoundary { runtime, operations, permit, control, _, recording, fixture ->
+            val before = recording.retireCalls.get()
+            val reaps = fixture.relay.reaps.get()
+            val tasks = fixture.manager.taskCount
+            drainBoundaryMethod(operations, "awaitConfinedSweep").invoke(
+                operations,
+                permit,
+                control,
+                Deadline(timeout),
+            )
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
+            assertEquals(before, recording.retireCalls.get())
+            assertEquals(reaps, fixture.relay.reaps.get())
+            assertEquals(tasks, fixture.manager.taskCount)
+        }
+
+    @Test
+    fun `closed original helper sweep boundary observes without effects`() =
+        withClosedDrainBoundary { runtime, _, _, control, _, recording, fixture ->
+            val before = recording.retireCalls.get()
+            val reaps = fixture.relay.reaps.get()
+            val tasks = fixture.manager.taskCount
+            ManagedRuntime::class.java.declaredMethods
+                .single { it.name == "awaitHelperSweep" }
+                .apply { isAccessible = true }
+                .invoke(runtime, control, Deadline(timeout))
+            assertIs<DrainReport.Complete>(runtime.drain(timeout))
+            assertEquals(before, recording.retireCalls.get())
+            assertEquals(reaps, fixture.relay.reaps.get())
+            assertEquals(tasks, fixture.manager.taskCount)
+        }
+
+    @Test
+    fun `closed drain boundaries reject real foreign ownership`() =
+        withClosedDrainBoundary { runtime, operations, permit, control, preparation, recording, fixture ->
+            val originalDirectory = directory
+            directory = Files.createTempDirectory(originalDirectory, "foreign-drain-fixture-")
+            try {
+                withRuntime { foreignFixture ->
+                    val foreignRecording = RecordingCapture(completeCapture = true)
+                    val foreignReady = assertIs<LiveSetup.Ready<PreparedStackScoping>>(
+                        captureSynthetic(foreignFixture.runtime, foreignFixture.reviewed, foreignFixture.resources, foreignRecording) {},
+                    )
+                    try {
+                        val foreignState = runtimeState(foreignFixture.runtime)
+                        val foreignPreparation = foreignState.javaClass.getDeclaredField("scopingPreparation").let {
+                            it.isAccessible = true
+                            it.get(foreignState)
+                        }
+                        val foreignControl = ManagedRuntime::class.java.getDeclaredField("legacyControl").let {
+                            it.isAccessible = true
+                            it.get(foreignFixture.runtime)
+                        }
+                        val deadline = Deadline(timeout)
+                        val release = drainBoundaryMethod(operations, "awaitScopingDrainRelease")
+                        val sweep = drainBoundaryMethod(operations, "awaitConfinedSweep")
+                        val before = recording.retireCalls.get()
+                        val reaps = fixture.relay.reaps.get()
+                        val tasks = fixture.manager.taskCount
+                        for (call in listOf<() -> Unit>(
+                            { sweep.invoke(operations, Any(), control, deadline) },
+                            { sweep.invoke(operations, permit, foreignControl, deadline) },
+                            { release.invoke(operations, permit, foreignControl, preparation, deadline) },
+                            { release.invoke(operations, permit, control, foreignPreparation, deadline) },
+                            { release.invoke(operations, Any(), control, preparation, deadline) },
+                        )) {
+                            assertIs<IllegalStateException>(assertFailsWith<java.lang.reflect.InvocationTargetException> { call() }.targetException)
+                        }
+                        val helper = ManagedRuntime::class.java.declaredMethods
+                            .single { it.name == "awaitHelperSweep" }
+                            .apply { isAccessible = true }
+                        assertIs<IllegalStateException>(
+                            assertFailsWith<java.lang.reflect.InvocationTargetException> { helper.invoke(runtime, foreignControl, deadline) }.targetException,
+                        )
+                        assertIs<DrainReport.Complete>(runtime.drain(timeout))
+                        assertEquals(before, recording.retireCalls.get())
+                        assertEquals(reaps, fixture.relay.reaps.get())
+                        assertEquals(tasks, fixture.manager.taskCount)
+                    } finally {
+                        foreignReady.value.close()
+                    }
+                }
+            } finally {
+                directory = originalDirectory
+            }
+        }
+
+    @Test
+    fun `closed drain preserves retained unknown failure`() =
+        withClosedDrainBoundary { runtime, _, _, _, _, recording, fixture ->
+            val state = runtimeState(runtime)
+            val lock = ManagedRuntime::class.java.getDeclaredField("lock").let {
+                it.isAccessible = true
+                it.get(runtime)
+            }
+            val unknown = state.javaClass.getDeclaredField("checkedUnknown").apply { isAccessible = true }
+            val failureField = state.javaClass.getDeclaredField("checkedRawFailure").apply { isAccessible = true }
+            val failure = IllegalStateException("retained unknown observation")
+            val before = recording.retireCalls.get()
+            val tasks = fixture.manager.taskCount
+            try {
+                synchronized(lock) {
+                    unknown.setBoolean(state, true)
+                    failureField.set(state, failure)
+                }
+                assertSame(failure, assertIs<DrainReport.Incomplete>(runtime.drain(timeout)).cleanupFailure)
+                assertEquals(before, recording.retireCalls.get())
+                assertEquals(tasks, fixture.manager.taskCount)
+            } finally {
+                synchronized(lock) {
+                    unknown.setBoolean(state, false)
+                    failureField.set(state, null)
+                }
             }
         }
 
