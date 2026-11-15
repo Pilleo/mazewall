@@ -423,6 +423,55 @@ class ConfinedHelperRuntimeDrainTest {
         }
         val managerThread = manager.submit(Callable { Thread.currentThread() }).get(2, TimeUnit.SECONDS)
 
+        private fun field(
+            owner: Any,
+            name: String,
+        ): Any {
+            val member = owner.javaClass.getDeclaredField(name)
+            member.isAccessible = true
+            return requireNotNull(member.get(owner))
+        }
+
+        fun queuedPreparationQuiescence(queued: Runnable): CountDownLatch {
+            val gate = field(runtime, "lock")
+            return synchronized(gate) {
+                val state = runtimeState(runtime)
+                assertEquals(1, field(state, "preparations") as Int)
+                assertEquals(1, manager.queue.size)
+                assertSame(queued, manager.queue.single())
+                val control = field(runtime, "legacyControl")
+                assertSame(control, field(queued, "jobControl"))
+                (field(control, "quiescence") as CountDownLatch).also { assertEquals(1L, it.count) }
+            }
+        }
+
+        fun confinedReapAttempt(): CountDownLatch {
+            val pool = relay.pool
+            val gate = field(pool, "gate")
+            return synchronized(gate) {
+                // This fixture owns one prestarted pool and one confined session.
+                val sessions = field(pool, "sessions") as Set<*>
+                val session = requireNotNull(sessions.single())
+                val jobs = field(session, "jobs") as Set<*>
+                val job = requireNotNull(jobs.single())
+                val work = assertIs<io.mazewall.enforcer.internal.supervisor.SocketHelperPool.Work.Confined>(field(job, "work"))
+                val confined = field(session, "confined")
+                assertSame(confined, work)
+                assertSame(field(confined, "slot"), work.slot)
+                (field(job, "reaping") as CountDownLatch).also { assertEquals(1L, it.count) }
+            }
+        }
+
+        fun dedicatedRetirementThread(): Thread {
+            val gate = field(runtime, "lock")
+            return synchronized(gate) {
+                val domains = field(runtime, "domains") as Map<*, *>
+                val domain = assertIs<OwnedDomain>(domains.values.single())
+                val retirement = field(domain, "retirement")
+                field(retirement, "thread") as Thread
+            }
+        }
+
         fun helperPhysicallyRetired(): Boolean {
             val owner = checkNotNull(canonicalOwner)
             val operations = runtime.javaClass
@@ -3271,8 +3320,14 @@ class ConfinedHelperRuntimeDrainTest {
             assertFalse(caller.isAlive)
             assertNotNull(outcome.get(1, TimeUnit.SECONDS))
             val failure: Throwable
+            lateinit var actualRetirement: Thread
+            lateinit var reapAttempt: CountDownLatch
             try {
                 assertTrue(reapEntered.await(5, TimeUnit.SECONDS))
+                actualRetirement = fixture.dedicatedRetirementThread()
+                reapAttempt = fixture.confinedReapAttempt()
+                assertFalse(actualRetirement === fixture.managerThread)
+                assertFalse(actualRetirement === Thread.currentThread())
                 val first = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(Duration.ofMillis(100)))
                 failure = assertNotNull(first.cleanupFailure)
                 assertEquals(0, supportCloseCalls.get())
@@ -3281,6 +3336,12 @@ class ConfinedHelperRuntimeDrainTest {
             } finally {
                 releaseReap.countDown()
             }
+            val completionDeadline = System.nanoTime() + timeout.toNanos()
+            assertTrue(reapAttempt.await(timeout.toNanos(), TimeUnit.NANOSECONDS))
+            val remaining = completionDeadline - System.nanoTime()
+            assertTrue(remaining > 0, "retirement completion budget exhausted")
+            TimeUnit.NANOSECONDS.timedJoin(actualRetirement, remaining)
+            assertFalse(actualRetirement.isAlive, "original retirement actor must physically exit")
             val second = assertIs<DrainReport.Incomplete>(fixture.runtime.drain(timeout))
             assertSame(failure, second.cleanupFailure)
             assertEquals(1, fixture.relay.reaps.get())
@@ -7423,12 +7484,16 @@ class ConfinedHelperRuntimeDrainTest {
             entered.countDown()
             check(release.await(5, TimeUnit.SECONDS))
         }
+        lateinit var quiescence: CountDownLatch
         try {
             check(entered.await(2, TimeUnit.SECONDS))
             f.startPreparation()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
             while (f.manager.queue.isEmpty() && System.nanoTime() < deadline) Thread.yield()
             assertEquals(1, f.manager.queue.size)
+            assertEquals(0, f.manager.queue.remainingCapacity())
+            val queued = f.manager.queue.single()
+            quiescence = f.queuedPreparationQuiescence(queued)
             assertIs<DrainReport.Incomplete>(f.runtime.drain(Duration.ofMillis(30)))
             assertTrue(f.managerThread.isAlive)
             assertFalse(f.manager.isShutdown, "Queue-full drain must retain the original manager")
@@ -7438,6 +7503,7 @@ class ConfinedHelperRuntimeDrainTest {
             release.countDown()
         }
         blocked.get(2, TimeUnit.SECONDS)
+        assertTrue(quiescence.await(2, TimeUnit.SECONDS))
         f.manager.submit {}.get(2, TimeUnit.SECONDS)
         assertEquals(DrainReport.Complete, f.runtime.drain(timeout))
         assertFalse(f.managerThread.isAlive)

@@ -1,0 +1,86 @@
+import org.gradle.api.Task
+import org.gradle.api.execution.TaskExecutionListener
+import org.gradle.api.tasks.TaskState
+import java.nio.file.NoSuchFileException
+import java.lang.reflect.InvocationTargetException
+
+// Temporary observation only. This listener does not modify task state or failures.
+class YarnCauseObserver implements TaskExecutionListener {
+    private static final String ANALYSIS = 'org.owasp.dependencycheck.analyzer.exception.AnalysisException'
+    private static final String COLLECTION = 'org.owasp.dependencycheck.exception.ExceptionCollection'
+    private static final String YARN = 'org.owasp.dependencycheck.analyzer.YarnAuditAnalyzer'
+    private static final Set<String> CONNECTION_TYPES = [
+        'java.net.ConnectException', 'java.net.SocketTimeoutException', 'java.net.UnknownHostException',
+        'javax.net.ssl.SSLException', 'javax.net.ssl.SSLHandshakeException',
+        'org.owasp.dependencycheck.utils.URLConnectionFailureException'
+    ] as Set
+    private static final Set<String> MESSAGES = [
+        'Failed to read results from the NPM Audit API (YarnAuditAnalyzer); the analyzer is being disabled and may result in false negatives.',
+        'Failed to connect to the NPM Audit API (YarnAuditAnalyzer); the analyzer is being disabled and may result in false negatives.'
+    ] as Set
+
+    @Override void beforeExecute(Task task) { }
+    @Override void afterExecute(Task task, TaskState state) {
+        if (task.path != ':portals:codegen:dependencyCheckAnalyze' || state.failure == null) return
+        String result
+        try {
+            result = classify(state.failure)
+        } catch (Exception ignored) {
+            result = 'DIAGNOSTIC_UNAVAILABLE'
+        }
+        println("YARN_DIAG ${result}")
+    }
+
+    private static String classify(Throwable failure) {
+        def queue = new ArrayDeque<List>()
+        queue.add([failure, false])
+        def seen = new IdentityHashMap<Throwable, Integer>()
+        def categories = [] as Set
+        int unique = 0
+        while (!queue.isEmpty()) {
+            def entry = queue.removeFirst()
+            Throwable current = entry[0] as Throwable
+            boolean context = entry[1] as boolean
+            if (current.class.name == ANALYSIS) {
+                context = context || MESSAGES.contains(current.message) || current.stackTrace.any { it.className == YARN }
+            }
+            int bit = context ? 2 : 1
+            int previous = seen.getOrDefault(current, 0)
+            if ((previous & bit) != 0) continue
+            if (previous == 0 && ++unique > 32) return 'DIAGNOSTIC_UNAVAILABLE'
+            seen.put(current, previous | bit)
+            if (context) {
+                if (current instanceof NoSuchFileException && new File(current.file ?: '').name == 'package.json') {
+                    categories.add('YARN_PACKAGE_JSON_MISSING')
+                } else if (CONNECTION_TYPES.contains(current.class.name)) {
+                    categories.add('YARN_CONNECTION_FAILURE')
+                } else if (current instanceof IOException) {
+                    categories.add('YARN_IO_OTHER')
+                }
+            }
+            if (current.cause != null) queue.add([current.cause, context])
+            def suppressed = current.suppressed
+            if (suppressed.length > 32) return 'DIAGNOSTIC_UNAVAILABLE'
+            suppressed.each { queue.add([it, context]) }
+            if (current.class.name == COLLECTION) {
+                try {
+                    def children = current.class.getMethod('getExceptions').invoke(current)
+                    if (!(children instanceof List) || children.size() > 32) return 'DIAGNOSTIC_UNAVAILABLE'
+                    children.each { child ->
+                        if (!(child instanceof Throwable)) throw new IllegalStateException()
+                        queue.add([child, context])
+                    }
+                } catch (InvocationTargetException wrapped) {
+                    if (wrapped.cause instanceof Error) throw (Error) wrapped.cause
+                    return 'DIAGNOSTIC_UNAVAILABLE'
+                } catch (ReflectiveOperationException ignored) {
+                    return 'DIAGNOSTIC_UNAVAILABLE'
+                }
+            }
+            if (queue.size() > 64) return 'DIAGNOSTIC_UNAVAILABLE'
+        }
+        return categories.size() == 1 ? categories.first() : 'UNKNOWN'
+    }
+}
+
+gradle.taskGraph.addTaskExecutionListener(new YarnCauseObserver())

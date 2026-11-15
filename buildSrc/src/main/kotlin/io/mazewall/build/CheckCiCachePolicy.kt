@@ -48,7 +48,7 @@ internal fun ciCachePolicyViolations(workflow: String): List<CiCacheViolation> {
             CiCacheViolation.DEPENDENCY_CHECK_DATA -> !hasExclusiveSecurityCache(workflow, security)
             CiCacheViolation.SECURITY_LIFECYCLE -> !hasCompletedSecurityLifecycle(security)
             CiCacheViolation.HOST_DEPENDENCY_CHECK -> workflowStep(security, "Run Security Check").lines().map(String::trim)
-                .filter { it.startsWith("./gradlew") } != listOf("./gradlew verifySecuritySnapshot dependencyCheckSdk -Pmazewall.securitySnapshotScan=true --info --no-configuration-cache --no-daemon --no-parallel --max-workers=1 2>&1 | tee security-analysis.log")
+                .filter { it.startsWith("./gradlew") } != listOf("./gradlew verifySecuritySnapshot dependencyCheckSdk -Pmazewall.securitySnapshotScan=true --init-script scripts/ci/security-scan-failure-diagnostics.init.gradle --info --no-configuration-cache --no-daemon --no-parallel --max-workers=1 2>&1 | tee security-analysis.log")
             CiCacheViolation.CONTAINER_DEPENDENCY_CHECK -> "run: ./scripts/run_containerized_tests.sh dependencyCheckAnalyze" in workflow
             CiCacheViolation.IMMUTABLE_NVD_CACHE -> "key: nvd-database-" in workflow
             CiCacheViolation.CONTAINER_CACHE_IDENTITY -> containerJobs.withIndex().any { (index, job) ->
