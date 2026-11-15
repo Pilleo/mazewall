@@ -10,6 +10,7 @@ target_modules:
   - "buildSrc"
 target_files:
   - "build.gradle.kts"
+  - "gradle/verification-metadata.xml"
   - ".github/workflows/ci.yml"
   - "buildSrc/src/main/kotlin/io/mazewall/build/CheckCiCachePolicy.kt"
   - "buildSrc/src/test/java/io/mazewall/build/VerificationWorkflowInputFunctionalTest.java"
@@ -34,7 +35,7 @@ Keep the mandatory consumer keyless and read-only, gated by the existing trusted
 4. Add functional tests for scan-mode-only plugin application, SDK owner lifecycle and selection, `:portals` no-scan behavior, excluded projects, production configurations, and the seven-report join. CI policy must require the root join and separately guard all seven report files; the join task itself does not check file presence. Reject a missing owner report.
 5. Verify actual report inventories for all seven owners and fresh required CI. Require SDK-only sentinels such as serialization/coroutines and codegen production dependencies; reject demo and test-only entries where present. Do not treat the successful prior root-only report as SDK coverage.
 
-**Current evidence (2026-11-15):** Per-owner scan configuration and the root join are implemented. The real security functional fixture passed (1m58s, exit 0); graph-init-free and the 625-case policy/report-invalidation checks passed; independent Option A review found no blocker. Root ktlint passed in lint006 after a formatting-only correction. Full002 and fresh CI with all seven report files and actual report inventories remain pending. Keep this issue OPEN; no SDK report contents or whole-SDK clearance are claimed.
+**Current evidence (2026-11-15):** Per-owner scan configuration and the root join are implemented. The real security fixture passed (1m58s); graph-init-free and policy/report-invalidation checks passed; independent Option A review found no blocker. CI run 43757655617 verified artifact 14176351241 at 20:23:41Z and passed root plus platform reports, then stopped before Enforcer analysis because three POM checksums were missing from strict verification metadata. This is a metadata-resolution failure, not a checksum mismatch or CVE verdict; other owner reports did not run. Offline owner diagnostics and online manifest review found six additional codegen POMs (nine missing entries total, not 26); 20 pre-existing POM hashes remain unchanged. The approved metadata update adds nine SHA-256 entries for existing components; canonical HTTPS POM bytes match cached bytes. Five POMs have published SHA-256 sidecars; four Kotlin POMs lack them, and PGP signatures were not verified. No dependencies, versions, trust flags, thresholds, or suppressions changed. Full002 was intentionally stopped before completion; The offline POM-resolution preflight passed all seven owners with zero failures across 31 distinct module versions; this verifies metadata, not vulnerability analysis. Full003 and successful required CI remain pending. Keep this issue OPEN; no SDK report inventory or whole-SDK clearance is claimed.
 
 ---
 <!-- id: issue-20261115-193140-602-expand-mandatory-dependency-check-coverage-to-defa  file: issue-20261115-193140-602-expand-mandatory-dependency-check-coverage-to-defa.md -->
