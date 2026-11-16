@@ -465,6 +465,8 @@ Current checkpoint (2026-11-16): Full003 passed on the earlier `b356c8e301da43e0
 
 The user explicitly approved disabling Yarn Audit for `:portals:codegen` only. This disables Yarn Audit checks for all current and future Codegen Yarn inputs; other checks remain. JVM/dependency checks and analyzers for the other owners remain required. A Codegen Dependency-Check report without Yarn Audit does not establish complete Codegen dependencies or SDK-wide coverage; do not claim a complete SDK scan while this gap remains. Keep the existing four-hour trusted-snapshot limit, thresholds, failure propagation, and all other checks unchanged. Issue 225 remains OPEN to restore maintained Codegen Yarn coverage.
 
+Codegen scan follow-up (2026-11-16): a Dependency-Check report identifies `kotlin-reflect:2.1.21`, brought in through KotlinPoet 2.2.0, and maps it to CVE-2026-53914 using a broad CPE/CVSS match. Applicability to `kotlin-reflect` is unconfirmed; the related GHSA describes KGP versions below 2.4.20-Beta1 and a KAPT fix, not this artifact. The preferred scoped remediation is to align Codegen runtime reflection with the project Kotlin version; do not suppress the finding or claim the reflect artifact is confirmed vulnerable. See [issue 322](../../backlog/issue-20261116-002649-322-align-codegen-kotlin-reflection-runtime-with-proje.md). This does not establish complete SDK scan coverage.
+
 ### Optional integration feedback and diagnostics
 
 The source-bound optional gate stages the exact SDK publications once. It checks
