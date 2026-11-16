@@ -13,6 +13,74 @@ import kotlin.test.assertTrue
 
 class TierECollectorServiceTest {
     @Test
+    fun `cleanup restores interruption even when independent clock failure is fatal`() {
+        val source = RecordingSource()
+        val interrupted = InterruptedException("source cleanup interrupted")
+        source.closeFailure = interrupted
+        val fatal = LinkageError("clock cleanup failed")
+        val clock = ClosingClock()
+        clock.closeFailure = fatal
+        val service = TierECollectorService(TierEProfilerSession(source, 1), receiptClock = clock)
+        try {
+            assertSame(fatal, assertFailsWith<LinkageError> { service.close() })
+            assertEquals(listOf(interrupted), fatal.suppressed.toList())
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+            service.close()
+        }
+        assertEquals(2, source.closeCalls)
+        assertEquals(2, clock.closeCalls)
+    }
+
+    @Test
+    fun `interrupted join retains worker and clock until retry joins and retires them`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val source = RecordingSource(events = ArrayDeque(listOf(listOf(event()))))
+        val clock = ClosingClock()
+        val session = TierEProfilerSession(source, 1, definitionReader = { AgentDefinitionFile.Contents(emptyList(), emptyList(), 0) })
+        val service = TierECollectorService(session, receiptClock = clock, onResolved = {
+            entered.countDown()
+            release.await()
+        })
+        service.start()
+        assertTrue(entered.await(1, TimeUnit.SECONDS))
+        try {
+            Thread.currentThread().interrupt()
+            assertFailsWith<InterruptedException> { service.finish(Path.of("ignored"), true) }
+            assertTrue(Thread.currentThread().isInterrupted)
+            assertEquals(0, source.closeCalls)
+            assertEquals(0, clock.closeCalls)
+        } finally {
+            Thread.interrupted()
+            release.countDown()
+            service.close()
+        }
+        service.close()
+        assertEquals(1, source.closeCalls)
+        assertEquals(1, clock.closeCalls)
+        assertFailsWith<InterruptedException> { service.finish(Path.of("ignored"), true) }
+        Thread.interrupted()
+    }
+
+    @Test
+    fun `source close failure still closes independent receipt clock and retries only source`() {
+        val source = RecordingSource()
+        val failure = IllegalStateException("unmap failed")
+        source.closeFailure = failure
+        val clock = ClosingClock()
+        val service = TierECollectorService(TierEProfilerSession(source, 1), receiptClock = clock)
+
+        assertSame(failure, assertFailsWith<IllegalStateException> { service.close() })
+        assertEquals(1, clock.closeCalls)
+        service.close()
+        service.close()
+        assertEquals(2, source.closeCalls)
+        assertEquals(1, clock.closeCalls)
+    }
+
+    @Test
     fun `service starts once and caches one terminal profile`() {
         val source = RecordingSource()
         val service = service(source)
@@ -218,6 +286,7 @@ private open class RecordingSource(
 ) : TierEEventSource {
     val drainStarted = CountDownLatch(1)
     var closeCalls = 0
+    var closeFailure: Throwable? = null
 
     override fun install(
         targetPid: Int,
@@ -247,6 +316,27 @@ private open class RecordingSource(
 
     override fun close() {
         closeCalls++
+        closeFailure?.let {
+            closeFailure = null
+            throw it
+        }
+    }
+}
+
+private class ClosingClock :
+    TierECollectorClock,
+    AutoCloseable {
+    var closeCalls = 0
+    var closeFailure: Throwable? = null
+
+    override fun nowNanos(): Long = 1_000L
+
+    override fun close() {
+        closeCalls++
+        closeFailure?.let {
+            closeFailure = null
+            throw it
+        }
     }
 }
 

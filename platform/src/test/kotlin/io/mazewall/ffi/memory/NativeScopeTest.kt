@@ -15,9 +15,9 @@ import kotlin.test.assertFailsWith
 class NativeScopeTest {
     @Test
     fun `nativeScope closes arena even when exception is thrown`() {
-        assertFailsWith<RuntimeException> {
+        assertFailsWith<IllegalStateException> {
             nativeScope {
-                throw RuntimeException("Simulated failure")
+                throw IllegalStateException("Simulated failure")
             }
         }
     }

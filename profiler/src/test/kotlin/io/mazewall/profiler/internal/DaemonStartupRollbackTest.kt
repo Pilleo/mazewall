@@ -321,10 +321,14 @@ class DaemonStartupRollbackTest {
         launcher: MockProcessLauncher,
     ): Driver {
         val managerClass = Class.forName("io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager")
-        val manager = managerClass.declaredConstructors
-            .single { constructor ->
-            constructor.parameterTypes.size == 3
-        }.newInstance(engine, MockSocketManager(), launcher)
+        val observationClass = Class.forName("io.mazewall.ffi.internal.HelperSecurityObservation")
+        val constructor = managerClass.getDeclaredConstructor(
+            io.mazewall.platform.native.NativeEngine::class.java,
+            io.mazewall.platform.socket.SocketManager::class.java,
+            io.mazewall.platform.process.ProcessLauncher::class.java,
+            observationClass,
+        )
+        val manager = constructor.newInstance(engine, MockSocketManager(), launcher, observationClass.getDeclaredConstructor().newInstance())
         val start = managerClass.getDeclaredMethod("getOrSpawnSharedDaemon", io.mazewall.platform.native.NativeEngine::class.java)
         val stop = managerClass.getDeclaredMethod("stop")
         return Driver(

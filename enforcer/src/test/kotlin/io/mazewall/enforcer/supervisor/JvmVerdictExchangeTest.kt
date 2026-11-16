@@ -22,6 +22,35 @@ import org.junit.jupiter.params.provider.ValueSource
 
 class JvmVerdictExchangeTest {
     @Test
+    fun `borrowed timeout leaves control socket to its connection owner`() {
+        val fixture = SupervisorBoundaryFixture()
+        var polls = 0
+        fixture.engine.onPoll = { _, _, _ -> SupervisorBoundaryFixture.success(if (++polls == 1) 1 else 0) }
+        fixture.engine.memory.onRead = { _, buffer, _ ->
+            buffer.writeByte(0, 42)
+            SupervisorBoundaryFixture.success(1)
+        }
+        NativeArena.ofConfined().use { arena ->
+            val exchange = JvmVerdictExchange(fixture.engine, fixture.socket, fixture.sockets, ControlSocketOwnership.Borrowed)
+            assertEquals(JvmExchangeResult.Timeout(), with(arena) { exchange.receive(fixture.context(arena).request) })
+            exchange.close()
+        }
+        assertEquals(0, fixture.sockets.closeCalledCount.get())
+    }
+
+    @Test
+    fun `borrowed malformed exchange does not close its connection owner's socket`() {
+        val fixture = SupervisorBoundaryFixture()
+        fixture.responseId = 99
+        NativeArena.ofConfined().use { arena ->
+            val exchange = JvmVerdictExchange(fixture.engine, fixture.socket, fixture.sockets, ControlSocketOwnership.Borrowed)
+            assertInstanceOf(JvmExchangeResult.Malformed::class.java, with(arena) { exchange.receive(fixture.context(arena).request) })
+            exchange.close()
+        }
+        assertEquals(0, fixture.sockets.closeCalledCount.get())
+    }
+
+    @Test
     fun `write retries EINTR and short writes without changing the request bytes`() {
         val fixture = SupervisorBoundaryFixture()
         val written = mutableListOf<Byte>()

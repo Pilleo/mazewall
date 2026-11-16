@@ -31,7 +31,11 @@
 #include "capture_yield_recorder.hpp"
 #include "invocation_fd_recorder.hpp"
 #include "invocation_registry.hpp"
+#include "open_boundary_recorder.hpp"
 #include "lifecycle_barrier.hpp"
+#include "live_stack_context.hpp"
+#include "live_stack_jni.hpp"
+#include "live_startup_binding.hpp"
 #include "marker_version_proof.hpp"
 #include "symbolization_generation.hpp"
 #include "tier_e_usdt_marker.hpp"
@@ -52,6 +56,10 @@ extern "C" __attribute__((noinline, visibility("default"))) void mazewall_stack_
 }
 
 namespace {
+
+enum class LiveStartupMode { DiagnosticOnly, Only, Shared };
+LiveStartupMode live_startup_mode = LiveStartupMode::DiagnosticOnly;
+std::atomic<bool> live_hooks_ready{false};
 
 std::atomic<std::uint64_t> native_bind_count{0};
 std::atomic<std::uint64_t> proxied_bind_count{0};
@@ -114,8 +122,45 @@ jvmtiEnv* global_jvmti = nullptr;
 std::string definitions_path;
 std::string marker_version_proof_path;
 std::string capture_yield_path;
-std::mutex capture_yield_mutex;
 std::unique_ptr<mazewall::profiler::CaptureYieldRecorder> capture_yield_recorder;
+std::string open_boundary_path;
+std::unique_ptr<mazewall::profiler::OpenBoundaryRecorder> open_boundary_recorder;
+
+bool read_open_boundary_clock(std::uint64_t& nanos) noexcept {
+    timespec time{};
+    if (::clock_gettime(CLOCK_MONOTONIC, &time) != 0) return false;
+    nanos = static_cast<std::uint64_t>(time.tv_sec) * 1'000'000'000ULL + time.tv_nsec;
+    return true;
+}
+
+std::int64_t read_open_boundary_tid() noexcept { return ::syscall(SYS_gettid); }
+
+bool read_open_boundary_path(std::uint64_t pointer, char* owned, std::uint32_t& length) noexcept {
+    if (pointer == 0) return false;
+    // Only the live JNI-owned open0 pathname is admitted here, never arbitrary memory.
+    const auto* path = reinterpret_cast<const char*>(pointer);
+    for (std::uint32_t i = 0; i < 256; ++i) {
+        owned[i] = path[i];
+        if (path[i] == '\0') { length = i + 1; return true; }
+    }
+    return false;
+}
+
+mazewall::profiler::OpenBoundaryInput prepare_open_boundary(jlong path, jint flags, jint mode) noexcept {
+    const int saved_errno = errno;
+    // Recorder owns all 256 bridges; even rejected threads have no owner or cleanup registration.
+    static thread_local auto* bridge = open_boundary_recorder->reserve_bridge();
+    mazewall::profiler::OpenBoundaryInput input;
+    if (bridge) input = open_boundary_recorder->prepare(*bridge, static_cast<std::uint64_t>(path), flags, mode);
+    else {
+        input.path_pointer = static_cast<std::uint64_t>(path);
+        input.flags = flags;
+        input.mode = mode;
+        input.failures = 2 | 4;
+    }
+    errno = saved_errno;
+    return input;
+}
 std::string invocation_fd_path;
 std::mutex invocation_fd_mutex;
 std::unique_ptr<mazewall::profiler::InvocationFdRecorder> invocation_fd_recorder;
@@ -126,7 +171,6 @@ std::string lifecycle_barrier_gate_path;
 std::atomic<bool> force_capture_failure_once{false};
 std::string capture_failure_gate_path;
 std::atomic<bool> force_exec_once{false};
-std::atomic<std::uint64_t> capture_yield_contention_drops{0};
 mazewall::profiler::CaptureProfile capture_profile = mazewall::profiler::CaptureProfile::full();
 std::atomic<bool> capture_profile_admitted{true};
 std::array<std::atomic<std::uint64_t>, mazewall::profiler::BindingManifest::supported_bindings.size()> capture_profile_admitted_counts{};
@@ -237,22 +281,20 @@ void record_capture_yield(
     mazewall::profiler::BindingKind binding_kind,
     mazewall::profiler::CaptureYieldOutcome outcome) noexcept {
     if (capture_yield_recorder == nullptr || invocation_id == 0) return;
-    std::unique_lock lock(capture_yield_mutex, std::try_to_lock);
-    if (!lock.owns_lock()) {
-        capture_yield_contention_drops.fetch_add(1, std::memory_order_relaxed);
-        return;
-    }
+    const int saved_errno = errno;
     (void)capture_yield_recorder->record(invocation_id, binding_kind, outcome);
+    errno = saved_errno;
 }
+
+#ifdef MAZEWALL_CAPTURE_YIELD_TEST
+bool capture_yield_test_close_error = false;
+unsigned capture_yield_test_rename_attempts = 0;
+#endif
 
 bool write_capture_yield() noexcept {
     if (capture_yield_path.empty() || capture_yield_recorder == nullptr) return true;
     try {
-        std::vector<std::uint8_t> bytes;
-        {
-            std::lock_guard lock(capture_yield_mutex);
-            bytes = capture_yield_recorder->serialize(session_tag);
-        }
+        const auto bytes = capture_yield_recorder->serialize(session_tag);
         const auto temporary_path = capture_yield_path + ".tmp";
         std::ofstream stream(temporary_path, std::ios::binary | std::ios::trunc);
         if (!stream) return false;
@@ -260,6 +302,16 @@ bool write_capture_yield() noexcept {
         stream.flush();
         if (!stream.good()) return false;
         stream.close();
+#ifdef MAZEWALL_CAPTURE_YIELD_TEST
+        if (capture_yield_test_close_error) {
+            assert(!stream.is_open() && stream.good());
+            stream.setstate(std::ios::badbit);
+        }
+#endif
+        if (!stream.good()) return false;
+#ifdef MAZEWALL_CAPTURE_YIELD_TEST
+        ++capture_yield_test_rename_attempts;
+#endif
         return std::rename(temporary_path.c_str(), capture_yield_path.c_str()) == 0;
     } catch (...) {
         return false;
@@ -751,14 +803,17 @@ bool record_invocation(InvocationDefinition definition) {
     return true;
 }
 
+thread_local ExecutionContext prepared_worker_execution{};
 ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
     if (env == nullptr || thread == nullptr) return {};
+    if (prepared_worker_execution.valid()) return prepared_worker_execution;
     auto is_virtual = thread_is_virtual.load(std::memory_order_acquire);
     auto java_thread_id = thread_id.load(std::memory_order_acquire);
     if (is_virtual == nullptr || java_thread_id == nullptr) {
         jclass thread_class = env->GetObjectClass(thread);
         if (thread_class == nullptr) return {};
         is_virtual = env->GetMethodID(thread_class, "isVirtual", "()Z");
+        if (env->ExceptionCheck()) { env->DeleteLocalRef(thread_class); return {}; }
         java_thread_id = env->GetMethodID(thread_class, "threadId", "()J");
         env->DeleteLocalRef(thread_class);
         if (is_virtual != nullptr) thread_is_virtual.store(is_virtual, std::memory_order_release);
@@ -766,6 +821,7 @@ ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
     }
     if (is_virtual == nullptr || java_thread_id == nullptr) return {};
     const auto virtual_thread = env->CallBooleanMethod(thread, is_virtual) == JNI_TRUE;
+    if (env->ExceptionCheck()) return {};
     const auto id = env->CallLongMethod(thread, java_thread_id);
     if (env->ExceptionCheck()) {
         // Preserve the application's pending exception. Profiler cleanup must
@@ -791,6 +847,7 @@ ExecutionContext execution_context(JNIEnv* env, jthread thread) noexcept {
 }
 
 void JNICALL on_virtual_thread_end(jvmtiEnv*, JNIEnv* env, jthread thread) noexcept {
+    if (live_startup_mode == LiveStartupMode::Only) return;
     auto method = thread_id.load(std::memory_order_acquire);
     if (method == nullptr) return;
     const auto id = env->CallLongMethod(thread, method);
@@ -895,14 +952,69 @@ std::atomic<NetAccept> original_net_accept{nullptr};
 
 thread_local mazewall::profiler::InvocationRegistry invocation_registry;
 
+struct RawCapture final {
+    std::array<jvmtiFrameInfo, 129> frames{};
+    jint count = 0;
+    bool failed = true;
+};
+#ifdef MAZEWALL_LIVE_JNI_TEST
+thread_local uint64_t test_acquisitions = 0;
+#endif
+RawCapture acquire_stack(jthread thread) noexcept {
+    RawCapture raw;
+    if (!global_jvmti || !thread) return raw;
+#ifdef MAZEWALL_LIVE_JNI_TEST
+    ++test_acquisitions;
+#endif
+    const auto started = benchmark_started();
+    const auto diagnostic = capture_timing_diagnostic.begin(capture_timing_diagnostic_enabled, read_capture_clock);
+    const auto result = global_jvmti->GetStackTrace(thread, 0, static_cast<jint>(raw.frames.size()),
+                                                  raw.frames.data(), &raw.count);
+    capture_timing_diagnostic.finish(diagnostic, read_capture_clock);
+    if (benchmark_phases) benchmark_get_stack_trace_nanos.fetch_add(elapsed_nanos(started), std::memory_order_relaxed);
+    raw.failed = result != JVMTI_ERROR_NONE || raw.count <= 0 || raw.count > static_cast<jint>(raw.frames.size());
+    return raw;
+}
+
 class InvocationScope final {
 public:
     [[nodiscard]] std::uint64_t published_invocation_id() const noexcept {
         return scope_.valid() ? scope_.id : 0;
     }
 
-    InvocationScope(JNIEnv* env, mazewall::profiler::BindingKind binding_kind) noexcept
+    [[nodiscard]] std::uint64_t execution_id() const noexcept { return execution_.id; }
+
+    InvocationScope(JNIEnv* env, mazewall::profiler::BindingKind binding_kind, const mazewall::live::Arguments& arguments = {}) noexcept
         : binding_kind_(binding_kind) {
+        mazewall::live::enter();
+        if (live_startup_mode != LiveStartupMode::DiagnosticOnly) {
+            guard_owner_ = mazewall::live::jni::begin_activation();
+            if (binding_kind == mazewall::profiler::BindingKind::unix_open0 ||
+                binding_kind == mazewall::profiler::BindingKind::unix_openat0)
+                live_capture_ = mazewall::live::jni::probe(env);
+            else mazewall::live::jni::poison_guard();
+            if (env->ExceptionCheck()) return;
+        }
+        diagnostics(env);
+        if (live_startup_mode != LiveStartupMode::DiagnosticOnly && env->ExceptionCheck()) {
+            mazewall::live::jni::poison_guard();
+            return;
+        }
+        if (!live_capture_ || !mazewall::live::probe_eligible()) return;
+        current_env_ = env;
+        if (!raw_acquired_) {
+            if (!current_thread_ && global_jvmti) (void)global_jvmti->GetCurrentThread(&current_thread_);
+            raw_ = acquire_stack(current_thread_);
+            raw_acquired_ = true;
+        }
+        mazewall::live::jni::publish_capture(
+            binding_kind == mazewall::profiler::BindingKind::unix_open0 ? 1 : 2,
+            raw_.frames.data(), raw_.count, raw_.failed, arguments);
+    }
+
+private:
+    void diagnostics(JNIEnv* env) noexcept {
+        if (live_startup_mode == LiveStartupMode::Only) return;
         current_env_ = env;
         scope_started_ = std::chrono::steady_clock::now();
         if (invocation_ids_exhausted.load(std::memory_order_relaxed)) {
@@ -1004,7 +1116,21 @@ public:
         }
     }
 
+public:
     ~InvocationScope() {
+        if (live_startup_mode != LiveStartupMode::DiagnosticOnly) {
+            mazewall::live::jni::end_activation(guard_owner_);
+            if (current_env_ && current_env_->ExceptionCheck()) {
+                if (live_startup_mode != LiveStartupMode::Only) {
+                    publish_stack_marker(0, 0, MarkerTransition::exit_clear);
+                    invocation_registry.invalidate();
+                    record_virtual_duration();
+                    record_capture_yield(invocation_id_, binding_kind_, capture_yield_outcome_);
+                }
+                return;
+            }
+        } else mazewall::live::leave();
+        if (live_startup_mode == LiveStartupMode::Only) { release_current_thread(); return; }
         publish_stack_marker(0, 0, MarkerTransition::exit_clear);
         if (!scope_.valid()) {
             publish_stack_marker(
@@ -1019,6 +1145,7 @@ public:
         }
         jthread exit_thread = nullptr;
         const auto current_execution =
+            !(open_boundary_recorder != nullptr && current_env_->ExceptionCheck()) &&
             global_jvmti != nullptr && global_jvmti->GetCurrentThread(&exit_thread) == JVMTI_ERROR_NONE
                 ? execution_context_from_current(exit_thread)
                 : ExecutionContext{};
@@ -1081,6 +1208,7 @@ private:
         // outer marker and nesting state must be inactive before gate I/O or arbitrary callback
         // JVM work. A nested proxy may establish its own exact boundary, but this outer scope is
         // never restored implicitly after the callback returns.
+        mazewall::live::jni::poison_guard();
         publish_stack_marker(0, 0, MarkerTransition::admission_clear);
         invocation_registry.suppress();
         scope_ = {};
@@ -1128,25 +1256,17 @@ private:
             return Capture{0, 4, 0, false};
         }
 
-        std::array<jvmtiFrameInfo, 129> frames{};
-        jint frame_count = 0;
         const auto capture_lease = symbolization_generation.begin_capture();
         if (!capture_lease.valid()) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             return Capture{0, 5, 0, false};
         }
         const auto capture_epoch = capture_lease.value;
-        const auto stack_trace_started = benchmark_started();
-        const auto diagnostic_started = capture_timing_diagnostic.begin(capture_timing_diagnostic_enabled, read_capture_clock);
-        const auto result = global_jvmti->GetStackTrace(
-            current_thread_,
-            0,
-            static_cast<jint>(frames.size()),
-            frames.data(),
-            &frame_count);
-        capture_timing_diagnostic.finish(diagnostic_started, read_capture_clock);
-        if (benchmark_phases) benchmark_get_stack_trace_nanos.fetch_add(elapsed_nanos(stack_trace_started), std::memory_order_relaxed);
-        if (result != JVMTI_ERROR_NONE || frame_count <= 0) {
+        raw_ = acquire_stack(current_thread_);
+        raw_acquired_ = true;
+        const auto& frames = raw_.frames;
+        const auto frame_count = raw_.count;
+        if (raw_.failed) {
             stack_capture_failures.fetch_add(1, std::memory_order_relaxed);
             return {};
         }
@@ -1245,19 +1365,69 @@ private:
         mazewall::profiler::CaptureYieldOutcome::admission_failed;
     std::chrono::steady_clock::time_point scope_started_{};
     bool virtual_scope_ = false;
+    bool guard_owner_ = false, live_capture_ = false, raw_acquired_ = false;
+    RawCapture raw_{};
 };
 
+static_assert(sizeof(jlong) == sizeof(uint64_t) && sizeof(jint) == sizeof(uint32_t));
 jint JNICALL proxy_unix_open0(JNIEnv* env, jclass owner, jlong path, jint flags, jint mode) {
-    InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0);
-    const auto original = original_unix_open0.load(std::memory_order_acquire);
-    return original == nullptr ? -1 : original(env, owner, path, flags, mode);
+    const mazewall::live::Arguments arguments{mazewall::live::ArgumentKind::Open0, static_cast<uint64_t>(path),
+        static_cast<uint32_t>(flags), static_cast<uint32_t>(mode), 0};
+    const int entry_errno = errno;
+    if (open_boundary_recorder != nullptr) {
+        const auto input = prepare_open_boundary(path, flags, mode);
+        jint result;
+        int original_errno;
+        {
+            InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0, arguments);
+            const auto id = invocation.published_invocation_id();
+            const auto execution_id = invocation.execution_id();
+            const auto original = original_unix_open0.load(std::memory_order_acquire);
+            result = mazewall::profiler::invoke_open_boundary(
+                open_boundary_recorder.get(), input, id, execution_id, original != nullptr,
+                [&] { return original == nullptr ? -1 : original(env, owner, path, flags, mode); });
+            original_errno = errno;
+        }
+        errno = original_errno;
+        return result;
+    }
+    jint result;
+    int original_errno;
+    {
+        InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_open0, arguments);
+        const auto original = original_unix_open0.load(std::memory_order_acquire);
+        const bool exceptional = live_startup_mode != LiveStartupMode::DiagnosticOnly && env->ExceptionCheck();
+#ifdef MAZEWALL_LIVE_JNI_TEST
+        if (!exceptional) mazewall::live::jni::test_observe_original();
+#endif
+        errno = entry_errno;
+        result = exceptional || original == nullptr ? -1 : original(env, owner, path, flags, mode);
+        original_errno = errno;
+    }
+    errno = original_errno;
+    return result;
 }
 
 jint JNICALL proxy_unix_openat0(JNIEnv* env, jclass owner, jint dirfd, jlong path, jint flags, jint mode) {
-    InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_openat0);
-    record_invocation_fd(invocation.published_invocation_id(), dirfd);
-    const auto original = original_unix_openat0.load(std::memory_order_acquire);
-    return original == nullptr ? -1 : original(env, owner, dirfd, path, flags, mode);
+    const mazewall::live::Arguments arguments{mazewall::live::ArgumentKind::Openat0, static_cast<uint64_t>(path),
+        static_cast<uint32_t>(flags), static_cast<uint32_t>(mode), static_cast<uint32_t>(dirfd)};
+    const int entry_errno = errno;
+    jint result;
+    int original_errno;
+    {
+        InvocationScope invocation(env, mazewall::profiler::BindingKind::unix_openat0, arguments);
+        record_invocation_fd(invocation.published_invocation_id(), dirfd);
+        const auto original = original_unix_openat0.load(std::memory_order_acquire);
+        const bool exceptional = live_startup_mode != LiveStartupMode::DiagnosticOnly && env->ExceptionCheck();
+#ifdef MAZEWALL_LIVE_JNI_TEST
+        if (!exceptional) mazewall::live::jni::test_observe_original();
+#endif
+        errno = entry_errno;
+        result = exceptional || original == nullptr ? -1 : original(env, owner, dirfd, path, flags, mode);
+        original_errno = errno;
+    }
+    errno = original_errno;
+    return result;
 }
 
 void JNICALL proxy_unix_close0(JNIEnv* env, jclass owner, jint fd) {
@@ -1349,7 +1519,7 @@ void JNICALL on_native_method_bind(
     jmethodID method,
     void* address,
     void** new_address) noexcept {
-    native_bind_count.fetch_add(1, std::memory_order_relaxed);
+    if (live_startup_mode != LiveStartupMode::Only) native_bind_count.fetch_add(1, std::memory_order_relaxed);
     if (env == nullptr || new_address == nullptr) return;
 
     char* name = nullptr;
@@ -1366,7 +1536,18 @@ void JNICALL on_native_method_bind(
     }
 
     const auto kind = mazewall::profiler::BindingManifest::classify(owner_descriptor, name, descriptor);
-    (void)replace_binding(kind, address, new_address);
+    if (live_startup_mode != LiveStartupMode::DiagnosticOnly) mazewall::live::jni::observe_helper_binding(env, owner, method);
+    const uint32_t selected = kind == mazewall::profiler::BindingKind::unix_open0 ? 1u :
+        kind == mazewall::profiler::BindingKind::unix_openat0 ? 2u : 0u;
+    if (selected && live_startup_mode != LiveStartupMode::DiagnosticOnly) {
+#ifdef MAZEWALL_MANAGED_T4_FIXTURE
+        std::fprintf(stderr, "MANAGED_T4_BIND_CALLBACK selected=%u address_present=%d\n", selected, address != nullptr);
+#endif
+        mazewall::live::jni::BindingUpdate update(env, jvmti, method, owner, selected);
+        (void)replace_binding(kind, address, new_address);
+    } else if (live_startup_mode != LiveStartupMode::Only) {
+        (void)replace_binding(kind, address, new_address);
+    }
 
     jvmti->Deallocate(reinterpret_cast<unsigned char*>(owner_descriptor));
     jvmti->Deallocate(reinterpret_cast<unsigned char*>(descriptor));
@@ -1376,7 +1557,7 @@ void JNICALL on_native_method_bind(
 
 void JNICALL on_class_file_load(
     jvmtiEnv*,
-    JNIEnv*,
+    JNIEnv* env,
     jclass class_being_redefined,
     jobject,
     const char*,
@@ -1385,6 +1566,10 @@ void JNICALL on_class_file_load(
     const unsigned char*,
     jint*,
     unsigned char**) noexcept {
+    if (class_being_redefined != nullptr && live_startup_mode != LiveStartupMode::DiagnosticOnly) {
+        mazewall::live::jni::observed_replacement(env, class_being_redefined);
+    }
+    if (live_startup_mode == LiveStartupMode::Only) return;
     // Initial class loading can close at ClassPrepare. A replacement callback
     // has no post-install completion signal, so it remains unproven and exact
     // captures fail closed until an explicit resynchronization boundary.
@@ -1394,6 +1579,7 @@ void JNICALL on_class_file_load(
 }
 
 void JNICALL on_class_prepare(jvmtiEnv* jvmti, JNIEnv* env, jthread, jclass klass) noexcept {
+    if (live_startup_mode == LiveStartupMode::Only) return;
     (void)symbolization_generation.complete_replacement();
     if (!callback_suppression_probe_enabled.load(std::memory_order_acquire) ||
         callback_suppression_probe_class.load(std::memory_order_acquire) != nullptr) {
@@ -1428,7 +1614,13 @@ void JNICALL on_class_prepare(jvmtiEnv* jvmti, JNIEnv* env, jthread, jclass klas
     }
 }
 
-void JNICALL on_vm_init(jvmtiEnv*, JNIEnv* env, jthread) noexcept {
+void JNICALL on_vm_init(jvmtiEnv* jvmti, JNIEnv* env, jthread) noexcept {
+    if (live_startup_mode != LiveStartupMode::DiagnosticOnly &&
+        (!live_hooks_ready.load() || !mazewall::live::jni::vm_init(env, jvmti))) {
+        env->FatalError("mazewall live startup: helper setup failed");
+        return;
+    }
+    if (live_startup_mode == LiveStartupMode::Only) return;
     if (capture_profile.is_full()) return;
     if (!validate_capture_profile(env)) {
         std::fprintf(stderr, "mazewall-stack-agent: capture profile validation failed after VM initialization\\n");
@@ -1437,14 +1629,40 @@ void JNICALL on_vm_init(jvmtiEnv*, JNIEnv* env, jthread) noexcept {
     capture_profile_admitted.store(true, std::memory_order_release);
 }
 
+void JNICALL on_live_method_entry(jvmtiEnv*, JNIEnv*, jthread, jmethodID method) noexcept {
+    mazewall::live::jni::method_entry(method);
+}
+
+void JNICALL on_live_thread_end(jvmtiEnv*, JNIEnv*, jthread) noexcept {
+    mazewall::live::jni::thread_end();
+    prepared_worker_execution = {};
+}
+
+void JNICALL on_live_vm_death(jvmtiEnv*, JNIEnv*) noexcept {
+    mazewall::live::shutdown();
+    // Helper pins remain owned through all callbacks until process termination.
+}
+
+
 bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
+    const bool live = live_startup_mode != LiveStartupMode::DiagnosticOnly;
     jvmtiCapabilities capabilities{};
     capabilities.can_generate_native_method_bind_events = 1;
     capabilities.can_tag_objects = 1;
     capabilities.can_support_virtual_threads = 1;
     capabilities.can_generate_all_class_hook_events = 1;
+    capabilities.can_retransform_classes = live;
+    capabilities.can_generate_method_entry_events = live;
     if (jvmti->AddCapabilities(&capabilities) != JVMTI_ERROR_NONE) {
         return false;
+    }
+
+    if (live) {
+        jvmtiCapabilities actual{};
+        if (jvmti->GetCapabilities(&actual) != JVMTI_ERROR_NONE ||
+            !actual.can_generate_native_method_bind_events || !actual.can_tag_objects ||
+            !actual.can_support_virtual_threads || !actual.can_generate_all_class_hook_events ||
+            !actual.can_retransform_classes || !actual.can_generate_method_entry_events) return false;
     }
 
     jvmtiEventCallbacks callbacks{};
@@ -1453,15 +1671,24 @@ bool configure_native_bind_events(jvmtiEnv* jvmti) noexcept {
     callbacks.ClassPrepare = on_class_prepare;
     callbacks.VMInit = on_vm_init;
     callbacks.VirtualThreadEnd = on_virtual_thread_end;
+    if (live) {
+        callbacks.MethodEntry = on_live_method_entry;
+        callbacks.ThreadEnd = on_live_thread_end;
+        callbacks.VMDeath = on_live_vm_death;
+    }
     if (jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
         return false;
     }
 
-    return jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, nullptr) == JVMTI_ERROR_NONE &&
+    const bool enabled = jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_INIT, nullptr) == JVMTI_ERROR_NONE &&
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr) == JVMTI_ERROR_NONE &&
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_NATIVE_METHOD_BIND, nullptr) == JVMTI_ERROR_NONE &&
         jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_PREPARE, nullptr) == JVMTI_ERROR_NONE &&
-        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VIRTUAL_THREAD_END, nullptr) == JVMTI_ERROR_NONE;
+        jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VIRTUAL_THREAD_END, nullptr) == JVMTI_ERROR_NONE &&
+        (!live || (jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_THREAD_END, nullptr) == JVMTI_ERROR_NONE &&
+                   jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_VM_DEATH, nullptr) == JVMTI_ERROR_NONE));
+    if (live && enabled) live_hooks_ready.store(true);
+    return enabled;
 }
 
 template<typename T>
@@ -1759,20 +1986,61 @@ void stop_live_publisher() noexcept {
     if (live_publisher.joinable()) live_publisher.join();
 }
 
-bool parse_options(const char* options) {
+bool select_live_options(const char* options, LiveStartupMode& selected_mode) {
+    if (options == nullptr || *options == '\0') return true;
+    std::string remaining(options);
+    // Validate live selection before diagnostic parsing can allocate output owners.
+    bool selected_live = false;
+    bool diagnostic_option = false;
+    bool boundary_option = false;
+    for (std::size_t begin = 0; begin <= remaining.size();) {
+        const auto end = remaining.find(',', begin);
+        const auto option = remaining.substr(begin, end == std::string::npos ? end : end - begin);
+        if (option.starts_with("live-stack=")) {
+            if (selected_live) return false;
+            selected_live = true;
+            if (option == "live-stack=only") selected_mode = LiveStartupMode::Only;
+            else if (option == "live-stack=shared") selected_mode = LiveStartupMode::Shared;
+            else return false;
+        } else {
+            diagnostic_option = true;
+            if (option.starts_with("test-open-boundary=")) boundary_option = true;
+        }
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    if (selected_live && (boundary_option || (selected_mode == LiveStartupMode::Only && diagnostic_option))) return false;
+    return true;
+}
+
+bool apply_options(const char* options) {
     if (options == nullptr || *options == '\0') return true;
     std::string remaining(options);
     bool selected_marker_version = false;
+    bool boundary_compatible = true;
+    bool boundary_session = false;
     std::size_t start = 0;
     while (start <= remaining.size()) {
         const auto end = remaining.find(',', start);
         const auto option = remaining.substr(start, end == std::string::npos ? end : end - start);
-        if (option.starts_with("definitions=")) {
+        if (!(option.starts_with("definitions=") || option.starts_with("capture-yield=") ||
+              option.starts_with("test-open-boundary=") || option.starts_with("session=") ||
+              option == "session-bound-definitions" || option == "mode=full-stream" ||
+              option == "marker-version=v1" || option == "stack-transport=dictionary")) boundary_compatible = false;
+        if (option == "live-stack=only" || option == "live-stack=shared") {
+            // Selected once, before diagnostic side effects above.
+        } else if (option.starts_with("definitions=")) {
             definitions_path = option.substr(std::strlen("definitions="));
             if (definitions_path.empty()) return false;
         } else if (option.starts_with("capture-yield=")) {
             capture_yield_path = option.substr(std::strlen("capture-yield="));
             if (capture_yield_path.empty()) return false;
+        } else if (option.starts_with("test-open-boundary=")) {
+            if (!open_boundary_path.empty()) return false;
+            open_boundary_path = option.substr(std::strlen("test-open-boundary="));
+            if (open_boundary_path.empty() || open_boundary_path.size() > 4095 ||
+                open_boundary_path.front() != '/' || open_boundary_path.back() == '/' ||
+                open_boundary_path.find('%') != std::string::npos) return false;
         } else if (option.starts_with("invocation-fd=")) {
             if (!invocation_fd_path.empty()) return false;
             invocation_fd_path = option.substr(std::strlen("invocation-fd="));
@@ -1803,6 +2071,8 @@ bool parse_options(const char* options) {
             callback_suppression_probe_gate_path = option.substr(std::strlen("callback-suppression-gate="));
             if (callback_suppression_probe_gate_path.empty()) return false;
         } else if (option.starts_with("session=")) {
+            const auto session_value = option.substr(std::strlen("session="));
+            boundary_session = !session_value.empty() && session_value.find_first_not_of("0123456789abcdefABCDEF") == std::string::npos;
             try {
                 const auto value = std::stoul(option.substr(std::strlen("session=")), nullptr, 16);
                 if (value == 0 || value > INT32_MAX) return false;
@@ -1864,6 +2134,11 @@ bool parse_options(const char* options) {
         start = end + 1;
     }
     if (capture_timing_diagnostic_enabled && !benchmark_phases) return false;
+    if (!open_boundary_path.empty() && (!boundary_compatible || !boundary_session ||
+        !session_bound_definitions.load(std::memory_order_acquire) || definitions_path.empty() ||
+        definitions_path.front() != '/' || capture_yield_path.empty() || capture_yield_path.front() != '/' ||
+        emission_mode != EmissionMode::full_stream || stack_transport != StackTransport::dictionary ||
+        marker_version_v2.load(std::memory_order_acquire))) return false;
     if (!definitions_path.empty()) {
         const auto replace = [](std::string& value, const std::string& needle, const std::string& replacement) {
             std::size_t position = 0;
@@ -1895,11 +2170,74 @@ bool parse_options(const char* options) {
     }
     if (!capture_profile.is_full() && !benchmark_phases) return false;
     if (!marker_version_proof_path.empty() && !session_bound_definitions.load(std::memory_order_acquire)) return false;
+    if (!open_boundary_path.empty()) {
+        try {
+            open_boundary_recorder = std::make_unique<mazewall::profiler::OpenBoundaryRecorder>(
+                mazewall::profiler::OpenBoundaryRecorder::production_capacity,
+                read_open_boundary_clock, read_open_boundary_tid, read_open_boundary_path);
+        } catch (...) {
+            return false;
+        }
+    }
     capture_profile_admitted.store(capture_profile.is_full(), std::memory_order_release);
     return true;
 }
 
+[[maybe_unused]] bool parse_options(const char* options) {
+    auto selected_mode = live_startup_mode;
+    if (!select_live_options(options, selected_mode)) return false;
+    live_startup_mode = selected_mode;
+    return apply_options(options);
+}
+
 } // namespace
+
+int mazewall::live::jni::startup_variant() noexcept {
+    if (!live_hooks_ready.load() || live_startup_mode == LiveStartupMode::DiagnosticOnly) return -1;
+    return live_startup_mode == LiveStartupMode::Only ? 0 : 1;
+}
+bool mazewall::live::jni::prepare_diagnostics(JNIEnv* env, jthread actual) noexcept {
+    if (live_startup_mode == LiveStartupMode::Only) return true;
+    const auto context = execution_context(env, actual);
+    if (env->ExceptionCheck() || !context.valid() || context.kind != ExecutionKind::platform) return false;
+    prepared_worker_execution = context;
+    return true;
+}
+void* mazewall::live::jni::original(uint32_t binding) noexcept {
+    if (binding == 1) return reinterpret_cast<void*>(original_unix_open0.load(std::memory_order_acquire));
+    if (binding == 2) return reinterpret_cast<void*>(original_unix_openat0.load(std::memory_order_acquire));
+    return nullptr;
+}
+#ifdef MAZEWALL_LIVE_JNI_TEST
+uint64_t mazewall::live::jni::test_acquisition_calls() noexcept { return test_acquisitions; }
+int mazewall::live::jni::test_invoke_open(JNIEnv* env, jclass owner, const char* path) noexcept {
+    const auto result = proxy_unix_open0(env, owner, reinterpret_cast<jlong>(path), 0, 0);
+    if (result >= 0 && ::close(result) < 0) {
+        const int close_error = errno; // The original's owned descriptor is never retried.
+        return -close_error;
+    }
+    return result;
+}
+int mazewall::live::jni::test_invoke_openat(JNIEnv* env, jclass owner, const char* path) noexcept {
+    const auto result = proxy_unix_openat0(env, owner, -100, reinterpret_cast<jlong>(path), 0, 0);
+    if (result >= 0 && ::close(result) < 0) {
+        const int close_error = errno; // The original's owned descriptor is never retried.
+        return -close_error;
+    }
+    return result;
+}
+namespace {
+UnixOpen0 test_real_open0 = nullptr;
+jint JNICALL test_substituted_open0(JNIEnv* env, jclass owner, jlong path, jint flags, jint mode) {
+    return test_real_open0(env, owner, path, flags, mode);
+}
+}
+void* mazewall::live::jni::substituted_original(uint32_t binding) noexcept {
+    if (binding != 1) return nullptr;
+    test_real_open0 = original_unix_open0.load(std::memory_order_acquire);
+    return reinterpret_cast<void*>(test_substituted_open0);
+}
+#endif
 
 extern "C" void mazewall_symbolization_replacement_begin() noexcept {
     cooperative_replacement = true;
@@ -1913,9 +2251,47 @@ extern "C" void mazewall_symbolization_replacement_end() noexcept {
 }
 
 extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*) {
-    if (vm == nullptr || !parse_options(options)) {
+    if (vm == nullptr) {
+        std::fprintf(stderr, "mazewall-stack-agent: load rejected invalid VM\n");
+        return JNI_ERR;
+    }
+
+    auto selected_mode = live_startup_mode;
+    if (!select_live_options(options, selected_mode)) {
         std::fprintf(stderr, "mazewall-stack-agent: load rejected invalid VM or options\\n");
         return JNI_ERR;
+    }
+    mazewall::profiler::integrity::StartupSnapshot snapshot;
+    mazewall::profiler::integrity::CaptureResult capture{mazewall::profiler::integrity::CaptureDisposition::Absent, 0};
+    if (selected_mode != LiveStartupMode::DiagnosticOnly) {
+        try {
+            capture = mazewall::profiler::integrity::capture_startup(snapshot);
+        } catch (...) {
+            std::fprintf(stderr, "mazewall-stack-agent: protected startup capture failed\n");
+            return JNI_ERR;
+        }
+        if (capture.disposition == mazewall::profiler::integrity::CaptureDisposition::Invalid) {
+            std::fprintf(stderr, "mazewall-stack-agent: protected startup binding rejected (%d)\n", capture.error);
+            return JNI_ERR;
+        }
+        if (capture.disposition == mazewall::profiler::integrity::CaptureDisposition::Ready
+                && selected_mode != LiveStartupMode::Only) {
+            std::fprintf(stderr, "mazewall-stack-agent: protected startup requires Only\n");
+            return JNI_ERR;
+        }
+    }
+    live_startup_mode = selected_mode;
+    if (!apply_options(options)) {
+        std::fprintf(stderr, "mazewall-stack-agent: load rejected invalid VM or options\\n");
+        return JNI_ERR;
+    }
+    if (capture.disposition == mazewall::profiler::integrity::CaptureDisposition::Ready) {
+        try {
+            mazewall::profiler::integrity::install_startup_snapshot(std::move(snapshot));
+        } catch (...) {
+            std::fprintf(stderr, "mazewall-stack-agent: protected startup capture failed\n");
+            return JNI_ERR;
+        }
     }
 
     jvmtiEnv* jvmti = nullptr;
@@ -1944,15 +2320,23 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM* vm, char* options, void*)
             return JNI_ERR;
         }
     }
-    start_live_publisher();
+    if (live_startup_mode != LiveStartupMode::Only) start_live_publisher();
     return JNI_OK;
 }
 
 extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
+    if (live_startup_mode != LiveStartupMode::DiagnosticOnly) mazewall::live::shutdown();
+    if (live_startup_mode == LiveStartupMode::Only) return;
     stop_live_publisher();
     const bool definitions_written = write_definitions(true);
     const bool capture_yield_written = write_capture_yield();
     const bool invocation_fd_written = write_invocation_fd();
+    if (open_boundary_recorder != nullptr) {
+        const bool written = open_boundary_recorder->write(open_boundary_path, session_tag, true);
+        const int write_errno = errno;
+        std::fprintf(stderr, "mazewall-stack-agent: open-boundary=%s errno=%d\n",
+                     written ? "written" : "failed", written ? 0 : write_errno);
+    }
     const char* const capture_yield_status = capture_yield_path.empty()
         ? "disabled"
         : (capture_yield_written ? "written" : "failed");
@@ -1966,7 +2350,7 @@ extern "C" JNIEXPORT void JNICALL Agent_OnUnload(JavaVM* vm) {
         static_cast<unsigned long long>(scope_failures.load(std::memory_order_relaxed)),
         definitions_written ? "written" : "failed",
         capture_yield_status,
-        static_cast<unsigned long long>(capture_yield_contention_drops.load(std::memory_order_relaxed)));
+        static_cast<unsigned long long>(capture_yield_recorder == nullptr ? 0 : capture_yield_recorder->dropped_count()));
     if (!invocation_fd_path.empty()) {
         std::fprintf(stderr, "mazewall-stack-agent: invocation-fd=%s invocation-fd-dropped=%llu\n",
             invocation_fd_written ? "written" : "failed",

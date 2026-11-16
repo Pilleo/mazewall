@@ -1,5 +1,6 @@
 package io.mazewall.profiler.tierE.daemon
 
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
 import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
@@ -10,6 +11,7 @@ import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class TierETargetRegistrationTest {
@@ -52,6 +54,65 @@ class TierETargetRegistrationTest {
         assertEquals(EvidenceIntegrity.INCOMPLETE, reports.single().evidenceIntegrity)
         assertEquals(false, reports.single().policyEligibility)
         assertEquals(false, reports.single().lifecycleValidity)
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `rejected registration retains ordinary and fatal real terminal publication failures without acquiring owner`() {
+        val target = TierERegisteredTarget("orders", 4242, 0x4d5a, 9876, Path.of("/agent.so"), 0x20, "orders.mzse")
+        for (observed in listOf<Long?>(null, 9877L)) {
+            for (preparation in listOf(false, true)) {
+                for (fatal in listOf(false, true)) {
+                    val directory = Files.createTempDirectory(root, "rejected-")
+                    val final = Files.writeString(directory.resolve("orders-19802.tier-e.json"), "prior evidence")
+                    val publicationFailure = if (fatal) LinkageError("fatal rejected terminal") else java.nio.file.AccessDeniedException("evidence", null, "EACCES")
+                    val access = TierEEvidenceFileAccess()
+                    val fileSink = TierETerminalReportFileSink(
+                        directory,
+                        prepareTemporary = { file -> if (preparation) throw publicationFailure else access.apply(file) },
+                        replaceTemporary = { _, _ -> throw publicationFailure },
+                    )
+                    var engines = 0
+                    var reports = 0
+                    val stopped = AtomicBoolean(false)
+                    val daemon = TierEDaemonService(
+                        stopRequested = stopped,
+                        engineFactory = {
+                            engines++
+                            error("stale registration must not acquire an engine")
+                        },
+                        artifactResolver = TierEDaemonArtifactResolver(root),
+                        registeredTargetResolver = TierETargetRegistrationResolver(mapOf("orders" to target)),
+                        processIdentityVerifier = TierEProcessIdentityVerifier { observed },
+                        terminalReportSink = TierETerminalReportSink {
+                            reports++
+                            assertEquals("STALE_PROCESS_IDENTITY", it.terminalReason)
+                            fileSink.accept(it)
+                        },
+                    )
+                    if (fatal) {
+                        assertSame(publicationFailure, assertFailsWith<LinkageError> { daemon.executeCommand("ATTACH 4242 uprobe /agent.so 20 4d5a") })
+                    } else {
+                        assertTrue(daemon.executeCommand("ATTACH 4242 uprobe /agent.so 20 4d5a").startsWith("ERR"))
+                    }
+                    assertTrue(daemon.executeCommand("STATUS").contains("FINALIZATION_FAILED"))
+                    val retained = assertFailsWith<Throwable> { daemon.shutdown() }
+                    assertSame(retained, assertFailsWith<Throwable> { daemon.shutdown() })
+                    if (fatal) {
+                        assertSame(publicationFailure, retained)
+                        assertTrue(retained.suppressed.single() is IllegalArgumentException)
+                    } else {
+                        assertTrue(retained is IllegalArgumentException)
+                        assertEquals(listOf(publicationFailure), retained.suppressed.toList())
+                    }
+                    assertEquals(0, engines)
+                    assertEquals(1, reports)
+                    assertTrue(stopped.get())
+                    assertEquals("prior evidence", Files.readString(final))
+                    assertEquals(1L, Files.list(directory).use { it.count() })
+                }
+            }
+        }
     }
 
     @Test

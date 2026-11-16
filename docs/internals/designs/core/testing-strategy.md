@@ -347,11 +347,11 @@ owned-Git fixtures and workflow-policy mutations. These checks also run in manda
 `verificationActionsTest`, whose inputs include the helper. The policy fixtures
 retain cache-identity/save/host-container regressions and reject serialized,
 skipped, unbounded or allowed-to-fail mutation lanes, missing diagnostics and
-unsafe required-check joins. They execute the extracted join shell command for
-all 625 core/mutation/security/build-logic combinations with Go fixed to success,
-then every Go and optional-integration result with the other prerequisites successful. Only six literal
-successes pass. Existing security125/legacy25 projections fix the extra results
-explicitly to success. Actual security metadata/eligibility/ownership/task shells,
+unsafe required-check joins. The 625-result projection varies core, mutation, security and build-logic outcomes
+with Go, optional integration and confined-helper results fixed to success. Separate
+controls vary Go, optional-integration and confined-helper results with the other
+prerequisites successful. The literal required join accepts only seven `success`
+results; these bounded projections are not an exhaustive seven-lane combination. Actual security metadata/eligibility/ownership/task shells,
 snapshot assertion and lifecycle conditions are exercised without scanner/network
 calls; simulated outcomes do not establish actual cache persistence. Cache identities are
 compatibility keys, not native protection attestations: cache isolation, ownership,
@@ -437,76 +437,35 @@ it neither substitutes container termination for a collector join nor extends an
 native or JVM deadline. The standalone comparison retains `docker run --rm` and
 signals its container by identity; it does not signal a saved numeric host PID.
 
-Security uses a caller-owned host `GRADLE_USER_HOME/dependency-check-data`, not the
-container's separate data mount. The security lane alone owns its data-only cache
-and retained snapshot artifacts; setup-gradle excludes that directory. Compatibility keys include OS, architecture
-and the actual catalog scanner version, with unique run-ID/attempt snapshots and
-only the compatible restore prefix. No previous matched key is overwritten, no
-cross-version/container fallback is allowed, and a cache hit never skips analysis.
-Dependency-Check 13.0.0's task data-directory property is explicitly bound to the
-configured extension directory, so update and analysis cannot silently use its
-separate default `11.0` directory. Old scanner/database versions are not migrated
-by copying their databases across compatibility prefixes.
+### Security snapshot trust and dependency analysis
 
-On a genuine cache miss (empty matched key, not the exact-hit boolean), the lane
-looks for the newest compatible, non-expired completed snapshot artifact. Artifacts
-are retained for 14 days outside the evictable build-cache quota. Default-branch
-consumers accept only same-repository default-branch push artifacts from this CI
-workflow; PRs may additionally consume their own PR's artifacts, never another PR's.
-Source run/repository/commit/attempt metadata and the exact compatibility prefix
-are checked. Overall workflow success is not required: a completed database remains
-usable when a later analysis or another job failed. Deleted-fork metadata is rejected.
-API/download errors are failures, not evidence that no snapshot exists.
+The security workflow separates NVD updates from mandatory analysis. The default-branch-only `security-data.yml` updater runs hourly or by manual dispatch and uses a non-cancelling publication group. It can use the security-data cache as an update seed, but a cache entry alone is never evidence of trust or freshness. Until a trusted updater artifact is available, only an eligible same-repository default-branch `push` artifact from the legacy CI workflow can serve as bootstrap; absence of a fresh qualifying snapshot keeps the required security check red.
 
-Snapshots contain a versioned compatibility manifest and SHA-256/size inventory of
-all database files, including hidden cache files. Preparation and restoration reject
-links, foreign ownership, non-regular files, missing/empty `odc.mv.db`, more than
-10,000 entries, more than 2 GiB of data or a manifest larger than 2 MiB. Restoration
-first requires the downloaded ZIP's SHA-256 to match GitHub's recorded artifact
-digest, before extraction; an internally consistent replacement manifest is not
-sufficient. Downloads are streamed and bounded by their recorded archive size,
-with missing/mismatched digests, truncation, unsafe ZIP paths and non-regular entries
-remaining blocking failures. Restoration checks the inventory before admitting data through an owned temporary directory;
-existing nonempty data is never overwritten. Snapshot age is not a freshness waiver:
-the normal updater must still succeed before real analysis. With neither a compatible
-cache nor retained artifact, the cold path seeds from Dependency-Check's
-[maintainer-published NVD feed](https://dependency-check.github.io/DependencyCheck_Builder/nvd_cache/cache.properties),
-then requires a separate live NVD API update with `nvd.api.check.validforhours=0`.
-The seed alone is never accepted as fresh security data. Warm updates retain the
-normal validity window. API requests use 500 records per page to bound response
-size; every page is still consumed, with no CVE filtering or retry-count increase.
+The updater forces a live NVD check with Dependency-Check 13.0.0's `validForHours=0` and 500 results per page. It rejects logs containing `Failed to process CVE-`, verifies caller ownership and the actual database, then prepares and uploads the immutable 14-day snapshot. Upload, cache save, and exact cache lookup assertions run only after successful update, ownership, and H2 verification; a failed, cancelled, or incomplete update never publishes a snapshot. The artifact carries its compatibility key and file inventory, and publication retains the existing size, SHA-256, bounded ZIP, ownership, path, and no-overwrite protections. A completed producing attempt may remain eligible when a later unrelated job fails because its artifact was already guarded by successful update and verification.
 
-The independent security job has a bounded 180-minute cold budget, including a
-150-minute `dependencyCheckUpdate` step covering both seed and forced live refresh
-when cold. This separates bootstrap from already successful native work; it is not
-a latency guarantee, and seed/API errors remain blocking.
-After a successful update, caller ownership is checked before explicit snapshot
-save and a separate retained-artifact upload. Artifact preparation/publication has
-its own success guard and nonempty artifact-ID assertion before analysis; persistence
-failures leave the lane red. Failed/cancelled updates and foreign ownership never publish a snapshot;
-there is no permission repair or partial-database resume assumption.
-An updater or analyzer that logs `Failed to process CVE-` is rejected even if
-Gradle exits successfully, including an implicit refresh at the validity-window
-boundary. Omitted records are not a completed database. This guards the known
-[NVD record-processing failure](../../backlog/issue-20260908-173331-804-investigate-dependency-check-nvd-record-processing.md)
-without suppressing CVEs or modifying upstream data.
+Consumers accept only artifacts from the same repository and default branch, produced by the explicitly identified updater on `schedule`/`workflow_dispatch` or by legacy CI on `push`. Selection checks workflow ID, event, branch, repository/head repository, commit, completed producing attempt, artifact/run/attempt identity, scanner/OS/architecture compatibility, expiry, size, and GitHub's archive digest. PR and fork artifacts are rejected. The mutable data cache is not a substitute for a trusted artifact, and neither cache age nor artifact upload time proves that NVD data is fresh. A PR-owned cache or artifact cannot establish a usable snapshot.
 
-Because cache/save may warn and exit successfully after upload failure, a supported
-lookup-only restore checks the identical new primary key/path without fallback,
-with fail-on-cache-miss. An explicit assertion also requires literal `cache-hit ==
-true`, rejecting false/unset/nonexact results even when unavailable cache features
-return without an action error. This proves membership only, not archive integrity,
-retention or successful future restoration. Missing/evicted/not-yet-visible data
-fails closed rather than invoking a retry or accepting warning-only upload success.
+Before analysis, `verifySecuritySnapshot` opens the configured Dependency-Check 13.0.0 H2 database using the scanner's existing driver, on the same configured data directory the plugin tasks use. The verifier uses an existing-file/read-only H2 connection; it does not create or modify the database. It rejects a noncanonical connection configuration, unsafe or symlinked paths, missing/empty database, foreign ownership, incompatible schema, absent or ambiguous metadata, or zero actual CVE rows. It requires schema 5.6 and parseable `nvd.api.last.checked` and `nvd.api.last.modified` timestamps, with `lastModified <= lastChecked <= now` and `now - lastChecked <= 4 hours`. Freshness comes from the database check timestamp, not archive age or file modification time. The timestamp and database checks do not replace the updater's successful forced refresh and CVE-omission guard.
 
-After successful update and ownership, `dependencyCheckAnalyze` runs even if save,
-lookup or assertion failed, unless cancelled. Persistence failures keep the job
-red; successful analysis cannot erase them. Failed update/ownership prevents data
-use/save/analysis. Existing CVSS 7 threshold, suppression/configuration/demo/OSSIndex
-selection, normal freshness checks and scanner errors remain unchanged. Missing or
-blank NVD credentials and docs-only changes retain the existing no-scan policy;
-an eligible-key flag or a green skipped job is not evidence of executed analysis.
-Always-scheduled ownership and diagnostics retain update/analysis logs and reports.
+The November 15 CI consumer verified the trusted snapshot and successfully ran the then-configured root-only `dependencyCheckAnalyze`; it did not cover the SDK modules. Scan mode now configures Dependency-Check 13.0.0 `dependencyCheckAnalyze` separately for seven owners: the root project, `:platform`, `:enforcer`, `:profiler`, `:portals:runtime`, `:portals:worker`, and `:portals:codegen`. The `:portals` base project has no scan of its own. A root `dependencyCheckSdk` join requires all seven owner scan tasks; CI separately requires their report files. Each report uses production `compileClasspath` and `runtimeClasspath` inputs; demos, `:integrations`, and `:tools` are excluded even when optional integrations are enabled.
+
+Apply Dependency-Check to child owners only in security scan mode so normal local plugin application and `dependencyCheckAnalyze` behavior remain unchanged. Run the seven scans serially with `--no-parallel --max-workers=1` and explicit task ordering. All use the same verified snapshot data directory; scan mode remains keyless and disables updates. Preserve the four-hour trusted-snapshot gate, scanner version, CVSS 7 threshold, `failOnError`, suppressions, required result, and failure/cancellation behavior. CI must separately require all seven report files in addition to the root join; the `dependencyCheckSdk` task does not itself guard report-file presence. The prior Dependency-Check Aggregate approach hit a Gradle 9.8.2 lock failure and is not the approved design.
+
+Focused local evidence: the Python snapshot/selector suite passed seven tests in GREEN001, including malformed and out-of-range producer-attempt metadata, pre-attempt trust bounds, and fail-closed handling of genuine GitHub API errors. The real Dependency-Check/H2 verifier and keyless task-wiring contract passed in GREEN003. Policy GREEN004 passed its 625-result projection, workflow-input invalidation, and required seven-report inventory; graph-init-free GREEN004 passed. The actual security functional fixture passed in GREEN005 in 1m58s, and independent Option A review 001 found no blocker. The Aggregate candidate hit a Gradle 9.8.2 lock failure, so the accepted design changed to per-owner Analyze reports plus a root join. Root ktlint passed in lint006 after a format-only correction. At this historical checkpoint, Full002 had been intentionally stopped and Full003 and successful required CI remained pending. No actual per-owner report contents were yet qualified. The earlier `nvd-decoupling001/full001` run was interrupted at exit 137; it is distinct from the successful `nvd-recovery002/full001` local gate recorded below.
+
+Trusted default-branch producer attempt 4 (run `41157097057`) published artifact `14176351241` with SHA-256 `48c7062ee51bdcf9304bdf03d27f0220804566ad227c175b2b0553a696acb0a0`; the database check time was `2026-11-15T19:06:34Z`. PR consumer run `43745079030`, Security Validation job `132924944835`, verified that snapshot and successfully ran the then-configured root-only `dependencyCheckAnalyze`. Its report contained only two root-project jars, so it is a successful root scan and not evidence of default SDK module coverage. Keep issue 021 open and track the module-coverage gap in issue 602. Earlier bootstrap attempts 2 and 3 failed with NVD HTTP 503; those failures had no scan result and do not negate the later successful attempt 4.
+
+In CI run `43757655617`, artifact `14176351241` passed snapshot verification at `2026-11-15T20:23:41Z`; root and `:platform` reports passed. The job then stopped before Enforcer analysis because strict verification lacked checksums for three POMs. This is missing metadata, not a checksum mismatch or CVE verdict; Enforcer and the remaining owners did not run. Offline owner diagnostics and online manifest review found six additional missing codegen POM entries (nine total, not 26); 20 existing POM hashes remain unchanged. The approved `gradle/verification-metadata.xml` update adds SHA-256 entries for nine existing components; canonical HTTPS POM bytes match the cache. Five have published SHA-256 sidecars; four Kotlin POMs lack them, and PGP signatures were not verified. No dependencies, versions, trust flags, thresholds, or suppressions changed. Full002 was intentionally stopped with its owner retired (PID 0, exit 1, logger 0) and source/index/HEAD unchanged at `3393ff684cc9b5319a3c0d82d880c2b49721f0b1`; it is not a full-gate pass. The offline POM-resolution preflight then passed all seven owner tasks with zero failures across 31 distinct module versions. This verifies dependency metadata, not vulnerability analysis. Full003 and successful required CI remain pending; no SDK-wide result is claimed.
+
+The `nvd-recovery002/full001` offline incremental Gradle build completed successfully in 1h 03m 02s at HEAD `7e66773e2f10131a533369009358c2ce318582cf`: 248 actionable tasks, 184 executed, 7 from cache, and 57 up-to-date. The runner retired with exit 0 and source/index/HEAD unchanged. This full local gate did not execute `dependencyCheckAnalyze`, `dependencyCheckAggregate`, or `verifySecuritySnapshot`; it is neither a live scan nor aggregate coverage qualification. It is distinct from the earlier `nvd-decoupling001/full001` run interrupted at exit 137.
+
+The run retained three profiler socket `Function not implemented` shutdown exceptions and three suppressed directory exceptions; issue 752 and individual profiler-child retirement remain unknown. A post-build user-preferences-directory IOException was recorded without inferring an additional consequence. At the time of Full003, fresh remote CI remained pending; the later root-only consumer scan succeeded as recorded above, while the seven per-owner reports and their CI file guard remain pending. Full003 report: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/ci-pr567-20261115-001/nvd-decoupling001/full-proposal003/report.md` (SHA-256 `bc075a2cb59de2a26593b353b9e3bef99ab8bdb1d8f05da7e4dd90b5636e40d5`).
+
+Current checkpoint (2026-11-16): Full003 passed on the earlier `b356c8e301da43e0114b0019f0233b767b7bfc2a` baseline; Full004 passed incrementally at `cd8a7fc2d149608bc509317be668f5a5a8a009b7`. CI run `43771830610`, Security job `132989220151`, had six owner analyses succeed before Codegen Yarn Audit failed with `YARN_PACKAGE_JSON_MISSING` and a `NoSuchFileException` naming only basename `package.json` in Yarn context. The later final-source consumer verified artifact `14184992294` against the archive digest and passed snapshot schema, positive-CVE-count, ordering, and four-hour predicates at `23:35:25Z`; exact H2 values were not emitted. Six owner analyses completed, then Codegen Yarn Audit failed at `23:36:23Z`; the Codegen report and seven-report guard were absent, so the mandatory SDK scan did not succeed. The one-run observer is removed, and its synthetic controls do not establish the full missing path or root cause.
+
+The user explicitly approved disabling Yarn Audit for `:portals:codegen` only. This disables Yarn Audit checks for all current and future Codegen Yarn inputs; other checks remain. JVM/dependency checks and analyzers for the other owners remain required. A Codegen Dependency-Check report without Yarn Audit does not establish complete Codegen dependencies or SDK-wide coverage; do not claim a complete SDK scan while this gap remains. Keep the existing four-hour trusted-snapshot limit, thresholds, failure propagation, and all other checks unchanged. Issue 225 remains OPEN to restore maintained Codegen Yarn coverage.
+
+Codegen scan follow-up (2026-11-16): a Dependency-Check report identifies `kotlin-reflect:2.1.21`, brought in through KotlinPoet 2.2.0, and maps it to CVE-2026-53914 using a broad CPE/CVSS match. Applicability to `kotlin-reflect` is unconfirmed; the related GHSA describes KGP versions below 2.4.20-Beta1 and a KAPT fix, not this artifact. The preferred scoped remediation is to align Codegen runtime reflection with the project Kotlin version; do not suppress the finding or claim the reflect artifact is confirmed vulnerable. See [issue 322](../../backlog/issue-20261116-002649-322-align-codegen-kotlin-reflection-runtime-with-proje.md). This does not establish complete SDK scan coverage.
 
 ### Optional integration feedback and diagnostics
 
@@ -558,8 +517,8 @@ collection. The workflow-policy regression rejects removal of failure-time uploa
 
 Both existing required check names remain: `Koog and Spring Integration Acceptance`
 and `Build, Test, Security Scan & Publish`. The latter is the `build-test-publish`
-join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations]`
-and `if: always()`; its shell requires all six results to equal `success`.
+join with `needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]`
+and `if: always()`; its shell requires all seven results to equal `success`.
 Failure, cancellation, skipping or a
 missing result cannot turn the join green. It forwards
 `core-quality.outputs.container_cache_hash` unchanged.
@@ -675,7 +634,7 @@ independent Gradle fixture.
 ## Optional global benchmarks
 
 `.github/workflows/benchmarks.yml` is a separate `workflow_dispatch`-only workflow,
-not a PR/push/scheduled trigger or a prerequisite of the six-lane required join or
+not a PR/push/scheduled trigger or a prerequisite of the seven-lane required join or
 publication. It runs the existing integration-boundary harness unchanged on
 Linux/JDK25. No performance threshold, comparison bot or new benchmark framework
 is added. See the [operator recipe and evidence inventory](../../../../benchmarks/integration-boundaries/README.md#optional-global-benchmark-job).
@@ -721,8 +680,12 @@ an unmatched explicit filter is not treated as successful execution.
 The shared isolated-process harness cleans up after successful parent exits as
 well as timeout, interruption and failure. It retains observed descendant handles,
 terminates descendants before the parent and reaps with bounded waits, preserving
-interruption and suppressed cleanup errors. Its process-tree observations cannot
-prove discovery of a child that forks and reparents entirely between observations;
+interruption and suppressed cleanup errors. Signals use the acquired process handle
+without closing its output pipes; consumer stream owners drain and close those
+pipes separately, including after timeout or interruption. A delayed-reader timeout
+regression verifies retained stdout/stderr and unrelated-process survival after
+physical retirement. Its process-tree observations cannot prove discovery of a
+child that forks and reparents entirely between observations;
 this is a cooperative test harness, not an arbitrary-process containment boundary.
 
 ## Build and evidence gates

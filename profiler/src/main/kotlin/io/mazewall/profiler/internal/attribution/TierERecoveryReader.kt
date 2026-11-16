@@ -34,12 +34,12 @@ internal class TierERecoveryReader(
         }
     }
 
-    /** Stop and join before the caller performs the exclusive final scan. */
-    fun stopAndJoin(timeoutMillis: Long = 1_000): Boolean {
+    /** Physical termination is independent of [failed]; only termination permits source retirement. */
+    fun stopAndJoin(timeoutMillis: Long = 1_000): TierERecoveryReaderTermination {
         stopped = true
         thread.interrupt()
         thread.join(timeoutMillis)
-        return !thread.isAlive && !failed
+        return if (thread.isAlive) TierERecoveryReaderTermination.STILL_RUNNING else TierERecoveryReaderTermination.TERMINATED
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -72,4 +72,9 @@ internal class TierERecoveryReader(
             failed = true
         }
     }
+}
+
+internal enum class TierERecoveryReaderTermination {
+    STILL_RUNNING,
+    TERMINATED,
 }

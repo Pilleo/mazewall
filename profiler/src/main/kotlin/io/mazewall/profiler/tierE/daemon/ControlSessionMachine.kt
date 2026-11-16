@@ -32,10 +32,12 @@ internal sealed interface ControlSessionEvent {
 
     public data class AttachSucceeded(
         public val session: AttachedSessionInfo,
+        public val command: ControlCommand.Attach,
     ) : ControlSessionEvent
 
     public data class AttachFailed(
         public val error: String,
+        public val command: ControlCommand.Attach,
     ) : ControlSessionEvent
 }
 
@@ -73,38 +75,51 @@ internal object ControlSessionMachine {
         state: ControlSessionState,
         event: ControlSessionEvent,
     ): ControlSessionTransition =
-        when (event) {
+        if (state == ControlSessionState.Terminated) {
+            ControlSessionTransition(state, ControlSessionEffect.SendReply(ControlReply.err("STATE")))
+        } else {
+            when (event) {
             is ControlSessionEvent.SyntaxError -> ControlSessionTransition(
                 state = state,
                 effect = ControlSessionEffect.SendReply(event.reply),
             )
 
-            is ControlSessionEvent.AttachSucceeded -> when (state) {
-                is ControlSessionState.Attaching,
-                ControlSessionState.Idle,
-                is ControlSessionState.Attached,
-                ControlSessionState.Terminated,
-                -> ControlSessionTransition(
+            is ControlSessionEvent.AttachSucceeded ->
+                if (state is ControlSessionState.Attaching &&
+                    state.command === event.command &&
+                    event.session.pid == event.command.pid &&
+                    event.session.sessionTag == event.command.sessionTag
+                ) {
+                    ControlSessionTransition(
                     state = ControlSessionState.Attached(event.session),
                     effect = ControlSessionEffect.SendReply(ControlReply.ok("attached pid=${event.session.pid}")),
                 )
-            }
+                } else {
+                    ControlSessionTransition(state, ControlSessionEffect.SendReply(ControlReply.err("STATE")))
+                }
 
-            is ControlSessionEvent.AttachFailed -> ControlSessionTransition(
+            is ControlSessionEvent.AttachFailed -> if (state is ControlSessionState.Attaching && state.command === event.command) {
+                ControlSessionTransition(
                 state = ControlSessionState.Idle,
                 effect = ControlSessionEffect.SendReply(ControlReply.err(event.error)),
             )
+            } else {
+                ControlSessionTransition(state, ControlSessionEffect.SendReply(ControlReply.err("STATE")))
+            }
 
             is ControlSessionEvent.CommandReceived -> handleCommand(state, event.command)
+        }
         }
 
     private fun handleCommand(
         state: ControlSessionState,
         command: ControlCommand,
     ): ControlSessionTransition =
-        if (state == ControlSessionState.Terminated) {
+        if (state == ControlSessionState.Terminated ||
+            (state is ControlSessionState.Attaching && command != ControlCommand.Shutdown && command != ControlCommand.Status)
+        ) {
             ControlSessionTransition(
-                state = ControlSessionState.Terminated,
+                state = state,
                 effect = ControlSessionEffect.SendReply(ControlReply.err("STATE")),
             )
         } else {

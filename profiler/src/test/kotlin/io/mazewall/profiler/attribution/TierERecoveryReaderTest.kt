@@ -10,6 +10,26 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class TierERecoveryReaderTest {
+    @Test
+    fun `failed scanner may be physically terminated without erasing failure`() {
+        val entered = CountDownLatch(1)
+        val reader = TierERecoveryReader(
+            CoverageRecoveryScanner(
+                RecoveryMapReader { _, _ ->
+                    entered.countDown()
+                    error("scan failed")
+                },
+            ),
+        )
+        reader.start()
+        assertTrue(entered.await(1, TimeUnit.SECONDS))
+
+        assertEquals(TierERecoveryReaderTermination.TERMINATED, reader.stopAndJoin())
+        assertTrue(reader.failed)
+        assertEquals(TierERecoveryReaderTermination.TERMINATED, reader.stopAndJoin())
+        assertTrue(reader.failed)
+    }
+
     private fun entry(stack: Long): RecoveryMapEntry {
         val key = ByteBuffer
             .allocate(24)
@@ -61,7 +81,7 @@ class TierERecoveryReaderTest {
             assertTrue(repeatedSweep.await(2, TimeUnit.SECONDS), "reader should attempt a later sweep")
             assertTrue(reader.takeReady().isEmpty(), "repeated sweeps must not requeue retained entries")
         } finally {
-            assertTrue(reader.stopAndJoin())
+            assertEquals(TierERecoveryReaderTermination.TERMINATED, reader.stopAndJoin())
         }
     }
 }

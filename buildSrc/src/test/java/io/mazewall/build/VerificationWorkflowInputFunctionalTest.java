@@ -30,6 +30,8 @@ public final class VerificationWorkflowInputFunctionalTest {
             Files.copy(repository.resolve("buildSrc/settings.gradle.kts"), project.resolve("settings.gradle.kts"));
             Files.createDirectories(fixture.resolve("gradle"));
             Files.copy(repository.resolve("gradle/libs.versions.toml"), fixture.resolve("gradle/libs.versions.toml"));
+            Path verificationMetadata = fixture.resolve("gradle/verification-metadata.xml");
+            Files.copy(repository.resolve("gradle/verification-metadata.xml"), verificationMetadata);
             String production = Files.readString(repository.resolve("buildSrc/build.gradle.kts"));
             int start = production.indexOf("val verificationActionsTest =");
             int end = production.indexOf("\ntasks.withType<JavaExec>()", start);
@@ -50,6 +52,11 @@ public final class VerificationWorkflowInputFunctionalTest {
             Files.createDirectories(workflow.getParent());
             String valid = Files.readString(repository.resolve(".github/workflows/ci.yml"));
             Files.writeString(workflow, valid);
+            Files.copy(repository.resolve(".github/workflows/security-data.yml"), fixture.resolve(".github/workflows/security-data.yml"));
+            Files.createDirectories(fixture.resolve("scripts"));
+            for (String name : new String[] {"security_snapshot.py", "test_security_snapshot.py"}) {
+                Files.copy(repository.resolve("scripts").resolve(name), fixture.resolve("scripts").resolve(name));
+            }
             Path helper = fixture.resolve("scripts/ci_cache_key.sh");
             Files.createDirectories(helper.getParent());
             Files.copy(repository.resolve("scripts/ci_cache_key.sh"), helper);
@@ -61,15 +68,25 @@ public final class VerificationWorkflowInputFunctionalTest {
             }
             if (!Files.isRegularFile(marker)) throw new AssertionError("Prime verifier did not publish its marker");
             outcome(TaskOutcome.UP_TO_DATE, runner(project).build().task(":verificationActionsTest").getOutcome());
+            Files.writeString(verificationMetadata, Files.readString(verificationMetadata) + "\n<!-- Metadata-only input invalidation control -->\n");
+            outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
+            for (Path input : new Path[] {fixture.resolve(".github/workflows/security-data.yml"),
+                fixture.resolve("scripts/security_snapshot.py"), fixture.resolve("scripts/test_security_snapshot.py")}) {
+                Files.writeString(input, Files.readString(input) + "\n# Input invalidation control\n");
+                outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
+                outcome(TaskOutcome.UP_TO_DATE, runner(project).build().task(":verificationActionsTest").getOutcome());
+            }
             Files.writeString(workflow, valid + "\n# Workflow-only input invalidation control\n");
             outcome(TaskOutcome.SUCCESS, runner(project).build().task(":verificationActionsTest").getOutcome());
-            Files.writeString(workflow, valid.replace("timeout-minutes: 180", "timeout-minutes: 90"));
+            String mutated = valid.replace("dependencyCheckSdk", "dependencyCheckAnalyze");
+            if (mutated.equals(valid)) throw new AssertionError("Security scan mutation did not change the workflow");
+            Files.writeString(workflow, mutated);
             var failed = runner(project).buildAndFail();
             outcome(TaskOutcome.FAILED, failed.task(":verificationActionsTest").getOutcome());
             if (!failed.getOutput().contains("Actual workflow must satisfy the completed-data policy") || Files.exists(marker)) {
                 throw new AssertionError("Invalid actual workflow must fail policy checks and remove the old success marker: " + failed.getOutput());
             }
-            System.out.println("Actual verifier DSL: prime SUCCESS, unchanged UP-TO-DATE, workflow-only edit SUCCESS, invalid workflow FAILED without stale marker: " + fixture);
+            System.out.println("Actual verifier DSL: prime SUCCESS, unchanged UP-TO-DATE, metadata-only and workflow-only edits SUCCESS, invalid workflow FAILED without stale marker: " + fixture);
         } catch (Exception failure) {
             throw new AssertionError("Actual verification workflow-input contract failed", failure);
         }

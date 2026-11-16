@@ -238,7 +238,20 @@ internal object SupervisorSocketUtils {
     }
 
     // Receipt validation owns every integer decoded from SCM_RIGHTS before any rejection path.
-    private fun <R : FileDescriptorRole> validateReceivedDescriptor(
+    internal fun rejectUnexpectedAncillary(
+        message: MsghdrSegment,
+        control: MemorySegment,
+        fileSystem: NativeFileSystem,
+    ) {
+        val length = message.getMsgControllen()
+        val truncated = message.getMsgFlags() and (NativeConstants.MSG_CTRUNC or NativeConstants.MSG_TRUNC) != 0
+        if (length == 0L && !truncated) return
+        val descriptors = decodeDescriptors(control, length, CmsghdrSegment(control))
+        closeRejectedDescriptors(descriptors, FileDescriptorRole.Generic, fileSystem)
+        throw java.io.IOException("Unexpected or truncated helper ancillary data")
+    }
+
+    internal fun <R : FileDescriptorRole> validateReceivedDescriptor(
         bytesReceived: Long,
         message: MsghdrSegment,
         control: MemorySegment,

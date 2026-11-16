@@ -523,6 +523,7 @@ class ProfilerDaemonTest {
             TestFileDescriptors
                 .adopt(number.toInt(), FileDescriptorRole.UnixSocket)
         }
+        val later = realNative.networking.socket(1, 1 or NativeConstants.SOCK_CLOEXEC, 0).getFdOrThrow("later caller socket", FileDescriptorRole.UnixSocket)
         var consumed = false
         var attempts = 0
         val native = MockNativeEngine(
@@ -536,11 +537,14 @@ class ProfilerDaemonTest {
             }
         },
         )
+        native.pollResult = LinuxNative.SyscallResult.Error(NativeConstants.EPERM, -1L)
         LinuxNative.setEngine(native)
         try {
             val daemon = ProfilerDaemonEngine("/tmp/production-cleanup-test.sock")
-            daemon.triggerGlobalShutdown("test")
             daemon.handleConnection(socket)
+            daemon.triggerGlobalShutdown("test")
+            daemon.handleConnection(later)
+            assertTrue(later.isLiveForIo(), "cutoff leaves the caller-owned socket open")
             val delegateField = ProfilerDaemonEngine::class.java.getDeclaredField("delegate").apply { isAccessible = true }
             val delegate = delegateField.get(daemon) as io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
             val outcome = org.junit.jupiter.api.Assertions.assertInstanceOf(
@@ -559,6 +563,7 @@ class ProfilerDaemonTest {
         } finally {
             LinuxNative.resetToDefault()
             if (!consumed) realNative.fileSystem.close(socket).getOrThrow("close unused profiler fixture")
+            if (later.isLiveForIo()) later.close(realNative.fileSystem)
         }
     }
 

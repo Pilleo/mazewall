@@ -40,7 +40,15 @@ must observe `closed` and refuse creation. A mid-wait interruption is restored
 after independently attempting sentinel cleanup. An unresolved controller
 retains evidence and only stops currently visible containers.
 
-## Migration sequence and qualification
+## Migration sequence and qualification (2026-09-25–26 historical snapshot)
+
+The ownership and results below describe the migration at that time, not
+current script paths or qualification of current source. For historical replay,
+the [retirement guide](tier-e-legacy-script-retirement-20260929.md#approved-historical-replay-policy)
+pins Node/Python commands to `07dcdb22` and later retired shell commands to
+`96789e51`. Current typed experiment tooling is described under
+[active ownership](#active-ownership); the installed operator deployment
+workflow is in the [split-privilege guide](tier-e-split-privilege-deployment.md#installed-operator-helper).
 
 - Short rootful JUnit fixture consumes the smoke JSON profile and exports its
   resolved configuration. Its scenario controller and declared parameters are
@@ -653,12 +661,12 @@ The installed CLI dispatches to the existing substantive Kotlin controllers:
   source revisions. The native code-section and Java workload class hashes
   matched; this is not a basis to rebaseline or to cherry-pick a later phase
   sample. A replacement gate requires explicit operator approval.
-  Profile-first shell launchers now select the checked-in trustworthy,
-  capacity and node-noise JSON without ambient experiment variables. A
+  In the historical profile-first migration, shell launchers selected the
+  checked-in trustworthy, capacity and node-noise JSON without ambient experiment variables. A
   prefixed legacy setting or explicit `--legacy-env` keeps historical env
   invocation available; an explicitly selected profile rejects conflicting
-  legacy settings rather than silently ignoring them. Rootful gate shell
-  startup also preserves the old explicit engine/image override. The new
+  legacy settings rather than silently ignoring them. Historical rootful gate
+  shell startup also preserved the old explicit engine/image override. The new
   `tierEEndpoint` Gradle property is a machine-local socket override; the
   native build task derives its image from the same selected profile and
   rejects conflicting image overrides. Selected CPUs must belong to the
@@ -679,11 +687,12 @@ The installed CLI dispatches to the existing substantive Kotlin controllers:
   `scripts/`. The standalone perf-window leaf analysis has no active Kotlin
   equivalent; reintroducing it would require a focused tested Kotlin command.
 
-The additional active native release/flavour, transport comparison, phase gate,
-ring decoder/mapped-drain, and focused/delivery checks scripts now launch Kotlin
-controllers. `TierEActiveEntrypointPolicyTest` inventories active `run_tier_e_*`,
+In the historical migration, additional native release/flavour, transport
+comparison, phase gate, ring decoder/mapped-drain, and focused/delivery checks
+scripts launched Kotlin controllers. At that time, `TierEActiveEntrypointPolicyTest`
+inventoried active `run_tier_e_*`,
 `build_tier_e_*`, `compare_tier_e_*`, and `check_tier_e_*` scripts, excluding only
-the explicit legacy fixture replay, and rejects a return to Node, Python, jq,
+the explicit legacy fixture replay, and rejected a return to Node, Python, jq,
 CTest, engine CLI commands, or shell matrix loops in active launchers. Native
 phase medians still use the historical 125% baseline bound; the current host
 phase test rejected a measured regression, which is retained as a failed gate

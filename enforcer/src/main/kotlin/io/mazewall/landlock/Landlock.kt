@@ -708,35 +708,38 @@ internal object Landlock {
         return mapCreateRuleset(res)
     }
 
-    private fun mapCreateRuleset(res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>): LandlockFdOutcome {
-        return when (res) {
-            is LinuxNative.SyscallResult.Success ->
-                LandlockFdOutcome.Ok(res.getFdOrThrow("create ruleset", FileDescriptorRole.Ruleset))
-            is LinuxNative.SyscallResult.Error -> LandlockFdOutcome.Err(res.errno, res.rawValue)
-        }
-    }
+    private val noAfterTypedStore: () -> Unit = {}
 
-    private fun throwCreateRuleset(errno: Int): Nothing {
-        if (errno == NativeConstants.ENOSYS ||
-            errno == NativeConstants.EOPNOTSUPP ||
-            errno == NativeConstants.ENOPKG
-        ) {
-            val errnoName = when (errno) {
-                NativeConstants.ENOSYS -> "ENOSYS"
-                NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
-                NativeConstants.ENOPKG -> "ENOPKG"
-                else -> "UNKNOWN"
-            }
-            throw UnsupportedKernelFeatureException(
-                "landlock_create_ruleset failed with $errnoName. " +
-                    "Landlock is not supported or enabled on this system. " +
-                    "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
-                    "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor').",
-            )
-        }
-        LinuxNative.SyscallResult
-            .Error<LinuxNative.SyscallHandledState.Unhandled>(errno, -1L)
-            .throwErrno("landlock_create_ruleset")
+    context(arena: NativeArena) internal fun tryCreateRulesetRetained(
+        accessMaskFs: Long,
+        accessMaskNet: Long,
+        abi: Int,
+        retained: PreparedLandlock,
+    ): LandlockFdOutcome = tryCreateRulesetRetainedWithPostStore(accessMaskFs, accessMaskNet, abi, retained, noAfterTypedStore)
+
+    context(arena: NativeArena) internal fun tryCreateRulesetRetainedWithPostStore(
+        accessMaskFs: Long,
+        accessMaskNet: Long,
+        abi: Int,
+        retained: PreparedLandlock,
+        afterTypedStore: () -> Unit,
+    ): LandlockFdOutcome {
+        val native = retained.requireAcquisitionReady()
+        val rulesetAttr = LandlockRulesetAttrSegment.allocate()
+        rulesetAttr.setHandledAccessFs(accessMaskFs)
+        rulesetAttr.setHandledAccessNet(accessMaskNet)
+        rulesetAttr.setScoped(0L)
+        val size = rulesetAttrSize(abi)
+        val res = native.raw.syscall(
+            NativeConstants.LANDLOCK_CREATE_RULESET_NR,
+            io.mazewall.platform.syscall.NativeArg
+                .MemoryArg(rulesetAttr.managed),
+            io.mazewall.platform.syscall.NativeArg
+                .LongArg(size),
+            io.mazewall.platform.syscall.NativeArg
+                .MemoryArg(ManagedSegment.NULL),
+        )
+        return retained.mapRetainedAcquisition(res, afterTypedStore)
     }
 
     context(arena: NativeArena) internal fun addRuleToRuleset(
@@ -783,4 +786,35 @@ internal object Landlock {
             }
         }
     }
+}
+
+private fun mapCreateRuleset(res: LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled>): LandlockFdOutcome {
+    return when (res) {
+        is LinuxNative.SyscallResult.Success ->
+            LandlockFdOutcome.Ok(res.getFdOrThrow("create ruleset", FileDescriptorRole.Ruleset))
+        is LinuxNative.SyscallResult.Error -> LandlockFdOutcome.Err(res.errno, res.rawValue)
+    }
+}
+
+private fun throwCreateRuleset(errno: Int): Nothing {
+    if (errno == NativeConstants.ENOSYS ||
+        errno == NativeConstants.EOPNOTSUPP ||
+        errno == NativeConstants.ENOPKG
+    ) {
+        val errnoName = when (errno) {
+            NativeConstants.ENOSYS -> "ENOSYS"
+            NativeConstants.EOPNOTSUPP -> "EOPNOTSUPP"
+            NativeConstants.ENOPKG -> "ENOPKG"
+            else -> "UNKNOWN"
+        }
+        throw UnsupportedKernelFeatureException(
+            "landlock_create_ruleset failed with $errnoName. " +
+                "Landlock is not supported or enabled on this system. " +
+                "Landlock requires Linux kernel 5.13+ and must be enabled via the 'landlock' LSM " +
+                "(check /sys/kernel/security/lsm or the kernel boot parameters, e.g., 'lsm=landlock,capability,yama,apparmor').",
+        )
+    }
+    LinuxNative.SyscallResult
+        .Error<LinuxNative.SyscallHandledState.Unhandled>(errno, -1L)
+        .throwErrno("landlock_create_ruleset")
 }

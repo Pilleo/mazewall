@@ -163,55 +163,57 @@ public final class NativeJdbcConsumer {
         Class<?> foreignClass = Class.forName("consumer.spring.ForeignJdbcOperation");
         check(!foreignClass.getProtectionDomain().getCodeSource().getLocation().equals(
                 JdbcOperation.class.getProtectionDomain().getCodeSource().getLocation()), "Actual second implementation origin required");
-        var resources = PreparedOperationResources.resolve(PROFILE, policy, implementation, Set.of(jar, root.resolve("template.txt")));
-        try (resources) { // Resolution/review/binding failures must close unconsumed acquisitions as well.
-        if (args[0].equals("measure") || args[0].equals("measure-security")) {
-            try (resources) {
-                var binding = binding(resources.getImplementationSha256(), resources.getResourceGeneration(), implementation, "operation");
-                var candidate = new OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(PROFILE, policy), Set.of(), Map.of());
-                Files.writeString(root.resolve("candidate.json"), candidate.toJson());
-                Files.writeString(root.resolve("candidate-generation.txt"), resources.getResourceGeneration());
-                var other = new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration(),
-                        OtherOperation.class, "other"), candidate.getPolicy(), Set.of(), Map.of());
-                Files.writeString(root.resolve("other-candidate.json"), other.toJson());
-                var foreign = new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration(),
-                        foreignClass, "foreign"), candidate.getPolicy(), Set.of(), Map.of());
-                Files.writeString(root.resolve("foreign-candidate.json"), foreign.toJson());
-                var stale = new OperationPolicyDocument(binding("0".repeat(64), resources.getResourceGeneration(),
-                        implementation, "operation"), candidate.getPolicy(), Set.of(), Map.of());
-                Files.writeString(root.resolve("stale-candidate.json"), stale.toJson());
-                var wrongMember = new OperationPolicyDocument(wrongMemberBinding(resources.getImplementationSha256(),
-                        resources.getResourceGeneration(), implementation), candidate.getPolicy(), Set.of(), Map.of());
-                Files.writeString(root.resolve("wrong-member-candidate.json"), wrongMember.toJson());
-                System.out.println("MEASURED_CANDIDATE_ONLY jar=" + resources.getImplementationSha256()
-                        + " generation=" + resources.getResourceGeneration());
+        try (var owner = PreparedResolutionOwner.create()) {
+            var resources = owner.resolve(PROFILE, policy, implementation, Set.of(jar, root.resolve("template.txt")));
+            try (resources) { // Resolution/review/binding failures must close unconsumed acquisitions as well.
+            if (args[0].equals("measure") || args[0].equals("measure-security")) {
+                try (resources) {
+                    var binding = binding(resources.getImplementationSha256(), resources.getResourceGeneration(), implementation, "operation");
+                    var candidate = new OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(PROFILE, policy), Set.of(), Map.of());
+                    Files.writeString(root.resolve("candidate.json"), candidate.toJson());
+                    Files.writeString(root.resolve("candidate-generation.txt"), resources.getResourceGeneration());
+                    var other = new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration(),
+                            OtherOperation.class, "other"), candidate.getPolicy(), Set.of(), Map.of());
+                    Files.writeString(root.resolve("other-candidate.json"), other.toJson());
+                    var foreign = new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration(),
+                            foreignClass, "foreign"), candidate.getPolicy(), Set.of(), Map.of());
+                    Files.writeString(root.resolve("foreign-candidate.json"), foreign.toJson());
+                    var stale = new OperationPolicyDocument(binding("0".repeat(64), resources.getResourceGeneration(),
+                            implementation, "operation"), candidate.getPolicy(), Set.of(), Map.of());
+                    Files.writeString(root.resolve("stale-candidate.json"), stale.toJson());
+                    var wrongMember = new OperationPolicyDocument(wrongMemberBinding(resources.getImplementationSha256(),
+                            resources.getResourceGeneration(), implementation), candidate.getPolicy(), Set.of(), Map.of());
+                    Files.writeString(root.resolve("wrong-member-candidate.json"), wrongMember.toJson());
+                    System.out.println("MEASURED_CANDIDATE_ONLY jar=" + resources.getImplementationSha256()
+                            + " generation=" + resources.getResourceGeneration());
+                }
+                return;
             }
-            return;
-        }
-        check(args[0].equals("verify") || args[0].equals("verify-security"), "Unsupported fixture mode");
-        Properties authority = new Properties();
-        try (var input = Files.newInputStream(root.resolve("trusted-review.properties"))) { authority.load(input); }
-        String json = Files.readString(root.resolve("candidate.json"));
-        var expected = binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), implementation, "operation");
-        var review = new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("documentSha256"), Set.of());
-        var artifact = ReviewedOperationArtifact.load(json, review, expected);
-        check(!resources.getImplementationSha256().equals(SpringOperationBinder.classResourceSha256(implementation)),
-                "Finished JAR hash must not be substituted with selected class hash");
-        check(resources.getImplementationSha256().equals(authority.getProperty("jarSha256")), "External finished JAR expectation");
-        var otherReview = new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("otherDocumentSha256"), Set.of());
-        var otherArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("other-candidate.json")), otherReview,
-                binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), OtherOperation.class, "other"));
-        var foreignArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("foreign-candidate.json")),
-                new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("foreignDocumentSha256"), Set.of()),
-                binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), foreignClass, "foreign"));
-        var staleArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("stale-candidate.json")),
-                new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("staleDocumentSha256"), Set.of()),
-                binding("0".repeat(64), authority.getProperty("resourceGeneration"), implementation, "operation"));
-        var wrongMemberArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("wrong-member-candidate.json")),
-                new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("wrongMemberDocumentSha256"), Set.of()),
-                wrongMemberBinding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), implementation));
-        verify(root, resources, artifact, otherArtifact, foreignArtifact, foreignClass, security);
-        verifyUnusedAndFailedOwnerCleanup(policy, Set.of(jar, root.resolve("template.txt")), artifact, staleArtifact, wrongMemberArtifact, implementation);
+            check(args[0].equals("verify") || args[0].equals("verify-security"), "Unsupported fixture mode");
+            Properties authority = new Properties();
+            try (var input = Files.newInputStream(root.resolve("trusted-review.properties"))) { authority.load(input); }
+            String json = Files.readString(root.resolve("candidate.json"));
+            var expected = binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), implementation, "operation");
+            var review = new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("documentSha256"), Set.of());
+            var artifact = ReviewedOperationArtifact.load(json, review, expected);
+            check(!resources.getImplementationSha256().equals(SpringOperationBinder.classResourceSha256(implementation)),
+                    "Finished JAR hash must not be substituted with selected class hash");
+            check(resources.getImplementationSha256().equals(authority.getProperty("jarSha256")), "External finished JAR expectation");
+            var otherReview = new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("otherDocumentSha256"), Set.of());
+            var otherArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("other-candidate.json")), otherReview,
+                    binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), OtherOperation.class, "other"));
+            var foreignArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("foreign-candidate.json")),
+                    new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("foreignDocumentSha256"), Set.of()),
+                    binding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), foreignClass, "foreign"));
+            var staleArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("stale-candidate.json")),
+                    new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("staleDocumentSha256"), Set.of()),
+                    binding("0".repeat(64), authority.getProperty("resourceGeneration"), implementation, "operation"));
+            var wrongMemberArtifact = ReviewedOperationArtifact.load(Files.readString(root.resolve("wrong-member-candidate.json")),
+                    new TrustedPolicyReview(authority.getProperty("reviewer"), authority.getProperty("wrongMemberDocumentSha256"), Set.of()),
+                    wrongMemberBinding(authority.getProperty("jarSha256"), authority.getProperty("resourceGeneration"), implementation));
+            verify(root, resources, artifact, otherArtifact, foreignArtifact, foreignClass, security);
+            verifyUnusedAndFailedOwnerCleanup(policy, Set.of(jar, root.resolve("template.txt")), artifact, staleArtifact, wrongMemberArtifact, implementation);
+            }
         }
     }
 

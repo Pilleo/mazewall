@@ -1,0 +1,43 @@
+# B5 packaged-helper qualification — bounded private flow, 2026-11-14
+
+## Accepted scope
+
+Root accepted **ACCEPT_BOUNDED_PACKAGED_HELPER_FLOW_WITH_PRIVATE_CUSTODY_PREMISE** after the full-gate and case audit. This records one private controlled flow through the genuine packaged helper and original owner. It does not establish production custody, general support cold-file closure, public/native Live activation, B6, or overall B5 completion. Existing issue 842 remains open and its Needed entries remain unchanged.
+
+## Case 005 flow and boundary
+
+The [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-packaged-helper-private-flow) records status `BOUNDED_PRIVATE_EXPERIMENT`, with the first and later acquisition results both `UNKNOWN_WITH_ORIGINAL_B6_HISTORY`, helper PID 52/start ticks 234333236, no-Begin as `SOURCE_CONTROL_FLOW_INFERENCE_NOT_NATIVE_COUNTER`, support closure `NOT_ESTABLISHED`, and custody `TRUSTED_HOST_PREMISE_NOT_PRODUCTION`. The retained [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-packaged-helper-private-flow), [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-packaged-helper-private-flow), and [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-packaged-helper-private-flow) retain the source records. The exact input/runner manifest is SHA-256 `654efc3666bca4199a1c76912edef1722a6658992d9cc1079c8315e718efe1e3`. The child recorded original daemon PID 28/start 234333155 and helper PID 52/start 234333236. The owned child was PID 9/start 234332008 under the recorded proc/PID-namespace view.
+
+The parent measured a 30-role cohort and checked mappings for 22 expected roles using map-file descriptors. The finite private support set had 45 entries, including the independently measured exact `classes.jsa` file SHA-256 `4fadb72485174b6d8c094ad3b77fcb9daa9f7484265b269a84e0d9945cbbd6e3`. That observation does not establish general helper cold-read closure. The private NoWriters trusted-host premise applied from the post-fixture custody epoch through helper/pin retirement; it is not production custody. The helper's default five-second startup setting was used. JSA measurement did not change default CDS settings or JVM capabilities.
+
+The flow reached the original producer's Ready, executed Register, was refused at the unconditional B6 gate, and subsequently retired the exact worker/session and native owner. One original helper stop was attempted; the original PID/start was observed physically gone using the original proc view. The first and later acquisition outcomes remain Unknown with the original B6 history; helper stop/exit evidence does not convert acquisition to Complete. Ready with no Begin is a source/control-flow inference, not a native event counter. There was no forced cleanup, PID-derived kill, or synthetic helper handle.
+
+The selected production DSO SHA-256 `85065351f172b9059871321f544bdf1f96040ff45dfbaa8da42b77702caffc48` came from current-source build006 and is byte-identical to the earlier retained DSO; its export inventory is nine strong plus 918 existing other exports, with no new export names. The managed fixture JAR SHA-256 is `925575673722564cafd6edc8beaa6fa17c1c6883fffdf014ecb6be2a870777d8`; all three packaged bridge class entries match the JAR bytes. Four production files remain byte-identical to the accepted D4 source checkpoint; the source and index comparisons for this attempt matched.
+
+## Preserved failure history
+
+Private001 failed before VM initialization on an unsupported extra JVM `-D` argument (D-profile EINVAL). Private002 failed before owner start because the managed-fixture alias lacked `.jar`. Private003 withheld the parent handoff after a raw maps device mismatch; the numeric mismatch was not retained, so its cause is not established. Private004 reached actual helper SETUP and failed closed with `RuntimeClosure` for `classes.jsa`; it did not establish Ready. A separate self-mmap observation recorded raw maps device `0:34` versus FD/map_files `0:50` for the same inode, and an actual map-FD check matched. This supported the parent fix but does not retroactively prove private003's cause. The exact JSA file is measured as above; no default JVM setting was changed. The preserved [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-packaged-helper-private-flow) distinguishes these attempts and their evidence limits; they remain separate historical outcomes.
+
+## Focused and full quality evidence
+
+The bounded quality001 run covered 16 ordinary cases with zero skips/failures; test lint/analysis and compile executed, while aggregate tasks and the fixture JAR were up-to-date. Three opt-in T4 cases remained excluded. Full gate attempt `b5-packaged-helper-full-gate-proposal001` completed in 34m31s: 248 tasks (63 executed, 185 up-to-date), 694 XML files, 4,759 tests, 45 skips, zero failures/errors, 19 outer test tasks, and 91 fresh child executions (identity/freshness only, not per-case probe proof). Enforcer unit coverage was 84,947/103,570; combined coverage was 85,384/103,570. Source/index matched, HEAD remained `81b37a3f`, index was empty, physical retirement passed, and 16,598 retained rows were verified.
+
+Enforcer/platform Kotlin ABI checks executed. Main Detekt/SpotBugs were up-to-date, backed by actual clean D4 unit evidence on the same production bytes; legacy ABI002 is a separate same-byte check, not a claim that the legacy ABI task ran in this full gate. The 15-second override applied only to the owning FreshJvm worker; the default five seconds remains the default, and global propagation/reliability is unqualified. The 45 skips remain unqualified.
+
+The [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-packaged-helper-private-flow) and [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b5-packaged-helper-private-flow) are retained. Issue 752 remains Unknown: the full log contains three primary `profiler.sock` and three suppressed directory `FileSystemException: Function not implemented` pairs at lines 21346/21367, 21461/21482, and 21509/21530. These do not establish a causal link to the helper flow.
+
+## Remaining qualification
+
+The measured private flow does not supply final production JAR/DSO/loader identities, a production support closure, named production custodian, or production no-writer interval. It does not qualify protected-native/public activation or B6. Keep B6 closed, preserve issue 842 Needed entries, and retain the older `MODE_UNLAUNCHED` and 49-historical-candidate statements as dated limits of earlier checkpoints.
+
+
+### Workspace-only receipt provenance
+
+The following local ignored artifacts are retained as plain-text provenance; these paths are not portable links. Their bytes were present in this workspace at handoff preparation time.
+
+- case-005 receipt: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-packaged-helper-private-run005/private-case-receipt.json`; SHA-256 `e26fe7ecfdd5987ccae235beee99dc9b3f135679f57c3d9dff10018aeee7413d`.
+- child log: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-packaged-helper-private-run005/child.log`; SHA-256 `ab54af974b32af346f905cd870d10c2dd42a33edcf1cc1e0ebcd5b095cc74108`.
+- parent observation: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-packaged-helper-private-run005/parent-observation.json`; SHA-256 `c7de1f200df09a78a58f110d9116b8e310cfedc2c1663af5d37b3765b574b481`.
+- case-005 proposal and attempt history: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b5-packaged-helper-private-case-proposal-20261114-005.md`; SHA-256 `9a08f7ec5ce9981eaf9a8f55b6f5a42212f5f92c8c86c1110bb759b824ce9da5`.
+- quality001 receipt: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-manager-retirement-preparation/confined-handoff-step2-001/b5-packaged-helper-quality-proposal001/green-receipt.json`; SHA-256 `88999f362bde2fffebae43f641dfb032671a88f3a1079c2b573e3e64539967d4`.
+- full-gate XML receipt: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-manager-retirement-preparation/confined-handoff-step2-001/b5-packaged-helper-full-gate-proposal001/xml-copied.sha256`; SHA-256 `454402e7e1e659b1f1a6d0397196bec159518024b30018589b4ec19069d7b283`.

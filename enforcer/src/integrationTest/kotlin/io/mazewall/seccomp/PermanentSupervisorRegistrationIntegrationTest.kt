@@ -31,8 +31,7 @@ class PermanentSupervisorRegistrationIntegrationTest : BaseIntegrationTest() {
         val file = Files.createTempFile("permanent-supervisor-", ".txt").toFile()
         file.writeText("registered")
         val calls = AtomicInteger()
-        val scoping = object : StacktraceScopingPolicy {
-            override val handlers = mapOf<Syscall, ScopingHandler>(
+        val handlers = mutableMapOf<Syscall, ScopingHandler>(
                 Syscall.OPENAT to { _, args, _ ->
                     if (args.any { it.toString().contains(file.name) }) calls.incrementAndGet()
                     true
@@ -42,6 +41,8 @@ class PermanentSupervisorRegistrationIntegrationTest : BaseIntegrationTest() {
                     true
                 },
             )
+        val scoping = object : StacktraceScopingPolicy {
+            override val handlers: Map<Syscall, ScopingHandler> = handlers
         }
         val policy = ProcessPolicyBuilder.denyList(RuntimeProfile.NATIVE_IMAGE).allowMmapExec().build()
         try {
@@ -71,6 +72,49 @@ class PermanentSupervisorRegistrationIntegrationTest : BaseIntegrationTest() {
                 }.get(10, TimeUnit.SECONDS)
                 assertEquals(1, depth, "sequential and nested task leases must not stack filters")
                 assertTrue(calls.get() >= 3, "all target accesses must reach the registered scoping handler")
+                val originalOpen = handlers.getValue(Syscall.OPEN)
+                val originalOpenAt = handlers.getValue(Syscall.OPENAT)
+                handlers.remove(Syscall.OPEN)
+                val missing = assertFailsWith<java.util.concurrent.ExecutionException> {
+                    raw
+                        .submit {
+                            io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+                                .acquireTaskSession(scoping)
+                                .close()
+                        }.get(10, TimeUnit.SECONDS)
+                }
+                assertTrue(
+                    missing.cause
+                        ?.message
+                        .orEmpty()
+                        .contains("Cannot replace the scoping policy"),
+                )
+                handlers[Syscall.OPEN] = { _, _, _ -> false }
+                val changed = assertFailsWith<java.util.concurrent.ExecutionException> {
+                    raw
+                        .submit {
+                            io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+                                .acquireTaskSession(scoping)
+                                .close()
+                        }.get(10, TimeUnit.SECONDS)
+                }
+                assertTrue(
+                    changed.cause
+                        ?.message
+                        .orEmpty()
+                        .contains("Cannot replace the scoping policy"),
+                )
+                handlers[Syscall.OPEN] = originalOpen
+                assertTrue(handlers[Syscall.OPENAT] === originalOpenAt)
+                raw
+                    .submit {
+                        io.mazewall.enforcer.internal.supervisor.SupervisorInstaller
+                            .acquireTaskSession(scoping)
+                            .close()
+                    }.get(10, TimeUnit.SECONDS)
+                val callsBefore = calls.get()
+                assertEquals("registered", raw.submit<String> { file.readText() }.get(10, TimeUnit.SECONDS))
+                assertTrue(calls.get() > callsBefore, "first immutable dispatch must remain active")
                 val other = object : StacktraceScopingPolicy {
                     override val handlers = scoping.handlers
                 }

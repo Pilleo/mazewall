@@ -1,6 +1,5 @@
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.RegularFileProperty
-import org.gradle.api.provider.Property
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.TaskAction
@@ -240,6 +239,20 @@ sourceSets {
     }
 }
 
+tasks.named<ProcessResources>("processTestResources") {
+    from(rootProject.file("profiler-native/tests/TierEAllTargetWorkload.java")) { into("tierE") }
+}
+
+tasks.register<JavaExec>("tierEA4Replay") {
+    group = "verification"
+    description = "Read-only A4 retained data-plane replay; never runtime qualification"
+    dependsOn("testClasses")
+    classpath = sourceSets.test.get().runtimeClasspath
+    mainClass.set("io.mazewall.profiler.testing.tierE.TierEA4DiagnosticReplay")
+    val replayArguments = listOf("tierEReplayDirectory", "tierEReplayTargetPid", "tierEReplayStartTicks", "tierEReplayOutput").map { providers.gradleProperty(it) }
+    argumentProviders.add(CommandLineArgumentProvider { replayArguments.map { it.get() } })
+}
+
 // Developer-only verification utilities are not part of the published profiler
 // jar. Ordinary Kotlin unit tests can exercise them without Docker/Podman.
 val toolingSourceSet =
@@ -259,6 +272,13 @@ sourceSets.named("integrationTest") {
 }
 configurations.named("toolingImplementation") {
     extendsFrom(configurations.implementation.get())
+}
+
+tasks.register<JavaExec>("tierEEvidence") {
+    group = "verification"
+    description = "Capture or verify versioned Tier E file identities using Kotlin"
+    classpath = toolingSourceSet.runtimeClasspath
+    mainClass.set("io.mazewall.profiler.tierE.tools.TierEEvidence")
 }
 
 tasks.register<JavaExec>("policyDiff") {
@@ -661,10 +681,27 @@ val tierEToolsStartScripts =
                 .asFile
     }
 
+val tierETargetHelperStartScripts =
+    tasks.register<org.gradle.jvm.application.tasks.CreateStartScripts>("tierETargetHelperStartScripts") {
+        applicationName = "tier-e-target-helper"
+        mainClass.set("io.mazewall.profiler.tierE.daemon.TierETargetHelperKt")
+        classpath = files(tasks.named("jar"), configurations.runtimeClasspath)
+        defaultJvmOpts = application.applicationDefaultJvmArgs
+        outputDir =
+            layout.buildDirectory
+                .dir("tier-e-target-helper-scripts")
+                .get()
+                .asFile
+    }
+
 distributions.main {
     contents {
         from(tierEToolingJar) { into("lib") }
         from(tierEToolsStartScripts) {
+            into("bin")
+            filePermissions { unix("rwxr-xr-x") }
+        }
+        from(tierETargetHelperStartScripts) {
             into("bin")
             filePermissions { unix("rwxr-xr-x") }
         }
@@ -703,6 +740,17 @@ kotlinCompilations.named("integrationTest") {
     associateWith(kotlinCompilations.getByName("test"))
     associateWith(kotlinCompilations.getByName("tooling"))
 }
+tasks.named<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>("compileIntegrationTestKotlin") {
+    dependsOn("testClasses")
+    friendPaths.from(
+        sourceSets.main
+            .get()
+            .output.classesDirs,
+        sourceSets.test
+            .get()
+            .output.classesDirs,
+    )
+}
 kotlinCompilations.named("test") {
     associateWith(kotlinCompilations.getByName("tooling"))
 }
@@ -722,6 +770,13 @@ fun Test.configureIntegrationSourceSet() {
     group = "verification"
     testClassesDirs = sourceSets["integrationTest"].output.classesDirs
     classpath = sourceSets["integrationTest"].runtimeClasspath
+}
+
+rootProject.allprojects {
+    tasks.withType<Test>().configureEach {
+        environment("TIER_E_A4_DIAGNOSTIC_ARM", "")
+        environment("TIER_E_TEST_BOUNDARY_DIAGNOSTICS", "")
+    }
 }
 
 val integrationTest =
@@ -760,6 +815,17 @@ val rootfulContainerTest =
                 }
             environment(name, selected)
         }
+        environment(
+            "TIER_E_QUALIFICATION_ARTIFACTS",
+            providers
+                .environmentVariable("TIER_E_QUALIFICATION_ARTIFACTS")
+                .orElse(
+                    layout.buildDirectory
+                        .dir("tier-e-installed-qualification")
+                        .get()
+                        .asFile.absolutePath,
+                ).get(),
+        )
         outputs.upToDateWhen { false }
         outputs.cacheIf { false }
         maxParallelForks = 1

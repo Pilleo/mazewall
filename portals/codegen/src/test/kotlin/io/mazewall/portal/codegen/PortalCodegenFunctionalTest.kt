@@ -74,6 +74,18 @@ class PortalCodegenFunctionalTest {
     }
 
     @Test
+    fun `plugin consumer classpath resolves aligned kotlin reflect`() {
+        val metadata = java.util.Properties()
+        val resource = requireNotNull(javaClass.classLoader.getResourceAsStream("plugin-under-test-metadata.properties"))
+        resource.use(metadata::load)
+        val jars = requireNotNull(metadata.getProperty("implementation-classpath"))
+            .split(java.io.File.pathSeparatorChar)
+            .map { Path.of(it).fileName.toString() }
+            .filter { it.startsWith("kotlin-reflect-") && it.endsWith(".jar") }
+        assertEquals(listOf("kotlin-reflect-2.4.20-Beta1.jar"), jars)
+    }
+
+    @Test
     fun `host only configuration publishes no worker code or descriptor`() {
         val apiJar = compileApiJar(projectDir)
         writeFixture(apiJar, listOf("fixture.A"), workerSourceSet = null)

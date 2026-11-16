@@ -99,6 +99,13 @@ internal interface RawSyscallOperations {
 }
 
 internal interface NativeFileSystem {
+    /** Optional capability; unsupported engines must not silently retain inherited access ACLs. */
+    fun removeExtendedAttribute(
+        path: ManagedSegment,
+        name: ManagedSegment,
+    ): SyscallResult<Long, SyscallHandledState.Unhandled> =
+        SyscallResult.Error(io.mazewall.ffi.NativeConstants.ENOSYS, -1L)
+
     fun open(
         path: ManagedSegment,
         flags: io.mazewall.platform.lifecycle.OpenFlags,

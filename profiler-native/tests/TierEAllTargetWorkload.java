@@ -23,18 +23,24 @@ public final class TierEAllTargetWorkload {
         var input = Path.of(args[3]);
         var output = Path.of(args[4]);
         await(firstGate);
-        var left = Thread.ofPlatform().start(() -> {
+        var failures = new Throwable[2];
+        var left = Thread.ofPlatform().uncaughtExceptionHandler((thread, failure) -> failures[0] = failure).start(() -> {
             try {
                 for (int i = 0; i < 20; i++) readConfiguration(input);
             } catch (Exception failure) { throw new RuntimeException(failure); }
         });
-        var right = Thread.ofPlatform().start(() -> {
+        var right = Thread.ofPlatform().uncaughtExceptionHandler((thread, failure) -> failures[1] = failure).start(() -> {
             try {
                 for (int i = 0; i < 20; i++) loadTemplate(input);
             } catch (Exception failure) { throw new RuntimeException(failure); }
         });
         left.join();
         right.join();
+        if (failures[0] != null || failures[1] != null) {
+            var failure = new RuntimeException("all-target worker failure");
+            for (var cause : failures) if (cause != null) failure.addSuppressed(cause);
+            throw failure;
+        }
         Files.writeString(phaseReady, "attributed-complete");
         await(secondGate);
         for (int i = 0; i < 20; i++) Files.readString(input);

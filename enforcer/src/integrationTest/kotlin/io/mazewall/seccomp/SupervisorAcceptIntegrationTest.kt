@@ -62,7 +62,7 @@ class SupervisorAcceptIntegrationTest : BaseIntegrationTest() {
             .denyList(RuntimeProfile.NATIVE_IMAGE)
             .base(Policy.PURE_COMPUTE_UNSAFE)
             .allowJvmClasspath()
-            .block(Syscall.ACCEPT, Syscall.ACCEPT4)
+            .allow(Syscall.ACCEPT, Syscall.ACCEPT4)
             .build()
         val raw = Executors.newSingleThreadExecutor()
         try {

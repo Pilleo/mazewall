@@ -3,11 +3,23 @@
 #include "binding_manifest.hpp"
 
 #include <cassert>
+#include <algorithm>
+#include <atomic>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 #include <vector>
 
 namespace mazewall::profiler {
+
+#ifdef MAZEWALL_CAPTURE_YIELD_TEST
+namespace capture_yield_test {
+void ownership_checkpoint();
+void precheck_checkpoint();
+}
+#endif
 
 enum class CaptureYieldOutcome : std::uint16_t {
     captured = 1,
@@ -22,32 +34,54 @@ public:
     static constexpr std::size_t record_size = 16;
 
     explicit CaptureYieldRecorder(std::size_t capacity)
-        : capacity_(capacity) {
-        records_.reserve(capacity_);
-    }
+        : capacity_(checked_capacity(capacity)), records_(capacity_) {}
 
     [[nodiscard]] bool record(
         std::uint64_t invocation_id,
         BindingKind binding_kind,
-        CaptureYieldOutcome outcome) {
-        if (records_.size() == capacity_) {
-            ++dropped_count_;
-            return false;
-        }
-        records_.push_back(Record{invocation_id, binding_code(binding_kind), outcome});
+        CaptureYieldOutcome outcome) noexcept {
+        // Linux positive signed-int TIDs, one non-reentrant call per thread: stale
+        // entrants after full/CLOSED are bounded by INT_MAX, not lifetime calls.
+        const auto observed = control_.fetch_add(0, std::memory_order_relaxed);
+        if ((observed & closed) != 0 || observed >= capacity_) return reject();
+#ifdef MAZEWALL_CAPTURE_YIELD_TEST
+        capture_yield_test::precheck_checkpoint();
+#endif
+        const auto ticket = control_.fetch_add(1, std::memory_order_relaxed);
+        if ((ticket & closed) != 0 || ticket >= capacity_) return reject();
+#ifdef MAZEWALL_CAPTURE_YIELD_TEST
+        capture_yield_test::ownership_checkpoint();
+#endif
+        auto& slot = records_[ticket];
+        slot.invocation_id = invocation_id;
+        slot.binding_kind = binding_code(binding_kind);
+        slot.outcome = outcome;
+        slot.commit.store(1, std::memory_order_release);
         return true;
     }
 
     [[nodiscard]] std::size_t record_count() const {
-        return records_.size();
+        return std::min<std::uint64_t>(control_.load(std::memory_order_relaxed) & ~closed, capacity_);
     }
 
-    [[nodiscard]] std::size_t dropped_count() const {
-        return dropped_count_;
+    [[nodiscard]] std::uint64_t dropped_count() const {
+        return dropped_count_.load(std::memory_order_relaxed);
     }
 
-    [[nodiscard]] std::vector<std::uint8_t> serialize(std::uint32_t session_tag) const {
-        std::vector<std::uint8_t> bytes(header_size + records_.size() * record_size, 0);
+    [[nodiscard]] std::vector<std::uint8_t> serialize(std::uint32_t session_tag) {
+        // CLOSED is also the terminal publication latch: even failed I/O cannot
+        // retry a clean snapshot. This cut does not join producers or permit unload.
+        const auto cutoff = control_.fetch_or(closed, std::memory_order_acq_rel);
+        if ((cutoff & closed) != 0 || dropped_count() != 0) {
+            throw std::runtime_error("capture-yield closed or lost records");
+        }
+        const auto count = std::min<std::uint64_t>(cutoff, capacity_);
+        for (std::size_t index = 0; index < count; ++index) {
+            if (records_[index].commit.load(std::memory_order_acquire) != 1) {
+                throw std::runtime_error("capture-yield uncommitted reservation");
+            }
+        }
+        std::vector<std::uint8_t> bytes(header_size + count * record_size, 0);
         bytes[0] = 'M';
         bytes[1] = 'Z';
         bytes[2] = 'C';
@@ -55,10 +89,10 @@ public:
         append_u16_le(bytes, 4, 1);
         append_u16_le(bytes, 6, record_size);
         append_u32_le(bytes, 8, session_tag);
-        append_u64_le(bytes, 16, records_.size());
-        for (std::size_t index = 0; index < records_.size(); ++index) {
+        append_u64_le(bytes, 16, count);
+        for (std::size_t index = 0; index < count; ++index) {
             const std::size_t offset = header_size + index * record_size;
-            const Record& record = records_[index];
+            const Slot& record = records_[index];
             append_u64_le(bytes, offset, record.invocation_id);
             append_u16_le(bytes, offset + 8, record.binding_kind);
             append_u16_le(bytes, offset + 10, static_cast<std::uint16_t>(record.outcome));
@@ -123,11 +157,32 @@ public:
     }
 
 private:
-    struct Record {
-        std::uint64_t invocation_id;
-        std::uint16_t binding_kind;
-        CaptureYieldOutcome outcome;
+    struct Slot {
+        std::uint64_t invocation_id = 0;
+        std::uint16_t binding_kind = 0;
+        CaptureYieldOutcome outcome{};
+        std::atomic<std::uint32_t> commit{0};
     };
+    static_assert(sizeof(Slot) == 16);
+    static_assert(CHAR_BIT == 8 && INT_MAX == 2'147'483'647);
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
+    static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+    static_assert(65'536ULL + INT_MAX < (1ULL << 32));
+    static constexpr std::uint64_t closed = 1ULL << 63;
+
+#ifdef MAZEWALL_CAPTURE_YIELD_TEST
+    friend struct CaptureYieldRecorderTestAccess;
+#endif
+
+    static std::size_t checked_capacity(std::size_t capacity) {
+        if (capacity > 65'536) throw std::invalid_argument("capture-yield capacity exceeds 65536");
+        return capacity;
+    }
+
+    bool reject() noexcept {
+        dropped_count_.store(std::numeric_limits<std::uint64_t>::max(), std::memory_order_relaxed);
+        return false;
+    }
 
     static void append_u16_le(std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint16_t value) {
         bytes[offset] = static_cast<std::uint8_t>(value);
@@ -147,8 +202,9 @@ private:
     }
 
     std::size_t capacity_;
-    std::size_t dropped_count_ = 0;
-    std::vector<Record> records_;
+    std::atomic<std::uint64_t> dropped_count_{0};
+    std::atomic<std::uint64_t> control_{0};
+    std::vector<Slot> records_;
 };
 
 }  // namespace mazewall::profiler

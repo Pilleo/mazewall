@@ -16,6 +16,146 @@ import kotlin.test.assertTrue
 
 class TierEProfilerSessionLifecycleTest {
     @Test
+    fun boundarySnapshotBeforeSourceClose() {
+        val steps = mutableListOf<String>()
+        val source = object : TierEEventSource by FakeTierEEventSource() {
+            override fun disableCaptureAdmission() {
+                steps += "disable"
+            }
+
+            override fun detachMarker() {
+                steps += "detach"
+            }
+
+            override fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean {
+                steps += "quiesce"
+                return true
+            }
+
+            override fun exportBoundaryDiagnostics(
+                producerClosed: Boolean,
+                quiescent: Boolean,
+            ) {
+                steps += "export:$producerClosed:$quiescent"
+            }
+
+            override fun close() {
+                steps += "close"
+            }
+        }
+        val session = TierEProfilerSession(source, 1, TierEOptions(allTargetCapture = true), definitionReader = { emptyDefinitions() })
+        session.finish(Path.of("ignored"), true)
+        assertEquals(listOf("disable", "detach", "quiesce", "export:true:true", "close"), steps)
+    }
+
+    @Test
+    fun snapshotCarriesActualProducerAndQuiescenceFacts() {
+        for (producerClosed in listOf(false, true)) {
+            for (quiescent in listOf(false, true)) {
+                val snapshots = mutableListOf<Pair<Boolean, Boolean>>()
+                val source = object : TierEEventSource by FakeTierEEventSource() {
+                    override fun awaitSysEnterQuiescence(timeoutNanos: Long): Boolean = quiescent
+
+                    override fun exportBoundaryDiagnostics(
+                        producerClosed: Boolean,
+                        quiescent: Boolean,
+                    ) {
+                        snapshots += producerClosed to quiescent
+                    }
+                }
+                TierEProfilerSession(source, 1, TierEOptions(allTargetCapture = true), definitionReader = { emptyDefinitions() })
+                    .finish(Path.of("ignored"), producerClosed)
+                assertEquals(listOf(producerClosed to quiescent), snapshots)
+            }
+        }
+    }
+
+    @Test
+    fun snapshotFailurePreservesOwnerAndPrimaryFailure() {
+        val failure = IllegalStateException("diagnostic publication failed")
+        val cleanupFailure = IllegalStateException("source retirement failed")
+        var exports = 0
+        var closes = 0
+        val source = object : TierEEventSource by FakeTierEEventSource() {
+            override fun exportBoundaryDiagnostics(
+                producerClosed: Boolean,
+                quiescent: Boolean,
+            ) {
+                exports++
+                throw failure
+            }
+
+            override fun close() {
+                closes++
+                if (closes == 1) throw cleanupFailure
+            }
+        }
+        val session = TierEProfilerSession(source, 1, definitionReader = { emptyDefinitions() })
+        assertSame(failure, assertFailsWith<IllegalStateException> { session.finish(Path.of("ignored"), true) })
+        assertEquals(0, closes, "failed export must retain the resource owner")
+        assertSame(failure, assertFailsWith<IllegalStateException> { session.finish(Path.of("ignored"), true) })
+        assertEquals(1, exports, "terminal failure must not be retried as successful evidence")
+        assertSame(cleanupFailure, assertFailsWith<IllegalStateException> { session.close() })
+        assertSame(failure, assertFailsWith<IllegalStateException> { session.finish(Path.of("ignored"), true) })
+        session.close()
+        session.close()
+        assertEquals(2, closes)
+    }
+
+    @Test
+    fun disabledSourceNeverExports() {
+        val session = TierEProfilerSession(FakeTierEEventSource(), 1, definitionReader = { emptyDefinitions() })
+        val first = session.finish(Path.of("ignored"), true)
+        assertSame(first, session.finish(Path.of("not-read"), true))
+        session.close()
+    }
+
+    @Test
+    fun `failed physical close still terminates collection before retry`() {
+        val source = FakeTierEEventSource()
+        source.closeFailure = IllegalStateException("unmap failed")
+        val session = TierEProfilerSession(source, 1, definitionReader = { emptyDefinitions() })
+
+        assertFailsWith<IllegalStateException> { session.close() }
+        assertFailsWith<IllegalStateException> { session.poll() }
+        assertFailsWith<IllegalStateException> { session.finish(Path.of("ignored"), true) }
+        session.close()
+
+        assertEquals(2, source.closeCalls)
+        assertEquals(0, source.detachMarkerCalls)
+    }
+
+    @Test
+    fun `loop retries failed source retirement without repeating successful close`() {
+        val source = FakeTierEEventSource()
+        source.closeFailure = IllegalStateException("unmap failed")
+        val loop = TierECollectorLoop(TierEProfilerSession(source, 1))
+
+        assertFailsWith<IllegalStateException> { loop.close() }
+        loop.close()
+        loop.close()
+
+        assertEquals(2, source.closeCalls)
+        assertFailsWith<IllegalStateException> { loop.pollOnce() }
+    }
+
+    @Test
+    fun `terminal counter failure cannot become successful finish on retry`() {
+        val source = FakeTierEEventSource()
+        val failure = IllegalStateException("terminal counters failed")
+        source.counterFailure = failure
+        val session = TierEProfilerSession(source, 1, definitionReader = { emptyDefinitions() })
+
+        assertSame(failure, assertFailsWith<IllegalStateException> { session.finish(Path.of("ignored"), true) })
+        source.counterFailure = null
+        assertSame(failure, assertFailsWith<IllegalStateException> { session.finish(Path.of("ignored"), true) })
+        session.close()
+        session.close()
+        assertEquals(1, source.closeCalls)
+        assertEquals(1, source.detachMarkerCalls)
+    }
+
+    @Test
     fun `configured session epoch is retained for daemon artifact admission`() {
         val session = TierEProfilerSession(
             source = FakeTierEEventSource(),
@@ -570,6 +710,8 @@ private class FakeTierEEventSource(
     private val markerFailureCount: Long = 0L,
 ) : TierEEventSource {
     var closeCalls = 0
+    var closeFailure: Throwable? = null
+    var counterFailure: Throwable? = null
     var detachMarkerCalls = 0
     var drainEventsCalls = 0
     var quiescenceCalls = 0
@@ -626,11 +768,18 @@ private class FakeTierEEventSource(
 
     override fun readMarkerFailureCount(): Long = markerFailureCount
 
-    override fun readMarkerTransitionCount(): Long = 0
+    override fun readMarkerTransitionCount(): Long {
+        counterFailure?.let { throw it }
+        return 0
+    }
 
     override fun readLastMarkerPidTgid(): Long = 0
 
     override fun close() {
         closeCalls++
+        closeFailure?.let {
+            closeFailure = null
+            throw it
+        }
     }
 }

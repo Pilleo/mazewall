@@ -13,25 +13,14 @@ internal class ExplodedArtifact private constructor(
     private val entries: Map<String, PreparedPath>,
     val sha256: String,
 ) : AutoCloseable {
-    val generation: String = ArtifactBytes.hash(
-        entries
-        .map { "${it.key}\u0000${it.value.identity}" }
-        .sorted()
-        .joinToString("\n")
-        .toByteArray(),
-    )
+    val generation: String = generationDirect(entries)
 
     fun validate() {
-        root.validate()
-        check(list(root.resolved).keys == entries.keys) { "Exploded deployment entries changed" }
-        entries.values.forEach { it.validate() }
-        check(treeDigest(entries) == sha256) { "Exploded deployment bytes changed" }
+        validateTree(root, entries, sha256)
     }
 
     fun selectedBytes(name: String): ByteArray {
-        val selected = checkNotNull(entries[name]) { "Selected class is absent from exploded deployment" }
-        require(!selected.directory) { "Selected class is a directory" }
-        return Files.newInputStream(selected.descriptorPath()).use { ArtifactBytes.read(it) }
+        return selectedBytes(entries, name)
     }
 
     @Suppress("TooGenericExceptionCaught") // attempt every genuine leaf/directory release, preserving fatal-first failure
@@ -49,6 +38,15 @@ internal class ExplodedArtifact private constructor(
 
     companion object {
         private const val MAX_DEPTH = 64
+
+        internal fun generationDirect(entries: Map<String, PreparedPath>): String =
+            ArtifactBytes.hash(
+            entries
+                .map { "${it.key}\u0000${it.value.identity}" }
+                .sorted()
+                .joinToString("\n")
+                .toByteArray(),
+        )
 
         @Suppress("TooGenericExceptionCaught") // partially captured descendants remain owned through rollback
         fun capture(
@@ -75,7 +73,7 @@ internal class ExplodedArtifact private constructor(
             }
         }
 
-        private fun list(root: Path): Map<String, Path> =
+        internal fun list(root: Path): Map<String, Path> =
             Files.walk(root, MAX_DEPTH + 1).use { stream ->
             val paths = linkedMapOf<String, Path>()
             val iterator = stream.iterator()
@@ -90,6 +88,36 @@ internal class ExplodedArtifact private constructor(
                 paths[relative.toString()] = path
             }
             paths.toSortedMap()
+        }
+
+        internal fun verifyDirect(
+            root: PreparedPath,
+            entries: Map<String, PreparedPath>,
+            selected: String,
+        ): Pair<String, ByteArray> {
+            val digest = treeDigest(entries)
+            validateTree(root, entries, digest)
+            return digest to selectedBytes(entries, selected)
+        }
+
+        private fun validateTree(
+            root: PreparedPath,
+            entries: Map<String, PreparedPath>,
+            sha256: String,
+        ) {
+            root.validate()
+            check(list(root.resolved).keys == entries.keys) { "Exploded deployment entries changed" }
+            entries.values.forEach { it.validate() }
+            check(treeDigest(entries) == sha256) { "Exploded deployment bytes changed" }
+        }
+
+        private fun selectedBytes(
+            entries: Map<String, PreparedPath>,
+            name: String,
+        ): ByteArray {
+            val selected = checkNotNull(entries[name]) { "Selected class is absent from exploded deployment" }
+            require(!selected.directory) { "Selected class is a directory" }
+            return Files.newInputStream(selected.descriptorPath()).use { ArtifactBytes.read(it) }
         }
 
         private fun treeDigest(entries: Map<String, PreparedPath>): String {

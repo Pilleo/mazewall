@@ -10,9 +10,14 @@
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/un.h>
+#include "live_stack_context_abi.h"
 
 #define SIZE(type) printf("size." #type "=%zu\n", sizeof(struct type))
 #define OFFSET(type, member) printf("offset." #type "." #member "=%zu\n", offsetof(struct type, member))
+#define ALIGN(type) printf("align." #type "=%zu\n", _Alignof(struct type))
+#define RECORD(type) SIZE(type); ALIGN(type)
+#define HEADER(type) OFFSET(type, abi_version); OFFSET(type, struct_bytes); OFFSET(type, status); OFFSET(type, reason)
+#define IDENTITIES(type) OFFSET(type, process_cookie); OFFSET(type, process_start_ticks); OFFSET(type, installation_id); OFFSET(type, worker_id); OFFSET(type, task_id); OFFSET(type, code_generation); OFFSET(type, invocation_id)
 
 int main(void) {
     printf("flag.O_PATH=%d\n", O_PATH);
@@ -36,5 +41,19 @@ int main(void) {
 #endif
     SIZE(landlock_path_beneath_attr); OFFSET(landlock_path_beneath_attr, allowed_access); OFFSET(landlock_path_beneath_attr, parent_fd);
     SIZE(open_how); OFFSET(open_how, flags); OFFSET(open_how, mode); OFFSET(open_how, resolve);
+    RECORD(mw_live_request_v1);
+    OFFSET(mw_live_request_v1, abi_version); OFFSET(mw_live_request_v1, struct_bytes); OFFSET(mw_live_request_v1, operation); OFFSET(mw_live_request_v1, reserved0);
+    IDENTITIES(mw_live_request_v1);
+    OFFSET(mw_live_request_v1, tgid); OFFSET(mw_live_request_v1, tid); OFFSET(mw_live_request_v1, worker_capacity); OFFSET(mw_live_request_v1, reserved1);
+    RECORD(mw_live_frame_v1); OFFSET(mw_live_frame_v1, method_token); OFFSET(mw_live_frame_v1, location);
+    RECORD(mw_live_snapshot_v1); HEADER(mw_live_snapshot_v1); IDENTITIES(mw_live_snapshot_v1);
+    OFFSET(mw_live_snapshot_v1, parent_invocation_id); OFFSET(mw_live_snapshot_v1, publication_id);
+    OFFSET(mw_live_snapshot_v1, tgid); OFFSET(mw_live_snapshot_v1, tid); OFFSET(mw_live_snapshot_v1, binding); OFFSET(mw_live_snapshot_v1, frame_count); OFFSET(mw_live_snapshot_v1, frames);
+    printf("stride.mw_live_snapshot_v1.frames=%zu\n", sizeof(((mw_live_snapshot_v1 *)0)->frames[0]));
+    RECORD(mw_live_receipt_v1); HEADER(mw_live_receipt_v1); IDENTITIES(mw_live_receipt_v1);
+    OFFSET(mw_live_receipt_v1, tgid); OFFSET(mw_live_receipt_v1, tid); OFFSET(mw_live_receipt_v1, worker_capacity); OFFSET(mw_live_receipt_v1, allocated_slots);
+    RECORD(mw_live_info_v1); HEADER(mw_live_info_v1);
+    OFFSET(mw_live_info_v1, process_cookie); OFFSET(mw_live_info_v1, process_start_ticks);
+    OFFSET(mw_live_info_v1, tgid); OFFSET(mw_live_info_v1, arch); OFFSET(mw_live_info_v1, max_workers); OFFSET(mw_live_info_v1, max_classes); OFFSET(mw_live_info_v1, max_methods); OFFSET(mw_live_info_v1, max_frames); OFFSET(mw_live_info_v1, binding_mask); OFFSET(mw_live_info_v1, reserved);
     return 0;
 }

@@ -13,6 +13,36 @@ import kotlin.test.assertTrue
 
 class BpfProgLoadRequestEncoderTest {
     @Test
+    fun `diagnostic extension requests stats and preserves other default bytes`() {
+        Arena.ofConfined().use { arena ->
+            val program = listOf(TierEbpfEngine.Insn(code = 0x18, src = 1, imm = 0))
+            val ordinary = BpfProgLoadRequestEncoder.encode(arena, program, listOf(41), 17, "tier_e")
+            val enabled = BpfProgLoadRequestEncoder.encode(arena, program, listOf(41), 17, "tier_e", true)
+            assertEquals(104L, ordinary.attr.byteSize())
+            assertEquals(144L, enabled.attr.byteSize())
+            assertEquals(140L, BpfProgLoadLayout.LOG_TRUE_SIZE)
+            assertEquals(1, ordinary.attr.get(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_LEVEL))
+            assertEquals(4, enabled.attr.get(ValueLayout.JAVA_INT, BpfProgLoadLayout.LOG_LEVEL))
+            for (offset in 0L until 104L) {
+                if (offset !in 8L..23L && offset !in 24L..27L && offset !in 32L..39L) assertEquals(ordinary.attr.get(ValueLayout.JAVA_BYTE, offset), enabled.attr.get(ValueLayout.JAVA_BYTE, offset))
+            }
+            assertTrue((104L until 144L).all { enabled.attr.get(ValueLayout.JAVA_BYTE, it) == 0.toByte() })
+            assertEquals(ordinary.instructions.toArray(ValueLayout.JAVA_BYTE).toList(), enabled.instructions.toArray(ValueLayout.JAVA_BYTE).toList())
+            assertEquals(65536L, enabled.verifierLog.byteSize())
+        }
+    }
+
+    @Test
+    fun `enabled cap is checked before encoding but ordinary program cap is unchanged`() {
+        Arena.ofConfined().use { arena ->
+            val program = List(1025) { TierEbpfEngine.Insn(code = 0x95) }
+            assertEquals(8192L, BpfProgLoadRequestEncoder.encode(arena, program.take(1024), emptyList(), 17, "limit", true).instructions.byteSize())
+            assertFailsWith<IllegalArgumentException> { BpfProgLoadRequestEncoder.encode(arena, program, emptyList(), 17, "limit", true) }
+            assertEquals(8200L, BpfProgLoadRequestEncoder.encode(arena, program, emptyList(), 17, "limit").instructions.byteSize())
+        }
+    }
+
+    @Test
     fun `encodes program load attributes and substitutes pseudo map descriptors`() {
         Arena.ofConfined().use { arena ->
             val request =

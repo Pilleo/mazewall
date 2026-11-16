@@ -1,4 +1,7 @@
 package io.mazewall.profiler.tierE.engine
+import io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
+import io.mazewall.enforcer.api.MockNativeEngine
+import io.mazewall.ffi.memory.native
 import io.mazewall.platform.native.*
 import io.mazewall.platform.native.LinuxNative.SyscallHandledState
 import io.mazewall.platform.native.LinuxNative.SyscallResult
@@ -9,14 +12,313 @@ import io.mazewall.profiler.api.ObservationConstructorContract
 import io.mazewall.profiler.internal.attribution.TierEEmissionMode
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierERingSubmissionMode
+import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentBackend
 import io.mazewall.profiler.internal.engine.SyscallEventConstructorContract
+import java.lang.foreign.Arena
 import java.lang.reflect.Proxy
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class BpfProgLoadLayoutTest {
+    @org.junit.jupiter.api.io.TempDir
+    lateinit var evidenceDirectory: java.nio.file.Path
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `diagnostic failed load names actual program and preserves native error and rollback`() {
+        for ((index, name) in listOf("tier_e_marker", "tier_e_exec", "tier_e_syscall").withIndex()) {
+            val native = FailedLoadNative(index + 1)
+            var captured = 0
+            val engine = TierEbpfEngine(
+                native,
+                BoundaryDiagnosticConfig(
+                    java.nio.file.Path
+                .of("/fixture/evidence/boundary.bpfdiag"),
+                ),
+                    { fd -> native.info.getValue(fd) },
+                { capture ->
+                captured++
+                assertEquals(index + 1, capture.ordinal)
+                assertEquals(name, capture.name)
+                assertEquals(listOf(398, 31, 647)[index] * 8L, capture.request.instructions.byteSize())
+                assertEquals(if (index == 0) 2 else 17, capture.type)
+                assertEquals(7L, capture.installation)
+                assertEquals(42, capture.target)
+                assertEquals(19802, capture.session)
+                TierEBpfProgramLoadFailureEvidence.write(capture, evidenceDirectory.resolve(name))
+            },
+            )
+            engine.boundaryControlReporter(7) {}
+            val failure = assertFailsWith<IllegalStateException> {
+                engine.install(42, 19802, TierEOptions(allTargetCapture = true, sysEnterAttachmentBackend = TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT))
+            }
+            assertTrue(failure.message.orEmpty().contains(name), failure.message)
+            assertTrue(failure.message.orEmpty().contains("ordinal=${index + 1}"), failure.message)
+            assertTrue(failure.message.orEmpty().contains("errno=28"), failure.message)
+            assertEquals(index + 1, native.loads)
+            assertEquals(1, captured)
+            assertEquals(List(index + 1) { 144L }, native.loadSizes)
+            assertEquals(native.acquired.toSet(), native.closed.toSet())
+            assertEquals(native.acquired.size, native.closed.size)
+            engine.close()
+            assertEquals(native.acquired.size, native.closed.size)
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `evidence failure preserves original error unless identical fatal error wins and rollback still retires`() {
+        for (fatal in listOf(false, true)) {
+            val native = FailedLoadNative(3)
+            val publication = if (fatal) LinkageError("publication") else java.io.IOException("publication")
+            val engine = TierEbpfEngine(
+                native,
+                BoundaryDiagnosticConfig(
+                    java.nio.file.Path
+                .of("/fixture/evidence/boundary.bpfdiag"),
+                ),
+                    { native.info.getValue(it) },
+                { throw publication },
+            )
+            engine.boundaryControlReporter(7) {}
+            val thrown = assertFailsWith<Throwable> {
+                engine.install(42, 19802, TierEOptions(allTargetCapture = true, sysEnterAttachmentBackend = TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT))
+            }
+            if (fatal) {
+                assertSame(publication, thrown)
+                assertTrue(
+                    thrown.suppressed
+                    .single()
+                    .message
+                    .orEmpty()
+                    .contains("program=tier_e_syscall ordinal=3"),
+                )
+            } else {
+                assertTrue(thrown is IllegalStateException)
+                assertSame(publication, thrown.suppressed.single())
+            }
+            assertEquals(native.acquired.sorted(), native.closed.sorted())
+            engine.close()
+            assertEquals(native.acquired.size, native.closed.size)
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `successful loads adopt real descriptors without evidence publication and disabled request stays short`() {
+        for (enabled in listOf(false, true)) {
+            val native = FailedLoadNative(0)
+            val engine =
+                TierEbpfEngine(
+                    native,
+                    if (enabled) {
+                    BoundaryDiagnosticConfig(
+                        java.nio.file.Path
+                    .of("/fixture/evidence/boundary.bpfdiag"),
+                    )
+                } else {
+                    null
+                },
+                    {
+                    native.info.getValue(it)
+                },
+                    { error("success must not publish failure evidence") },
+                )
+            if (enabled) engine.boundaryControlReporter(7) {}
+            engine.install(42, 19802, TierEOptions(allTargetCapture = true, sysEnterAttachmentBackend = TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT))
+            assertEquals(List(3) { if (enabled) 144L else 104L }, native.loadSizes)
+            assertTrue(native.closed.isEmpty())
+            engine.close()
+            assertEquals(native.acquired.sorted(), native.closed.sorted())
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `diagnostic request extends same native call with a zero tail`() {
+        val native = FailedLoadNative(1)
+        var captured = 0
+        val engine = TierEbpfEngine(
+            native,
+            BoundaryDiagnosticConfig(
+                java.nio.file.Path
+            .of("/fixture/evidence/boundary.bpfdiag"),
+            ),
+                { fd -> native.info.getValue(fd) },
+            { captured++ },
+        )
+        engine.boundaryControlReporter(7) {}
+        assertFailsWith<IllegalStateException> {
+            engine.install(42, 19802, TierEOptions(allTargetCapture = true, sysEnterAttachmentBackend = TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT))
+        }
+        assertEquals(1, captured)
+        assertEquals(listOf(144L), native.loadSizes)
+        assertEquals(List(40) { 0.toByte() }, native.tail)
+    }
+
+    private class FailedLoadNative(
+        private val failAt: Int,
+    ) : MockNativeEngine() {
+        val acquired = mutableListOf<Long>()
+        val closed = mutableListOf<Long>()
+        val info = mutableMapOf<Int, String>()
+        val loadSizes = mutableListOf<Long>()
+        var tail = emptyList<Byte>()
+        var loads = 0
+
+        override fun syscall(
+            nr: Long,
+            a1: NativeArg,
+            a2: NativeArg,
+            a3: NativeArg,
+            a4: NativeArg,
+            a5: NativeArg,
+            a6: NativeArg,
+        ): SyscallResult<Long, SyscallHandledState.Unhandled> {
+            if (nr == Arch.current().close.toLong()) {
+                closed += a1.asLong
+                return io.mazewall.ffi.internal.RealNativeEngine
+                    .syscall(nr, a1, a2, a3, a4, a5, a6)
+            }
+            check(nr == Syscall.BPF.numberFor(Arch.current()).toLong())
+            val command = a1.asLong
+            val attr = (a2 as NativeArg.MemoryArg).value.native
+            if (command == 1L) attr.get(java.lang.foreign.ValueLayout.ADDRESS, 16).reinterpret(128).fill(0)
+            if (command == 5L) {
+                loads++
+                loadSizes += a3.asLong
+                tail = (104L until a3.asLong).map { attr.get(java.lang.foreign.ValueLayout.JAVA_BYTE, it) }
+                if (loads == failAt) return SyscallResult.Error(28, -1)
+            }
+            if (command !in listOf(0L, 5L, 17L, 18L)) return SyscallResult.Success(0)
+            return io.mazewall.ffi.memory.NativeArena.ofConfined().use { arena ->
+                io.mazewall.platform.native.LinuxNative.fileSystem
+                    .open(
+                    arena.allocateFrom("/dev/null"),
+                    io.mazewall.platform.lifecycle
+                    .OpenFlags(0),
+                ).also { result ->
+                    if (result is SyscallResult.Success) {
+                        acquired += result.value
+                        if (command == 0L) {
+                            val size = attr.get(java.lang.foreign.ValueLayout.JAVA_INT, 8)
+                            val capacity = attr.get(java.lang.foreign.ValueLayout.JAVA_INT, 12)
+                            val type = attr.get(java.lang.foreign.ValueLayout.JAVA_INT, 0)
+                            info[result.value.toInt()] = "map_type: $type\nvalue_size: $size\nmax_entries: $capacity\nmemlock: ${if (size == 112) 3674112 else 4096}\n"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `native close promotes fatal identity after unmap failure and retries only failed mapping`() {
+        Arena.ofShared().use { arena ->
+            val native = RetirementNative(arena)
+            val engine = TierEbpfEngine(native)
+            val ordinary = IllegalStateException("unmap failed")
+            val fatal = LinkageError("native descriptor close failed")
+            try {
+                engine.install(42, 1, TierEOptions(sysEnterAttachmentBackend = TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT))
+                engine.drainEvents()
+                native.unmapFailure = ordinary
+                native.closeFailure = fatal
+
+                assertSame(fatal, assertFailsWith<LinkageError> { engine.close() })
+                assertEquals(listOf(ordinary), fatal.suppressed.toList())
+                assertEquals(native.acquired.toSet(), native.closed.toSet(), "independent descriptors must all retire")
+                assertEquals(native.acquired.size, native.closed.size, "each owned descriptor gets one raw close attempt")
+                val released = native.closed.toList()
+                engine.close()
+                engine.close()
+                assertEquals(released, native.closed, "raw close must never be retried, even after a thrown Error")
+                assertEquals(
+                    listOf(1, 2),
+                    native.unmapped
+                    .groupingBy { it }
+                    .eachCount()
+                    .values
+                    .sorted(),
+                )
+            } finally {
+                engine.close()
+            }
+        }
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `native acquisition rollback promotes identical fatal cleanup over original acquisition error`() {
+        Arena.ofShared().use { arena ->
+            val native = RetirementNative(arena)
+            val ordinary = IllegalStateException("map acquisition failed")
+            val fatal = LinkageError("rollback descriptor close failed")
+            native.acquisitionFailure = ordinary
+            native.closeFailure = fatal
+            val engine = TierEbpfEngine(native)
+
+            assertSame(fatal, assertFailsWith<LinkageError> { engine.install(42) })
+            assertEquals(listOf(ordinary), fatal.suppressed.toList())
+            assertEquals(native.acquired, native.closed)
+            engine.close()
+            assertEquals(native.acquired, native.closed, "rollback must clear raw descriptors after failure")
+        }
+    }
+
+    private class RetirementNative(
+        private val arena: Arena,
+    ) : MockNativeEngine() {
+        val acquired = mutableListOf<Long>()
+        val closed = mutableListOf<Long>()
+        val unmapped = mutableListOf<Long>()
+        var unmapFailure: Throwable? = null
+        var closeFailure: Throwable? = null
+        var acquisitionFailure: Throwable? = null
+
+        override fun syscall(
+            nr: Long,
+            a1: NativeArg,
+            a2: NativeArg,
+            a3: NativeArg,
+            a4: NativeArg,
+            a5: NativeArg,
+            a6: NativeArg,
+        ): SyscallResult<Long, SyscallHandledState.Unhandled> =
+            when (nr) {
+            Syscall.BPF.numberFor(Arch.current()).toLong() -> {
+                if (acquired.isNotEmpty()) acquisitionFailure?.let { throw it }
+                val value = when (a1.asLong) {
+                    0L, 5L, 17L, 18L -> (71L + acquired.size).also(acquired::add)
+                    else -> 0L
+                }
+                SyscallResult.Success(value)
+            }
+            Syscall.MMAP.numberFor(Arch.current()).toLong() -> SyscallResult.Success(arena.allocate(a2.asLong, 4096).address())
+            Syscall.MUNMAP.numberFor(Arch.current()).toLong() -> {
+                unmapped += a1.asLong
+                unmapFailure?.let {
+                    unmapFailure = null
+                    throw it
+                }
+                SyscallResult.Success(0L)
+            }
+            Arch.current().close.toLong() -> {
+                closed += a1.asLong
+                closeFailure?.let {
+                    closeFailure = null
+                    throw it
+                }
+                SyscallResult.Success(0L)
+            }
+            else -> error("unexpected native syscall $nr")
+        }
+    }
+
     @Test
     fun `opt in capture gate extends only the Tier E session map value`() {
         assertEquals(16, TierEbpfEngine.sessionConfigurationSize(TierEOptions()))

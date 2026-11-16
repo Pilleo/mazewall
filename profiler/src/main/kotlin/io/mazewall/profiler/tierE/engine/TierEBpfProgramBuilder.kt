@@ -69,6 +69,27 @@ internal object TierEBpfProgramBuilder {
     private const val V4_VALIDATED_FD_STACK_OFFSET: Int = -132
     private const val RECOVERY_MAP_INDEX: Int = 8
     private const val BPF_NOEXIST: Int = 1
+    private const val BOUNDARY_ROW_STACK = -320
+    private const val BOUNDARY_CONTROL_STACK = -328
+    private const val BOUNDARY_KEY_STACK = -332
+    private const val BOUNDARY_MAIN_RECORDS_MAP = 12
+    private const val BOUNDARY_MAIN_CONTROL_MAP = 13
+    private const val BOUNDARY_MARKER_RECORDS_MAP = 3
+    private const val BOUNDARY_MARKER_CONTROL_MAP = 4
+    private const val BOUNDARY_RESERVATION_RETRIES = 256
+    private const val R_CONTROL = 4
+    private const val R_VALID_MASK = 3
+    private const val R_SCRATCH = 5
+    private const val R_MARKER_PID = 6
+    private const val R_INVOCATION = 7
+    private const val R_MAIN_PID_OR_FLAGS = 8
+    private const val PT_REGS_RDI_OFFSET = 112
+    private const val RAW_SYSCALL_ID_OFFSET = 8
+    private const val MOV32_REG = 0xbc
+    private const val JGE_REG = 0x3d
+    private const val JEQ_REG = 0x1d
+    private const val ATOMIC_CMPXCHG = 0xf1
+    private const val ATOMIC_OR = 0x40
     internal const val RECOVERY_INSERTION_FAILURE_COUNTER_INDEX: Int = 12
     private const val EXACT_ADMISSION_AUDIT_HANDLER_ENTERED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.HANDLER_ENTERED_OFFSET
     private const val EXACT_ADMISSION_AUDIT_LOW32_HANDLER_ENTERED_OFFSET: Int = TierEbpfEngine.ExactAdmissionAuditCount.LOW32_HANDLER_ENTERED_OFFSET
@@ -704,6 +725,16 @@ internal object TierEBpfProgramBuilder {
     /** x86_64 raw-tracepoint program with the same 88-byte ring record. */
     public fun buildRawTracepointSysEnterProgram(options: TierEOptions = TierEOptions()): List<Insn> = buildSysEnterProgram(options, rawTracepoint = true)
 
+    internal fun buildBoundaryDiagnosticSysEnterProgram(
+        options: TierEOptions,
+        targetTgid: Int,
+    ): List<Insn> = buildSysEnterProgram(options, rawTracepoint = true, boundaryTarget = targetTgid)
+
+    internal fun buildBoundaryDiagnosticMarkerProgram(
+        options: TierEOptions,
+        targetTgid: Int,
+    ): List<Insn> = buildMarkerProgram(options, targetTgid)
+
     public fun buildRawTracepointSysEnterProgram(
         options: TierEOptions,
         benchmarkTargetTgid: Int,
@@ -713,6 +744,7 @@ internal object TierEBpfProgramBuilder {
         options: TierEOptions,
         rawTracepoint: Boolean,
         benchmarkTargetTgid: Int? = null,
+        boundaryTarget: Int? = null,
     ): List<Insn> {
         if (options.coverageRecoveryMode != CoverageRecoveryMode.DISABLED) {
             require(options.markerVersion == MarkerVersion.V2) {
@@ -720,6 +752,7 @@ internal object TierEBpfProgramBuilder {
             }
         }
         val p = mutableListOf<Insn>()
+        val boundary = boundaryTarget?.let { BoundaryEmitter(p, it, marker = false) }
         val kernelCoverageMode =
             if (options.emissionMode == TierEEmissionMode.UNIQUE_STACK_SYSCALL) options.kernelCoverageMode else TierEKernelCoverageMode.NONE
 
@@ -872,6 +905,7 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_REG, dst = 9, src = 1))
         emit(Insn(CALL, imm = H_PID_TGID))
         emit(Insn(MOV_REG, dst = 8, src = 0))
+        boundary?.entry()
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 5, off = -4))
 
@@ -927,6 +961,7 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(CALL, imm = H_LOOKUP))
         val missingSession = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
+        boundary?.field(BoundaryLayout.RECORD_WORDS, R_CONTROL, 0)
         emit(Insn(MOV_REG, dst = 5, src = 8))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
@@ -958,6 +993,7 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(ADD_IMM, dst = 2, imm = -4))
         emit(Insn(CALL, imm = H_LOOKUP))
         val missingInFlightCounter = emit(Insn(JEQ_IMM, dst = 0))
+        boundary?.constant(BoundaryLayout.WORD_4, 1, BoundaryLayout.WORD_4_BIT)
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_IN_FLIGHT_ADMITTED_OFFSET)
@@ -967,6 +1003,7 @@ internal object TierEBpfProgramBuilder {
         // final quiescence wait even after userspace disables new capture.
         val captureDisabled = if (options.allTargetCapture) {
             emit(Insn(LDX_W, dst = 5, src = 7, off = 16))
+            boundary?.field(BoundaryLayout.WORD_1, R_SCRATCH, 1)
             emit(Insn(JEQ_IMM, dst = 5))
         } else {
             null
@@ -986,6 +1023,7 @@ internal object TierEBpfProgramBuilder {
             null
         }
         emit(Insn(LDX_W, dst = 5, src = 7, off = 8))
+        boundary?.field(BoundaryLayout.WORD_2, R_SCRATCH, 2)
         val markerDetached = emit(Insn(JEQ_IMM, dst = 5))
         val markerAttached = emit(Insn(JA))
 
@@ -996,6 +1034,7 @@ internal object TierEBpfProgramBuilder {
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_MARKER_ATTACHED_OFFSET)
         emit(Insn(LDX_DW, dst = 7, src = FP, off = -112))
         emit(Insn(LDX_W, dst = 5, src = 7, off = 12))
+        boundary?.field(BoundaryLayout.WORD_3, R_SCRATCH, BoundaryLayout.WORD_3_BIT)
         emit(Insn(STX_W, dst = FP, src = 5, off = -36))
         ldMap(6, 0)
         emit(Insn(CALL, imm = H_CURRENT_TASK_BTF))
@@ -1009,14 +1048,18 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_REG, dst = 6, src = 0))
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_TASK_STORAGE_AVAILABLE_OFFSET)
         emit(Insn(LDX_DW, dst = 5, src = 6, off = 0))
+        boundary?.field(BoundaryLayout.RECORD_INVOCATION, R_SCRATCH, BoundaryLayout.INVOCATION_BIT)
         emit(Insn(STX_DW, dst = FP, src = 5, off = -24))
         val inactiveInvocation = emit(Insn(JEQ_IMM, dst = 5))
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_ACTIVE_INVOCATION_OFFSET)
         emit(Insn(LDX_DW, dst = 5, src = 6, off = 8))
+        boundary?.field(BoundaryLayout.RECORD_SEQUENCE, R_SCRATCH, BoundaryLayout.SEQUENCE_BIT)
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
         emit(Insn(LDX_W, dst = 5, src = 6, off = 16))
+        boundary?.field(BoundaryLayout.RECORD_AUX, R_SCRATCH, BoundaryLayout.AUX_BIT, wide = false)
         emit(Insn(STX_W, dst = FP, src = 5, off = -8))
         emit(Insn(LDX_W, dst = 5, src = 6, off = 20))
+        boundary?.field(BoundaryLayout.RECORD_GENERATION, R_SCRATCH, BoundaryLayout.GENERATION_BIT, wide = false)
         emit(Insn(LDX_W, dst = 4, src = FP, off = -36))
         val staleAttachmentGeneration = emit(Insn(JNE_REG, dst = 5, src = 4))
         emitExactAdmissionAuditCounter(EXACT_ADMISSION_AUDIT_GENERATION_VALIDATED_OFFSET)
@@ -1030,6 +1073,7 @@ internal object TierEBpfProgramBuilder {
 
         // Diagnostic counts are keyed by active invocation, bounded by the
         // map's LRU capacity, and never participate in attribution.
+        boundary?.terminal(BoundaryStage.MAIN_ACTIVE_COUNTER_REACHED)
         emit(Insn(LDX_DW, dst = 5, src = FP, off = -24))
         val noMetricContext = emit(Insn(JEQ_IMM, dst = 5))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -72))
@@ -1397,34 +1441,68 @@ internal object TierEBpfProgramBuilder {
             lossHandler ?: activeExit,
         )
 
+        fun boundaryTarget(
+            stage: BoundaryStage,
+            continuation: Int,
+        ): Int {
+            if (boundary == null) return continuation
+            val start = p.size
+            if (stage == BoundaryStage.MAIN_NO_INFLIGHT) boundary.constant(BoundaryLayout.WORD_4, 0, BoundaryLayout.WORD_4_BIT)
+            boundary.terminal(stage)
+            val jump = emit(Insn(JA))
+            p[jump] = p[jump].copy(off = (continuation - jump - 1).toShort())
+            return start
+        }
+        val boundaryMissingSession = boundaryTarget(BoundaryStage.MAIN_NO_SESSION, missingSessionAuditTarget)
+        val boundaryWrongTarget = boundaryTarget(BoundaryStage.MAIN_WRONG_TARGET, wrongTargetAuditTarget)
+        val boundaryNoTask = boundaryTarget(BoundaryStage.MAIN_NO_TASK, noTaskAuditTarget)
+        val boundaryNoStorage = boundaryTarget(BoundaryStage.MAIN_NO_STORAGE, noStorageAuditTarget)
+        val boundaryInactive = boundaryTarget(BoundaryStage.MAIN_INACTIVE, inactiveAuditTarget)
+        val boundaryStale = boundaryTarget(BoundaryStage.MAIN_STALE, staleAuditTarget)
+        val boundaryDetached = boundaryTarget(BoundaryStage.MAIN_DETACHED, detachedAuditTarget)
+        val boundaryNoInFlight = boundaryTarget(BoundaryStage.MAIN_NO_INFLIGHT, missingInFlightAuditTarget)
+        val boundaryPartialFailure = if (boundary == null) {
+            inFlightCounterFailureHandler
+        } else {
+            val start = p.size
+            boundary.partialFailure()
+            val jump = emit(Insn(JA))
+            p[jump] = p[jump].copy(off = (inFlightCounterFailureHandler - jump - 1).toShort())
+            start
+        }
+        captureDisabled?.let { index ->
+            val target = boundaryTarget(BoundaryStage.MAIN_CAPTURE_DISABLED, completeActive)
+            p[index] = p[index].copy(off = (target - index - 1).toShort())
+        }
+
         reservationFailed?.let { index ->
             p[index] = p[index].copy(off = (reservationAuditTarget - index - 1).toShort())
         }
-        p[missingSession] = p[missingSession].copy(off = (missingSessionAuditTarget - missingSession - 1).toShort())
-        p[wrongTarget] = p[wrongTarget].copy(off = (wrongTargetAuditTarget - wrongTarget - 1).toShort())
+        p[missingSession] = p[missingSession].copy(off = (boundaryMissingSession - missingSession - 1).toShort())
+        p[wrongTarget] = p[wrongTarget].copy(off = (boundaryWrongTarget - wrongTarget - 1).toShort())
         p[noTask] = p[noTask].copy(
-            off = (noTaskAuditTarget - noTask - 1).toShort(),
+            off = (boundaryNoTask - noTask - 1).toShort(),
         )
         p[noStorage] = p[noStorage].copy(
-            off = (noStorageAuditTarget - noStorage - 1).toShort(),
+            off = (boundaryNoStorage - noStorage - 1).toShort(),
         )
         p[inactiveInvocation] = p[inactiveInvocation].copy(
-            off = (inactiveAuditTarget - inactiveInvocation - 1).toShort(),
+            off = (boundaryInactive - inactiveInvocation - 1).toShort(),
         )
         p[staleAttachmentGeneration] = p[staleAttachmentGeneration].copy(
-            off = (staleAuditTarget - staleAttachmentGeneration - 1).toShort(),
+            off = (boundaryStale - staleAttachmentGeneration - 1).toShort(),
         )
         p[markerDetached] = p[markerDetached].copy(
-            off = (detachedAuditTarget - markerDetached - 1).toShort(),
+            off = (boundaryDetached - markerDetached - 1).toShort(),
         )
         p[markerAttached] = p[markerAttached].copy(off = (activeMarkerObservation - markerAttached - 1).toShort())
         submitted?.let { index -> p[index] = p[index].copy(off = (completeActive - index - 1).toShort()) }
         missingLossCounter?.let { index ->
             p[index] = p[index].copy(off = (completeActive - index - 1).toShort())
         }
-        p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (missingInFlightAuditTarget - missingInFlightCounter - 1).toShort())
+        p[missingInFlightCounter] = p[missingInFlightCounter].copy(off = (boundaryNoInFlight - missingInFlightCounter - 1).toShort())
         missingCaptureAdmissionCounter?.let { index ->
-            p[index] = p[index].copy(off = (inFlightCounterFailureHandler - index - 1).toShort())
+            p[index] = p[index].copy(off = (boundaryPartialFailure - index - 1).toShort())
         }
         missingCaptureSubmittedCounter?.let { index ->
             p[index] = p[index].copy(off = (inFlightCounterFailureHandler - index - 1).toShort())
@@ -1522,8 +1600,239 @@ internal object TierEBpfProgramBuilder {
     private const val V2_INITIALIZER_OFFSET = -32
     private const val V1_INITIALIZER_OFFSET = -24
 
-    public fun buildMarkerProgram(options: TierEOptions): List<Insn> {
+    /** Scratch is below production FP-280; entry kills only helper-clobbered registers, fields only r1-r3. */
+    private class BoundaryEmitter(
+        private val p: MutableList<Insn>,
+        target: Int,
+        private val marker: Boolean,
+    ) {
+        private val targetTgid = target.also { require(it > 0) }
+        private val flightOffset = if (marker) BoundaryLayout.MARKER_IN_FLIGHT else BoundaryLayout.MAIN_IN_FLIGHT
+
+        private fun emit(i: Insn): Int {
+            p += i
+            return p.lastIndex
+        }
+
+        private fun patch(
+            index: Int,
+            target: Int = p.size,
+        ) {
+            val distance = target - index - 1
+            require(distance in Short.MIN_VALUE..Short.MAX_VALUE)
+            p[index] = p[index].copy(off = distance.toShort())
+        }
+
+        private fun map(index: Int) {
+            emit(Insn(LD_MAP_FD, dst = 1, src = PSEUDO_FD, imm = index))
+            emit(Insn(0))
+        }
+
+        private fun store(
+            offset: Int,
+            source: Int,
+            wide: Boolean = true,
+            destination: Int = FP,
+        ) {
+            emit(Insn(if (wide) STX_DW else STX_W, dst = destination, src = source, off = offset.toShort()))
+        }
+
+        private fun load(
+            destination: Int,
+            offset: Int,
+        ) {
+            emit(Insn(LDX_DW, dst = destination, src = FP, off = offset.toShort()))
+        }
+
+        private fun imm(
+            register: Int,
+            value: Int,
+        ) {
+            emit(Insn(MOV_IMM, dst = register, imm = value))
+        }
+
+        private fun add(
+            offset: Int,
+            value: Int = 1,
+        ) {
+            imm(R_SCRATCH, value)
+            emit(Insn(ATOMIC_ADD_DW, dst = 4, src = 5, off = offset.toShort()))
+        }
+
+        fun entry() {
+            imm(R_SCRATCH, 0)
+            store(BOUNDARY_ROW_STACK, R_SCRATCH)
+            store(BOUNDARY_CONTROL_STACK, R_SCRATCH)
+            store(BOUNDARY_KEY_STACK, R_SCRATCH, wide = false)
+            emit(Insn(MOV_REG, dst = 5, src = if (marker) 6 else 8))
+            emit(Insn(RSH_IMM, dst = 5, imm = 32))
+            val foreign = emit(Insn(JNE_IMM, dst = 5, imm = targetTgid))
+            map(if (marker) BOUNDARY_MARKER_CONTROL_MAP else BOUNDARY_MAIN_CONTROL_MAP)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = BOUNDARY_KEY_STACK))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val noControl = emit(Insn(JEQ_IMM, dst = 0))
+            store(BOUNDARY_CONTROL_STACK, 0)
+            emit(Insn(MOV_REG, dst = 4, src = 0))
+            add(flightOffset)
+            emit(Insn(LD_MAP_FD, dst = 1, imm = -1)) // Signed codec bound; saturation is explicit diagnostic failure.
+            emit(Insn(0, imm = Int.MAX_VALUE))
+            imm(2, 0)
+            val attempt = p.size
+            emit(Insn(LDX_DW, dst = 5, src = 4))
+            val exhausted = emit(Insn(JGE_REG, dst = 5, src = 1))
+            emit(Insn(MOV_REG, dst = 0, src = 5))
+            emit(Insn(MOV_REG, dst = 3, src = 5))
+            emit(Insn(ADD_IMM, dst = 3, imm = 1))
+            emit(Insn(ATOMIC_ADD_DW, dst = 4, src = 3, imm = ATOMIC_CMPXCHG)) // Saturating bounded attempt accounting.
+            val counted = emit(Insn(JEQ_REG, dst = 0, src = 5))
+            emit(Insn(ADD_IMM, dst = 2, imm = 1))
+            val contention = emit(Insn(JGE_IMM, dst = 2, imm = BOUNDARY_RESERVATION_RETRIES))
+            val retry = emit(Insn(JA))
+            patch(retry, attempt)
+            patch(counted)
+            val full = emit(Insn(JGE_IMM, dst = 5, imm = BoundaryLayout.CAPACITY))
+            imm(R_SCRATCH, 1)
+            emit(Insn(ATOMIC_ADD_DW, dst = 4, src = 5, off = 8, imm = 1)) // Fetch-add reserves a unique, never-reused bounded slot.
+            store(BOUNDARY_KEY_STACK, R_SCRATCH, wide = false)
+            map(if (marker) BOUNDARY_MARKER_RECORDS_MAP else BOUNDARY_MAIN_RECORDS_MAP)
+            emit(Insn(MOV_REG, dst = 2, src = FP))
+            emit(Insn(ADD_IMM, dst = 2, imm = BOUNDARY_KEY_STACK))
+            emit(Insn(CALL, imm = H_LOOKUP))
+            val noRow = emit(Insn(JEQ_IMM, dst = 0))
+            store(BOUNDARY_ROW_STACK, 0)
+            emit(Insn(MOV_REG, dst = 1, src = 0))
+            imm(R_SCRATCH, if (marker) 1 else 2)
+            store(BoundaryLayout.RECORD_PLANE, R_SCRATCH, wide = false, destination = 1)
+            store(BoundaryLayout.RECORD_PID_TGID, if (marker) R_MARKER_PID else R_MAIN_PID_OR_FLAGS, destination = 1)
+            emit(Insn(LDX_DW, dst = 5, src = 9, off = (if (marker) PT_REGS_RDI_OFFSET else RAW_SYSCALL_ID_OFFSET).toShort()))
+            store(BoundaryLayout.RECORD_RAW_ID, R_SCRATCH, destination = 1)
+            emit(Insn(CALL, imm = H_KTIME))
+            load(1, BOUNDARY_ROW_STACK)
+            store(BoundaryLayout.RECORD_KTIME, 0, destination = 1)
+            imm(R_SCRATCH, 1)
+            store(0, R_SCRATCH, wide = false, destination = 1)
+            load(R_CONTROL, BOUNDARY_CONTROL_STACK)
+            add(BoundaryLayout.ENTRIES)
+            val done = emit(Insn(JA))
+            patch(full)
+            load(R_CONTROL, BOUNDARY_CONTROL_STACK)
+            add(BoundaryLayout.DROPS)
+            val dropped = emit(Insn(JA))
+            patch(noRow)
+            load(R_CONTROL, BOUNDARY_CONTROL_STACK)
+            add(BoundaryLayout.HELPER_FAILURES)
+            val helperFailed = emit(Insn(JA))
+            patch(exhausted)
+            patch(contention)
+            imm(R_SCRATCH, 1)
+            emit(Insn(ATOMIC_ADD_DW, dst = 4, src = 5, off = BoundaryLayout.HELPER_FAILURES.toShort(), imm = ATOMIC_OR)) // Latch failure without risking a counter wrap.
+            patch(done)
+            patch(dropped)
+            patch(helperFailed)
+            patch(noControl)
+            patch(foreign)
+        }
+
+        fun field(
+            offset: Int,
+            register: Int,
+            bit: Int,
+            wide: Boolean = true,
+        ) {
+            emit(Insn(MOV_REG, dst = 2, src = register))
+            load(1, BOUNDARY_ROW_STACK)
+            val absent = emit(Insn(JEQ_IMM, dst = 1))
+            store(offset, 2, wide, destination = 1)
+            emit(Insn(LDX_W, dst = 3, src = 1, off = BoundaryLayout.RECORD_VALID.toShort()))
+            emit(Insn(OR_IMM, dst = 3, imm = 1 shl bit))
+            store(BoundaryLayout.RECORD_VALID, R_VALID_MASK, wide = false, destination = 1)
+            patch(absent)
+        }
+
+        fun constant(
+            offset: Int,
+            value: Int,
+            bit: Int,
+        ) {
+            load(1, BOUNDARY_ROW_STACK)
+            val absent = emit(Insn(JEQ_IMM, dst = 1))
+            imm(2, value)
+            store(offset, 2, destination = 1)
+            emit(Insn(LDX_W, dst = 3, src = 1, off = BoundaryLayout.RECORD_VALID.toShort()))
+            emit(Insn(OR_IMM, dst = 3, imm = 1 shl bit))
+            store(BoundaryLayout.RECORD_VALID, R_VALID_MASK, wide = false, destination = 1)
+            patch(absent)
+        }
+
+        fun terminal(stage: BoundaryStage) {
+            load(1, BOUNDARY_ROW_STACK)
+            val noRow = emit(Insn(JEQ_IMM, dst = 1))
+            imm(R_SCRATCH, stage.encoding)
+            store(BoundaryLayout.RECORD_STAGE, R_SCRATCH, wide = false, destination = 1)
+            imm(R_SCRATCH, BoundaryLayout.TERMINAL_COMMIT)
+            store(0, R_SCRATCH, wide = false, destination = 1)
+            load(R_CONTROL, BOUNDARY_CONTROL_STACK)
+            add(BoundaryLayout.TERMINALS)
+            patch(noRow)
+            load(R_CONTROL, BOUNDARY_CONTROL_STACK)
+            val noControl = emit(Insn(JEQ_IMM, dst = 4))
+            add(flightOffset, -1)
+            patch(noControl)
+            imm(R_SCRATCH, 0)
+            store(BOUNDARY_ROW_STACK, R_SCRATCH)
+            store(BOUNDARY_CONTROL_STACK, R_SCRATCH)
+        }
+
+        fun partialFailure() {
+            load(R_CONTROL, BOUNDARY_CONTROL_STACK)
+            val absent = emit(Insn(JEQ_IMM, dst = 4))
+            add(BoundaryLayout.HELPER_FAILURES)
+            add(flightOffset, -1)
+            patch(absent)
+            imm(R_SCRATCH, 0)
+            store(BOUNDARY_ROW_STACK, R_SCRATCH)
+            store(BOUNDARY_CONTROL_STACK, R_SCRATCH)
+        }
+
+        fun markerFlagsStored() {
+            emit(Insn(MOV32_REG, dst = 5, src = 8)) // Zero-extend the value actually stored by STX_W.
+            field(BoundaryLayout.WORD_4, R_SCRATCH, BoundaryLayout.WORD_4_BIT)
+        }
+
+        fun markerStored() {
+            field(BoundaryLayout.RECORD_INVOCATION, R_INVOCATION, BoundaryLayout.INVOCATION_BIT)
+            emit(Insn(LDX_DW, dst = 5, src = 0, off = 8))
+            field(BoundaryLayout.RECORD_SEQUENCE, R_SCRATCH, BoundaryLayout.SEQUENCE_BIT)
+            val cleared = emit(Insn(JEQ_IMM, dst = 7))
+            terminal(BoundaryStage.MARKER_SET)
+            val set = emit(Insn(JA))
+            patch(cleared)
+            terminal(BoundaryStage.MARKER_CLEAR)
+            patch(set)
+        }
+
+        fun markerRejected(
+            stage: BoundaryStage,
+            continuation: Int,
+        ): Int {
+            val start = p.size
+            if (stage == BoundaryStage.MARKER_STORAGE_FAILED) constant(BoundaryLayout.WORD_2, 0, 2)
+            terminal(stage)
+            val jump = emit(Insn(JA))
+            patch(jump, continuation)
+            return start
+        }
+    }
+
+    public fun buildMarkerProgram(options: TierEOptions): List<Insn> = buildMarkerProgram(options, null)
+
+    private fun buildMarkerProgram(
+        options: TierEOptions,
+        boundaryTarget: Int?,
+    ): List<Insn> {
         val program = mutableListOf<Insn>()
+        val boundary = boundaryTarget?.let { BoundaryEmitter(program, it, marker = true) }
 
         fun emit(instruction: Insn): Int {
             program += instruction
@@ -1533,6 +1842,7 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_REG, dst = 9, src = 1))
         emit(Insn(CALL, imm = H_PID_TGID))
         emit(Insn(MOV_REG, dst = 6, src = 0))
+        boundary?.entry()
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_W, dst = FP, src = 5, off = -28))
         emitMarkerMapLoad(program, 1, 2)
@@ -1541,6 +1851,7 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(CALL, imm = H_LOOKUP))
         val noTargetConfig = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(LDX_W, dst = 4, src = 0, off = 4))
+        boundary?.field(BoundaryLayout.WORD_1, R_CONTROL, 1)
         emit(Insn(LDX_W, dst = 5, src = 0, off = 12))
         if (options.markerVersion == MarkerVersion.V2) {
             emit(Insn(STX_W, dst = FP, src = 5, off = -56))
@@ -1552,6 +1863,7 @@ internal object TierEBpfProgramBuilder {
         val wrongTarget = emit(Insn(JNE_REG, dst = 5, src = 4))
         emit(Insn(LDX_DW, dst = 7, src = 9, off = 112)) // pt_regs.di (invocation_id, both versions)
         emitMarkerArguments(program, options)
+        boundary?.field(BoundaryLayout.WORD_3, R_MAIN_PID_OR_FLAGS, BoundaryLayout.WORD_3_BIT)
         val clearMarker = emit(Insn(JEQ_IMM, dst = 7))
         emit(Insn(MOV_REG, dst = 5, src = 7))
         emit(Insn(RSH_IMM, dst = 5, imm = 32))
@@ -1564,29 +1876,11 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(CALL, imm = H_LOOKUP))
         val noSession = emit(Insn(JEQ_IMM, dst = 0))
         emit(Insn(LDX_W, dst = 4, src = 0))
+        boundary?.field(BoundaryLayout.RECORD_WORDS, R_CONTROL, 0)
         emit(Insn(LDX_W, dst = 5, src = FP, off = -32))
         val wrongSession = emit(Insn(JNE_REG, dst = 5, src = 4))
         val acceptedMarker = program.size
-        emit(Insn(MOV_IMM, dst = 5, imm = 1))
-        emit(Insn(STX_W, dst = FP, src = 5, off = -28))
-        emitMarkerMapLoad(program, 1, 1)
-        emit(Insn(MOV_REG, dst = 2, src = FP))
-        emit(Insn(ADD_IMM, dst = 2, imm = -28))
-        emit(Insn(CALL, imm = H_LOOKUP))
-        val noMarkerCounter = emit(Insn(JEQ_IMM, dst = 0))
-        emit(Insn(MOV_IMM, dst = 5, imm = 1))
-        emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5))
-        emit(Insn(CALL, imm = H_PID_TGID))
-        emit(Insn(STX_DW, dst = FP, src = 0, off = -40))
-        emit(Insn(MOV_IMM, dst = 5, imm = 2))
-        emit(Insn(STX_W, dst = FP, src = 5, off = -28))
-        emitMarkerMapLoad(program, 1, 1)
-        emit(Insn(MOV_REG, dst = 2, src = FP))
-        emit(Insn(ADD_IMM, dst = 2, imm = -28))
-        emit(Insn(CALL, imm = H_LOOKUP))
-        val noPidSlot = emit(Insn(JEQ_IMM, dst = 0))
-        emit(Insn(LDX_DW, dst = 5, src = FP, off = -40))
-        emit(Insn(STX_DW, dst = 0, src = 5))
+        val (noMarkerCounter, noPidSlot) = MarkerAdmissionCounters.emit(program)
         emit(Insn(STX_DW, dst = FP, src = 7, off = -24))
         emit(Insn(MOV_IMM, dst = 5, imm = 0))
         emit(Insn(STX_DW, dst = FP, src = 5, off = -16))
@@ -1605,12 +1899,16 @@ internal object TierEBpfProgramBuilder {
         emit(Insn(MOV_IMM, dst = 4, imm = 1))
         emit(Insn(CALL, imm = H_TASK_STORAGE_GET))
         val noStorage = emit(Insn(JEQ_IMM, dst = 0))
+        boundary?.constant(BoundaryLayout.WORD_2, 1, 2)
         emit(Insn(STX_DW, dst = 0, src = 7, off = 0))
         emit(Insn(MOV_IMM, dst = 5, imm = 1))
         emit(Insn(ATOMIC_ADD_DW, dst = 0, src = 5, off = 8))
         emit(Insn(STX_W, dst = 0, src = 8, off = 16))
+        boundary?.markerFlagsStored()
+        boundary?.field(BoundaryLayout.RECORD_AUX, R_MAIN_PID_OR_FLAGS, BoundaryLayout.AUX_BIT, wide = false)
         emit(Insn(LDX_W, dst = 5, src = FP, off = -44))
         emit(Insn(STX_W, dst = 0, src = 5, off = 20))
+        boundary?.field(BoundaryLayout.RECORD_GENERATION, R_SCRATCH, BoundaryLayout.GENERATION_BIT, wide = false)
         if (options.markerVersion == MarkerVersion.V2) {
             // FP-44 holds attachment generation, so only the low 32 bits of
             // the canonical stack ID at FP-48 belong in task storage. The
@@ -1618,20 +1916,62 @@ internal object TierEBpfProgramBuilder {
             emit(Insn(LDX_W, dst = 5, src = FP, off = -48))
             emit(Insn(STX_DW, dst = 0, src = 5, off = 24))
         }
+        boundary?.markerStored()
         val markerStored = emit(Insn(JA))
         val (markerFailureHandler, noFailureCounter, exitIndex) = emitMarkerFailureHandler(program)
+
+        fun rejected(
+            stage: BoundaryStage,
+            continuation: Int,
+        ): Int = boundary?.markerRejected(stage, continuation) ?: continuation
+        val missingConfig = rejected(BoundaryStage.MARKER_CONFIG_MISSING, exitIndex)
+        val wrongTargetReceipt = rejected(BoundaryStage.MARKER_WRONG_TARGET, exitIndex)
+        val missingSession = rejected(BoundaryStage.MARKER_SESSION_MISSING, exitIndex)
+        val wrongSessionReceipt = rejected(BoundaryStage.MARKER_WRONG_SESSION, exitIndex)
+        val missingCounter = rejected(BoundaryStage.MARKER_COUNTER_MISSING, exitIndex)
+        val missingPidSlot = rejected(BoundaryStage.MARKER_PID_SLOT_MISSING, exitIndex)
+        val missingTask = rejected(BoundaryStage.MARKER_NO_TASK, markerFailureHandler)
+        val missingStorage = rejected(BoundaryStage.MARKER_STORAGE_FAILED, markerFailureHandler)
         program[clearMarker] = program[clearMarker].copy(off = (acceptedMarker - clearMarker - 1).toShort())
-        program[noSession] = program[noSession].copy(off = (exitIndex - noSession - 1).toShort())
-        program[noTargetConfig] = program[noTargetConfig].copy(off = (exitIndex - noTargetConfig - 1).toShort())
-        program[wrongTarget] = program[wrongTarget].copy(off = (exitIndex - wrongTarget - 1).toShort())
-        program[wrongSession] = program[wrongSession].copy(off = (exitIndex - wrongSession - 1).toShort())
-        program[noMarkerCounter] = program[noMarkerCounter].copy(off = (exitIndex - noMarkerCounter - 1).toShort())
-        program[noPidSlot] = program[noPidSlot].copy(off = (exitIndex - noPidSlot - 1).toShort())
-        program[noTask] = program[noTask].copy(off = (markerFailureHandler - noTask - 1).toShort())
-        program[noStorage] = program[noStorage].copy(off = (markerFailureHandler - noStorage - 1).toShort())
+        program[noSession] = program[noSession].copy(off = (missingSession - noSession - 1).toShort())
+        program[noTargetConfig] = program[noTargetConfig].copy(off = (missingConfig - noTargetConfig - 1).toShort())
+        program[wrongTarget] = program[wrongTarget].copy(off = (wrongTargetReceipt - wrongTarget - 1).toShort())
+        program[wrongSession] = program[wrongSession].copy(off = (wrongSessionReceipt - wrongSession - 1).toShort())
+        program[noMarkerCounter] = program[noMarkerCounter].copy(off = (missingCounter - noMarkerCounter - 1).toShort())
+        program[noPidSlot] = program[noPidSlot].copy(off = (missingPidSlot - noPidSlot - 1).toShort())
+        program[noTask] = program[noTask].copy(off = (missingTask - noTask - 1).toShort())
+        program[noStorage] = program[noStorage].copy(off = (missingStorage - noStorage - 1).toShort())
         program[markerStored] = program[markerStored].copy(off = (exitIndex - markerStored - 2).toShort())
         program[noFailureCounter] = program[noFailureCounter].copy(off = (exitIndex - noFailureCounter - 1).toShort())
         return program
+    }
+
+    private object MarkerAdmissionCounters {
+    fun emit(program: MutableList<Insn>): Pair<Int, Int> {
+        program += Insn(MOV_IMM, dst = 5, imm = 1)
+        program += Insn(STX_W, dst = FP, src = 5, off = -28)
+        emitMarkerMapLoad(program, 1, 1)
+        program += Insn(MOV_REG, dst = 2, src = FP)
+        program += Insn(ADD_IMM, dst = 2, imm = -28)
+        program += Insn(CALL, imm = H_LOOKUP)
+        val noMarkerCounter = program.size
+        program += Insn(JEQ_IMM, dst = 0)
+        program += Insn(MOV_IMM, dst = 5, imm = 1)
+        program += Insn(ATOMIC_ADD_DW, dst = 0, src = 5)
+        program += Insn(CALL, imm = H_PID_TGID)
+        program += Insn(STX_DW, dst = FP, src = 0, off = -40)
+        program += Insn(MOV_IMM, dst = 5, imm = 2)
+        program += Insn(STX_W, dst = FP, src = 5, off = -28)
+        emitMarkerMapLoad(program, 1, 1)
+        program += Insn(MOV_REG, dst = 2, src = FP)
+        program += Insn(ADD_IMM, dst = 2, imm = -28)
+        program += Insn(CALL, imm = H_LOOKUP)
+        val noPidSlot = program.size
+        program += Insn(JEQ_IMM, dst = 0)
+        program += Insn(LDX_DW, dst = 5, src = FP, off = -40)
+        program += Insn(STX_DW, dst = 0, src = 5)
+        return noMarkerCounter to noPidSlot
+    }
     }
 
     /**

@@ -35,7 +35,8 @@ import java.lang.invoke.MethodHandles
  * Captured error states are optimized using thread-local segments via [ErrnoSegment].
  */
 
-internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
+internal object RealNativeEngine : NativeEngine, RawSyscallOperations, NativeStackContextProvider {
+    override val stackContexts: NativeStackContexts = UnsupportedNativeStackContexts
     override val fileSystem: NativeFileSystem = RealNativeFileSystem
     override val networking: NativeNetworking = RealNativeNetworking
     override val process: NativeProcess = RealNativeProcess
@@ -217,6 +218,25 @@ internal object RealNativeEngine : NativeEngine, RawSyscallOperations {
 }
 
 internal object RealNativeFileSystem : NativeFileSystem {
+    private val LREMOVEXATTR: MethodHandle =
+        RealNativeHelper.downcall(
+            "lremovexattr",
+            FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.ADDRESS),
+            Linker.Option.captureCallState("errno"),
+        )
+
+    override fun removeExtendedAttribute(
+        path: ManagedSegment,
+        name: ManagedSegment,
+    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+        NativeTransfer.path(path)
+        NativeTransfer.path(name)
+        return ErrnoSegment.withCapturedState { capturedState ->
+            val result = LREMOVEXATTR.invokeExact(capturedState.segment, path.native, name.native) as Int
+            RealNativeHelper.result(result.toLong(), capturedState.getErrno())
+        }
+    }
+
     private val OPEN: MethodHandle =
         RealNativeHelper.downcall(
             "open",

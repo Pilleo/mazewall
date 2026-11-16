@@ -4,6 +4,7 @@ import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
 import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
+import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.process.ProcessLauncher
 import io.mazewall.platform.process.RealProcessLauncher
 import io.mazewall.platform.socket.RealSocketManager
@@ -22,7 +23,9 @@ import java.nio.file.Files
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.Adler32
 
 @Execution(ExecutionMode.SAME_THREAD)
@@ -345,7 +348,7 @@ class ProcessBrokerIntegrationTest {
                 if (attempts.incrementAndGet() == 1) {
                     failedOwner = fd
                     closeEntered.countDown()
-                    assertTrue(releaseClose.await(5, TimeUnit.SECONDS))
+                    assertTrue(releaseClose.await(30, TimeUnit.SECONDS))
                     throw fatal
                 }
                 socketReceipts.close(fd)
@@ -353,23 +356,47 @@ class ProcessBrokerIntegrationTest {
         }
         val broker = ProcessBroker(sockets = sockets, launcher = childReceipts)
         broker.start()
-        val first = CompletableFuture.runAsync { broker.close() }
-        assertTrue(closeEntered.await(5, TimeUnit.SECONDS))
-        val waiter = CompletableFuture.runAsync { broker.close() }
-        releaseClose.countDown()
+        val first = CompletableFuture.runAsync({ broker.close() }, { Thread.ofPlatform().start(it) })
+        val waiterResult = CompletableFuture<Unit>()
+        val waiter = Thread.ofPlatform().unstarted {
+            try {
+                broker.close()
+                waiterResult.complete(Unit)
+            } catch (failure: Throwable) {
+                waiterResult.completeExceptionally(failure)
+            }
+        }
+        try {
+            assertTrue(closeEntered.await(30, TimeUnit.SECONDS))
+            waiter.start()
+            awaitCondition(java.time.Duration.ofSeconds(30), "concurrent closer joined shared close") {
+                val stack = waiter.stackTrace
+                stack.any { it.className == "io.mazewall.portal.ProcessBrokerKt" && it.methodName.startsWith("awaitBrokerCloseOperation") } &&
+                    stack.any { it.className == "java.util.concurrent.CompletableFuture" && it.methodName == "get" }
+            }
+            releaseClose.countDown()
 
-        val thrown = assertThrows(Exception::class.java) { first.get(10, TimeUnit.SECONDS) }
-        assertSame(fatal, thrown.cause)
-        val waiterThrown = assertThrows(Exception::class.java) { waiter.get(5, TimeUnit.SECONDS) }
-        assertSame(fatal, waiterThrown.cause, "every closer must observe the shared cleanup failure")
-        assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
-        assertFalse(childReceipts.children.single().isAlive, "fatal socket close must not prevent actual child retirement")
-        assertTrue(socketReceipts.retired.none { it === failedOwner }, "pre-native fatal must not discharge the failed socket owner")
+            val thrown = assertThrows(Exception::class.java) { first.get(10, TimeUnit.SECONDS) }
+            assertSame(fatal, thrown.cause)
+            val waiterThrown = assertThrows(Exception::class.java) { waiterResult.get(5, TimeUnit.SECONDS) }
+            assertSame(fatal, waiterThrown.cause, "every closer must observe the shared cleanup failure")
+            assertTrue(broker.lifecycleState() is ProcessBrokerLifecycle.Failed)
+            assertFalse(childReceipts.children.single().isAlive, "fatal socket close must not prevent actual child retirement")
+            assertTrue(socketReceipts.retired.none { it === failedOwner }, "pre-native fatal must not discharge the failed socket owner")
 
-        broker.close()
-        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
-        socketReceipts.assertAllRetired()
-        assertEquals(1, socketReceipts.retired.count { it === failedOwner }, "retry must retire the exact owner rejected by fatal close")
+            broker.close()
+            assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+            socketReceipts.assertAllRetired()
+            assertEquals(1, socketReceipts.retired.count { it === failedOwner }, "retry must retire the exact owner rejected by fatal close")
+        } finally {
+            releaseClose.countDown()
+            try {
+                first.handle { _, _ -> Unit }.get(30, TimeUnit.SECONDS)
+                if (waiter.state != Thread.State.NEW) waiter.join(30_000)
+            } finally {
+                broker.close()
+            }
+        }
     }
 
     @Test
@@ -387,26 +414,47 @@ class ProcessBrokerIntegrationTest {
             ): Process {
                 if (starts.incrementAndGet() == 2) {
                     secondLaunchEntered.countDown()
-                    assertTrue(releaseSecondLaunch.await(5, TimeUnit.SECONDS))
+                    assertTrue(releaseSecondLaunch.await(30, TimeUnit.SECONDS))
                 }
                 return RealProcessLauncher.startProcess(args, redirectErrorStream, preparation).also(children::add)
             }
         }
         val broker = ProcessBroker(limits = PortalRuntimeLimits(workers = 2), launcher = launcher)
-        val startup = CompletableFuture.runAsync { broker.start() }
-        assertTrue(secondLaunchEntered.await(10, TimeUnit.SECONDS))
-
-        val closing = CompletableFuture.runAsync { broker.close() }
-        awaitCondition(java.time.Duration.ofSeconds(2), "broker entered closing lifecycle") {
-            broker.lifecycleState() == ProcessBrokerLifecycle.Closing
+        val startup = CompletableFuture.runAsync({ broker.start() }, { Thread.ofPlatform().start(it) })
+        val closing = CompletableFuture<Unit>()
+        val closer = Thread.ofPlatform().unstarted {
+            try {
+                broker.close()
+                closing.complete(Unit)
+            } catch (failure: Throwable) {
+                closing.completeExceptionally(failure)
+            }
         }
-        assertFalse(closing.isDone, "close must join the startup owner before publishing Closed")
-        releaseSecondLaunch.countDown()
+        try {
+            assertTrue(secondLaunchEntered.await(30, TimeUnit.SECONDS))
+            closer.start()
+            awaitCondition(java.time.Duration.ofSeconds(30), "close awaiting cancelled startup") {
+                val stack = closer.stackTrace
+                broker.lifecycleState() == ProcessBrokerLifecycle.Closing &&
+                    stack.any { it.className == "io.mazewall.portal.ProcessBrokerKt" && it.methodName.startsWith("awaitBrokerStartup") } &&
+                    stack.any { it.className == "java.util.concurrent.CountDownLatch" && it.methodName == "await" }
+            }
+            assertFalse(closing.isDone, "close must join the startup owner before publishing Closed")
+            releaseSecondLaunch.countDown()
 
-        assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
-        closing.get(10, TimeUnit.SECONDS)
-        assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
-        assertTrue(children.none(Process::isAlive), "all provisional children must be reaped")
+            assertThrows(Exception::class.java) { startup.get(10, TimeUnit.SECONDS) }
+            closing.get(10, TimeUnit.SECONDS)
+            assertEquals(ProcessBrokerLifecycle.Closed, broker.lifecycleState())
+            assertTrue(children.none(Process::isAlive), "all provisional children must be reaped")
+        } finally {
+            releaseSecondLaunch.countDown()
+            try {
+                startup.handle { _, _ -> Unit }.get(30, TimeUnit.SECONDS)
+                if (closer.state != Thread.State.NEW) closer.join(30_000)
+            } finally {
+                broker.close()
+            }
+        }
     }
 
     @Test
@@ -546,10 +594,65 @@ class ProcessBrokerIntegrationTest {
     fun `worker checkout consumes the same budget as the subsequent RPC`() {
         ProcessBroker(limits = PortalRuntimeLimits(callTimeoutMs = 2_000)).use { broker ->
             broker.start()
-            val first = CompletableFuture.runAsync { broker.sleep(1_500) }
-            io.mazewall.testing.awaitCondition(java.time.Duration.ofSeconds(2), "first RPC checked out the worker") { broker.idleSize() == 0 }
-            assertThrows(PortalCallException::class.java) { broker.sleep(1_500) }
-            first.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            val secondReady = CountDownLatch(1)
+            val startSecond = CountDownLatch(1)
+            val firstWrite = CountDownLatch(1)
+            val releaseWrite = CountDownLatch(1)
+            val firstThread = AtomicReference<Thread>()
+            val gateOnce = AtomicBoolean(true)
+            val secondResult = CompletableFuture<Unit>()
+            val second = Thread.ofPlatform().start {
+                try {
+                    secondReady.countDown()
+                    assertTrue(startSecond.await(30, TimeUnit.SECONDS))
+                    assertThrows(PortalCallException::class.java) { broker.sleep(1_500) }
+                    secondResult.complete(Unit)
+                } catch (failure: Throwable) {
+                    secondResult.completeExceptionally(failure)
+                }
+            }
+            val runtime = LinuxNative.snapshot()
+            LinuxNative.setEngine(object : io.mazewall.platform.native.NativeEngine by runtime {
+                override val memory = object : io.mazewall.platform.native.NativeMemory by runtime.memory {
+                    override fun write(
+                        fd: FileDescriptor<*, FdState.Open, FdOwnership>,
+                        buf: io.mazewall.ffi.memory.ManagedSegment,
+                        count: Long,
+                    ): io.mazewall.platform.native.LinuxNative.SyscallResult<Long, io.mazewall.platform.native.LinuxNative.SyscallHandledState.Unhandled> {
+                        if (Thread.currentThread() === firstThread.get() && gateOnce.compareAndSet(true, false)) {
+                            firstWrite.countDown()
+                            check(releaseWrite.await(2, TimeUnit.SECONDS))
+                        }
+                        return runtime.memory.write(fd, buf, count)
+                    }
+                }
+            })
+            var first: CompletableFuture<Void>? = null
+            try {
+                assertTrue(secondReady.await(30, TimeUnit.SECONDS))
+                first = CompletableFuture.runAsync({
+                    firstThread.set(Thread.currentThread())
+                    broker.sleep(1_500)
+                }, { Thread.ofPlatform().start(it) })
+                assertTrue(firstWrite.await(2, TimeUnit.SECONDS), "first caller must reach request write after checkout")
+                startSecond.countDown()
+                awaitCondition(java.time.Duration.ofSeconds(2), "second caller blocked in checkout") {
+                    second.stackTrace.any { it.className == "io.mazewall.portal.ProcessBroker" && it.methodName.startsWith("checkoutWorker-") } &&
+                        second.stackTrace.any { it.className == "java.util.concurrent.ArrayBlockingQueue" && it.methodName == "poll" }
+                }
+                releaseWrite.countDown()
+                secondResult.get(5, TimeUnit.SECONDS)
+                first.get(5, TimeUnit.SECONDS)
+            } finally {
+                startSecond.countDown()
+                releaseWrite.countDown()
+                try {
+                    first?.handle { _, _ -> Unit }?.get(10, TimeUnit.SECONDS)
+                    second.join(10_000)
+                } finally {
+                    LinuxNative.resetToDefault()
+                }
+            }
         }
     }
 

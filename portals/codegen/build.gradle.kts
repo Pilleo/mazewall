@@ -26,6 +26,7 @@ portalCodegenKotlin.target.compilations.matching { it.name == "test" }.configure
 dependencies {
     implementation(libs.kotlinGradlePlugin)
     compileOnly(kotlin("reflect"))
+    runtimeOnly(kotlin("reflect"))
     implementation(libs.kotlinpoet)
     implementation(project(":portals:runtime"))
     implementation(project(":portals:worker"))

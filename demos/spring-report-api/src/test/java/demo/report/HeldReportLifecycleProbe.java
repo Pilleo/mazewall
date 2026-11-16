@@ -59,8 +59,9 @@ public final class HeldReportLifecycleProbe {
         Path root = Path.of(args[1]).toRealPath();
         var profile = RuntimeProfile.HOTSPOT_JIT;
         var policy = WorkerPolicyBuilder.denyList(profile).allowFsRead(root.resolve("application.jar"), root.resolve("templates/approved.txt")).build();
-        try (var resources = PreparedOperationResources.resolve(profile, policy, HeldReportService.class,
-                Set.of(root.resolve("application.jar"), root.resolve("templates/approved.txt")))) {
+        try (var resolution = PreparedResolutionOwner.create()) {
+            var resources = resolution.resolve(profile, policy, HeldReportService.class,
+                Set.of(root.resolve("application.jar"), root.resolve("templates/approved.txt")));
             if (args[0].equals("measure")) {
                 System.out.println(new OperationPolicyDocument(binding(resources.getImplementationSha256(), resources.getResourceGeneration()),
                         CanonicalPolicyArtifact.worker(profile, policy), Set.of(), Map.of()).toJson());
@@ -82,8 +83,10 @@ public final class HeldReportLifecycleProbe {
             var worker = new AtomicReference<Thread>();
             var budget = Duration.ofSeconds(10);
             DomainLifecycle lifecycle;
-            try (var runtime = ManagedRuntime.open(profile, Policy.NO_EXEC_HOTSPOT, budget, budget)) {
-                lifecycle = new DomainLifecycle(runtime, artifact, new DomainLimits(1, 4), resources, Duration.ofMillis(50), ReportRequestContext.bridge(effects, worker));
+            var acquisition = ManagedRuntimeAcquisitionOwner.create();
+            var runtime = acquisition.start(budget, budget);
+            {
+                lifecycle = new DomainLifecycle(runtime, acquisition, artifact, new DomainLimits(1, 4), resources, Duration.ofMillis(50), ReportRequestContext.bridge(effects, worker));
                 lifecycle.start();
                 var beans = new DefaultListableBeanFactory();
                 beans.registerSingleton("jdbc", new DataSourceTransactionManager(data));
@@ -127,17 +130,20 @@ public final class HeldReportLifecycleProbe {
                         check(!caller.isAlive() && delivered.get() instanceof InterruptedException, "Caller cancellation must remain delivery only");
                         check(target.cancellation.await(5, TimeUnit.SECONDS) && worker.get().isAlive(), "Actual cleanup must still be held");
                         lifecycle.stop();
-                        check(lifecycle.lastDrain() instanceof DrainReport.Incomplete, "Held worker must retain incomplete drain");
-                        var incomplete = (DrainReport.Incomplete) lifecycle.lastDrain();
+                        var pending = lifecycle.retirement();
+                        check(pending instanceof DomainLifecycle.OwnerRetirementObservation.OwnerResult result
+                                && result.status() instanceof ManagedRuntimeAcquisitionStatus.Pending,
+                                "Held worker must retain actual owner Pending");
+                        check(lifecycle.lastDrain() == null, "Owner mode must not invent a drain report");
                         check(!lifecycle.isRunning() && !lifecycle.diagnostics().getRetirementComplete(), "Incomplete must refuse readiness");
                         resources.validate();
                         check(receipt.transaction.get() == null, "Caller interruption is not a transaction completion receipt");
                         target.release.countDown();
-                        runtime.drain(budget);
-                        lifecycle.stop();
+                        retire(lifecycle, budget);
                         worker.get().join(5000);
-                        check(!worker.get().isAlive() && lifecycle.lastDrain() == DrainReport.Complete.INSTANCE, "Canonical physical retirement required");
-                        check(incomplete.getLiveWorkers() > 0, "Earlier incomplete receipt must not upgrade itself");
+                        check(!worker.get().isAlive() && lifecycle.diagnostics().getRetirementComplete(), "Canonical physical retirement required");
+                        check(((DomainLifecycle.OwnerRetirementObservation.OwnerResult) pending).status() instanceof ManagedRuntimeAcquisitionStatus.Pending,
+                                "Earlier Pending snapshot must not upgrade itself");
                         check(jdbc.queryForObject("select count(*) from report_audit", Integer.class) == 0, "Actual cancellation rollback required");
                         check(receipt.transaction.get() != null && receipt.transactionOutcome().equals("ROLLED_BACK"), "Actual correlated completion required after physical end");
                     } finally {
@@ -146,11 +152,21 @@ public final class HeldReportLifecycleProbe {
                         caller.join(5000);
                     }
                 }
+                retire(lifecycle, budget);
             }
             jdbc.execute("shutdown");
             System.out.println(drainRace ? "REPORT_DRAIN_RACE_OK status=503 body=not-entered transaction=not-started" :
                     "REPORT_HELD_LIFECYCLE_OK caller=cancelled drain=incomplete resources=retained rollback=actual retirement=physical");
         }
+    }
+    private static void retire(DomainLifecycle lifecycle, Duration budget) {
+        lifecycle.stop();
+        var observed = lifecycle.retirement();
+        if (observed instanceof DomainLifecycle.OwnerRetirementObservation.OwnerResult result
+                && result.status() instanceof ManagedRuntimeAcquisitionStatus.Complete) return;
+        observed = lifecycle.retryRetirement(budget);
+        check(observed instanceof DomainLifecycle.OwnerRetirementObservation.OwnerResult result
+                && result.status() instanceof ManagedRuntimeAcquisitionStatus.Complete, "Actual owner Complete required");
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
 }

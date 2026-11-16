@@ -1,0 +1,33 @@
+# B6 private native argument provenance — accepted with explicit limits — 2026-11-14
+
+Root accepted `ACCEPT_PRIVATE_NATIVE_ARGUMENT_PROVENANCE_WITH_EXPLICIT_LIMITS` under issue 368. This accepts only the seven-file private publication/matching prerequisite and actual Open0/Openat0 proxy wiring. It does not complete B6, add a JNI/FFM match bridge, read memory, emit pointer or argument data, grant permission, move either production Live guard, or approve broader daemon confidentiality trust. See the [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b6-native-argument-provenance), [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b6-native-argument-provenance), [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b6-native-argument-provenance), and [Pause/resume handoff](tier-e-pause-handoff-20261114.md#b6-native-argument-provenance).
+
+## Accepted private behavior
+
+The actual proxy JNI scalar bits are committed with the existing invocation, publication, binding, and frames under the original native gate. A hidden matcher validates the complete request, requires exact nonzero invocation and publication, compares the bounded record under one nonblocking gate, then performs the existing local/immortal-atomic revalidation. It returns only Match or Unavailable. None or malformed published provenance leaves otherwise valid v1 capture usable but cannot match. Lifecycle changes revoke authority; opaque bits are scrubbed only under a safely held gate, with no physical zeroization claim. Existing recorder and ordinary branch errno, throwable, and original-call behavior remain distinct and preserved.
+
+No raw pointer output, diagnostic/ring argument output, new export, dependency, NativeEngine member, ABI/header/layout change, or production activation was introduced. Match proves only equality with the actual proxy inputs represented in this publication. It does not prove kernel register provenance, JNI-to-syscall routing, pathname immutability, protected buffer lifetime, deployment custody, or permission. The optional match-bridge design is a proposal only and is a separate boundary decision; it is not implementation scope here.
+
+## Verification evidence
+
+The existing Debug/USDTOFF baseline and final GREEN010 each passed 32/32 selected native CTests, including seven existing default JNI/FIFO prerequisite cases. This does not qualify Release/USDT-on or original 20+20. The reported complete comparison found the baseline and final DSO defined `nm` type/name/version multiset identical at 927/927, `readelf` defined type/binding/visibility/name-version records identical at 928/928, and all four `NEEDED` libraries unchanged. Existing v1 layout assertions remain: request 88 bytes, snapshot 2,152 bytes, publication offset 80, binding 96, frames 104, with remaining fields checked. The full Gradle gate did not run native CTests; GREEN010 is separate evidence.
+
+The coherent full gate passed in 38m53s: runner, Gradle and pipeline exits 0; physical retirement; 697 XML files, 4,823 tests, 45 skips, zero failures/errors; all 19 expected outer Test tasks and 132 task-owned child executions, without per-case attribution. Unit instructions were 89,367/108,739 and combined instructions 89,815/108,739. Kotlin ABI, coverage, and warning ratchet executed; Detekt, lint, and SpotBugs had UP-TO-DATE outcomes backed by earlier actual JVM executions. Legacy ABI belongs to an earlier static graph, not this full graph. Root independently aggregated results and checked the exits, source/index snapshots, and physical retirement. Frozen source manifest SHA-256: `e11168a6fdfe9635a799f3c065a1ddfe4b7d8c705214d91d3a755b49ae9aae6d`; raw index: `ab358d070a8a89955f7a3f046707c15477add45278c6ada75855c75238fb1d25`; HEAD: `81b37a3f93943af63d0806298667e03cabbf112e`.
+
+The full outer logger cap was 16 MiB and retained 4,822,969 bytes without an outer truncation marker; nested output completeness is unknown. Three profiler shutdown socket exceptions and three suppressed directory exceptions remain under issue 752; cause, impact, and individual process/FD/pump retirement remain UNKNOWN. Sanitizer/race-instrumented configurations, Release/USDT-on, original 20+20, kernel USER_NOTIF, protected custody, and native route remain unqualified.
+
+## Preserved attempt and roadmap limits
+
+Retain the individual baseline and failed/unlaunched attempt history without collapsing results: wrong identity, name collision/unlaunched, missing test dependencies, partial 25-pass result, and 32/32 baseline are separate records. GREEN001 and GREEN008 remain their reported partial/compile-failure attempts; GREEN010 is the final reported 32/32 focused result. Private frame corruption and exhaustive atomic-interleaving/ABA were not established. Issue 338 remains a separate asynchronous-failure follow-up.
+
+Issue 368 remains OPEN and unarchived to preserve qualification limits; this acceptance does not add a bridge or consumer to its scope. Issue 094 / Needed 3, both production guards, self-read/v2, READ, ADDFD, CONTINUE, callbacks/effects, broad daemon-memory trust, protected buffer lifetime, same-address substitution, Tier1/LSM permission, custody, B4/resource/effects/cancellation linearization, G4/G5/P5/P6/T4/vendor/JFR, Plan A, B7/B8, and original 20+20 remain open or unqualified. Any later match bridge requires its own concrete boundary scope and independent review.
+
+
+### Workspace-only receipt provenance
+
+The following local ignored artifacts are retained as plain-text provenance; these paths are not portable links. Their bytes were present in this workspace at handoff preparation time.
+
+- formal plan: `docs/superpowers/plans/2026-11-14-tier-e-b6-native-argument-provenance.md`; SHA-256 `15242b5082c3193be264a59d3dd3eefc2b83d217f1a188726f98ce08371054dc`.
+- controller decision: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b6-native-argument-provenance-implementation001/controller-decision-20261114-001.md`; SHA-256 `ad3cd027269132787be475340f994d60ac96bdb35ff187ec8ee6521e9c7761fa`.
+- independent full audit: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-manager-retirement-preparation/confined-handoff-step2-001/b6-native-argument-full-independent-audit-20261114-001.md`; SHA-256 `9eb90ef886407558a1e96615bb29c91bc437a5814a74532dfaafd7553cd3e73a`.
+- maker report: `.superpowers/sdd/2026-11-08-tier-e-remaining-work/task2-current-interface-preparation/b6-native-argument-provenance-implementation001/final-maker-report-successor.md`; SHA-256 `5867047fd87ec26a8accd1287ea609d3e77637bb89583a27529e0cefcf398d90`.

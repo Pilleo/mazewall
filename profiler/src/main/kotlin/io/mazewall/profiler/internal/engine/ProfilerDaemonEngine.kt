@@ -77,7 +77,8 @@ internal class ProfilerDaemonEngine internal constructor(
         socketManager = socketManager,
         raw = transport.raw,
         handshakeWriter = { fd, buffer, count -> transport.write(fd, buffer.native, count) },
-        connectionAcceptor = transport::accept,
+        hooks = io.mazewall.platform.seccomp.daemon
+            .SeccompConnectionHooks(connectionAcceptor = transport::accept),
     )
 
     @JvmField

@@ -7,8 +7,9 @@ claim that the combined integration release gates or physical bytecode closure p
 ## Ownership and preparation
 
 `ManagedRuntime` retains its captured `InstallationEnvironment`. For filesystem
-policies, the manager resolves every explicit grant, `java.home`, and every nonempty
-classpath entry before constructing workers. Missing grants or runtime entries fail;
+policies on the original route, the manager resolves every explicit grant, `java.home`,
+and every nonempty classpath entry before constructing workers. The direct-owner route
+captures those resources before the manager claims the result. Missing grants or runtime entries fail;
 a nonexistent writable leaf never implicitly authorizes its parent. Future output
 uses an explicitly reviewed, existing directory grant.
 
@@ -37,8 +38,9 @@ generations must finish prepared cleanup before explicit recreation. Each filesy
 generation has one retained `PreparedRetirement` platform thread, started by the trusted
 manager before validation/worker setup. It performs no target execution or installation.
 On failure/drain it waits for actual executor termination and joins every physical
-worker, then acquires the public operation owner's validation monitor before releasing
-its shared resource set and ruleset. External/manager validation and a stalled close can
+worker. The original route then acquires the public operation owner's validation monitor
+before releasing its shared resource set and ruleset; the direct-owner route uses its
+counted validation and dependency order described below. External/manager validation and a stalled close can
 block this cleanup owner, but never the drain caller: drain only joins it within the
 same absolute deadline and reports Incomplete while cleanup lives. The liveWorkers
 count includes this physical cleanup owner, as it already includes the runtime manager.
@@ -91,6 +93,171 @@ read directories retain their positive-allowance semantics. The trusted deployme
 must also control preexisting bind-mount aliases and mount topology; this is not a
 global inode immutability guarantee.
 
+## Caller-owned canonical runtime acquisition
+
+`ManagedRuntimeAcquisitionOwner` provides a separate acquisition route for the fixed
+`HOTSPOT_JIT` runtime and `Policy.NO_EXEC_HOTSPOT` process baseline. `create()` allocates
+an inert owner. Before calling `start(preparationTimeout, closeTimeout)`, the actual caller
+must store that same owner in an application-owned location that remains reachable if
+startup throws. The owner captures one environment and retains the original runtime during
+startup; it does not accept a caller-selected environment or policy. On success, `start`
+returns that runtime and the owner remains its retirement authority.
+
+`status()` is an observation; `retire(timeout)` attempts eligible physical cleanup of that
+original runtime. `Active` means startup completed, not that retirement occurred.
+`Pending(history)` means physical retirement is not yet proved. `Unknown(history)` retains
+an ambiguous installation or cleanup outcome; an ambiguously dispatched operation is not
+replayed. Keep the original owner reachable after Pending or Unknown. Installation Unknown
+does not prevent an eligible first physical cleanup pass. `Complete(history)` is the
+physical retirement receipt for the original runtime, manager and owned work on this route;
+it does not remove a process baseline or any already installed filter. Repeated observation
+or retirement after physical completion does not repeat the completed drain. `close()` uses
+the configured close timeout and reports unresolved Pending or Unknown; a newly encountered
+cleanup `Error` is retained and delivered by identity. Kotlin `use` and Java
+try-with-resources can suppress cleanup failures on an existing body failure.
+
+A local `create().use { it.start(...) }` whose failure escapes while the caller discards the
+owner does not provide a recoverable startup handle. The actual application must establish
+and retain its own bounded lifetime before startup, including on failed startup; no generic
+registry is supplied by this API. The report application now implements a retained
+caller-owned startup root; scoped host review and selected finished-JAR native tests
+passed with synthetic test authority. Final delivery remains pending.
+Existing `ManagedRuntime.open` declared public behavior remains available, including its
+previously identified pre-return recovery gap when failed startup does not return the runtime.
+
+The implementation reshapes private compiler-generated JVM internals; it adds no native API.
+Private or package visibility alone is not an authority boundary: partial effectful operations
+require the unexported original permit together with the original runtime/state pair and the
+appropriate actor and phase. An ordinary whole startup operation applies the same public
+bootstrap checks and installs its genuine baseline before opening admission. Access-override
+reflection is outside this authority claim, and thread-scoped containment is not a complete
+arbitrary-code-execution boundary.
+
+The focused canonical-owner kernel oracle observed successful baseline installation and
+real worker Landlock denial, followed by physical retirement. It did not independently
+assert that a process-baseline-denied operation fails. The fixed canonical route does not activate Live or confined
+operation, helper authority, or other unsupported paths. The remaining issues 338, 461,
+507 and 752 and separate B6 and 20+20 qualifications retain their existing scopes; this
+route does not by itself close them.
+
+## Caller-owned direct resolution for Legacy
+
+`PreparedResolutionOwner` is the additive caller-owned route for resolving a reviewed
+Legacy operation. Create it before calling `resolve`, and keep it reachable until the
+result is retired or transferred. Its factory captures one ambient native-engine snapshot
+before acquiring a descriptor. The single resolution retains every acquired owner in the
+same carrier, including when resolution fails before returning a result; the caller can
+still observe and retire that carrier. This removes the pre-return ownership gap for this
+route. The existing `PreparedOperationResources.resolve` overloads and their callers remain
+unchanged and still have the previously identified pre-return gap. Direct Live and confined
+runtime associations are unsupported and refuse before their effects.
+
+A trusted caller can use the new route as follows, with the policy, selected class and
+read-only paths matching an independently reviewed artifact. The artifact must be loaded
+from an external review of the actual policy and identities; the measured values alone do
+not grant review authority.
+
+```kotlin
+PreparedResolutionOwner.create().use { owner ->
+    val resources = owner.resolve(runtimeProfile, workerPolicy, selectedClass, readOnlyPaths)
+    // Load the independently reviewed artifact for these exact resource identities.
+    val domain = runtime.prepare(reviewedArtifact, limits, resources)
+    // Submit the reviewed operation and await its result.
+    check(runtime.drain(timeout) == DrainReport.Complete)
+}
+```
+
+`owner.retirement()` only observes state; `retryRetirement()` attempts at most one eligible
+caller-owned cleanup pass. `Complete(history)` means that aggregate physically settled;
+its optional history remains available even after successful cleanup. `Pending(history)`
+means work is still active or an eligible pass remains, and does not prove quiescence.
+`Unknown(history)` records a dispatched cleanup without an authoritative successful
+receipt: it and dependent pins are retained and the dispatched close is never replayed.
+Closing an unconsumed owner or its result throws `PreparedResolutionPendingException` for
+Pending, or a fresh `PreparedResolutionUnknownException` whose cause is the retained
+Unknown history. A newly encountered cleanup `Error` is recorded before its first direct
+propagation. If a body has already thrown, Kotlin `use` or Java try-with-resources may
+suppress a new cleanup error on that body failure instead of making the cleanup error
+primary.
+
+After the exact result is claimed by a Legacy runtime, observation and retry report
+`Transferred(history)`; owner and result close are inert. Transferred does **not** mean
+physical retirement. Runtime drain is the authoritative physical receipt, and a Pending
+or Unknown prerequisite retains dependent resources. For this route, the actual workers
+and the Landlock owner retire before dependent grant and artifact pins; incomplete or
+unknown prerequisite cleanup cannot release those pins. Direct Legacy setup dispatches
+actual Landlock create, rule-add and worker-apply operations through the captured native
+engine; retaining the existing native backend does not mean this route has no native effects.
+The original Legacy, Live and confined routes keep their existing behavior and release ordering. This direct route does
+not close the separately tracked native-Live, broader issue 338/812 or loaded-bytecode
+attestation gaps.
+
+## Owner-bound Spring lifecycle
+
+The seven-argument `DomainLifecycle` constructor accepts the original active
+`ManagedRuntimeAcquisitionOwner`, its exact returned runtime, the reviewed artifact,
+limits, prepared resources, timeout and invocation context bridge. It rejects a foreign
+or inactive owner/runtime pair before preparation. Identity and the Active observation
+are snapshots, not an exclusive lease: an independently retained owner can retire after
+the observation, and runtime admission still fails closed.
+
+Preparation runs on the calling thread. A stop that wins while preparation is active
+prevents READY and returns without draining resources still in use. Once the original
+preparation actor has returned or thrown from all resource-dependent work and recorded
+its result, it hands off the lifecycle boundary. The caller thread need not terminate for
+a later eligible retirement pass, but this handoff is not itself a worker-exit or
+physical-retirement receipt. A separate retirement that wins without a lifecycle stop
+cannot produce a successful READY result.
+
+The lifecycle retires only through the same original acquisition owner. `retirement()`
+is passive; `retryRetirement(timeout)` requests one eligible bounded pass. A Pending
+stop callback reports only that bounded stop returned. The application must retain strong
+references to the lifecycle, acquisition owner and resolution owner outside the Spring
+context until actual Complete receipts permit release; retain the originals while
+Pending or Unknown, including after context close. An owner-reported Unknown may be passed back to the same owner's guarded retry, which does
+not replay an ambiguously dispatched cleanup. An opaque lifecycle failure blocks another
+lifecycle dispatch. The owner-bound constructor's `lastDrain()` is null; it does not
+invent a drain report from the owner's status.
+
+The original Legacy acquisition now records the exact cleanup failure and its
+conservative disposition before checking a retained direct-pending result or merging
+failure history. Raw cleanup, proof, and metadata-failure slots retain their original
+objects; reconciliation checks suppression by identity before allowing another attempt.
+If history cannot be represented or reconciliation fails, retirement remains Unknown
+and does not replay the affected close. The existing outward report carries one
+Throwable; when suppression is disabled, a distinct retained private failure is not
+necessarily visible through that report. The bounded slots do not establish universal
+recovery from allocation failure. A post-dispatch retained-pending proof is not claimed
+as independently exercised by this host test, and earlier native-acquisition frontiers
+remain open.
+
+The Spring lifecycle boundary alone does not provide an application startup root,
+failed-main recovery, or independent kernel-containment proof. The report application
+adds its own retained caller-owned lifetime, subject to its separate verification gates.
+
+## Report application startup owner
+
+The report sample anchors one original application startup handle before path, review,
+resolution or runtime-start effects. `measure` retains the direct resolution owner;
+`serve` retains that owner, the canonical acquisition owner, its exact runtime, the
+owner-bound lifecycle and the context captured by the actual initializer. Startup is
+one-shot for that application classloader, including after a completed or failed run.
+
+A same-JVM caller that catches a failed `ReportApplication.main` on the same original
+platform thread can call `failedStartup()` and, when a handle is present, observe its
+passive state or request eligible cleanup with `retryRetirement(Duration)`. A foreign
+thread cannot use that capability. Pending and Unknown retain the original owners and
+any actual captured context; a Spring stop callback or a context that merely appears
+inactive is not a physical receipt. If Spring fails before the application can prove
+its own context close returned, the context outcome remains Unknown and is not replayed.
+The runtime budget is not a total wall-clock bound: the direct resolution owner's close
+has no duration. No keepalive thread, process-exit guarantee or generic registry is added.
+
+The app's native tests use separately labelled synthetic fixture review, not an operator's
+independent approval. The Legacy rollback boundary retains the limitations described
+above; these changes do not extend Live/helper support. The selected finished-JAR native and HTTP tests passed under the recorded test fixture;
+the held-child logs were asserted by JUnit but not separately retained.
+
 ## Actual operation binding API
 
 The existing `prepare(policy, limits)`, `prepare(reviewed, limits)`, `submit`,
@@ -99,7 +266,9 @@ two-argument reviewed overload validates configured review metadata and prepares
 policy; it is **not** actual implementation-byte proof. Framework adapters using it
 must not advertise the stronger contract without adopting the additive resource owner.
 
-The stronger sequence is:
+The existing stronger sequence remains available below; the direct-owner alternative is
+described above. Neither route makes a self-generated digest an independent review.
+
 
 1. Resolve `PreparedOperationResources.resolve(runtime, workerPolicy, actualClass,
    readOnlyPaths)` during trusted platform-thread bootstrap. It holds genuine resource
@@ -159,7 +328,8 @@ existing PreparedPath contract and are revalidated for target switches. Every di
 file receives its own genuine O_PATH owner; capture rejects changed paths/objects. This uses
 existing captured NativeEngine acquisitions and no new FFM layout/downcall. Descendant
 owners live in the same retained operation-owner retirement hierarchy as the root and
-prepared Landlock ruleset. Fatal-first attempt-all cleanup includes partial acquisition.
+prepared Landlock ruleset. The original route's fatal-first attempt-all cleanup includes
+partial acquisition; the direct-owner route retains dependent pins behind an Unknown close.
 
 `implementationSha256` for exploded roots hashes UTF-8 records sorted by root-relative
 Linux path, joined by newline (no final newline): `directory\0<path>` or

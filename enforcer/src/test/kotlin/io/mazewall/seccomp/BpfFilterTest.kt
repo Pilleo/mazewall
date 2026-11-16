@@ -16,6 +16,7 @@ import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -624,5 +625,109 @@ class BpfFilterTest {
             BpfSimulator.simulate(instructions, arch.prctl, arch.audit, longArrayOf(wrongOptionWithGarbageHighWord)),
             "low-word mismatch must be denied regardless of high word",
         )
+    }
+
+    @Test
+    fun `supervised exec preserves inherited definite spawn denials`() {
+        val policy = PolicyDefinition<PolicyScope.ThreadLocalOnly>(
+            defaultAction = SeccompAction.ACT_ERRNO(NativeConstants.EACCES),
+            syscallActions = mapOf(Syscall.EXECVE to SeccompAction.ACT_NOTIFY),
+        )
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            val program = BpfFilter.build(arch, policy).instructions
+            for (nr in listOf(arch.fork, arch.vfork, arch.clone).filter { it >= 0 }) {
+                val action = BpfSimulator.simulate(program, nr, arch.audit, LongArray(6))
+                assertEquals(NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EACCES, action, "spawn $nr on $arch")
+            }
+        }
+    }
+
+    @Test
+    fun `spawn denial leaves JVM clone floor and profiling behavior unchanged`() {
+        val denial = SeccompAction.ACT_ERRNO(NativeConstants.EACCES)
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            val policy = PolicyDefinition<PolicyScope.ThreadLocalOnly>(defaultAction = denial, syscallActions = mapOf(Syscall.EXECVE to SeccompAction.ACT_NOTIFY))
+            val program = BpfFilter.build(arch, policy).instructions
+            val thread = LongArray(6).also { it[0] = 0x10000 }
+            assertEquals(NativeConstants.SECCOMP_RET_ALLOW, BpfSimulator.simulate(program, arch.clone, arch.audit, thread))
+            assertEquals(NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EACCES, BpfSimulator.simulate(program, arch.clone, arch.audit, LongArray(6)))
+            assertEquals(NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.ENOSYS, BpfSimulator.simulate(program, arch.clone3, arch))
+            assertEquals(NativeConstants.SECCOMP_RET_ALLOW, BpfSimulator.simulate(program, Syscall.FUTEX.numberFor(arch), arch))
+            for (defaultAction in listOf(denial, SeccompAction.ACT_KILL_PROCESS, SeccompAction.ACT_KILL_THREAD, SeccompAction.ACT_TRAP, SeccompAction.ACT_LOG, SeccompAction.ACT_TRACE(37))) {
+                val profilePolicy = policy.copy(defaultAction = defaultAction)
+                val profile = BpfFilter.build(arch, profilePolicy, profilingMode = true).instructions
+                assertEquals(NativeConstants.SECCOMP_RET_USER_NOTIF, BpfSimulator.simulate(profile, arch.clone, arch.audit, LongArray(6)))
+            }
+        }
+    }
+
+    @Test
+    fun `spawn propagation preserves non-denial behavior and explicit actions`() {
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            for (exec in listOf(Syscall.EXECVE, Syscall.EXECVEAT)) {
+            val spawn = listOf(Syscall.FORK, Syscall.VFORK, Syscall.CLONE).filter { it.numberFor(arch) >= 0 }
+            for (syscall in spawn) {
+                val nr = syscall.numberFor(arch)
+
+                fun verdict(
+                    default: SeccompAction,
+                    explicit: SeccompAction?,
+                ): Int? {
+                    val actions = mutableMapOf<Syscall, SeccompAction>(exec to SeccompAction.ACT_NOTIFY)
+                    if (explicit != null) actions[syscall] = explicit
+                    val policy = PolicyDefinition<PolicyScope.ThreadLocalOnly>(defaultAction = default, syscallActions = actions)
+                    return BpfSimulator.simulate(BpfFilter.build(arch, policy).instructions, nr, arch.audit, LongArray(6))
+                }
+                for ((action, expected) in listOf(
+                    SeccompAction.ACT_KILL_PROCESS to NativeConstants.SECCOMP_RET_KILL_PROCESS,
+                    SeccompAction.ACT_KILL_THREAD to NativeConstants.SECCOMP_RET_KILL_THREAD,
+                    SeccompAction.ACT_TRAP to NativeConstants.SECCOMP_RET_TRAP,
+                    SeccompAction.ACT_ERRNO(NativeConstants.EACCES) to (NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EACCES),
+                )) {
+                    assertEquals(expected, verdict(action, null))
+                    assertEquals(expected, verdict(SeccompAction.ACT_ALLOW, action))
+                }
+                assertEquals(NativeConstants.SECCOMP_RET_USER_NOTIF, verdict(SeccompAction.ACT_ALLOW, null))
+                assertEquals(NativeConstants.SECCOMP_RET_USER_NOTIF, verdict(SeccompAction.ACT_ERRNO(), SeccompAction.ACT_ALLOW))
+                assertEquals(NativeConstants.SECCOMP_RET_USER_NOTIF, verdict(SeccompAction.ACT_ALLOW, SeccompAction.ACT_NOTIFY))
+                assertFailsWith<IllegalArgumentException> { verdict(SeccompAction.ACT_LOG, null) }
+                assertFailsWith<IllegalArgumentException> { verdict(SeccompAction.ACT_TRACE(37), null) }
+                assertEquals(NativeConstants.SECCOMP_RET_ERRNO or NativeConstants.EACCES, verdict(SeccompAction.ACT_ALLOW, SeccompAction.ACT_ERRNO(NativeConstants.EACCES)))
+                assertEquals(NativeConstants.SECCOMP_RET_TRACE or 37, verdict(SeccompAction.ACT_ALLOW, SeccompAction.ACT_TRACE(37)))
+                assertEquals(NativeConstants.SECCOMP_RET_LOG, verdict(SeccompAction.ACT_ALLOW, SeccompAction.ACT_LOG))
+            }
+        }
+        }
+    }
+
+    @Test
+    fun `spawn resolver identity and architecture availability are exact`() {
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            val symbols = listOf(Syscall.FORK, Syscall.VFORK, Syscall.CLONE, Syscall.EXECVE, Syscall.EXECVEAT)
+            val resolved = symbols.map { it.numberFor(arch) }
+            assertEquals(listOf(arch.fork, arch.vfork, arch.clone, arch.execve, arch.execveat), resolved)
+            val present = resolved.filter { it >= 0 }
+            assertEquals(present.size, present.toSet().size)
+        }
+        assertEquals(-1, Syscall.FORK.numberFor(Arch.AARCH64))
+        assertEquals(-1, Syscall.VFORK.numberFor(Arch.AARCH64))
+    }
+
+    @Test
+    fun `compiler rejects inherited audit spawn only in enforcement`() {
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            for (action in listOf(SeccompAction.ACT_LOG, SeccompAction.ACT_TRACE(37))) {
+                for (exec in listOf(Syscall.EXECVE, Syscall.EXECVEAT)) {
+                    val policy = PolicyDefinition<PolicyScope.ThreadLocalOnly>(defaultAction = action, syscallActions = mapOf(exec to SeccompAction.ACT_NOTIFY))
+                    assertFailsWith<IllegalArgumentException> { BpfFilter.build(arch, policy) }
+                    BpfFilter.build(arch, policy, profilingMode = true)
+                    val explicit = policy.copy(
+                        syscallActions = policy.syscallActions +
+                            listOf(Syscall.FORK, Syscall.VFORK, Syscall.CLONE).associateWith { SeccompAction.ACT_TRACE(37) },
+                    )
+                    BpfFilter.build(arch, explicit)
+                }
+            }
+        }
     }
 }

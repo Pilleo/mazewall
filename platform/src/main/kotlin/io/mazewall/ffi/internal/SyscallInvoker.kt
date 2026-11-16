@@ -11,19 +11,19 @@ import java.lang.invoke.MethodHandle
  * ensuring atomicity and preventing the JVM from overwriting errno.
  */
 internal object SyscallInvoker {
-    private fun intCall(invoke: (MemorySegment) -> Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return ErrnoSegment.withCapturedState { capturedState ->
-            val ret = invoke(capturedState.segment)
-            RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
-        }
-    }
+    fun liveInfoStatus(
+        handle: MethodHandle,
+        out: MemorySegment,
+        outBytes: Int,
+    ): Int = handle.invokeExact(out, outBytes) as Int
 
-    private fun longCall(invoke: (MemorySegment) -> Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
-        return ErrnoSegment.withCapturedState { capturedState ->
-            val ret = invoke(capturedState.segment)
-            RealNativeHelper.result(ret, capturedState.getErrno())
-        }
-    }
+    fun liveBufferStatus(
+        handle: MethodHandle,
+        request: MemorySegment,
+        requestBytes: Int,
+        out: MemorySegment,
+        outBytes: Int,
+    ): Int = handle.invokeExact(request, requestBytes, out, outBytes) as Int
 
     fun syscall(
         handle: MethodHandle,
@@ -307,5 +307,19 @@ internal object SyscallInvoker {
         addr: MemorySegment,
     ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
         return intCall { handle.invokeExact(it, code, addr) as Int }
+    }
+}
+
+private fun intCall(invoke: (MemorySegment) -> Int): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    return ErrnoSegment.withCapturedState { capturedState ->
+        val ret = invoke(capturedState.segment)
+        RealNativeHelper.result(ret.toLong(), capturedState.getErrno())
+    }
+}
+
+private fun longCall(invoke: (MemorySegment) -> Long): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+    return ErrnoSegment.withCapturedState { capturedState ->
+        val ret = invoke(capturedState.segment)
+        RealNativeHelper.result(ret, capturedState.getErrno())
     }
 }

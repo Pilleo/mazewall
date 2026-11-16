@@ -12,6 +12,7 @@ import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardWatchEventKinds.ENTRY_CREATE
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
@@ -94,7 +95,9 @@ class ConsumerProcessEvidenceTest {
             assertTrue(!waiter.isAlive, "Interrupted waiter did not finish bounded cleanup")
             assertTrue(failure is IllegalStateException, "Original lifecycle interruption was replaced: $failure")
             assertTrue(failure?.cause is InterruptedException, "Original interruption cause was lost: $failure")
-            assertTrue(failure!!.suppressed.any { it is java.util.concurrent.ExecutionException && it.cause is java.io.IOException }, "Later real pump failure was not suppressed")
+            assertTrue(failure!!.suppressed.none { it is java.util.concurrent.ExecutionException }, "Real pump failed: $failure")
+            assertEquals("out", Files.readString(root.resolve("interrupted.stdout.log")))
+            assertEquals("err", Files.readString(root.resolve("interrupted.stderr.log")))
             val receipt = Json.parseToJsonElement(Files.readString(root.resolve("interrupted.command.json"))).jsonObject
             assertEquals("true", receipt.getValue("reaped").jsonPrimitive.content)
             assertEquals("false", receipt.getValue("timedOut").jsonPrimitive.content)
@@ -167,6 +170,80 @@ class ConsumerProcessEvidenceTest {
         assertEquals("37", receipt.getValue("exitCode").jsonPrimitive.content)
         assertEquals("false", receipt.getValue("timedOut").jsonPrimitive.content)
         assertEquals("true", receipt.getValue("reaped").jsonPrimitive.content)
+    }
+
+    @Test
+    fun `timeout preserves output when readers start after child exit`() = assertDelayedTimeoutReaders(false)
+
+    @Test
+    fun `forced timeout preserves output when readers start after child exit`() = assertDelayedTimeoutReaders(true)
+
+    private fun assertDelayedTimeoutReaders(ignoreTerm: Boolean) {
+        val unrelated = ProcessBuilder("sleep", "30").start()
+        var owned: ProcessHandle? = null
+        var descendant: ProcessHandle? = null
+        val marker = root.resolve("ready")
+        val trap = if (ignoreTerm) "trap '' TERM; " else ""
+        val args =
+            listOf(
+                "sh",
+                "-c",
+                "${trap}sleep 30 & child=\$!; printf 'partial stdout\\n'; printf 'partial stderr\\n' >&2; " +
+                    "printf '%s %s' \"\$\$\" \"\$child\" > ready.tmp; mv ready.tmp ready; wait",
+            )
+        try {
+            root.fileSystem.newWatchService().use { watch ->
+                root.register(watch, ENTRY_CREATE)
+                val failure = assertThrows<ConsumerCommandTimeout> {
+                    ConsumerProcessEvidence.run(args, root, "delayed-timeout", Duration.ofSeconds(1), startPump = { reader ->
+                        if (owned == null) {
+                            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                            while (!Files.exists(marker)) {
+                                val remaining = deadline - System.nanoTime()
+                                check(remaining > 0) { "Child did not publish readiness" }
+                                val key = watch.poll(remaining, TimeUnit.NANOSECONDS) ?: error("Child did not publish readiness")
+                                key.pollEvents()
+                                check(key.reset()) { "Readiness watch invalidated" }
+                            }
+                            val pids = Files.readString(marker).split(" ").map(String::toLong)
+                            owned = ProcessHandle.of(pids[0]).orElseThrow()
+                            descendant = ProcessHandle.of(pids[1]).orElseThrow()
+                        }
+                        object : CompletableFuture<Void>() {
+                            override fun get(
+                                timeout: Long,
+                                unit: TimeUnit,
+                            ): Void? {
+                                if (!isDone) {
+                                    owned!!.onExit().get(timeout, unit)
+                                    val read = runCatching {
+                                        check(!descendant!!.isAlive) { "Descendant still holds the child pipes" }
+                                        reader.run()
+                                    }
+                                    read.fold({ complete(null) }, { completeExceptionally(it) })
+                                }
+                                return super.get(timeout, unit)
+                            }
+                        }
+                    })
+                }
+                assertEquals(args, failure.arguments)
+                val receipt = Json.parseToJsonElement(Files.readString(root.resolve("delayed-timeout.command.json"))).jsonObject
+                val transitions = receipt.getValue("transitions").jsonArray.map { it.jsonPrimitive.content }
+                assertTrue(transitions.indexOf("timed-out") in 0 until transitions.indexOf("reaped"))
+                assertEquals("true", receipt.getValue("timedOut").jsonPrimitive.content)
+                assertEquals("true", receipt.getValue("reaped").jsonPrimitive.content)
+                assertTrue(owned != null && !owned!!.isAlive, "Owned child survived")
+                assertTrue(descendant != null && !descendant!!.isAlive, "Owned descendant survived")
+                assertTrue(unrelated.isAlive, "Unrelated process was signalled")
+                assertEquals("partial stdout\n", Files.readString(root.resolve("delayed-timeout.stdout.log")))
+                assertEquals("partial stderr\n", Files.readString(root.resolve("delayed-timeout.stderr.log")))
+                assertTrue(failure.suppressed.isEmpty(), "Timeout cleanup failed: ${failure.suppressed.toList()}")
+            }
+        } finally {
+            unrelated.destroyForcibly()
+            assertTrue(unrelated.waitFor(5, TimeUnit.SECONDS))
+        }
     }
 
     @Test

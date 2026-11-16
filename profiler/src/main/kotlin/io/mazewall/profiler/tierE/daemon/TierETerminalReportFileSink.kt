@@ -1,18 +1,22 @@
 package io.mazewall.profiler.tierE.daemon
 
+import io.mazewall.platform.fd.CleanupFailures
 import java.nio.charset.StandardCharsets
-import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardCopyOption.REPLACE_EXISTING
-import java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
 import java.nio.file.StandardOpenOption.WRITE
 
 /** Atomically stores a platform-neutral terminal report in an operator-owned evidence root. */
 internal class TierETerminalReportFileSink(
     root: Path,
+    access: TierEEvidenceFileAccess = TierEEvidenceFileAccess(),
+    private val prepareTemporary: (Path) -> Unit = { access.apply(it) },
+    private val replaceTemporary: (Path, Path) -> Unit = { temporary, destination ->
+        Files.move(temporary, destination, ATOMIC_MOVE, REPLACE_EXISTING)
+    },
 ) : TierETerminalReportSink {
     private val root = root.toAbsolutePath().normalize()
 
@@ -23,6 +27,7 @@ internal class TierETerminalReportFileSink(
         require(!Files.isSymbolicLink(this.root)) { "Tier E evidence root must not be a symbolic link" }
     }
 
+    @Suppress("TooGenericExceptionCaught") // Cleanup must not mask the publication failure, including fatal errors.
     override fun accept(report: TierETerminalReport) {
         val registrationId = requireNotNull(report.registrationId) { "terminal report lacks registration identity" }
         val sessionEpoch = requireNotNull(report.sessionEpoch) { "terminal report lacks session epoch" }
@@ -33,16 +38,18 @@ internal class TierETerminalReportFileSink(
         require(file.parent == root) { "terminal report escaped evidence root" }
         val temporary = Files.createTempFile(root, ".$registrationId-$sessionEpoch.", ".tmp")
         try {
-            Files.newByteChannel(temporary, setOf(TRUNCATE_EXISTING, WRITE)).use { channel ->
-                channel.write(StandardCharsets.UTF_8.encode(report.toJson()))
+            Files.newBufferedWriter(temporary, StandardCharsets.UTF_8, WRITE).use { writer ->
+                writer.write(report.toJson())
             }
+            prepareTemporary(temporary)
+            replaceTemporary(temporary, file)
+        } catch (failure: Throwable) {
             try {
-                Files.move(temporary, file, ATOMIC_MOVE, REPLACE_EXISTING)
-            } catch (_: AtomicMoveNotSupportedException) {
-                Files.move(temporary, file, REPLACE_EXISTING)
+                Files.deleteIfExists(temporary)
+            } catch (cleanup: Throwable) {
+                throw CleanupFailures.merge(failure, cleanup)
             }
-        } finally {
-            Files.deleteIfExists(temporary)
+            throw failure
         }
     }
 }

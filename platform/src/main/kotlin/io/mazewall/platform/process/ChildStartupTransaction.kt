@@ -5,14 +5,31 @@ import io.mazewall.platform.lifecycle.MazewallInternal
 import io.mazewall.platform.socket.PrivateUnixEndpoint
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 /** Acquires one child JVM's resources; ownership transfers only after readiness is verified. */
 @MazewallInternal
-internal class ChildStartupTransaction(
+internal class ChildStartupTransaction private constructor(
     launcher: ProcessLauncher,
     directoryPrefix: String,
     socketName: String,
+    confined: Boolean,
 ) : AutoCloseable {
+    internal constructor(
+        launcher: ProcessLauncher,
+        directoryPrefix: String,
+        socketName: String,
+    ) : this(launcher, directoryPrefix, socketName, false)
+
+    internal companion object {
+        internal fun confined(
+            launcher: ProcessLauncher,
+            directoryPrefix: String,
+            socketName: String,
+        ): ChildStartupTransaction = ChildStartupTransaction(launcher, directoryPrefix, socketName, true)
+    }
+
+    private val confinedState = if (confined) ConfinedHookState() else null
     private val resources = ChildProcessResources(launcher, PrivateUnixEndpoint.create(launcher, directoryPrefix, socketName))
     private var committed = false
     private var ready = false
@@ -47,15 +64,24 @@ internal class ChildStartupTransaction(
 
     public fun registerShutdownHook() = registerShutdownHook {}
 
+    @Suppress("TooGenericExceptionCaught") // Preserve the original registration failure before rollback.
     public fun registerShutdownHook(beforeClose: () -> Unit) {
         check(!committed && !resources.isClosed && resources.hook == null) { "Startup closed or shutdown hook already acquired" }
         val hook = Thread({
+            confinedState?.beginHookClose()
             val cleanup = ResourceRetirement()
             cleanup.attempt(beforeClose)
             cleanup.attempt(resources::close)
             cleanup.finish()
         }, "mazewall-child-shutdown")
-        resources.launcher.addShutdownHook(hook)
+        val state = confinedState
+        if (state != null) state.dispatchedHook = hook
+        try {
+            resources.launcher.addShutdownHook(hook)
+        } catch (failure: Throwable) {
+            state?.recordRegistration(failure)
+            throw failure
+        }
         resources.hook = hook
     }
 
@@ -78,12 +104,124 @@ internal class ChildStartupTransaction(
         check(!committed && !resources.isClosed && ready && resources.hook != null && resources.process.isAlive) {
             "Cannot commit child before readiness and shutdown-hook registration"
         }
+        val state = confinedState
+        check(state == null || state.claimCommit()) { "Confined child closed before commit" }
         committed = true
         return resources
     }
 
     override fun close() {
-        if (!committed) resources.close()
+        if (!committed) {
+            val state = confinedState
+            if (state != null && state.registrationFailure != null) {
+                closeAfterFailedRegistration(state)
+            } else {
+                resources.close()
+            }
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Retain arbitrary original cleanup failure before the independent removal.
+    private fun closeAfterFailedRegistration(state: ConfinedHookState) {
+        try {
+            resources.close()
+        } catch (failure: Throwable) {
+            state.recordCleanup(failure)
+        }
+        var interrupted = Thread.interrupted()
+        if (state.remove(resources.launcher)) interrupted = true
+        if (interrupted) Thread.currentThread().interrupt()
+        val failure = state.failure()
+        if (failure != null) throw failure
+    }
+
+    private class ConfinedHookState {
+        private var hookClosing = false
+        private var commitClaimed = false
+
+        @Synchronized
+        fun beginHookClose() {
+            hookClosing = true
+        }
+
+        @Synchronized
+        fun claimCommit(): Boolean {
+            if (hookClosing || commitClaimed) return false
+            commitClaimed = true
+            return true
+        }
+
+        @Volatile var dispatchedHook: Thread? = null
+
+        @Volatile var registrationFailure: Throwable? = null
+        private val removalDispatched = AtomicBoolean()
+
+        @Volatile private var removalCompleted = false
+        private val foldDispatched = AtomicBoolean()
+
+        @Volatile private var foldCompleted = false
+        private val removalFailure = AtomicReference<Throwable?>()
+        private val firstCleanupFailure = AtomicReference<Throwable?>()
+        private val firstFatal = AtomicReference<Error?>()
+        private val metadataFailure = AtomicReference<Throwable?>()
+
+        fun recordRegistration(failure: Throwable) {
+            recordFatal(failure)
+            registrationFailure = failure
+        }
+
+        fun recordCleanup(failure: Throwable) {
+            firstCleanupFailure.compareAndSet(null, failure)
+            recordFatal(failure)
+        }
+
+        private fun recordFatal(failure: Throwable) {
+            if (failure is Error) firstFatal.compareAndSet(null, failure)
+        }
+
+        @Suppress("TooGenericExceptionCaught") // Retain the original arbitrary removal failure before folding.
+        fun remove(launcher: ProcessLauncher): Boolean {
+            val hook = checkNotNull(dispatchedHook)
+            var interrupted = false
+            if (Thread.currentThread() !== hook && removalDispatched.compareAndSet(false, true)) {
+                try {
+                    launcher.removeShutdownHook(hook)
+                } catch (failure: InterruptedException) {
+                    removalFailure.set(failure)
+                    interrupted = true
+                    Thread.interrupted()
+                } catch (failure: Throwable) {
+                    removalFailure.set(failure)
+                    recordFatal(failure)
+                } finally {
+                    removalCompleted = true
+                }
+            }
+            return interrupted
+        }
+
+        fun failure(): Throwable? {
+            if (!removalCompleted) return firstFatal.get() ?: checkNotNull(registrationFailure)
+            val cleanup = firstCleanupFailure.get()
+            val removal = removalFailure.get()
+            if (cleanup != null && removal != null) fold(cleanup, removal)
+            if (cleanup != null && removal != null && !foldCompleted) return firstFatal.get() ?: checkNotNull(registrationFailure)
+            return firstFatal.get() ?: cleanup ?: removal ?: metadataFailure.get()
+        }
+
+        @Suppress("TooGenericExceptionCaught") // Preserve raw metadata failure without retrying a broken fold.
+        private fun fold(cleanup: Throwable, removal: Throwable) {
+            if (foldDispatched.compareAndSet(false, true)) {
+                try {
+                    CleanupFailures.merge(cleanup, removal)
+                } catch (failure: Throwable) {
+                    metadataFailure.compareAndSet(null, failure)
+                    recordFatal(failure)
+                } finally {
+                    foldCompleted = true
+                }
+            }
+        }
     }
 }
 
