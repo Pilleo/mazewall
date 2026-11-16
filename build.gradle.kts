@@ -519,6 +519,7 @@ if (securitySnapshotScan) {
                 suppressionFile.set(rootExtension.suppressionFile)
                 format.set(rootExtension.format)
                 analyzers.ossIndex.enabled.set(false)
+                if (path == ":portals:codegen") analyzers.nodeAudit.yarnEnabled.set(false)
                 outputDir.set(owner.layout.buildDirectory.dir("reports"))
                 dependsOn(verifySecuritySnapshot)
                 if (preceding != null) mustRunAfter(preceding)

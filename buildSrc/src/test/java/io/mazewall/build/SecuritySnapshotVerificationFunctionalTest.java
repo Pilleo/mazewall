@@ -252,6 +252,11 @@ public final class SecuritySnapshotVerificationFunctionalTest {
                     assert task.suppressionFile.get() == extension.suppressionFile.get()
                     assert task.data.directory.get() == extension.data.directory.get()
                     assert !task.analyzers.ossIndex.enabled.get()
+                    def yarnFlag = task.analyzers.nodeAudit.yarnEnabled.orNull
+                    assert path == ':portals:codegen' ? yarnFlag == false : yarnFlag != false
+                    assert task.analyzers.nodeAudit.enabled.orNull != false
+                    assert task.analyzers.retirejs.enabled.orNull != false
+                    assert task.analyzers.jarEnabled.orNull != false
                     assert reportDirs.add(task.outputDir.get().asFile.canonicalPath)
                 }
             }
@@ -282,6 +287,18 @@ public final class SecuritySnapshotVerificationFunctionalTest {
             || path.startsWith(":integrations:") || path.startsWith(":tools:"))) {
             throw new AssertionError("SDK graph includes an excluded task: " + sdkGraph);
         }
+        Path ordinaryInit = scratch.resolve("ordinary-yarn-contract.gradle");
+        Files.writeString(ordinaryInit, """
+            gradle.projectsEvaluated {
+                if (gradle.rootProject.projectDir.canonicalFile != new File(new URI('%s')).canonicalFile) return
+                def root = gradle.rootProject
+                assert root.tasks.named('dependencyCheckAnalyze').get().analyzers.nodeAudit.yarnEnabled.orNull != false
+                assert !root.project(':portals:codegen').plugins.hasPlugin('org.owasp.dependencycheck')
+            }
+            """.formatted(repository.toRealPath().toUri().toASCIIString()));
+        GradleRunner.create().withProjectDir(repository.toFile())
+            .withArguments("help", "--offline", "--no-configuration-cache", "--init-script", ordinaryInit.toString(),
+                "--gradle-user-home", gradleUserHome()).build();
         var invalid = GradleRunner.create().withProjectDir(repository.toFile())
             .withArguments("help", "--offline", "--no-configuration-cache", "-Pmazewall.securitySnapshotScan=invalid",
                 "--gradle-user-home", gradleUserHome())
