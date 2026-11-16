@@ -2912,3 +2912,7 @@ performance cause. The original cycle005 **INCOMPLETE** outcome and artifacts
 remain unchanged. These are diagnostic consumer repairs, not full qualification:
 A4 remains FAILED, A3 unresolved; independent review, fresh cycle006 and the
 controller's final full gate remain pending.
+
+### Current availability — 2026-11-16
+
+The operator approved retiring the consumed one-shot A4 LIVE acquisition path and its two dedicated Python resources. The `:profiler:tierEMissingOpenDiagnostic` entry point is unavailable after this scoped retirement; the separate `:profiler:tierEA4Replay` path and shared replay/provenance support remain. Retained diagnostic packets, historical source records, native safeguards, and the ordinary installed fixture with its original 20+20 checks remain unchanged. This does not qualify or complete G4; A4 remains failed and A3 unresolved. See [issue 20261116-072155-079](../../backlog/issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md).

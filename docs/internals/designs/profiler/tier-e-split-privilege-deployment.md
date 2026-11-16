@@ -744,3 +744,7 @@ tooling migration has not yet removed its protocol and scheduling logic.
 - Keep dictionary/full-stream default and collector-authoritative unique-edge opt-in.
 - Do not add Kubernetes, Kubescape, or OTel dependencies here.
 - Do not make discovery implicit; future adapters must emit this explicit registration.
+
+### Current availability — 2026-11-16
+
+The operator approved retiring the consumed one-shot A4 LIVE acquisition path and its two dedicated Python resources. The `:profiler:tierEMissingOpenDiagnostic` entry point is unavailable after this scoped retirement; the separate `:profiler:tierEA4Replay` path and shared replay/provenance support remain. Retained diagnostic packets, historical source records, native safeguards, and the ordinary installed fixture with its original 20+20 checks remain unchanged. This does not qualify or complete G4; A4 remains failed and A3 unresolved. See [issue 20261116-072155-079](../../backlog/issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md).

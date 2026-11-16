@@ -30,3 +30,5 @@ Cycle003 passed BPF loading and mapped-object fingerprints but failed preREADY o
 
 ---
 <!-- id: issue-20261104-092359-647-record-tier-e-lsm-fingerprints-on-kernels-without-  file: issue-20261104-092359-647-record-tier-e-lsm-fingerprints-on-kernels-without-.md -->
+
+**Current availability (2026-11-16):** The approved retirement of the consumed one-shot A4 LIVE path removes the current fresh-diagnostic route requested above. This issue remains open and its LSM inventory/label-availability requirements are not qualified by this cleanup. Preserve historical evidence and the original 20+20 requirement; any future LIVE route requires separate authorization. Replay remains available; G4 is unresolved. See [retirement issue 079](issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md).

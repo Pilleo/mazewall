@@ -1,8 +1,8 @@
 # Mazewall Backlog Index
 
-*Total Active Issues:* 283 | *Total Resolved Issues:* 719
+*Total Active Issues:* 284 | *Total Resolved Issues:* 719
 
-Active status detail: 281 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
+Active status detail: 282 open, 2 deferred, including nested issue folders. Archived rows below preserve historical
 links and are explicitly marked; they are not active task entries.
 
 Presentation readiness: twelve scoped follow-ups filed on 2026-10-13; see the
@@ -50,6 +50,7 @@ Task 6 resolved: [Bound portal RPC transport and share closeable capability owne
 
 | Issue | Title | Priority | Component |
 |---|---|---|---|
+| [issue-20261116-072155-079](issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md) | Retire consumed Tier E A4 one-shot live diagnostic path | medium | profiler |
 | [issue-20261116-002649-322](issue-20261116-002649-322-align-codegen-kotlin-reflection-runtime-with-proje.md) | Align Codegen Kotlin reflection runtime with project Kotlin version | high | core |
 | [issue-20261115-220004-725](issue-20261115-220004-725-separate-confined-helper-drain-observations-from-p.md) | Separate confined-helper drain observations from physical retirement | high | enforcer |
 | [issue-20261115-215930-225](issue-20261115-215930-225-investigate-codegen-yarn-audit-i-o-failure-in-depe.md) | Investigate Codegen Yarn Audit I/O failure in Dependency-Check CI | high | core |

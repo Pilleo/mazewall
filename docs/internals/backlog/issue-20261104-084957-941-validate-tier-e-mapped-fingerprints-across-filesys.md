@@ -54,3 +54,5 @@ historical missing-open cause (A4 FAILED; A3 unresolved).
 
 ---
 <!-- id: issue-20261104-084957-941-validate-tier-e-mapped-fingerprints-across-filesys  file: issue-20261104-084957-941-validate-tier-e-mapped-fingerprints-across-filesys.md -->
+
+**Current availability (2026-11-16):** The approved retirement of the consumed one-shot A4 LIVE path removes the current fresh-diagnostic route requested above. This issue remains open and its fingerprint/permission requirements are not qualified by this cleanup. Preserve the original 20+20 requirement and historical evidence; any future LIVE route requires separate authorization. Replay remains available; G4 is unresolved. See [retirement issue 079](issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md).

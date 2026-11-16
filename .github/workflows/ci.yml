@@ -679,6 +679,7 @@ jobs:
             - name: Build and Run Confined Helper Kernel
               run: |
                   set -euo pipefail
+                  python3 scripts/test_confined_helper_ci.py
                   docker --host unix:///var/run/docker.sock build -t mazewall-confined-ci -f infra/dev/Containerfile .
                   image=$(docker --host unix:///var/run/docker.sock image inspect --format '{{.Id}}' mazewall-confined-ci)
                   mkdir -p "$RUNNER_TEMP/mazewall-confined-gradle"

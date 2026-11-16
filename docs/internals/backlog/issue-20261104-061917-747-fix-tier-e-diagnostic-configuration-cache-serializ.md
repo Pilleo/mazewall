@@ -23,3 +23,5 @@ The consumed one-attempt log records 3 configuration-cache problems with 2 uniqu
 
 ---
 <!-- id: issue-20261104-061917-747-fix-tier-e-diagnostic-configuration-cache-serializ  file: issue-20261104-061917-747-fix-tier-e-diagnostic-configuration-cache-serializ.md -->
+
+**Current availability (2026-11-16):** The operator approved retiring the consumed `tierEMissingOpenDiagnostic` LIVE task under [retirement issue 079](issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md). Preserve this historical cache-failure record, but do not recreate or invoke that task under this issue. The separate replay path remains; this does not resolve the Tier-E cause or qualify G4. Keep this issue open for scope reassessment; no live retry is authorized.

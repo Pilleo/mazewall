@@ -55,3 +55,5 @@ Controller readiness clarification: unchanged closed-gate polling already produc
 
 ---
 <!-- id: issue-20261103-190440-355-investigate-retained-all-target-19-of-20-loadtempl  file: issue-20261103-190440-355-investigate-retained-all-target-19-of-20-loadtempl.md -->
+
+**Current availability (2026-11-16):** The operator approved retiring only the consumed one-shot A4 LIVE task and its two dedicated Python resources. This supersedes the earlier “no cleanup authorized” limit solely for that narrow retirement; the live acquisition path is unavailable. Keep this issue open and preserve its historical failure evidence and original 20+20 requirement. `TierEA4DiagnosticReplay` and shared replay/provenance support remain. This retirement does not establish a cause, qualify G4, complete A4, or resolve A3; no follow-up live attempt is authorized. See [retirement issue 079](issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md).
