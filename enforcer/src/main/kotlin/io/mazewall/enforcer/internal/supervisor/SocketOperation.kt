@@ -54,6 +54,12 @@ internal sealed interface SocketHelperResult {
 
 /** Close must terminate/reap the independent process, including a blocked execute. */
 internal interface SocketHelper : AutoCloseable {
+    val confinedIdentity: ProcessIdentity? get() = null
+
+    fun runConfined(exchange: ConfinedHelperJob) {
+        error("Legacy helper cannot run a confined session")
+    }
+
     fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect = error("Helper does not implement tracee authority")
 
     fun execute(

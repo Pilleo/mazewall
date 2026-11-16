@@ -1,5 +1,6 @@
 package io.mazewall.profiler.internal.attribution
 
+import io.mazewall.platform.fd.CleanupFailures
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicReference
 
@@ -26,6 +27,8 @@ internal class TierECollectorService(
     private var state = TierECollectorServiceState.NEW
     private var worker: Thread? = null
     private var terminalProfile: TierEProfile? = null
+    private var terminalFailure: Throwable? = null
+    private var retired = false
     private var finishAttempts = 0L
     private var closeAttempts = 0L
     private var declaredProducerClosed: Boolean? = null
@@ -55,7 +58,26 @@ internal class TierECollectorService(
         producerClosed: Boolean,
     ): TierEProfile = finishInternal(producerClosed) { loop.finish(definitions, it) }
 
+    @Suppress("TooGenericExceptionCaught") // A failed finalization must never be retried as collection success.
     private fun finishInternal(
+        producerClosed: Boolean,
+        finishLoop: (Boolean) -> TierEProfile,
+    ): TierEProfile {
+        terminalFailure?.let { throw it }
+        return try {
+            finishOnce(producerClosed, finishLoop)
+        } catch (cause: Throwable) {
+            failFinalization(cause)
+        }
+    }
+
+    private fun failFinalization(cause: Throwable): Nothing {
+        terminalFailure = cause
+        if (cause is InterruptedException) Thread.currentThread().interrupt()
+        throw cause
+    }
+
+    private fun finishOnce(
         producerClosed: Boolean,
         finishLoop: (Boolean) -> TierEProfile,
     ): TierEProfile {
@@ -78,8 +100,7 @@ internal class TierECollectorService(
             return profile
         }
         val profile = finishLoop(producerClosed && failure.get() == null)
-        loop.close()
-        closeReceiptClock()
+        close()
         terminalProfile = profile
         state = TierECollectorServiceState.TERMINAL
         return profile
@@ -99,31 +120,57 @@ internal class TierECollectorService(
         )
 
     @Synchronized
+    @Suppress("TooGenericExceptionCaught") // Retire independent owners without losing fatal or interrupted failures.
     override fun close() {
         closeAttempts++
-        if (state == TierECollectorServiceState.TERMINAL) return
+        if (retired) return
         stopRequested = true
         state = TierECollectorServiceState.STOPPING
-        worker?.let { activeWorker ->
-            activeWorker.join(stopJoinMillis)
-            if (activeWorker.isAlive) {
-                failure.compareAndSet(null, TierECollectorServiceFailure.JOIN_TIMEOUT)
-                activeWorker.interrupt()
-                state = TierECollectorServiceState.TERMINAL
-                return
+        var interrupted = Thread.interrupted()
+        try {
+            worker?.let { activeWorker ->
+                activeWorker.join(stopJoinMillis)
+                if (activeWorker.isAlive) {
+                    failure.compareAndSet(null, TierECollectorServiceFailure.JOIN_TIMEOUT)
+                    activeWorker.interrupt()
+                    error("Tier E collector worker has not retired")
+                }
             }
+            var cleanupFailure: Throwable? = null
+            try {
+                loop.close()
+            } catch (cause: InterruptedException) {
+                cleanupFailure = cause
+                interrupted = true
+            } catch (cause: Throwable) {
+                cleanupFailure = cause
+            }
+            interrupted = Thread.interrupted() || interrupted
+            try {
+                closeReceiptClock()
+            } catch (cause: InterruptedException) {
+                cleanupFailure = CleanupFailures.merge(cleanupFailure, cause)
+                interrupted = true
+            } catch (cause: Throwable) {
+                cleanupFailure = CleanupFailures.merge(cleanupFailure, cause)
+            }
+            cleanupFailure?.let { throw it }
+            retired = true
+            state = TierECollectorServiceState.TERMINAL
+        } catch (cause: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw cause
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
         }
-        loop.close()
-        closeReceiptClock()
-        state = TierECollectorServiceState.TERMINAL
     }
 
     private var receiptClockClosed = false
 
     private fun closeReceiptClock() {
         if (receiptClockClosed) return
+        (receiptClock as? AutoCloseable)?.close()
         receiptClockClosed = true
-        runCatching { (receiptClock as? AutoCloseable)?.close() }
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -134,8 +181,6 @@ internal class TierECollectorService(
             System.err.println("tier-e-collector-failure: ${cause.javaClass.simpleName}: ${cause.message}")
             failure.compareAndSet(null, TierECollectorServiceFailure.COLLECTION)
             stopRequested = true
-        } finally {
-            if (failure.get() == TierECollectorServiceFailure.JOIN_TIMEOUT) loop.close()
         }
     }
 

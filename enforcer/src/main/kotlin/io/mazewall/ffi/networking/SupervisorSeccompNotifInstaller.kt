@@ -6,6 +6,7 @@ import io.mazewall.enforcer.api.Platform
 import io.mazewall.enforcer.api.UnsupportedKernelFeatureException
 import io.mazewall.enforcer.diagnostics.*
 import io.mazewall.enforcer.engine.*
+import io.mazewall.enforcer.internal.execution.LiveValidationTransport
 import io.mazewall.enforcer.state.*
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.ffi.ScopedBpfProgram
@@ -23,6 +24,7 @@ import io.mazewall.platform.syscall.NativeArg
 import io.mazewall.seccomp.*
 import java.lang.foreign.MemorySegment
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -71,70 +73,124 @@ internal object SupervisorSeccompNotifInstaller {
         }
     }
 
+    /** Every ownership boundary must retain even a direct Throwable before reporting failure. */
+    private class CoordinatorCleanup(
+        initial: Throwable? = null,
+    ) {
+        var failure: Throwable? = initial
+            private set
+        private var fatal: Error? = null
+
+        @Suppress("TooGenericExceptionCaught") // Irreversible installation and owned FDs require cleanup for every throwable.
+        fun attempt(action: () -> Unit) {
+            try {
+                action()
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                failure = CleanupFailures.merge(failure, interrupted)
+            } catch (problem: Error) {
+                if (fatal == null) fatal = problem
+                failure = CleanupFailures.merge(failure, problem)
+            } catch (problem: Throwable) {
+                failure = CleanupFailures.merge(failure, problem)
+            }
+        }
+
+        fun report(handshake: SeccompInstallHandshake) {
+            failure?.let(handshake::fail)
+            if (fatal != null) {
+                // Preserve any earlier absorbing failure alongside a later fatal cleanup.
+                attempt(handshake::checkActive)
+                throw checkNotNull(fatal)
+            }
+        }
+
+        fun rethrow() {
+            failure?.let { throw it }
+        }
+    }
+
+    private class CoordinatorHooks(
+        val connect: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        val send: (Int, Int) -> Boolean,
+        val onConnected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit,
+    )
+
+    private sealed interface ValidationMode {
+        data object Legacy : ValidationMode
+
+        class Live(
+            val receipt: LiveValidationTransport,
+        ) : ValidationMode
+    }
+
+    /** The caller retains the listener and socket; the same transfer is used by the coordinator. */
+    internal fun transferLiveListener(
+        native: NativeEngine,
+        socket: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+        listener: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+        receipt: LiveValidationTransport,
+        handshake: SeccompInstallHandshake,
+    ): Boolean {
+        handshake.checkActive()
+        receipt.send(socket, ConfinedDeadline.mint(native) { TimeUnit.MILLISECONDS.toNanos(handshake.remainingMillis().toLong()) })
+        handshake.checkActive()
+        receipt.requireCurrent()
+        handshake.checkActive()
+        return SeccompInstallTransport(native, handshake).send(socket, listener.value)
+    }
+
     private fun startCoordinator(
         native: NativeEngine,
         socketPath: String,
         listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?>,
         handshake: SeccompInstallHandshake,
+        mode: ValidationMode,
         connectWithRetry: (String) -> FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
         sendDescriptor: (Int, Int) -> Boolean,
         onSocketConnected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit,
     ): Thread =
         Thread {
-            try {
+            val coordinator = CoordinatorCleanup()
+            coordinator.attempt {
                 val transport = SeccompInstallTransport(native, handshake)
-                // Wait for the tracee thread to complete the seccomp installation
                 handshake.await(handshake.installed)
-
-                // Publish the successful irreversible kernel stage even if connect or
-                // readiness subsequently fails. The callback captures the tracee's holder.
                 handshake.publishApplied()
                 handshake.checkActive()
 
-                // Connect to socket and send the descriptor (runs uncontained)
                 val socketFd = if (connectWithRetry === defaultConnect) transport.connect(socketPath) else connectWithRetry(socketPath)
                 var socketTransferred = false
-                try {
+                val connection = CoordinatorCleanup()
+                connection.attempt {
                     handshake.checkActive()
-                    // The coordinator claims the local listener only when ready to send it.
-                    // Until then the failing installer may reclaim it; never close under sendmsg.
+                    // Claim the listener only once the coordinator is ready to use it.
                     val fdRef = checkNotNull(listenerFdVal.getAndSet(null)) { "Seccomp listener handoff cancelled" }
-                    try {
-                        val sent = if (sendDescriptor === defaultSend) transport.send(socketFd, fdRef.value) else sendDescriptor(socketFd.value, fdRef.value)
+                    val transfer = CoordinatorCleanup()
+                    transfer.attempt {
+                        val sent = when (mode) {
+                            ValidationMode.Legacy -> if (sendDescriptor === defaultSend) transport.send(socketFd, fdRef.value) else sendDescriptor(socketFd.value, fdRef.value)
+                            is ValidationMode.Live -> transferLiveListener(native, socketFd, fdRef, mode.receipt, handshake)
+                        }
                         check(sent) { "Failed to send seccomp listener FD to daemon" }
-                    } finally {
-                        native.fileSystem.close(fdRef).getOrThrow("close transferred seccomp listener")
                     }
+                    transfer.attempt { native.fileSystem.close(fdRef).getOrThrow("close transferred seccomp listener") }
+                    transfer.rethrow()
                     handshake.advance(SeccompInstallStage.Transferred)
                     handshake.checkActive()
 
                     val readyLatch = CountDownLatch(1)
-
-                    // Start validation/event listener thread (which will run uncontained)
+                    // The callback owns the socket on entry, including startup failure.
                     socketTransferred = true
                     onSocketConnected(socketFd, readyLatch)
-
-                    // Wait until the listener is fully initialized and ready
                     handshake.await(readyLatch)
-                } catch (expectedCoordinatorFailure: Exception) {
-                    if (!socketTransferred) {
-                        native.fileSystem.close(socketFd).getOrThrow("close failed coordinator socket")
-                    }
-                    throw expectedCoordinatorFailure
-                } catch (expectedCoordinatorError: Error) {
-                    if (!socketTransferred) {
-                        native.fileSystem.close(socketFd).getOrThrow("close failed coordinator socket")
-                    }
-                    throw expectedCoordinatorError
                 }
-
-                // Handshake is fully configured, wake up tracee thread
+                if (!socketTransferred) {
+                    connection.attempt { native.fileSystem.close(socketFd).getOrThrow("close failed coordinator socket") }
+                }
+                connection.rethrow()
                 handshake.advance(SeccompInstallStage.Ready)
-            } catch (expectedCoordinatorFailure: Exception) {
-                handshake.fail(expectedCoordinatorFailure)
-            } catch (expectedCoordinatorError: Error) {
-                handshake.fail(expectedCoordinatorError)
             }
+            coordinator.report(handshake)
         }.apply {
             isDaemon = true
             name = "seccomp-install-coordinator"
@@ -260,10 +316,56 @@ internal object SupervisorSeccompNotifInstaller {
         installationGate: SeccompInstallationGate,
         onSocketConnected: (socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, readyLatch: CountDownLatch) -> Unit,
     ) {
+        installOwnedInternal(
+            native,
+            userNotifSupported,
+            socketPath,
+            filter,
+            processWide,
+            CoordinatorHooks(connectWithRetry, sendDescriptor, onSocketConnected),
+            onFilterApplied,
+            installationGate,
+            ValidationMode.Legacy,
+        )
+    }
+
+    /** Dormant Live route: the receipt is minted by the original domain, never by wire claims. */
+    internal fun installLiveOwned(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        receipt: LiveValidationTransport,
+        onFilterApplied: () -> Unit,
+        installationGate: SeccompInstallationGate,
+        onSocketConnected: (FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>, CountDownLatch) -> Unit,
+    ) {
+        installOwnedInternal(
+            native,
+            userNotifSupported,
+            socketPath,
+            filter,
+            false,
+            CoordinatorHooks(defaultConnect, defaultSend, onSocketConnected),
+            onFilterApplied,
+            installationGate,
+            ValidationMode.Live(receipt),
+        )
+    }
+
+    private fun installOwnedInternal(
+        native: NativeEngine,
+        userNotifSupported: Boolean,
+        socketPath: String,
+        filter: BpfProgram<BpfStatus.Verified>,
+        processWide: Boolean,
+        hooks: CoordinatorHooks,
+        onFilterApplied: () -> Unit,
+        installationGate: SeccompInstallationGate,
+        mode: ValidationMode,
+    ) {
         validateNotVirtual()
-        if (!userNotifSupported) {
-            throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
-        }
+        requireUserNotif(userNotifSupported)
 
         // Mandatory for non-privileged seccomp
         native.process
@@ -294,12 +396,14 @@ internal object SupervisorSeccompNotifInstaller {
             socketPath,
             listenerFdVal,
             handshake,
-            connectWithRetry,
-            sendDescriptor,
-            onSocketConnected,
+            mode,
+            hooks.connect,
+            hooks.send,
+            hooks.onConnected,
         )
 
-        try {
+        val installation = CoordinatorCleanup()
+        installation.attempt {
             handshake.checkActive()
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
@@ -336,34 +440,26 @@ internal object SupervisorSeccompNotifInstaller {
             if (processWide && dummyBpf != null) {
                 synchronizeProcessFilter(native, arch, dummyBpf, installationGate)
             }
-        } catch (expectedInstallFailure: Exception) {
-            cleanupFailedInstallation(handshake, listenerFdVal, native, expectedInstallFailure)
-            throw expectedInstallFailure
-        } catch (expectedInstallError: Error) {
-            cleanupFailedInstallation(handshake, listenerFdVal, native, expectedInstallError)
-            throw expectedInstallError
         }
+        installation.failure?.let { throw cleanupFailedInstallation(handshake, listenerFdVal, native, it) }
     }
 
-    @Suppress("TooGenericExceptionCaught") // Cleanup preserves the original failure, including fatal errors.
+    private fun requireUserNotif(supported: Boolean) {
+        if (!supported) throw UnsupportedKernelFeatureException("Seccomp User Notifications are required.")
+    }
+
     private fun cleanupFailedInstallation(
         handshake: SeccompInstallHandshake,
         listener: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?>,
         native: NativeEngine,
         failure: Throwable,
-    ) {
+    ): Throwable {
         handshake.fail(failure)
         handshake.installed.countDown()
-        try {
-            listener.getAndSet(null)?.let { native.fileSystem.close(it).getOrThrow("close failed seccomp listener") }
-        } catch (cleanup: Throwable) {
-            if (cleanup !== failure) failure.addSuppressed(cleanup)
-        }
-        try {
-            // Even a coordinator that never ran cannot erase a completed kernel installation.
-            handshake.publishApplied()
-        } catch (publication: Throwable) {
-            if (publication !== failure) failure.addSuppressed(publication)
-        }
+        val cleanup = CoordinatorCleanup(failure)
+        cleanup.attempt { listener.getAndSet(null)?.let { native.fileSystem.close(it).getOrThrow("close failed seccomp listener") } }
+        // Even a coordinator that never ran cannot erase a completed kernel installation.
+        cleanup.attempt(handshake::publishApplied)
+        return checkNotNull(cleanup.failure)
     }
 }

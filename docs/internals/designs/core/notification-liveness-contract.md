@@ -1,5 +1,13 @@
 # Notification liveness and ownership contract
 
+The [live stack scoping contract](../enforcer/live-stack-scoping.md) has a native
+core only; its reviewed guard, bridge and enforcement remain proposed, unimplemented
+and unqualified. It requires a bounded, nonblocking pre-call copy,
+fresh notification identity and no CONTINUE of pointer-bearing opens; it does not
+change the implemented reply lease described below. A blocked syscall cannot wait
+for its own ring event; the source-pinned Linux v6.12 seccomp-before-tracepoint
+ordering must be requalified for each architecture/kernel path.
+
 This is the cross-module contract for the review-hardening implementation. The
 [finding manifest](post-review-hardening-evidence.md#liveness-and-boundary-review-rh)
 and [verification record](review-hardening-verification.md) separate implementation

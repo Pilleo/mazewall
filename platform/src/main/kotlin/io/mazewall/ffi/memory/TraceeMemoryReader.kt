@@ -6,6 +6,7 @@ import io.mazewall.platform.lifecycle.Deadline
 import io.mazewall.platform.lifecycle.Pid
 import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.LinuxNative
+import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.NativeFileSystem
 import io.mazewall.platform.native.NativeMemory
 import io.mazewall.platform.native.map
@@ -205,6 +206,8 @@ internal interface TraceeMemoryReader {
     }
 
     public companion object {
+        internal fun captured(engine: NativeEngine): TraceeMemoryReader = InjectedReal(engine.memory, engine.fileSystem)
+
         /** Construct a reader backed by the process' Linux native adapters. */
         @JvmStatic
         public fun real(): TraceeMemoryReader = InjectedReal(LinuxNative.memory, LinuxNative.fileSystem)

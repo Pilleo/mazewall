@@ -1,5 +1,11 @@
 # Tier E — eBPF Semantic Enrichment: Technical Design Document
 
+The separate [live stack scoping contract](../enforcer/live-stack-scoping.md) has
+a native core only; its reviewed guard, bridge and enforcement remain proposed,
+unimplemented and unqualified. It does not grant diagnostic streams,
+markers, rings or dictionaries authorization authority; Tier E evidence remains
+policy-ineligible. Historical results here do not qualify that proposed path.
+
 **Status:** EXPERIMENTAL IMPLEMENTATION (InvocationId stack backend and correctness hardening, 2026-09-13)
 **Component:** `:platform`, `:profiler`, `profiler-native/`
 **Related:** [profiler-design.md](profiler-design.md) (Tiers P/S/A), [security-considerations.md](../core/security-considerations.md) (Shared-Memory ACE threat model)
@@ -2733,3 +2739,180 @@ and several active protocol/verdict, fingerprint, and fork-parser callers now
 invoke Kotlin. Its Bash fixture and benchmark matrix controllers and some
 Node matrix analyses remain substantive and active. This tooling transition
 does not revise any archived measurements or the rejected default promotion.
+
+### Private failed-load diagnostic evidence (2026-11-04)
+
+The opt-in missing-open discriminator retains one failed `BPF_PROG_LOAD` at
+`/fixture/evidence/prog-load-failure.diag`; ordinary operation is unchanged. Enabled
+loads are capped at 1,024 submitted instruction slots before encoding/syscall. The
+same call uses a zero-filled 144-byte attr with unsigned `log_true_size` at 140
+and requests `BPF_LOG_STATS` (4) without verbose instruction logging;
+ordinary requests remain 104 bytes, level 1, 65,536-byte log buffer, identical
+instructions and map ordering. There is no native retry, new downcall, or
+success-path publication. A successful real FD is adopted immediately.
+Failure evidence is copied synchronously while the confined request arena lives;
+no segment escapes. The original immutable native failure is constructed first.
+Ordinary evidence failures are suppressed; an identical fatal `Error` wins via
+`CleanupFailures.merge`, including channel-close and prior-FD rollback failures.
+
+Cycle 001's marker load submitted 398 slots at level 1 and failed with ENOSPC:
+the kernel reported 307,202 required log bytes against 65,536 supplied, while
+the first NUL was at 104 and the retained text contained final stats only. Stats-only
+logging reduces requested verbosity; a fresh kernel run must establish whether the
+load succeeds or exposes another error. This evidence does not establish the
+historical missing-open cause or rule out a masked verifier error.
+
+The private MZPL v1 image is little-endian metadata, followed by exact native-order,
+map-FD-resolved submitted instructions and the first 32,768 raw supplied-buffer
+bytes (not necessarily the beginning of the kernel's rotating transcript). The
+fixed metadata region is 2,048 bytes; unused bytes are zero. Offsets/widths:
+
+| Offset | Encoding / meaning |
+|---|---|
+| 0/4/8/12 | u32 magic `0x4c505a4d`, version 1, metadata bytes 2048, program bytes |
+| 16/24/28 | u64 installation, u32 target TGID/session epoch |
+| 32/36/40/44 | u32 load ordinal/type/errno/capacity classification |
+| 48/56/64/72 | i64 raw result, u64 returned unsigned true size/log capacity/first NUL offset (all-ones = absent) |
+| 80/84/88/92 | u32 retained prefix length, prefix-shortened flag (always 1), native byte order (1 little/2 big), input log level/flags |
+| 96/100/104/108 | u32 program flags/instruction count/positive-size availability/NUL-termination flag |
+| 128/160/192 | raw SHA-256 digests (32 bytes each): program/full supplied log buffer/retained prefix |
+| 256/272/336 | fixed ASCII program name[16], backend[64], sanitized bounded verifier summary[96] |
+| 2048 | program bytes (at most 8192), then retained raw prefix (32768) |
+
+Capacity classification is 0 UNKNOWN, 1 SUFFICIENT, 2 INSUFFICIENT, 3 SATURATED,
+4 MALFORMED. Zero returned size means unknown/unsupported/early-exit, never
+complete-empty. A positive size at most capacity and at least NUL offset + 1,
+without EFAULT, supports capacity sufficiency **at requested verbosity only**.
+Greater size establishes insufficiency; UINT_MAX is saturated, not exact.
+Unterminated, contradictory or EFAULT output is malformed. Prefix-shortened,
+missing or partial evidence is always incomplete for causal/negative claims.
+Historical verifier `processed 4001 insns` is not a submitted instruction count.
+
+The 6,291,456-byte cap covers **incremental diagnostic storage**, not whole-JVM
+RSS/provider objects or inherited ordinary request working memory. Existing base
+6,226,456 plus exactly 44,072 = **6,270,528**: retained program 8,192 + raw prefix
+32,768 + metadata 2,048 + owned streaming/hash/summary scratch 1,024 + extra attr
+40. The existing 65,536-byte bookkeeping reserve is unchanged, with no phase
+sharing assumption about target unload. Map payload is 3,670,144; actual map
+allocation may exceed payload by at most **20,928**, hence maximum **3,691,072**.
+READY and STATUS use this same ledger and the consumer rejects stale accounting.
+The capture-yield host repair retains fixed65,536 16-byte slots and one overlapping
+output vector (maximum1,048,600 bytes), with two bounded RMW reservations and
+release/acquire commits. Its Linux premise is one non-reentrant recorder call per
+positive signed-int TID, no asynchronous callback/signal reentry: at most65,536 +
+INT_MAX stale reservations, below2^32. UINT64_MAX in `capture-yield-dropped` is now
+a sticky non-exact positive-loss sentinel for full/closed rejection, not an exact
+contention count. Zero still means no observed loss; qualification still requires
+the exact zero-drop success substring and complete closed unique-ID joins.
+CLOSED serializes a finite cut and latches all terminal attempts, including failed
+ones; missing commit/loss/I/O/close/rename failure cannot publish success or retry
+cleanly. Slots remain owned through failure and late producer completion. A
+successful publication is not producer quiescence; active DSO unload is unsupported.
+Host measurements retain slot/output/stream/native-FILE allocation sizes and grow
+object usable allocation by16. Removed global objects total48, but actual `.bss`
+shrinks only32 after compiler padding. Actual production unload-frame bound is
+unchanged (writer inlined), so measured net delta is -16; the forced standalone
+measurement-writer frame is not a production frame. This preserves the base and full map-excess margin
+above without phase sharing; it is not target storage/lowering qualification.
+Separately disclosed request native payload is at most **73,876** = log 65,536 +
+program 8,192 + attr 144 + license 4; this is not an all-in object/RSS claim.
+
+The artifact cap is **43,008** = 2,048 + 8,192 + 32,768. Program/log arrays and
+whole-log Strings are never mirrored on this path. Hashing uses byte-at-a-time
+updates; the one 256-byte native streaming scratch, three 32-byte digest results
+and bounded 96-character summary/builder payload fit the separate 1,024 allowance
+(provider/JVM object internals are not that ledger). The 0600 CREATE_NEW/NOFOLLOW
+temporary is progress-checked, forced and hard-linked in the same directory
+without replacement. Only the owned temporary is unlinked after publication;
+partial failures retain it. Final and temporary success aliases share one inode;
+existing final/temp collisions prohibit reinstall accumulation. The shared
+exporter applies 43,008 to both names, retains raw partial bytes, and never calls
+a failed-load attempt complete. No new policy eligibility or kernel cause is
+established by host tests or a later clean instrumented arm.
+
+### Private mapped-file fingerprint identity (2026-11-04)
+
+The private preREADY diagnostic fingerprints the owned target's agent and libjvm
+via `/proc/<pid>/map_files/<start>-<end>`. Raw maps device numbers and filesystem
+stat device numbers are distinct identity domains on Btrfs: retained cycle002
+reported maps device `0:34` versus stat device `0:50` for the same agent inode.
+The retained owned probe confirmed that the opened mapped object and target-root
+path have equal fstat device/inode identities and SHA-256. That evidence diagnoses
+the readiness comparison, not the historical missing-open cause.
+
+The extracted private test resource opens both objects for every selected range,
+requires regular files, compares their fstat device/inode identities and the maps
+inode, and hashes each file once from the checked mapped descriptor while owned.
+All ranges must match that file identity. Raw maps rows and descriptor identities
+are retained separately; maps device is never compared to stat device. This is
+not a filesystem-name exception, inode/path/hash-only acceptance, or permission
+fallback. The required proc magic link does not authorize general symlink
+acceptance. Missing/replaced mappings and open/stat/read/hash failures abort
+readiness with path/range and available identities; descriptors close on failure.
+The resource joins the READY source hash inventory. Other fingerprints, checked
+process identities and READY-before-ARM-before-first-gate ordering are unchanged.
+Host regressions do not qualify cycle003: independent review, a fresh unchanged
+20+20 diagnostic and the controller's full gate remain pending. A4 remains FAILED
+and A3 unresolved.
+
+### Private LSM fingerprint availability (2026-11-04)
+
+The host reads `/sys/kernel/security/lsm` and passes its actual active inventory
+to the private collector fingerprint resource; the existing host-PID namespace
+proof binds it to the same kernel. The resource requires a nonempty, unique,
+well-formed module list and attempts each owned process's `attr/current` read.
+A nonempty label is recorded as observed. Only EINVAL with every active module
+in `capability,landlock,lockdown,yama,bpf` is recorded as `label=UNAVAILABLE`,
+`errno=22`, together with role, path, host source and inventory. Permission
+errors, other failures, empty labels and EINVAL with unknown or label-providing
+modules fail readiness. This describes interface availability, not the absence
+of LSM enforcement, Landlock, or confinement. Host tests alone do not qualify
+the pending fresh diagnostic or establish the missing-open cause.
+
+### Private retained comparison semantics (2026-11-04)
+
+The diagnostic compares native JNI open mode with ptrace mode only when matching
+flags include `O_CREAT` or full `O_TMPFILE`; `O_DIRECTORY` alone does not use mode.
+JNI read-only mode `0666` remains unmodified in MZOB. Creation mode is still
+required and exact, as are pathname bytes, flags, results, identities, intervals
+and shared-FD closure evidence.
+
+Production `ambient_inactive_count` describes `FLAG_INACTIVE_INVOCATION`, not all
+`NO_ACTIVE_INVOCATION` events. The private classifier checks numeric flags and
+resolution consistency, and reconciles this count against complete same-session,
+same-target `MAIN_INACTIVE` receipts. `MAIN_NO_STORAGE` is a separate submitted
+reason; `MAIN_CAPTURE_DISABLED` is not submitted. Total event, terminal, loss,
+dictionary, identity and closure checks remain mandatory. This does not impose
+an all-kernel-rows/all-events equality that would erase localized missing rows.
+
+Follow-up K selects the final unambiguous observed owned marker state before
+original-call entry, considering every marker stage and invocation on the bridged
+host TID, not one matching SET per native publication. The supporting SET must
+have committed, known session/target/helper/flag fields, nonzero sequence and
+generation, and matching raw/current invocation. Repeated matching SETs require
+strictly increasing sequences and coherent generation; equal-time ambiguity is
+rejected. The exact final sequence/generation feeds existing main/rejection
+checks. Any marker during the native call interval is conservatively unsupported,
+even if apparently restored. Complete observers remain necessary for absence;
+a localized missing-main result points to the actual final marker ordinal while
+all repeated records stay retained. Positive input/result joins survive later
+certification failures. No general restoration semantics or execution count is
+inferred from these observations.
+
+Actual offline replay of immutable cycle005 through the shared Kotlin
+decoder/classifier returns **INCONCLUSIVE** instrumented baseline with all **40**
+native/oracle input/result matches, no missing/ambiguous IDs or reasons, 62 complete
+MZOB calls and 20,882 complete MZBD records. Production has 14,922 events: 308
+resolved, 12,567 no-storage and 2,047 inactive; ambient is 2,047. Each cold call's
+eight SETs culminate in the exact state seen by its main open without an
+intervening transition. This does not normalize records or prove eight native
+publications. Per-CPU attachment fanout is a separate, unimplemented,
+source/kernel-qualified investigation, not a demonstrated missing-open or
+performance cause. The original cycle005 **INCOMPLETE** outcome and artifacts
+remain unchanged. These are diagnostic consumer repairs, not full qualification:
+A4 remains FAILED, A3 unresolved; independent review, fresh cycle006 and the
+controller's final full gate remain pending.
+
+### Current availability — 2026-11-16
+
+The operator approved retiring the consumed one-shot A4 LIVE acquisition path and its two dedicated Python resources. The `:profiler:tierEMissingOpenDiagnostic` entry point is unavailable after this scoped retirement; the separate `:profiler:tierEA4Replay` path and shared replay/provenance support remain. Retained diagnostic packets, historical source records, native safeguards, and the ordinary installed fixture with its original 20+20 checks remain unchanged. This does not qualify or complete G4; A4 remains failed and A3 unresolved. See [issue 20261116-072155-079](../../backlog/issue-20261116-072155-079-retire-consumed-tier-e-a4-one-shot-live-diagnostic.md).

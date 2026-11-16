@@ -101,8 +101,9 @@ class AgentToolClosingTest {
 
     private fun runtimeDraining(runtime: ManagedRuntime): Boolean {
         val lock = ManagedRuntime::class.java.getDeclaredField("lock").apply { isAccessible = true }.get(runtime)
-        val phase = ManagedRuntime::class.java.getDeclaredField("phase").apply { isAccessible = true }
-        return synchronized(lock) { phase.get(runtime).toString() == "DRAINING" }
+        val shared = ManagedRuntime::class.java.getDeclaredField("shared").apply { isAccessible = true }.get(runtime)
+        val phase = shared.javaClass.getDeclaredField("phase").apply { isAccessible = true }
+        return synchronized(lock) { phase.get(shared).toString() == "DRAINING" }
     }
 
     private fun awaitCondition(condition: () -> Boolean) {

@@ -154,7 +154,8 @@ internal object LinuxNative : NativeEngine {
 /** Immutable view of one [NativeEngine] selected by [LinuxNative.snapshot]. */
 internal class RuntimeSnapshot internal constructor(
     private val engine: NativeEngine,
-) : NativeEngine by engine {
+) : NativeEngine by engine, NativeStackContextProvider {
+    override val stackContexts: NativeStackContexts get() = engine.stackContextsOrUnsupported()
     public val engineIdentity: Any get() = engine
     public val isRealEngine: Boolean get() = engine === RealNativeEngine
 }

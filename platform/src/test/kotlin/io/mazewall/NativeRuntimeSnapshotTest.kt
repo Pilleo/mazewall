@@ -15,6 +15,25 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
 
 class NativeRuntimeSnapshotTest {
+    @Test
+    fun capturedProvider() {
+        val capabilityA = object : NativeStackContexts by UnsupportedNativeStackContexts {}
+        val capabilityB = object : NativeStackContexts by UnsupportedNativeStackContexts {}
+        val first = object : MockNativeEngine(), NativeStackContextProvider {
+            override val stackContexts = capabilityA
+        }
+        val second = object : MockNativeEngine(), NativeStackContextProvider {
+            override val stackContexts = capabilityB
+        }
+        LinuxNative.setEngine(first)
+        val snapshot = LinuxNative.snapshot()
+        LinuxNative.setEngine(second)
+        assertSame(capabilityA, snapshot.stackContextsOrUnsupported())
+        LinuxNative.resetToDefault()
+        assertSame(capabilityA, snapshot.stackContexts)
+        assertSame(UnsupportedNativeStackContexts, LinuxNative.snapshot().stackContexts)
+    }
+
     @AfterEach
     fun resetEngine() {
         LinuxNative.resetToDefault()

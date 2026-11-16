@@ -1,0 +1,130 @@
+name: Security Data
+on:
+    schedule:
+        - cron: '0 * * * *'
+    workflow_dispatch:
+concurrency:
+    group: security-data-updater
+    cancel-in-progress: false
+permissions:
+    contents: read
+    actions: read
+jobs:
+    update:
+        if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        runs-on: ubuntu-26.04
+        timeout-minutes: 180
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v6
+            - name: Set up JDK 25
+              uses: actions/setup-java@v5
+              with:
+                  java-version: "25"
+                  distribution: temurin
+            - name: Setup Gradle
+              uses: gradle/actions/setup-gradle@v6
+              with:
+                  cache-read-only: false
+                  gradle-home-cache-excludes: dependency-check-data
+            - name: Compute Security Data Metadata
+              id: security_metadata
+              run: |
+                  python3 - <<'PY'
+                  import os
+                  import re
+                  import tomllib
+                  from pathlib import Path
+
+                  with open('gradle/libs.versions.toml', 'rb') as catalog:
+                      version = tomllib.load(catalog)['versions']['dependencyCheck']
+                  if not isinstance(version, str) or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)+(?:-[A-Za-z0-9.]+)?', version):
+                      raise SystemExit('Unsafe Dependency-Check version')
+                  home = os.environ['GRADLE_USER_HOME']
+                  if not Path(home).is_absolute() or any(char in home for char in '\r\n'):
+                      raise SystemExit('Expected absolute GRADLE_USER_HOME')
+                  prefix = f"dc-data-v1-{os.environ['RUNNER_OS']}-{os.environ['RUNNER_ARCH']}-dc{version}_"
+                  key = f"{prefix}{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}"
+                  with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+                      print(f'data_dir={Path(home) / "dependency-check-data"}', file=output)
+                      print(f'prefix={prefix}', file=output)
+                      print(f'key={key}', file=output)
+                  PY
+            - name: Restore Security Data
+              id: security_restore
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ steps.security_metadata.outputs.data_dir }}
+                  key: ${{ steps.security_metadata.outputs.key }}
+                  restore-keys: ${{ steps.security_metadata.outputs.prefix }}
+            - name: Verify Restored Security Ownership
+              id: restored_ownership
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "${GRADLE_USER_HOME:?}" "${GRADLE_USER_HOME:?}/dependency-check-data"; do
+                      if [ -e "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          test -z "$foreign" || exit 1
+                      fi
+                  done
+            - name: Update Security Data
+              id: security_update
+              timeout-minutes: 150
+              env:
+                  NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+              run: |
+                  set -o pipefail
+                  ./gradlew dependencyCheckUpdate -Pmazewall.securitySnapshotUpdate=true --info --no-configuration-cache --no-daemon -Dnvd.api.results.per.page=500 2>&1 | tee security-update.log
+                  python3 scripts/security_snapshot.py check-records security-update.log
+            - name: Verify Updated Security Ownership
+              id: updated_ownership
+              run: |
+                  for path in "$GITHUB_WORKSPACE" "${GRADLE_USER_HOME:?}" "${GRADLE_USER_HOME:?}/dependency-check-data"; do
+                      if [ -e "$path" ]; then
+                          foreign=$(find "$path" -xdev ! -user "$(id -u)" -print -quit)
+                          test -z "$foreign" || exit 1
+                      fi
+                  done
+            - name: Verify Security Snapshot
+              id: verified_snapshot
+              run: ./gradlew verifySecuritySnapshot --no-configuration-cache --no-daemon
+            - name: Prepare Completed Security Artifact
+              id: security_artifact_prepare
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.verified_snapshot.outcome == 'success' }}
+              env:
+                  SNAPSHOT_KEY: ${{ steps.security_metadata.outputs.key }}
+              run: python3 scripts/security_snapshot.py pack "$GRADLE_USER_HOME/dependency-check-data" "$RUNNER_TEMP/security-snapshot-upload"
+            - name: Upload Completed Security Artifact
+              id: security_artifact_upload
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.verified_snapshot.outcome == 'success' && steps.security_artifact_prepare.outcome == 'success' }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: security-snapshot-${{ steps.security_metadata.outputs.key }}
+                  path: ${{ runner.temp }}/security-snapshot-upload
+                  retention-days: 14
+                  include-hidden-files: true
+                  if-no-files-found: error
+            - name: Require Retained Security Snapshot
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.verified_snapshot.outcome == 'success' }}
+              env:
+                  ARTIFACT_ID: ${{ steps.security_artifact_upload.outputs.artifact-id }}
+              run: '[[ "${ARTIFACT_ID:-}" =~ ^[1-9][0-9]*$ ]]'
+            - name: Save Completed Security Data
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.verified_snapshot.outcome == 'success' }}
+              uses: actions/cache/save@v4
+              with:
+                  path: ${{ steps.security_metadata.outputs.data_dir }}
+                  key: ${{ steps.security_restore.outputs.cache-primary-key }}
+            - name: Look Up Completed Security Snapshot
+              id: security_snapshot_lookup
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.verified_snapshot.outcome == 'success' }}
+              uses: actions/cache/restore@v4
+              with:
+                  path: ${{ steps.security_metadata.outputs.data_dir }}
+                  key: ${{ steps.security_restore.outputs.cache-primary-key }}
+                  lookup-only: true
+                  fail-on-cache-miss: true
+            - name: Require Completed Security Snapshot
+              if: ${{ !cancelled() && steps.security_update.outcome == 'success' && steps.updated_ownership.outcome == 'success' && steps.verified_snapshot.outcome == 'success' }}
+              env:
+                  CACHE_HIT: ${{ steps.security_snapshot_lookup.outputs.cache-hit }}
+              run: test "${CACHE_HIT:-}" = true

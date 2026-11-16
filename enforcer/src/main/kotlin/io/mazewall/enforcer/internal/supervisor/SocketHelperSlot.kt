@@ -7,6 +7,13 @@ internal class SocketHelperSlot(
     @Volatile private var accepting = true
     private var closed = false
 
+    override val confinedIdentity: ProcessIdentity? get() = delegate.confinedIdentity
+
+    override fun runConfined(exchange: ConfinedHelperJob) {
+        check(accepting) { "Socket helper is retiring" }
+        delegate.runConfined(exchange)
+    }
+
     override fun executeAuthority(job: TraceeAuthorityJob): SupervisorReplyEffect {
         check(accepting) { "Socket helper is retiring" }
         return delegate.executeAuthority(job)

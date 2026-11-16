@@ -137,8 +137,9 @@ class SeccompCleanupInterpreterTest {
                 if (fd == server && ++serverAttempts == 1) throw cancellation
                 if (fd == client && !retry) throw clientFailure
             },
+            hooks = SeccompConnectionHooks(beforeListener = { _, _ -> PreludeOutcome.Handled }),
         )
-        daemon.clientSockets.add(client)
+        daemon.handleConnection(client)
 
         assertSame(
             cancellation,
@@ -235,11 +236,10 @@ class SeccompCleanupInterpreterTest {
             notifHandlerFactory = { _, _ -> error("unused") },
             engine = MockNativeEngine(),
             socketManager = manager,
+            hooks = SeccompConnectionHooks(beforeListener = { _, _ -> PreludeOutcome.Handled }),
         )
-        daemon.clientSockets.add(socket)
-        daemon.triggerGlobalShutdown("test")
-
         daemon.handleConnection(socket)
+        daemon.triggerGlobalShutdown("test")
 
         // Catches removing the descriptor before interpreting the failed close.
         assertEquals(listOf(socket), daemon.clientSockets.toList())
@@ -316,8 +316,10 @@ class SeccompCleanupInterpreterTest {
                 attempts += fd.value
                 if (fd != successfulClient) throw IllegalStateException("owned descriptor close failed")
             },
+            hooks = SeccompConnectionHooks(beforeListener = { _, _ -> PreludeOutcome.Handled }),
         )
-        daemon.clientSockets.addAll(listOf(failedClient, successfulClient))
+        daemon.handleConnection(failedClient)
+        daemon.handleConnection(successfulClient)
 
         daemon.applyEvent(UnixListenDaemonEvent.AcceptLoopFinished(server))
 

@@ -3,6 +3,7 @@
 package io.mazewall.profiler.tierE.daemon
 
 import io.mazewall.ffi.internal.RealNativeEngine
+import io.mazewall.platform.fd.CleanupFailures
 import io.mazewall.profiler.internal.attribution.AgentDefinitionFile
 import io.mazewall.profiler.internal.attribution.CoverageRecoveryMode
 import io.mazewall.profiler.internal.attribution.EvidenceIntegrity
@@ -10,12 +11,15 @@ import io.mazewall.profiler.internal.attribution.MarkerVersion
 import io.mazewall.profiler.internal.attribution.SessionEpoch
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntime
 import io.mazewall.profiler.internal.attribution.TierECollectorRuntimeResult
+import io.mazewall.profiler.internal.attribution.TierECollectorServiceMetrics
 import io.mazewall.profiler.internal.attribution.TierELinuxMonotonicClock
 import io.mazewall.profiler.internal.attribution.TierEOptions
 import io.mazewall.profiler.internal.attribution.TierEProducerClosure
 import io.mazewall.profiler.internal.attribution.TierEProfilerSession
 import io.mazewall.profiler.internal.attribution.TierESysEnterAttachmentBackend
+import io.mazewall.profiler.tierE.engine.BoundaryDiagnosticConfig
 import io.mazewall.profiler.tierE.engine.TierEbpfEngine
+import io.mazewall.profiler.tierE.engine.publishBoundaryControlReceipt
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.ServerSocketChannel
@@ -38,6 +42,7 @@ internal fun main() {
         exitProcess(1)
     }
 
+    val evidenceAccess = TierEEvidenceFileAccess.fromEnvironment()
     val socketPath = System.getenv("TIER_E_SOCKET") ?: "/tmp/tier_e.sock"
     Files.deleteIfExists(Path.of(socketPath))
     val socketAccess = TierEControlSocketAccess.fromEnvironment()
@@ -51,12 +56,13 @@ internal fun main() {
         require(selected == "1") { "TIER_E_ALL_TARGET_CAPTURE accepts only 1 when explicitly enabled" }
         true
     } ?: false
+    val boundaryDiagnostics = boundaryDiagnosticsFromEnvironment(System.getenv(), registeredTarget != null)
     val fileReportSink = System.getenv("TIER_E_EVIDENCE_ROOT")?.let {
-        TierETerminalReportFileSink(Path.of(it))
+        TierETerminalReportFileSink(Path.of(it), evidenceAccess)
     }
     val eventFileSink = if (allTargetCapture) {
         val root = requireNotNull(System.getenv("TIER_E_EVIDENCE_ROOT")) { "all-target capture requires an evidence root" }
-        TierEEventJsonlFileSink(Path.of(root))
+        TierEEventJsonlFileSink(Path.of(root), access = evidenceAccess)
     } else {
         null
     }
@@ -102,6 +108,7 @@ internal fun main() {
         ?: 30_000L
     val daemon = TierEDaemonService(
         stopRequested,
+        engineFactory = { TierEbpfEngine(RealNativeEngine, boundaryDiagnostics) },
         processIdentityVerifier = System.getenv("TIER_E_BENCHMARK_REUSE_MARKER")?.let { marker ->
             val path = Path.of(marker)
             TierEProcessIdentityVerifier { pid ->
@@ -173,6 +180,26 @@ internal fun main() {
     }
 }
 
+internal fun boundaryDiagnosticsFromEnvironment(
+    environment: Map<String, String>,
+    registered: Boolean,
+): BoundaryDiagnosticConfig? {
+    val selected = environment["TIER_E_TEST_BOUNDARY_DIAGNOSTICS"]
+    if (selected.isNullOrEmpty()) return null
+    require(selected == "1") { "TIER_E_TEST_BOUNDARY_DIAGNOSTICS accepts only 1" }
+    require(
+        registered &&
+        environment["TIER_E_ALL_TARGET_CAPTURE"] == "1" &&
+        markerVersionFromEnvironment(environment) == MarkerVersion.V1 &&
+        coverageRecoveryModeFromEnvironment(environment) == CoverageRecoveryMode.DISABLED &&
+        environment["TIER_E_BENCHMARK_PHASES"] != "1" &&
+        environment["TIER_E_SPLIT_BENCHMARK"] != "1",
+    ) {
+        "boundary diagnostics require a registered non-benchmark direct-raw v1 all-target session"
+    }
+    return BoundaryDiagnosticConfig(Path.of("/fixture/evidence/boundary.bpfdiag"))
+}
+
 internal class TierEDaemonService(
     private val stopRequested: AtomicBoolean,
     private val engineFactory: () -> TierEbpfEngine = { TierEbpfEngine(RealNativeEngine) },
@@ -196,12 +223,24 @@ internal class TierEDaemonService(
     private val nativeLiveSnapshotAdmission: Boolean = nativeLiveSnapshotAdmissionFromEnvironment(),
     private val benchmarkDropRingSyscallNumber: Int? = benchmarkDropRingSyscallFromEnvironment(),
     private val allTargetCapture: Boolean = false,
+    private val boundaryPublisher: (String) -> Unit = { publishBoundaryControlReceipt(it) },
+    private val boundaryReporterFactory: (TierEbpfEngine, Long, (String) -> Unit) -> (() -> Unit) = { engine, installation, publish ->
+        engine.boundaryControlReporter(installation, publish)
+    },
+    private val sessionFactory: (TierEbpfEngine, Long, TierEOptions, SessionEpoch) -> TierEProfilerSession = { engine, incarnation, options, epoch ->
+        TierEProfilerSession(engine, incarnation, options, configuredSessionEpoch = epoch)
+    },
 ) {
     private var sessionState: ControlSessionState = ControlSessionState.Idle
     private var activeSession: ActiveSession? = null
+
+    // Reentrant shutdown closes admission now, but cannot retire a resource still under construction/use.
+    private var acquisitionInProgress = false
     private var lastTerminalResult: TierECollectorRuntimeResult? = null
+    private var lastFinalizationFailure: Throwable? = null
     private var activeMarkerTransport = "idle"
     private var activeMarkerFallbackReason: String? = null
+    private var boundaryInstallationSequence = 0L
 
     init {
         require(registeredTargetResolver == null || artifactResolver != null) {
@@ -270,147 +309,214 @@ internal class TierEDaemonService(
     private fun dispatchEffect(effect: ControlSessionEffect): String =
         when (effect) {
             is ControlSessionEffect.SendReply -> effect.reply.render().trimEnd()
-
-            is ControlSessionEffect.RespondStatus -> {
-                val statusText = activeSession?.let {
-                    val metrics = it.runtime.metrics()
-                    "engine=active marker_transport=$activeMarkerTransport " +
-                        "marker_fallback=${activeMarkerFallbackReason ?: "none"} " +
-                        "collector_state=${metrics.state} worker_alive=${metrics.workerAlive} " +
-                        "polls=${metrics.loop.polls} active_polls=${metrics.loop.activePolls} " +
-                        "idle_polls=${metrics.loop.idlePolls} failure=${metrics.failure ?: "none"}"
-                } ?: lastTerminalResult?.let { result ->
-                    "engine=idle terminal_transport_complete=${result.profile.integrity.verdictDimensions.transportComplete}"
-                } ?: "engine=idle"
-                ControlReply.ok(statusText).render().trimEnd()
-            }
-
-            is ControlSessionEffect.PerformAttach -> {
-                finishActiveSession()
-                val cmd = effect.command
-                var engine: TierEbpfEngine? = null
-                var runtime: TierECollectorRuntime? = null
-                try {
-                    val attachment = resolveDaemonAttachment(cmd, registeredTargetResolver, artifactResolver)
-                    attachment.registeredTarget?.let(processIdentityVerifier::requireCurrent)
-                    if (markerVersion == MarkerVersion.V2) {
-                        val target = requireNotNull(attachment.registeredTarget) {
-                            "experimental marker v2 requires registered target and selected-version proof"
-                        }
-                        try {
-                            requireNotNull(artifactResolver).readMarkerProof(target).requireSelectedV2(target)
-                        } catch (failure: IllegalArgumentException) {
-                            throw TierEMarkerVersionMismatch(failure)
-                        }
-                        processIdentityVerifier.requireCurrent(target)
-                    }
-                    engine = engineFactory()
-                    val session = TierEProfilerSession(
-                        engine = requireNotNull(engine),
-                        processEpoch = attachment.session.processIncarnation,
-                        options = TierEOptions(
-                            cmd.emissionMode,
-                            maxPendingRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
-                            maxRetainedRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
-                            benchmarkPhases = benchmarkPhases,
-                            experimentalCoverage = markerVersion == MarkerVersion.V2,
-                            markerVersion = markerVersion,
-                            coverageRecoveryMode = recoveryMode,
-                            coverageRecoveryMapCapacity = recoveryMapCapacity,
-                            benchmarkDropRingSyscallNumber = benchmarkDropRingSyscallNumber,
-                            allTargetCapture = allTargetCapture,
-                            sysEnterAttachmentBackend = if (allTargetCapture) {
-                                TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT
-                            } else {
-                                TierESysEnterAttachmentBackend.AUTO
-                            },
-                        ),
-                        configuredSessionEpoch = SessionEpoch(cmd.sessionTag.toLong()),
-                    )
-                    runtime = TierECollectorRuntime(
-                        session,
-                        receiptClock = if (receiptClockMode == "monotonic") TierELinuxMonotonicClock() else null,
-                    )
-                    val markerPath = attachment.markerPath
-                    val selection = if (markerVersion == MarkerVersion.V2) {
-                        selectMarkerTransport(cmd.mode) {
-                            UsdtProbeNotes.findStackMarkerV2(markerPath)
-                        }
-                    } else {
-                        selectMarkerTransport(cmd.mode) {
-                            UsdtProbeNotes.findStackMarkerV1(markerPath)
-                        }
-                    }
-                    session.installAndAttach(
-                        attachment.session.pid,
-                        cmd.sessionTag,
-                        markerPath,
-                        attachment.markerOffset,
-                        selection.usdtNote,
-                    )
-                    if (nativeLiveSnapshotAdmission) {
-                        val artifact = requireNotNull(attachment.artifact) { "native live snapshot admission requires registered artifact" }
-                        val resolver = requireNotNull(artifactResolver) { "native live snapshot admission requires artifact root" }
-                        session.enableNativeLiveSnapshots { maxBytes -> resolver.readLive(artifact, maxBytes) }
-                    }
-                    runtime.start()
-                    if (allTargetCapture) session.enableCaptureAdmission()
-                    val active = ActiveSession(runtime, attachment.artifact, attachment.registeredTarget)
-                    activeSession = active
-                    attachment.registeredTarget?.let { target ->
-                        active.terminalWatch = targetExitCoordinator.watch(target) {
-                            finalizeRegisteredTarget(target)
-                        }
-                    }
-                    activeMarkerTransport = selection.selected.name.lowercase()
-                    activeMarkerFallbackReason = selection.fallbackReason
-                    val postTransition = ControlSessionMachine.evaluate(
-                        sessionState,
-                        ControlSessionEvent.AttachSucceeded(attachment.session),
-                    )
-                    sessionState = postTransition.state
-                    (postTransition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
-                } catch (versionFailure: TierEMarkerVersionMismatch) {
-                    runCatching { runtime?.close() ?: engine?.close() }
-                    val rejectedTarget = requireNotNull(registeredTargetResolver?.resolve(cmd)) {
-                        "marker-version mismatch requires a registered target"
-                    }
-                    reportRejectedAttach(rejectedTarget, "MARKER_VERSION_MISMATCH")
-                    completeAttachFailure(versionFailure)
-                } catch (expectedAttachFailure: Exception) {
-                    runCatching { runtime?.close() ?: engine?.close() }
-                    val rejectedTarget = runCatching { registeredTargetResolver?.resolve(cmd) }.getOrNull()
-                    if (rejectedTarget != null &&
-                        processIdentityVerifier.checkAtTerminal(rejectedTarget) != TierEProcessIdentityCheck.MATCHED
-                    ) {
-                        runCatching {
-                            reportRejectedAttach(rejectedTarget, "STALE_PROCESS_IDENTITY")
-                        }
-                    }
-                    completeAttachFailure(expectedAttachFailure)
-                }
-            }
-
-            is ControlSessionEffect.CloseSessionAndReply -> {
-                val reply = effect.reply.render().trimEnd()
-                finishActiveSession()
-                reply
-            }
-
-            is ControlSessionEffect.CloseAndShutdown -> {
-                val reply = ControlReply.ok("shutting down").render().trimEnd()
-                finishActiveSession()
-                stopRequested.set(true)
-                reply
-            }
+            is ControlSessionEffect.RespondStatus -> statusReply()
+            is ControlSessionEffect.PerformAttach -> performAttach(effect)
+            is ControlSessionEffect.CloseSessionAndReply -> closeSessionCommand(effect)
+            is ControlSessionEffect.CloseAndShutdown -> shutdownCommand()
         }
 
-    private fun completeAttachFailure(failure: Exception): String {
+    private fun statusReply(): String {
+        activeSession?.let(::observeBoundaryReadiness)?.let { return it }
+        val statusText = activeSession?.let {
+            "engine=active marker_transport=$activeMarkerTransport " +
+                "marker_fallback=${activeMarkerFallbackReason ?: "none"} " +
+                (it.runtime?.metrics()?.let(::collectorStatus) ?: "collector_state=unavailable")
+        } ?: lastTerminalResult?.let { result ->
+            "engine=idle terminal_transport_complete=${result.profile.integrity.verdictDimensions.transportComplete}"
+        } ?: "engine=idle"
+        val finalization = lastFinalizationFailure?.let { " terminal_reason=FINALIZATION_FAILED failure=${it.message}" }.orEmpty()
+        return ControlReply.ok(statusText + finalization).render().trimEnd()
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Observation failure must latch without bypassing normal terminal collection.
+    private fun observeBoundaryReadiness(active: ActiveSession): String? = when {
+        active.boundaryReporter != null && active.outcome != FinalizationOutcome.Collecting ->
+            lastFinalizationFailure?.let(::finalizationError) ?: ControlReply.err("STATE").render().trimEnd()
+        active.boundaryReadinessFailure != null -> boundaryReadinessError(requireNotNull(active.boundaryReadinessFailure))
+        else -> try {
+            active.boundaryReporter?.invoke()
+            null
+        } catch (interrupted: InterruptedException) {
+            active.boundaryReadinessFailure = interrupted
+            Thread.currentThread().interrupt()
+            boundaryReadinessError(interrupted)
+        } catch (cause: Throwable) {
+            active.boundaryReadinessFailure = cause
+            boundaryReadinessError(cause)
+        }
+    }
+
+    private fun boundaryReadinessError(failure: Throwable): String {
+        if (failure is Error) throw failure
+        return ControlReply.err("BOUNDARY_DIAGNOSTICS_FAILED").render().trimEnd()
+    }
+
+    private fun collectorStatus(metrics: TierECollectorServiceMetrics): String =
+        "collector_state=${metrics.state} worker_alive=${metrics.workerAlive} " +
+            "polls=${metrics.loop.polls} active_polls=${metrics.loop.activePolls} " +
+            "idle_polls=${metrics.loop.idlePolls} failure=${metrics.failure ?: "none"}"
+
+    @Suppress("TooGenericExceptionCaught") // Acquisition failures, including fatal ones, must retain cleanup ownership.
+    private fun performAttach(effect: ControlSessionEffect.PerformAttach): String {
+        if (activeSession?.outcome != null && activeSession?.outcome != FinalizationOutcome.Collecting) {
+            sessionState = effect.previousSession?.let(ControlSessionState::Attached) ?: ControlSessionState.Idle
+            return finalizationError(requireNotNull(lastFinalizationFailure))
+        }
+        val previousFailure = if (activeSession != null) finishActiveSession() else null
+        if (previousFailure != null) {
+            if (sessionState != ControlSessionState.Terminated) {
+                sessionState = activeSession?.let { ControlSessionState.Attached(it.session) } ?: ControlSessionState.Idle
+            }
+            return finalizationError(previousFailure)
+        }
+        val cmd = effect.command
+        var attachmentAcquired = false
+        return try {
+            val attachment = try {
+                acquisitionInProgress = true
+                check(sessionState != ControlSessionState.Terminated) { "STATE" }
+                val attachment = validatedAttachment(cmd)
+                check(sessionState != ControlSessionState.Terminated) { "STATE" }
+                val engine = engineFactory()
+                attachmentAcquired = true
+                lastFinalizationFailure = null
+                val active = ActiveSession(null, engine, attachment.session, attachment.artifact, attachment.registeredTarget)
+                activeSession = active
+                if (engine.boundaryDiagnosticsEnabled) {
+                    boundaryInstallationSequence = Math.incrementExact(boundaryInstallationSequence)
+                    active.boundaryReporter = boundaryReporterFactory(engine, boundaryInstallationSequence, boundaryPublisher)
+                }
+                check(sessionState != ControlSessionState.Terminated) { "STATE" }
+                val session = sessionFactory(engine, attachment.session.processIncarnation, sessionOptions(cmd), SessionEpoch(cmd.sessionTag.toLong()))
+                active.resource = session
+                check(sessionState != ControlSessionState.Terminated) { "STATE" }
+                val runtime = TierECollectorRuntime(session, receiptClock = if (receiptClockMode == "monotonic") TierELinuxMonotonicClock() else null)
+                active.runtime = runtime
+                active.resource = runtime
+                startAttachment(cmd, attachment, session, active)
+                check(sessionState != ControlSessionState.Terminated) { "STATE" }
+                attachment
+            } finally {
+                acquisitionInProgress = false
+            }
+            val postTransition = ControlSessionMachine.evaluate(sessionState, ControlSessionEvent.AttachSucceeded(attachment.session, cmd))
+            sessionState = postTransition.state
+            (postTransition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
+        } catch (versionFailure: TierEMarkerVersionMismatch) {
+            val target = requireNotNull(registeredTargetResolver?.resolve(cmd)) { "marker-version mismatch requires a registered target" }
+            reportRejectedAttach(target, "MARKER_VERSION_MISMATCH")
+            completeAttachFailure(cmd, versionFailure)
+        } catch (failure: Throwable) {
+            handleAttachFailure(cmd, failure, attachmentAcquired)
+        }
+    }
+
+    private fun validatedAttachment(cmd: ControlCommand.Attach): TierEDaemonAttachment {
+        val attachment = resolveDaemonAttachment(cmd, registeredTargetResolver, artifactResolver)
+        attachment.registeredTarget?.let(processIdentityVerifier::requireCurrent)
+        if (markerVersion == MarkerVersion.V2) {
+            val target = requireNotNull(attachment.registeredTarget) { "experimental marker v2 requires registered target and selected-version proof" }
+            try {
+                requireNotNull(artifactResolver).readMarkerProof(target).requireSelectedV2(target)
+            } catch (failure: IllegalArgumentException) {
+                throw TierEMarkerVersionMismatch(failure)
+            }
+            processIdentityVerifier.requireCurrent(target)
+        }
+        return attachment
+    }
+
+    private fun sessionOptions(cmd: ControlCommand.Attach): TierEOptions =
+        TierEOptions(
+        cmd.emissionMode,
+        maxPendingRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
+        maxRetainedRecords = benchmarkRecordLimit ?: TierEOptions.DEFAULT_RECORD_LIMIT,
+        benchmarkPhases = benchmarkPhases,
+        experimentalCoverage = markerVersion == MarkerVersion.V2,
+        markerVersion = markerVersion,
+        coverageRecoveryMode = recoveryMode,
+        coverageRecoveryMapCapacity = recoveryMapCapacity,
+        benchmarkDropRingSyscallNumber = benchmarkDropRingSyscallNumber,
+        allTargetCapture = allTargetCapture,
+        sysEnterAttachmentBackend = if (allTargetCapture) TierESysEnterAttachmentBackend.DIRECT_RAW_TRACEPOINT else TierESysEnterAttachmentBackend.AUTO,
+    )
+
+    private fun startAttachment(
+        cmd: ControlCommand.Attach,
+        attachment: TierEDaemonAttachment,
+        session: TierEProfilerSession,
+        active: ActiveSession,
+    ) {
+        val selection = if (markerVersion == MarkerVersion.V2) {
+            selectMarkerTransport(cmd.mode) { UsdtProbeNotes.findStackMarkerV2(attachment.markerPath) }
+        } else {
+            selectMarkerTransport(cmd.mode) { UsdtProbeNotes.findStackMarkerV1(attachment.markerPath) }
+        }
+        session.installAndAttach(attachment.session.pid, cmd.sessionTag, attachment.markerPath, attachment.markerOffset, selection.usdtNote)
+        check(sessionState != ControlSessionState.Terminated) { "STATE" }
+        if (nativeLiveSnapshotAdmission) {
+            val artifact = requireNotNull(attachment.artifact) { "native live snapshot admission requires registered artifact" }
+            val resolver = requireNotNull(artifactResolver) { "native live snapshot admission requires artifact root" }
+            session.enableNativeLiveSnapshots { maxBytes -> resolver.readLive(artifact, maxBytes) }
+        }
+        requireNotNull(active.runtime).start()
+        check(sessionState != ControlSessionState.Terminated) { "STATE" }
+        if (allTargetCapture) session.enableCaptureAdmission()
+        attachment.registeredTarget?.let { target ->
+            active.terminalWatch = targetExitCoordinator.watch(target) { finalizeRegisteredTarget(target) }
+        }
+        activeMarkerTransport = selection.selected.name.lowercase()
+        activeMarkerFallbackReason = selection.fallbackReason
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Rejected-report failures must remain observable even without an acquired owner.
+    private fun handleAttachFailure(
+        cmd: ControlCommand.Attach,
+        cause: Throwable,
+        attachmentAcquired: Boolean,
+    ): String {
+        var failure = activeSession?.let { active ->
+            recordFinalizationFailure(active, cause)
+            finishActiveSession()
+        } ?: cause
+        if (sessionState == ControlSessionState.Terminated) stopRequested.set(activeSession == null)
+        val target = runCatching { registeredTargetResolver?.resolve(cmd) }.getOrNull()
+        if (!attachmentAcquired && target != null && processIdentityVerifier.checkAtTerminal(target) != TierEProcessIdentityCheck.MATCHED) {
+            try {
+                reportRejectedAttach(target, "STALE_PROCESS_IDENTITY")
+            } catch (publicationFailure: Throwable) {
+                failure = recordFinalizationFailure(null, publicationFailure, failure)
+            }
+        }
+        if (failure is Error) throw failure
+        return completeAttachFailure(cmd, failure)
+    }
+
+    private fun closeSessionCommand(effect: ControlSessionEffect.CloseSessionAndReply): String {
+        val failure = finishActiveSession()
+        if (failure == null) return effect.reply.render().trimEnd()
+        if (sessionState != ControlSessionState.Terminated) sessionState = ControlSessionState.Attached(effect.session)
+        return finalizationError(failure)
+    }
+
+    private fun shutdownCommand(): String {
+        val failure = finishActiveSession()
+        stopRequested.set(activeSession == null && !acquisitionInProgress)
+        return if (failure == null) ControlReply.ok("shutting down").render().trimEnd() else finalizationError(failure)
+    }
+
+    private fun completeAttachFailure(
+        cmd: ControlCommand.Attach,
+        failure: Throwable,
+    ): String {
         val transition = ControlSessionMachine.evaluate(
             sessionState,
-            ControlSessionEvent.AttachFailed(failure.message ?: "attach failed"),
+            ControlSessionEvent.AttachFailed(failure.message ?: "attach failed", cmd),
         )
         sessionState = transition.state
+        if (sessionState != ControlSessionState.Terminated) {
+            activeSession?.let { sessionState = ControlSessionState.Attached(it.session) }
+        }
         return (transition.effect as ControlSessionEffect.SendReply).reply.render().trimEnd()
     }
 
@@ -438,25 +544,97 @@ internal class TierEDaemonService(
 
     @Synchronized
     fun shutdown() {
-        finishActiveSession()
-        stopRequested.set(true)
+        sessionState = ControlSessionMachine.evaluate(sessionState, ControlSessionEvent.CommandReceived(ControlCommand.Shutdown)).state
+        val failure = finishActiveSession()
+        stopRequested.set(activeSession == null && !acquisitionInProgress)
+        failure?.let { throw it }
     }
 
     @Synchronized
     private fun finalizeRegisteredTarget(target: TierERegisteredTarget) {
         if (activeSession?.registeredTarget != target) return
-        finishActiveSession(waitForTerminalArtifact = true)
-        sessionState = ControlSessionState.Idle
+        val failure = finishActiveSession(waitForTerminalArtifact = true)
+        if (sessionState != ControlSessionState.Terminated) {
+            sessionState = activeSession?.let { ControlSessionState.Attached(it.session) } ?: ControlSessionState.Idle
+        }
+        if (failure is Error) throw failure
     }
 
-    private fun finishActiveSession(waitForTerminalArtifact: Boolean = false) {
-        val active = activeSession ?: return
-        activeSession = null
-        active.terminalWatch?.close()
+    @Suppress("TooGenericExceptionCaught") // Keep ownership through failed finalization and attempt independent retirement.
+    private fun finishActiveSession(waitForTerminalArtifact: Boolean = false): Throwable? {
+        if (acquisitionInProgress) return IllegalStateException("attachment acquisition still in progress; retirement pending")
+        val active = activeSession ?: return lastFinalizationFailure
+        var finalized: Pair<TierECollectorRuntimeResult?, AgentDefinitionFile.Contents?>? = null
+        if (active.outcome == FinalizationOutcome.Collecting) {
+            try {
+                finalized = finalizeCollection(active, waitForTerminalArtifact)
+                active.outcome = FinalizationOutcome.Completed
+            } catch (cause: Throwable) {
+                recordFinalizationFailure(active, cause, active.boundaryReadinessFailure)
+            }
+            if (active.outcome == FinalizationOutcome.Completed) {
+                active.boundaryReadinessFailure?.let { recordFinalizationFailure(active, it) }
+            }
+        }
+        var interrupted = Thread.interrupted()
+        try {
+            retireWatch(active)
+            interrupted = Thread.interrupted() || interrupted
+            retireResource(active)
+            interrupted = Thread.interrupted() || interrupted
+            publishTerminal(active, finalized)
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt()
+        }
+        if (active.retired && active.terminalWatch == null) activeSession = null
+        return (active.outcome as? FinalizationOutcome.Failed)?.cause
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Watch retirement must not prevent independent resource retirement.
+    private fun retireWatch(active: ActiveSession) {
+        try {
+            active.terminalWatch?.close()
+            active.terminalWatch = null
+        } catch (cause: Throwable) {
+            recordFinalizationFailure(active, cause)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Keep unsuccessful physical retirement reachable for retry.
+    private fun retireResource(active: ActiveSession) {
+        if (active.retired) return
+        try {
+            active.resource.close()
+            active.retired = true
+        } catch (cause: Throwable) {
+            recordFinalizationFailure(active, cause)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // A publication attempt is consumed even when its sink throws.
+    private fun publishTerminal(active: ActiveSession, finalized: Pair<TierECollectorRuntimeResult?, AgentDefinitionFile.Contents?>?) {
+        if (active.reportAttempted) return
+        active.reportAttempted = true
+        try {
+            when (active.outcome) {
+                FinalizationOutcome.Collecting -> error("collection has not terminated")
+                FinalizationOutcome.Completed -> finalized?.first?.let {
+                    lastTerminalResult = deliverResult(it, active, finalized.second)
+                }
+                is FinalizationOutcome.Failed -> active.registeredTarget?.let { reportRejectedAttach(it, "FINALIZATION_FAILED") }
+            }
+        } catch (cause: Throwable) {
+            recordFinalizationFailure(active, cause)
+        }
+    }
+
+    private fun finalizeCollection(
+        active: ActiveSession,
+        waitForTerminalArtifact: Boolean,
+    ): Pair<TierECollectorRuntimeResult?, AgentDefinitionFile.Contents?> {
         val artifact = active.artifact
         if (artifact == null) {
-            active.runtime.close()
-            return
+            return null to null
         }
         val identityCheck = active.registeredTarget?.let(processIdentityVerifier::checkAtTerminal)
         val terminalContents = if (active.registeredTarget != null && identityCheck != TierEProcessIdentityCheck.REUSED) {
@@ -465,24 +643,40 @@ internal class TierEDaemonService(
             null
         }
         val producerClosure = if (terminalContents == null) TierEProducerClosure.UNPROVEN else TierEProducerClosure.PROVEN
-        val result = runCatching {
+        val runtime = requireNotNull(active.runtime)
+        val result =
             if (active.registeredTarget != null) {
-                active.runtime.finish(
+                runtime.finish(
                     terminalContents ?: AgentDefinitionFile.Contents(emptyList(), emptyList(), 0),
                     producerClosure,
                 )
             } else {
-                active.runtime.finish(artifact, producerClosure)
+                runtime.finish(artifact, producerClosure)
             }
-        }.getOrNull()
-        if (result != null) {
             val admitted = when {
                 identityCheck == TierEProcessIdentityCheck.REUSED -> result.withReusedProcessIdentity()
                 active.registeredTarget != null && terminalContents == null -> result.withUnavailableArtifact()
                 else -> result
             }
-            lastTerminalResult = deliverResult(admitted, active.registeredTarget, terminalContents)
-        }
+        return admitted to terminalContents
+    }
+
+    private fun recordFinalizationFailure(
+        active: ActiveSession?,
+        cause: Throwable,
+        previous: Throwable? = (active?.outcome as? FinalizationOutcome.Failed)?.cause,
+    ): Throwable {
+        val failure = CleanupFailures.merge(previous, cause)
+        if (active != null) active.outcome = FinalizationOutcome.Failed(failure)
+        lastFinalizationFailure = failure
+        if (cause is InterruptedException) Thread.currentThread().interrupt()
+        System.err.println("tier-e-finalization-failure: ${cause.javaClass.simpleName}: ${cause.message}")
+        return failure
+    }
+
+    private fun finalizationError(failure: Throwable): String {
+        if (failure is Error) throw failure
+        return ControlReply.err("FINALIZATION_FAILED: ${failure.message}").render().trimEnd()
     }
 
     private fun readTerminalContents(
@@ -497,19 +691,23 @@ internal class TierEDaemonService(
         } while (true)
     }
 
+    @Suppress("TooGenericExceptionCaught") // Retain event failure identity while still attempting the required terminal report once.
     private fun deliverResult(
         result: TierECollectorRuntimeResult,
-        target: TierERegisteredTarget?,
+        active: ActiveSession,
         contents: AgentDefinitionFile.Contents?,
     ): TierECollectorRuntimeResult {
-        // A failed optional in-process consumer must not suppress the durable,
-        // operator-owned terminal record of the fail-closed outcome.
-        val afterResultDelivery = if (runCatching { resultSink.accept(result) }.isSuccess) {
+        val target = active.registeredTarget
+        val afterResultDelivery = try {
+            resultSink.accept(result)
             result
-        } else {
+        } catch (cause: Throwable) {
+            recordFinalizationFailure(active, cause)
             result.withTerminalDeliveryFailure()
         }
-        val report = TierETerminalReport.from(afterResultDelivery, target, contents)
+        val report = TierETerminalReport.from(afterResultDelivery, target, contents).let {
+            if (active.outcome is FinalizationOutcome.Failed) it.copy(terminalReason = "FINALIZATION_FAILED") else it
+        }
         val receipt = afterResultDelivery.metrics.loop.receiptAge
         System.out.println(
             "tier-e-collector-metrics: polls=${afterResultDelivery.metrics.loop.polls} " +
@@ -557,22 +755,33 @@ internal class TierEDaemonService(
         } else {
             afterCoverageManifest.withTerminalDeliveryFailure()
         }
-        return if (runCatching {
-                terminalReportSink.accept(TierETerminalReport.from(afterOperationManifest, target, contents))
-            }.isSuccess
-        ) {
-            afterOperationManifest
-        } else {
-            afterOperationManifest.withTerminalDeliveryFailure()
-        }
+        terminalReportSink.accept(TierETerminalReport.from(afterOperationManifest, target, contents).copy(terminalReason = report.terminalReason))
+        return afterOperationManifest
     }
 
     private data class ActiveSession(
-        val runtime: TierECollectorRuntime,
+        var runtime: TierECollectorRuntime?,
+        var resource: AutoCloseable,
+        val session: AttachedSessionInfo,
         val artifact: io.mazewall.profiler.internal.attribution.TierEDefinitionArtifact?,
         val registeredTarget: TierERegisteredTarget? = null,
         var terminalWatch: AutoCloseable? = null,
+        var outcome: FinalizationOutcome = FinalizationOutcome.Collecting,
+        var retired: Boolean = false,
+        var reportAttempted: Boolean = false,
+        var boundaryReporter: (() -> Unit)? = null,
+        var boundaryReadinessFailure: Throwable? = null,
     )
+
+    private sealed interface FinalizationOutcome {
+        data object Collecting : FinalizationOutcome
+
+        data object Completed : FinalizationOutcome
+
+        data class Failed(
+            val cause: Throwable,
+        ) : FinalizationOutcome
+    }
 }
 
 internal data class TierECoverageManifestConfiguration(
@@ -628,51 +837,6 @@ internal fun terminalClosure(
 private fun runningAsRoot(): Boolean =
     (Files.getAttribute(Path.of("/proc/self"), "unix:uid") as? Number)?.toLong() == 0L ||
         System.getProperty("user.name") == "root"
-
-internal fun markerVersionFromEnvironment(env: Map<String, String> = System.getenv()): MarkerVersion =
-    when (env["TIER_E_MARKER_VERSION"]) {
-        null, "", "v1" -> MarkerVersion.V1
-        "v2" -> MarkerVersion.V2
-        else -> error("TIER_E_MARKER_VERSION must be v1 or v2")
-    }
-
-internal fun receiptClockModeFromEnvironment(env: Map<String, String> = System.getenv()): String =
-    when (env["TIER_E_COLLECTOR_RECEIPT_CLOCK"]) {
-        null, "", "disabled" -> "disabled"
-        "monotonic" -> "monotonic"
-        else -> error("TIER_E_COLLECTOR_RECEIPT_CLOCK must be disabled or monotonic")
-    }
-
-internal fun coverageRecoveryModeFromEnvironment(env: Map<String, String> = System.getenv()): CoverageRecoveryMode =
-    when (env["TIER_E_COVERAGE_RECOVERY_MODE"]) {
-        null, "", "disabled" -> CoverageRecoveryMode.DISABLED
-        "shadow" -> CoverageRecoveryMode.SHADOW
-        "recover" -> CoverageRecoveryMode.RECOVER
-        else -> error("TIER_E_COVERAGE_RECOVERY_MODE must be disabled, shadow, or recover")
-    }
-
-internal fun recoveryMapCapacityFromEnvironment(env: Map<String, String> = System.getenv()): Int =
-    env["TIER_E_RECOVERY_MAP_CAPACITY"]?.toIntOrNull()?.takeIf { it in 1..CoverageRecoveryMode.DEFAULT_MAP_CAPACITY }
-        ?: if (env.containsKey("TIER_E_RECOVERY_MAP_CAPACITY")) {
-            error("TIER_E_RECOVERY_MAP_CAPACITY must be 1..4096")
-        } else {
-            CoverageRecoveryMode.DEFAULT_MAP_CAPACITY
-        }
-
-internal fun benchmarkDropRingSyscallFromEnvironment(env: Map<String, String> = System.getenv()): Int? =
-    env["TIER_E_BENCHMARK_DROP_RING_SYSCALL"]?.toIntOrNull()?.takeIf { it >= 0 }
-        ?: if (env.containsKey("TIER_E_BENCHMARK_DROP_RING_SYSCALL")) {
-            error("TIER_E_BENCHMARK_DROP_RING_SYSCALL must be a nonnegative syscall number")
-        } else {
-            null
-        }
-
-internal fun nativeLiveSnapshotAdmissionFromEnvironment(env: Map<String, String> = System.getenv()): Boolean =
-    when (env["TIER_E_LIVE_SNAPSHOT_ADMISSION"]) {
-        null, "", "0" -> false
-        "1" -> true
-        else -> error("TIER_E_LIVE_SNAPSHOT_ADMISSION must be 0 or 1")
-    }
 
 private class TierEMarkerVersionMismatch(
     cause: IllegalArgumentException,

@@ -81,6 +81,7 @@ internal object NativeConstants {
     const val EINVAL = 22
     const val ELOOP = 40
     const val ENOPKG = 65
+    const val ENODATA = 61
     const val EOPNOTSUPP = 95
     const val ENOSYS = 38
     const val EFAULT = 14

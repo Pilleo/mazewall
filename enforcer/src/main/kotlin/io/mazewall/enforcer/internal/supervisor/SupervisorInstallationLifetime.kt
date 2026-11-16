@@ -3,11 +3,29 @@ package io.mazewall.enforcer.internal.supervisor
 import io.mazewall.enforcer.api.DefaultStacktraceScopingPolicy
 import io.mazewall.enforcer.api.StacktraceScopingPolicy
 
+internal class CapturedScopingPolicy private constructor(
+    val original: StacktraceScopingPolicy,
+) {
+    private val handlers = java.util.Map.copyOf(original.handlers)
+    val dispatch: StacktraceScopingPolicy = object : StacktraceScopingPolicy {
+        override val handlers = this@CapturedScopingPolicy.handlers
+    }
+
+    fun matches(other: CapturedScopingPolicy): Boolean =
+        original === other.original &&
+            handlers.keys == other.handlers.keys &&
+            handlers.all { (key, handler) -> handler === other.handlers[key] }
+
+    companion object {
+        fun capture(original: StacktraceScopingPolicy): CapturedScopingPolicy = CapturedScopingPolicy(original)
+    }
+}
+
 /** Explicit owner for a permanent filter; task leases never own this lifetime. */
 internal class SupervisorInstallationLifetime(
     private val owner: Thread,
     val runtime: SupervisorRuntimeContext,
-    val scopingPolicy: StacktraceScopingPolicy = DefaultStacktraceScopingPolicy,
+    val capturedScoping: CapturedScopingPolicy = CapturedScopingPolicy.capture(DefaultStacktraceScopingPolicy),
 ) : AutoCloseable {
     private var retired = false
     private var installationFailure: Throwable? = null

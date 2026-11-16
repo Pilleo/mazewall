@@ -12,7 +12,95 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.time.Duration
 
+@io.mazewall.enforcer.api.EnabledIfLinuxAndSupported
 class TierEFixtureLifecycleTest {
+    @Test
+    fun retainedFailureKeepsPrimaryAndCleanupErrors() {
+        val artifacts = Files.createTempDirectory("tier-e-retained-errors-")
+        val commands = mutableListOf<String>()
+        val primary = IllegalStateException("exercise failed")
+        val cleanup = IllegalArgumentException("receipt failed")
+        try {
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-retain-errors", artifacts) { command, _, _ ->
+                commands += command[1]
+                ContainerCommandResult(0, "exists")
+            }
+            val thrown = assertThrows(IllegalStateException::class.java) {
+                TierEFixtureLifecycle(owner, artifacts.resolve("creation.lock"), settle = {
+                    _,
+                        _,
+                    ->
+                    }, extraCleanup = { throw cleanup }, retainOnFailure = true, retainOnSuccess = true).run { throw primary }
+            }
+            org.junit.jupiter.api.Assertions
+                .assertSame(primary, thrown)
+            org.junit.jupiter.api.Assertions
+                .assertSame(cleanup, thrown.suppressed.single())
+            assertEquals(listOf("inspect", "stop", "inspect", "stop"), commands)
+        } finally {
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun pendingCreationRetainsWithoutCompleteExport() {
+        val artifacts = Files.createTempDirectory("tier-e-pending-creation-")
+        val commands = mutableListOf<String>()
+        try {
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-pending", artifacts) { command, _, _ ->
+                commands += command[1]
+                ContainerCommandResult(0, "exists")
+            }
+            assertThrows(IllegalStateException::class.java) {
+                TierEFixtureLifecycle(owner, artifacts.resolve("creation.lock"), settle = { _, _ -> error("creation unresolved") }, retainOnSuccess = true).run {}
+            }
+            assertEquals(listOf("inspect", "stop", "inspect", "stop"), commands)
+            assertTrue(Files.list(artifacts).use { it.findAny().isEmpty })
+        } finally {
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun defaultSuccessStillRetiresOrdinaryFixture() {
+        val artifacts = Files.createTempDirectory("tier-e-default-success-")
+        val commands = mutableListOf<String>()
+        val removed = mutableSetOf<String>()
+        try {
+            val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-default", artifacts) { command, _, _ ->
+                commands += command[1]
+                when (command[1]) {
+                    "rm" -> {
+                        removed += command.last()
+                        ContainerCommandResult(0, "removed")
+                    }
+                    "inspect" -> if (command.last() in removed) ContainerCommandResult(1, "No such object") else ContainerCommandResult(0, if ("--format" in command) "false" else "exists")
+                    else -> ContainerCommandResult(0, "ok")
+                }
+            }
+            TierEFixtureLifecycle(owner, artifacts.resolve("creation.lock"), settle = { _, _ -> }).run {}
+            assertEquals(2, commands.count { it == "rm" })
+        } finally {
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun retainOnSuccessNeverRestoresOrRemoves() {
+        val artifacts = Files.createTempDirectory("tier-e-retain-success-")
+        val commands = mutableListOf<String>()
+        val owner = TierEContainerRun(ContainerEndpoint(ContainerEngine.DOCKER, null), "tier-e-retain-success", artifacts) { command, _, _ ->
+            commands += command[1]
+            ContainerCommandResult(0, "exists")
+        }
+        try {
+            TierEFixtureLifecycle(owner, artifacts.resolve("create.lock"), settle = { _, _ -> }, retainOnSuccess = true).run {}
+            assertEquals(listOf("inspect", "stop", "inspect", "stop"), commands)
+        } finally {
+            artifacts.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun `settled fixture failure retains stopped source when recovery is requested`() {
         val artifacts = Files.createTempDirectory("tier-e-retain-on-failure-")

@@ -2,6 +2,8 @@ package io.mazewall.enforcer.api.execution
 
 import io.mazewall.enforcer.api.*
 import io.mazewall.enforcer.internal.ffi.RealPlatformProvider
+import io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager
+import io.mazewall.enforcer.internal.supervisor.SupervisorPrewarmBudget
 import io.mazewall.enforcer.state.ContainerState
 import io.mazewall.enforcer.state.ContainmentStateRegistry
 import io.mazewall.platform.native.LinuxNative
@@ -29,6 +31,61 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class OwnedRuntimeTest {
+    @Test
+    fun `canonical acquisition without helper support leaves helper owner absent`() {
+        val owner = ManagedRuntime.newCanonicalAcquisition()
+        try {
+            owner.start(timeout, timeout)
+            val field = owner.javaClass
+                .getDeclaredField("helperManager")
+                .apply { isAccessible = true }
+            assertNull(field.get(owner))
+        } finally {
+            owner.close()
+        }
+    }
+
+    @Test
+    fun `failed owned helper startup remains unknown without replay`() {
+        val property = SupervisorPrewarmBudget.PROPERTY
+        val previous = System.getProperty(property)
+        val cleanupCalls = AtomicInteger()
+        val launcher = object : MockProcessLauncher() {
+            override fun deleteIfExists(path: java.nio.file.Path): Boolean {
+                cleanupCalls.incrementAndGet()
+                return super.deleteIfExists(path)
+            }
+        }
+        val daemon = SupervisorDaemonManager(engine, MockSocketManager(), launcher)
+        val owner = ManagedRuntime.newCanonicalAcquisition()
+        val state = owner.javaClass
+            .getDeclaredField("state")
+            .apply { isAccessible = true }
+        val starting = state.type.enumConstants.single { (it as Enum<*>).name == "STARTING" }
+        state.set(owner, starting)
+        owner.javaClass
+            .getDeclaredField("startActor")
+            .apply { isAccessible = true }
+            .set(owner, Thread.currentThread())
+        val start = owner.javaClass
+            .getDeclaredMethod("startHelper", daemon.javaClass)
+            .apply { isAccessible = true }
+        try {
+            System.setProperty(property, "15001")
+            val failure = assertFailsWith<java.lang.reflect.InvocationTargetException> { start.invoke(owner, daemon) }
+            assertIs<IllegalArgumentException>(failure.cause)
+            assertFalse(launcher.startProcessCalled)
+            val rollbackCalls = cleanupCalls.get()
+            assertTrue(rollbackCalls > 0)
+            assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+            assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+            assertEquals(rollbackCalls, cleanupCalls.get())
+        } finally {
+            if (previous == null) System.clearProperty(property) else System.setProperty(property, previous)
+        }
+    }
+
+    @org.junit.jupiter.api.io.TempDir lateinit var directDirectory: java.nio.file.Path
     private val timeout = Duration.ofSeconds(5)
     private lateinit var engine: MockNativeEngine
 
@@ -66,6 +123,583 @@ class OwnedRuntimeTest {
     private fun open(): ManagedRuntime = ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout)
 
     private fun policy(): Policy<PolicyScope.ThreadLocalOnly, Uncompiled> = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).block(Syscall.CONNECT).build()
+
+    @Test
+    fun `direct Legacy claim retains real ruleset and pins until physical worker exits`() {
+        try {
+        LinuxNative.resetToDefault()
+        val real = LinuxNative.snapshot()
+        val capability = RealPlatformProvider.getLandlockCapability()
+        org.junit.jupiter.api.Assumptions
+            .assumeTrue(capability is KernelCapability.Available && capability.value >= 3)
+        val closes = java.util.Collections.synchronizedList(mutableListOf<Any>())
+        val beforeClose = AtomicReference<(Any) -> Unit>()
+        val afterClose = AtomicReference<(Any) -> Unit>()
+        val foreignCalls = AtomicInteger()
+        val activeRuntime = AtomicReference<ManagedRuntime>()
+        val typedGap = java.util.concurrent.atomic
+            .AtomicBoolean()
+        val gapReached = java.util.concurrent.atomic
+            .AtomicBoolean()
+        val gapFailure = AtomicReference<Throwable?>()
+        val nestedCreates = AtomicInteger()
+        val swapOnCreate = java.util.concurrent.atomic
+            .AtomicBoolean()
+        val swapped = java.util.concurrent.atomic
+            .AtomicBoolean()
+        val foreign = object : io.mazewall.platform.native.NativeEngine by real {
+            override val raw = object : io.mazewall.platform.native.RawSyscallOperations by real.raw {
+                override fun syscall(
+                    nr: Long,
+                    a1: io.mazewall.platform.syscall.NativeArg,
+                    a2: io.mazewall.platform.syscall.NativeArg,
+                    a3: io.mazewall.platform.syscall.NativeArg,
+                    a4: io.mazewall.platform.syscall.NativeArg,
+                    a5: io.mazewall.platform.syscall.NativeArg,
+                    a6: io.mazewall.platform.syscall.NativeArg,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    if (nr == io.mazewall.platform.syscall.Arch
+                        .current()
+                        .seccompSyscallNumber
+                        .toLong() ||
+                        nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR
+                    ) {
+                            return LinuxNative.SyscallResult.Error(1, -1L)
+                        }
+                    return real.raw.syscall(nr, a1, a2, a3, a4, a5, a6)
+                }
+
+                override fun syscall4(
+                    nr: Long,
+                    a1: io.mazewall.platform.syscall.NativeArg,
+                    a2: io.mazewall.platform.syscall.NativeArg,
+                    a3: io.mazewall.platform.syscall.NativeArg,
+                    a4: io.mazewall.platform.syscall.NativeArg,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    if (nr == io.mazewall.platform.syscall.Arch
+                        .current()
+                        .seccompSyscallNumber
+                        .toLong() ||
+                        nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR
+                    ) {
+                            return LinuxNative.SyscallResult.Error(1, -1L)
+                        }
+                    return real.raw.syscall4(nr, a1, a2, a3, a4)
+                }
+            }
+            override val fileSystem = object : io.mazewall.platform.native.NativeFileSystem by real.fileSystem {
+                override fun open(
+                    path: io.mazewall.ffi.memory.ManagedSegment,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return real.fileSystem.open(path, flags)
+                }
+
+                override fun open(
+                    path: io.mazewall.ffi.memory.ManagedSegment,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
+                    mode: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return real.fileSystem.open(path, flags, mode)
+                }
+
+                override fun openat(
+                    dirfd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership>,
+                    path: io.mazewall.ffi.memory.ManagedSegment,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return real.fileSystem.openat(dirfd, path, flags)
+                }
+
+                override fun openat(
+                    dirfd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership>,
+                    path: io.mazewall.ffi.memory.ManagedSegment,
+                    flags: io.mazewall.platform.lifecycle.OpenFlags,
+                    mode: Int,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return real.fileSystem.openat(dirfd, path, flags, mode)
+                }
+
+                override fun openat2(
+                    dirfd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership>,
+                    path: io.mazewall.ffi.memory.ManagedSegment,
+                    how: io.mazewall.ffi.memory.ManagedSegment,
+                    size: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return real.fileSystem.openat2(dirfd, path, how, size)
+                }
+
+                override fun mmap(
+                    addr: Long,
+                    length: Long,
+                    prot: io.mazewall.platform.lifecycle.MmapProt,
+                    flags: io.mazewall.platform.lifecycle.MmapFlags,
+                    fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership>,
+                    offset: Long,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return real.fileSystem.mmap(addr, length, prot, flags, fd, offset)
+                }
+
+                override fun close(
+                    fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return real.fileSystem.close(fd)
+                }
+            }
+            override val process = object : io.mazewall.platform.native.NativeProcess by real.process {
+                override fun prctl(command: PrctlCommand): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    foreignCalls.incrementAndGet()
+                    return LinuxNative.SyscallResult.Error(1, -1L)
+                }
+            }
+        }
+        val raw = object : io.mazewall.platform.native.RawSyscallOperations by real.raw {
+            override fun syscall(
+                nr: Long,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+                a5: io.mazewall.platform.syscall.NativeArg,
+                a6: io.mazewall.platform.syscall.NativeArg,
+            ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR && typedGap.get()) {
+                    nestedCreates.incrementAndGet()
+                    return LinuxNative.SyscallResult.Error(1, -1L)
+                }
+                val result = if (nr == io.mazewall.platform.syscall.Arch
+                    .current()
+                    .seccompSyscallNumber
+                    .toLong() ||
+                    nr == io.mazewall.ffi.NativeConstants.LANDLOCK_RESTRICT_SELF_NR
+                ) {
+                        LinuxNative.SyscallResult.Success(0L)
+                    } else {
+                        real.raw.syscall(nr, a1, a2, a3, a4, a5, a6)
+                    }
+                if (nr == io.mazewall.ffi.NativeConstants.LANDLOCK_CREATE_RULESET_NR && swapOnCreate.compareAndSet(true, false)) {
+                    typedGap.set(true)
+                    try {
+                        val ownerRuntime = checkNotNull(activeRuntime.get())
+                        val control = ManagedRuntime::class.java
+                            .getDeclaredField("legacyControl")
+                            .apply { isAccessible = true }
+                            .get(ownerRuntime)
+                        val record = control.javaClass
+                            .getDeclaredField("active")
+                            .apply { isAccessible = true }
+                            .get(control)
+                        val shell = record.javaClass
+                            .getDeclaredField("landlock")
+                            .apply { isAccessible = true }
+                            .get(record) as io.mazewall.landlock.PreparedLandlock
+                        gapReached.set(true)
+                        shell.prepareDirect()
+                    } catch (failure: Throwable) {
+                        gapFailure.set(failure)
+                    } finally {
+                        typedGap.set(false)
+                    }
+                    LinuxNative.setEngine(foreign)
+                    swapped.set(true)
+                }
+                return result
+            }
+
+            override fun syscall4(
+                nr: Long,
+                a1: io.mazewall.platform.syscall.NativeArg,
+                a2: io.mazewall.platform.syscall.NativeArg,
+                a3: io.mazewall.platform.syscall.NativeArg,
+                a4: io.mazewall.platform.syscall.NativeArg,
+            ) = syscall(
+                nr,
+                a1,
+                a2,
+                a3,
+                a4,
+                io.mazewall.platform.syscall.NativeArg
+                .LongArg(0),
+                    io.mazewall.platform.syscall.NativeArg
+                    .LongArg(0),
+            )
+        }
+        LinuxNative.setEngine(object : io.mazewall.platform.native.NativeEngine by real {
+            override val raw = raw
+            override val process = object : io.mazewall.platform.native.NativeProcess by real.process {
+                override fun prctl(command: PrctlCommand) = LinuxNative.SyscallResult.Success<Long, LinuxNative.SyscallHandledState.Unhandled>(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+            }
+            override val fileSystem = object : io.mazewall.platform.native.NativeFileSystem by real.fileSystem {
+                override fun close(
+                    fd: io.mazewall.platform.fd.FileDescriptor<*, io.mazewall.platform.fd.FdState.Open, io.mazewall.platform.fd.FdOwnership.Owned>,
+                ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                    beforeClose.get()?.invoke(fd)
+                    closes.add(fd)
+                    val result = real.fileSystem.close(fd)
+                    afterClose.get()?.invoke(fd)
+                    return result
+                }
+            }
+        })
+        Platform.setProvider(object : PlatformProvider by RealPlatformProvider {
+            override fun getOsName() = "Linux"
+
+            override fun hasKernelSeccompSupport() = true
+
+            override fun checkSeccompSanity() = LinuxNative.SyscallResult.Error<LinuxNative.SyscallHandledState.Unhandled>(22, -1L)
+
+            override fun getLandlockCapability() = capability
+
+            override fun probeSeccompTsync() = true
+
+            override fun probeSeccompUserNotif() = true
+
+            override fun probeCetSupported() = false
+        })
+            val source = java.nio.file.Files
+                .writeString(directDirectory.resolve("DirectWorker.java"), "package fixture; public class DirectWorker { public int call() { return 7; } }")
+            check(
+                javax.tools.ToolProvider
+                .getSystemJavaCompiler()
+                .run(null, null, null, "-d", directDirectory.toString(), source.toString()) == 0,
+            )
+            val jar = directDirectory.resolve("worker.jar")
+            java.util.jar
+                .JarOutputStream(
+                java.nio.file.Files
+                .newOutputStream(jar),
+            ).use {
+                it.putNextEntry(java.util.jar.JarEntry("fixture/DirectWorker.class"))
+                it.write(
+                    java.nio.file.Files
+                    .readAllBytes(directDirectory.resolve("fixture/DirectWorker.class")),
+                )
+                it.closeEntry()
+            }
+            java.net.URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
+                val workerPolicy = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allowFsRead(jar).build()
+                val publicOwner = PreparedResolutionOwner.create()
+                val owner = PreparedResolutionOwner::class.java
+                    .getDeclaredField("capture")
+                    .apply { isAccessible = true }
+                    .get(publicOwner) as DirectResolutionCapture
+                try {
+                val operation = publicOwner.resolve(RuntimeProfile.HOTSPOT_JIT, workerPolicy, loader.loadClass("fixture.DirectWorker"), emptySet())
+                val binding = OperationBinding("direct", OperationAdapter.CALLABLE, operation.implementationSha256, operation.resourceGeneration, mapOf("entryPoint" to "call()I"))
+                val document = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, workerPolicy), emptySet(), emptyMap())
+                val reviewed = ReviewedOperationArtifact.load(document.toJson(), TrustedPolicyReview("operator", document.sha256(), emptySet()), binding)
+                val capture = owner.javaClass
+                    .getDeclaredField("captured")
+                    .apply { isAccessible = true }
+                    .get(owner)
+                val pin = (
+                    capture.javaClass
+                    .getDeclaredField("root")
+                    .apply { isAccessible = true }
+                    .get(capture) as io.mazewall.ffi.internal.PreparedPath
+                ).descriptor
+                val runtime = open()
+                activeRuntime.set(runtime)
+                try {
+                    val capturedA = InstallationEnvironment.capture(Platform.FallbackBehavior.FAIL)
+                    val capturedEngine = LinuxNative.snapshot()
+                    val raceOwner = DirectResolutionCapture.create()
+                    try {
+                    val raceOperation = raceOwner.prepare(RuntimeProfile.HOTSPOT_JIT, workerPolicy, loader.loadClass("fixture.DirectWorker"), emptySet())
+                    val raceCapture = raceOwner.javaClass
+                        .getDeclaredField("captured")
+                        .apply { isAccessible = true }
+                        .get(raceOwner)
+                    val racePin = (
+                        raceCapture.javaClass
+                        .getDeclaredField("root")
+                        .apply { isAccessible = true }
+                        .get(raceCapture) as io.mazewall.ffi.internal.PreparedPath
+                    ).descriptor
+                    val raceConstructor = ManagedRuntime::class.java
+                        .getDeclaredConstructor(
+                        RuntimeProfile::class.java,
+                        InstallationEnvironment::class.java,
+                        Duration::class.java,
+                        Duration::class.java,
+                    ).apply {
+                        isAccessible =
+                        true
+                    }
+                    val raceRuntime = raceConstructor.newInstance(RuntimeProfile.HOTSPOT_JIT, capturedA, timeout, timeout)
+                    val raceEntered = CountDownLatch(1)
+                    val releaseRace = CountDownLatch(1)
+                    val raceDone = CountDownLatch(1)
+                    val raceFailure = AtomicReference<Throwable?>()
+                    val callerInterrupted = java.util.concurrent.atomic
+                        .AtomicBoolean()
+                    val raceHook = raceOwner.javaClass.getDeclaredField("afterValidationPermit").apply { isAccessible = true }
+                    val originalRaceHook = raceHook.get(raceOwner)
+                    raceHook.set(raceOwner, {
+                        raceEntered.countDown()
+                        var interrupted = false
+                        while (true) {
+                            try {
+                                releaseRace.await()
+                                break
+                            } catch (_: InterruptedException) {
+                                interrupted = true
+                            }
+                        }
+                        if (interrupted) Thread.currentThread().interrupt()
+                    })
+                    val caller = Thread.ofPlatform().start {
+                        try {
+                            raceRuntime.prepare(reviewed, DomainLimits(1, 1), raceOperation)
+                        } catch (failure: Throwable) {
+                            raceFailure.set(failure)
+                            callerInterrupted.set(Thread.currentThread().isInterrupted)
+                        } finally {
+                            raceDone.countDown()
+                        }
+                    }
+                    try {
+                        assertTrue(raceEntered.await(5, TimeUnit.SECONDS))
+                        assertFailsWith<DirectPendingException> { raceOperation.close() }
+                        caller.interrupt()
+                        assertTrue(raceDone.await(5, TimeUnit.SECONDS))
+                        assertIs<InterruptedException>(raceFailure.get())
+                        assertTrue(callerInterrupted.get())
+                        assertIs<DrainReport.Incomplete>(raceRuntime.drain(Duration.ofMillis(30)))
+                        assertTrue(racePin.isLiveForIo())
+                    } finally {
+                        releaseRace.countDown()
+                        caller.interrupt()
+                        caller.join(5000)
+                        raceRuntime.drain(timeout)
+                        raceHook.set(raceOwner, originalRaceHook)
+                        raceOwner.close()
+                    }
+                    assertFalse(caller.isAlive)
+                    assertFalse(racePin.isLiveForIo())
+                    } finally {
+                        raceOwner.close()
+                    }
+                    val otherPolicy = WorkerPolicyBuilder
+                        .denyList(RuntimeProfile.HOTSPOT_JIT)
+                        .allowFsRead(jar)
+                        .block(Syscall.CONNECT)
+                        .build()
+                    val wrongDocument = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, otherPolicy), emptySet(), emptyMap())
+                    val wrongReview = ReviewedOperationArtifact.load(wrongDocument.toJson(), TrustedPolicyReview("operator", wrongDocument.sha256(), emptySet()), binding)
+                    assertFailsWith<IllegalArgumentException> { runtime.prepare(wrongReview, DomainLimits(1, 1), operation) }
+                    assertTrue(pin.isLiveForIo())
+                    operation.validate()
+                    swapOnCreate.set(true)
+                    val domain = runtime.prepare(reviewed, DomainLimits(1, 1), operation)
+                    assertTrue(swapped.get())
+                    assertTrue(gapReached.get())
+                    assertIs<IllegalStateException>(gapFailure.get())
+                    assertEquals(0, nestedCreates.get())
+                    assertEquals(1L, domain.generation)
+                    val shell = domain.resource.javaClass
+                        .getDeclaredField("preparedLandlock")
+                        .apply { isAccessible = true }
+                        .get(domain.resource) as io.mazewall.landlock.PreparedLandlock
+                    val ruleset = shell.javaClass
+                        .getDeclaredField("acquiredRuleset")
+                        .apply { isAccessible = true }
+                        .get(shell)
+                    val reentrantRejections = AtomicInteger()
+                    beforeClose.set { fd ->
+                        if (fd === ruleset) {
+                            assertFailsWith<IllegalStateException> { operation.retireDirect(DirectClaimAction.RETIRE_DOMAIN) }
+                            assertTrue(pin.isLiveForIo())
+                            reentrantRejections.incrementAndGet()
+                        }
+                    }
+                    val permit = owner.javaClass
+                        .getDeclaredField("claimedPermit")
+                        .apply { isAccessible = true }
+                        .get(owner)
+                    assertFalse(runtime.matchesDirectPermit(Any(), operation, DirectClaimAction.APPLY_WORKER))
+                    assertFalse(runtime.matchesDirectPermit(permit, operation, DirectClaimAction.APPLY_WORKER))
+                    val permitClass = permit.javaClass
+                    val originalRecord = permitClass.getDeclaredField("acquisition").apply { isAccessible = true }.get(permit)
+                    val originalEnvironment = permitClass.getDeclaredField("environment").apply { isAccessible = true }.get(permit)
+                    val originalAbi = permitClass.getDeclaredField("abi").apply { isAccessible = true }.getInt(permit)
+                    val originalGate = permitClass.getDeclaredField("gate").apply { isAccessible = true }.get(permit)
+                    val forged = permitClass.declaredConstructors
+                        .single()
+                        .apply { isAccessible = true }
+                        .newInstance(runtime, originalRecord, operation, originalEnvironment, originalAbi, originalGate)
+                    assertFalse(runtime.matchesDirectPermit(forged, operation, DirectClaimAction.CLAIM))
+                    assertFailsWith<IllegalStateException> { shell.requireAcquisitionReady() }
+                    var callbackCalls = 0
+                    assertFailsWith<IllegalStateException> {
+                        shell.mapRetainedAcquisition(LinuxNative.SyscallResult.Error(22, -1L)) { callbackCalls++ }
+                    }
+                    assertFailsWith<IllegalStateException> {
+                        io.mazewall.landlock.PreparedLandlock
+                            .prepareRetainedWithPostStore(workerPolicy.definition, capturedA, shell) { callbackCalls++ }
+                    }
+                    assertEquals(0, callbackCalls)
+                    publicOwner.close()
+                    operation.close()
+                    assertEquals(PreparedResolutionRetirement.Transferred(null), publicOwner.retirement())
+                    assertEquals(PreparedResolutionRetirement.Transferred(null), publicOwner.retryRetirement())
+                    assertEquals(DirectResolutionCapture.Retirement.Transferred, owner.retire())
+                    assertTrue(pin.isLiveForIo())
+                    operation.validate()
+                    val constructor = ManagedRuntime::class.java
+                        .getDeclaredConstructor(
+                        RuntimeProfile::class.java,
+                        InstallationEnvironment::class.java,
+                        Duration::class.java,
+                        Duration::class.java,
+                    ).apply {
+                        isAccessible =
+                        true
+                    }
+                    val other = constructor.newInstance(RuntimeProfile.HOTSPOT_JIT, capturedA, timeout, timeout)
+                    try {
+                        assertFalse(other.matchesDirectPermit(permit, operation, DirectClaimAction.CLAIM))
+                        assertFailsWith<IllegalStateException> { other.prepare(reviewed, DomainLimits(1, 1), operation) }
+                        assertTrue(pin.isLiveForIo())
+                    } finally {
+                        other.drain(timeout)
+                    }
+                    val worker = runtime
+                        .submit(domain, Callable { Thread.currentThread() })
+                        .result()
+                        .toCompletableFuture()
+                        .get(5, TimeUnit.SECONDS)
+                    assertFalse(worker.isVirtual)
+                    val spoofResult = AtomicReference<Boolean>()
+                    val spoof = Thread.ofPlatform().name(worker.name).start { spoofResult.set(runtime.matchesDirectPermit(permit, operation, DirectClaimAction.APPLY_WORKER)) }
+                    spoof.join(2000)
+                    assertFalse(spoof.isAlive)
+                    assertEquals(false, spoofResult.get())
+                    val validationEntered = CountDownLatch(1)
+                    val releaseValidation = CountDownLatch(1)
+                    val validationFailure = AtomicReference<Throwable?>()
+                    val validationHook = owner.javaClass.getDeclaredField("afterValidationPermit").apply { isAccessible = true }
+                    val previousHook = validationHook.get(owner)
+                    validationHook.set(owner, {
+                        validationEntered.countDown()
+                        check(releaseValidation.await(5, TimeUnit.SECONDS))
+                    })
+                    val validator = Thread.ofPlatform().start {
+                        try {
+                            operation.validate()
+                        } catch (failure: Throwable) {
+                            validationFailure.set(failure)
+                        }
+                    }
+                    try {
+                        assertTrue(validationEntered.await(5, TimeUnit.SECONDS))
+                        domain.resource.fail(IllegalStateException("controlled retirement while runtime remains open"))
+                        worker.join(2000)
+                        assertFalse(worker.isAlive)
+                        val ownerGate = owner.javaClass
+                            .getDeclaredField("gate")
+                            .apply { isAccessible = true }
+                            .get(owner)
+                        val reserved = owner.javaClass.getDeclaredField("runtimeRetirementReserved").apply { isAccessible = true }
+                        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+                        while (!synchronized(ownerGate) { reserved.getBoolean(owner) } && System.nanoTime() < deadline) Thread.yield()
+                        assertTrue(synchronized(ownerGate) { reserved.getBoolean(owner) })
+                        val duplicateFailure = AtomicReference<Throwable?>()
+                        val duplicateDone = CountDownLatch(1)
+                        val duplicate = Thread.ofPlatform().start {
+                            try {
+                                runtime.prepare(reviewed, DomainLimits(1, 1), operation)
+                            } catch (failure: Throwable) {
+                                duplicateFailure.set(failure)
+                            } finally {
+                                duplicateDone.countDown()
+                            }
+                        }
+                        try {
+                            assertTrue(duplicateDone.await(3, TimeUnit.SECONDS), "Same-runtime duplicate claim must not deadlock retirement")
+                            assertIs<IllegalStateException>(duplicateFailure.get())
+                            assertTrue(pin.isLiveForIo())
+                        } finally {
+                            duplicate.interrupt()
+                            if (duplicate.isAlive) releaseValidation.countDown()
+                            duplicate.join(5000)
+                            check(!duplicate.isAlive)
+                        }
+                        assertIs<DrainReport.Incomplete>(runtime.drain(Duration.ofMillis(30)))
+                        worker.join(2000)
+                        assertFalse(worker.isAlive)
+                        assertIs<DrainReport.Incomplete>(runtime.drain(Duration.ofMillis(30)))
+                        assertTrue(pin.isLiveForIo())
+                        assertTrue(synchronized(closes) { closes.none { it === ruleset } })
+                    } finally {
+                        releaseValidation.countDown()
+                        validator.join(5000)
+                        validationHook.set(owner, previousHook)
+                    }
+                    assertFalse(validator.isAlive)
+                    assertNull(validationFailure.get())
+                    assertIs<DrainReport.Complete>(runtime.drain(timeout))
+                    assertFalse(worker.isAlive)
+                    assertFalse(pin.isLiveForIo())
+                    assertEquals(DirectResolutionCapture.Retirement.Transferred, owner.retire())
+                    assertFalse(runtime.matchesDirectPermit(permit, operation, DirectClaimAction.RETIRE_DOMAIN))
+                    val observed = synchronized(closes) { closes.toList() }
+                    assertTrue(observed.indexOfFirst { it === ruleset } >= 0)
+                    assertTrue(observed.indexOfFirst { it === pin } > observed.indexOfFirst { it === ruleset })
+                    assertEquals(1, observed.count { it === ruleset })
+                    assertEquals(1, observed.count { it === pin })
+                    assertEquals(1, reentrantRejections.get())
+                    assertEquals(0, foreignCalls.get(), "Captured engine must own all subsequent rule, worker and descriptor effects")
+                    LinuxNative.setEngine(capturedEngine)
+                    val runtimeOwner = ManagedRuntimeAcquisitionOwner.create()
+                    val secondRuntime = runtimeOwner.start(timeout, timeout)
+                    val secondOwner = PreparedResolutionOwner.create()
+                    val secondOperation = secondOwner.resolve(RuntimeProfile.HOTSPOT_JIT, workerPolicy, loader.loadClass("fixture.DirectWorker"), emptySet())
+                    val secondBinding =
+                        OperationBinding("direct", OperationAdapter.CALLABLE, secondOperation.implementationSha256, secondOperation.resourceGeneration, mapOf("entryPoint" to "call()I"))
+                    val secondDocument = OperationPolicyDocument(secondBinding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, workerPolicy), emptySet(), emptyMap())
+                    val secondReviewed = ReviewedOperationArtifact.load(secondDocument.toJson(), TrustedPolicyReview("operator", secondDocument.sha256(), emptySet()), secondBinding)
+                    val secondDomain = secondRuntime.prepare(secondReviewed, DomainLimits(1, 1), secondOperation)
+                    val secondShell = secondDomain.resource.javaClass
+                        .getDeclaredField("preparedLandlock")
+                        .apply { isAccessible = true }
+                        .get(secondDomain.resource)
+                    val secondRuleset = secondShell.javaClass
+                        .getDeclaredField("acquiredRuleset")
+                        .apply { isAccessible = true }
+                        .get(secondShell)
+                    val closeFailure = AssertionError("real close completed before failure")
+                    afterClose.set { if (it === secondRuleset) throw closeFailure }
+                    try {
+                        val outcome = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(runtimeOwner.retire(timeout))
+                        assertSame(closeFailure, outcome.history)
+                        assertSame(closeFailure, assertFailsWith<AssertionError> { runtimeOwner.close() })
+                        repeat(2) { assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(runtimeOwner.retire(timeout)) }
+                        assertEquals(1, synchronized(closes) { closes.count { it === secondRuleset } })
+                    } finally {
+                        afterClose.set(null)
+                        secondOwner.close()
+                    }
+                } finally {
+                    runtime.drain(timeout)
+                }
+                } finally {
+                    owner.close()
+                }
+            }
+        } finally {
+            LinuxNative.setEngine(engine)
+        }
+    }
 
     @Test
     fun `diagnostics retain physical lifetime after cancellation and never advance retirement`() {
@@ -177,10 +811,23 @@ class OwnedRuntimeTest {
                 LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
             }
             val domain = runtime.prepare(policy(), DomainLimits(1, 1), scoping)
+            val resource = domain.resource
+            val frozen = resource.javaClass.getDeclaredField("scoping").let {
+                it.isAccessible = true
+                it.get(resource) as io.mazewall.enforcer.internal.execution.FrozenStackScoping.Legacy
+            }
             assertEquals(1, reads.get())
             assertTrue(handlers.isNotEmpty())
-            val handle = runtime.submit(domain, Callable { Thread.currentThread() })
+            val observed = AtomicReference<io.mazewall.enforcer.internal.execution.FrozenStackScoping>()
+            val handle = runtime.submit(
+                domain,
+                Callable {
+                observed.set(io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.scoping)
+                Thread.currentThread()
+            },
+            )
             val worker = handle.result().toCompletableFuture().get(5, TimeUnit.SECONDS)
+            assertSame(frozen, observed.get())
             assertTrue(worker !== caller)
             assertIs<ExecutionEnd.Finished>(handle.executionEnd().toCompletableFuture().get(5, TimeUnit.SECONDS))
             assertEquals(DrainReport.Complete, runtime.drain(timeout))
@@ -216,7 +863,8 @@ class OwnedRuntimeTest {
                 override val handlers = mapOf<Syscall, ScopingHandler>(Syscall.CONNECT to { _, _, _ -> true })
             }
             val failure = assertFailsWith<IllegalStateException> {
-                val domain = runtime.prepare(policy(), DomainLimits(1, 1), scoping)
+                val allowedConnect = WorkerPolicyBuilder.denyList(RuntimeProfile.HOTSPOT_JIT).allow(Syscall.CONNECT).build()
+                val domain = runtime.prepare(allowedConnect, DomainLimits(1, 1), scoping)
                 runtime.submit(domain, Callable { entries.incrementAndGet() })
             }
             assertTrue(failure.message.orEmpty().contains("Cannot spawn SupervisorDaemon"))
@@ -649,6 +1297,16 @@ class OwnedRuntimeTest {
     }
 
     @Test
+    fun `owned domain has no synthetic raw phase setter`() {
+        val names = io.mazewall.enforcer.internal.execution.OwnedDomain::class.java.declaredMethods.map { it.name }
+        assertFalse(names.any { it == "access\$setPhase\$p" })
+        assertFalse(names.any { it == "access\$getPending\$p" })
+        assertFalse(names.any { it.contains("liveCancellationPermit", ignoreCase = true) })
+        val invocationNames = io.mazewall.enforcer.internal.execution.OwnedInvocation::class.java.declaredMethods.map { it.name }
+        assertFalse(invocationNames.any { it.contains("cancellationPermit", ignoreCase = true) })
+    }
+
+    @Test
     fun `canonical synchronous entry nests inline on the exact active worker`() {
         open().use { runtime ->
             val domain = runtime.prepare(policy(), DomainLimits(1, 1))
@@ -957,6 +1615,10 @@ class OwnedRuntimeTest {
                     assertSame(worker.get(), Thread.currentThread())
                     assertNull(failure)
                     assertEquals(42, value)
+                    assertNull(io.mazewall.enforcer.internal.execution.RuntimeWorkerContext.invocation)
+                    assertFailsWith<ExecutionTransitionException> {
+                        Mazewall.callContained(runtime, domain, Callable { secondEntries.incrementAndGet() })
+                    }
                     callbackEntered.countDown()
                     check(releaseCallback.await(5, TimeUnit.SECONDS))
                 }
@@ -1113,7 +1775,8 @@ class OwnedRuntimeTest {
             null,
             null,
             "unstarted-preparation-",
-            DefaultStacktraceScopingPolicy,
+            io.mazewall.enforcer.internal.execution.FrozenStackScoping
+                .Legacy(DefaultStacktraceScopingPolicy),
         )
         val failure = IllegalStateException("startup already failed")
         domain.fail(failure)
@@ -1127,5 +1790,534 @@ class OwnedRuntimeTest {
             assertSame(failure, actual)
         }
         assertTrue(domain.drainSnapshot().retired)
+    }
+
+    @Test
+    fun `public synthetic runtime constructor cannot admit a domain before baseline`() {
+        val constructor = ManagedRuntime::class.java.getConstructor(
+            RuntimeProfile::class.java,
+            Duration::class.java,
+            Duration::class.java,
+            kotlin.jvm.internal.DefaultConstructorMarker::class.java,
+        )
+        val runtime = constructor.newInstance(RuntimeProfile.HOTSPOT_JIT, timeout, timeout, null)
+        try {
+            assertFailsWith<java.util.concurrent.RejectedExecutionException> { runtime.prepare(policy(), DomainLimits(1, 1)) }
+            val managerThread = ManagedRuntime::class.java.getDeclaredField("managerThread").apply { isAccessible = true }
+            assertNull((managerThread.get(runtime) as AtomicReference<*>).get())
+        } finally {
+            runtime.drain(timeout)
+        }
+    }
+
+    @Test
+    fun `static scoping boundary rejects another original runtime state`() {
+        val constructor = ManagedRuntime::class.java.getConstructor(
+            RuntimeProfile::class.java,
+            Duration::class.java,
+            Duration::class.java,
+            kotlin.jvm.internal.DefaultConstructorMarker::class.java,
+        )
+        val first = constructor.newInstance(RuntimeProfile.HOTSPOT_JIT, timeout, timeout, null)
+        val second = constructor.newInstance(RuntimeProfile.HOTSPOT_JIT, timeout, timeout, null)
+        try {
+            val shared = ManagedRuntime::class.java
+                .getDeclaredField("shared")
+                .apply { isAccessible = true }
+                .get(second)
+            val boundary = Class
+                .forName("io.mazewall.enforcer.api.execution.ManagedRuntime\$ScopingFailureBoundary")
+                .getDeclaredConstructor(ManagedRuntime::class.java, shared.javaClass, Any::class.java)
+                .apply { isAccessible = true }
+            val originalPermit = ManagedRuntime::class.java
+                .getDeclaredField("operationsPermit")
+                .apply { isAccessible = true }
+                .get(first)
+            val failure = assertFailsWith<java.lang.reflect.InvocationTargetException> { boundary.newInstance(first, shared, originalPermit) }
+            assertIs<IllegalStateException>(failure.cause)
+            assertEquals(DrainReport.Complete, first.drain(timeout))
+            assertEquals(DrainReport.Complete, second.drain(timeout))
+        } finally {
+            first.drain(timeout)
+            second.drain(timeout)
+        }
+    }
+
+    @Test
+    fun `runtime acquisition rejects invalid duration without reserving`() {
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        assertFailsWith<IllegalArgumentException> { owner.start(Duration.ZERO, timeout) }
+        assertIs<ManagedRuntimeAcquisitionStatus.NotStarted>(owner.status())
+        owner.start(timeout, timeout)
+        assertFailsWith<IllegalStateException> { owner.start(timeout, timeout) }
+        assertIs<ManagedRuntimeAcquisitionStatus.Complete>(owner.retire(timeout))
+    }
+
+    @Test
+    fun `runtime acquisition keeps unknown installation after original manager exits`() {
+        val failure = AssertionError("native dispatch failed")
+        val calls = java.util.concurrent.atomic
+            .AtomicInteger()
+        val physicalManager = AtomicReference<Thread>()
+        engine.process.onPrctl = { command ->
+            if (command is PrctlCommand.SetNoNewPrivs) {
+                calls.incrementAndGet()
+                physicalManager.set(Thread.currentThread())
+                throw failure
+            }
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        assertSame(failure, assertFailsWith<AssertionError> { owner.start(timeout, timeout) })
+        val status = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+        assertSame(failure, status.history)
+        assertFalse(physicalManager.get().isAlive)
+        assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+        assertEquals(1, calls.get())
+        assertSame(failure, assertFailsWith<RuntimeAcquisitionUnknownException> { owner.close() }.cause)
+    }
+
+    @Test
+    fun `runtime acquisition use preserves original fatal without self suppression`() {
+        val failure = AssertionError("installation failed")
+        engine.process.onPrctl = { command ->
+            if (command is PrctlCommand.SetNoNewPrivs) throw failure
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        var originalSuppressed = 0
+        val actual = assertFailsWith<AssertionError> {
+            owner.use {
+                try {
+                    it.start(timeout, timeout)
+                } catch (problem: AssertionError) {
+                    originalSuppressed = problem.suppressed.size
+                    throw problem
+                }
+            }
+        }
+        assertSame(failure, actual)
+        assertEquals(originalSuppressed + 1, actual.suppressed.size)
+        assertFalse(actual.suppressed.any { it === failure })
+        val unknown = actual.suppressed.filterIsInstance<RuntimeAcquisitionUnknownException>().single()
+        assertSame(failure, unknown.cause)
+        repeat(2) {
+            val repeated = assertFailsWith<RuntimeAcquisitionUnknownException> { owner.close() }
+            assertSame(failure, repeated.cause)
+            assertEquals(originalSuppressed + 1, failure.suppressed.size)
+        }
+    }
+
+    @Test
+    fun `owner remains pending while its worker lives and registry is private`() {
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        val runtime = owner.start(timeout, timeout)
+        val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        try {
+            runtime.submit(
+                domain,
+                Callable {
+                entered.countDown()
+                while (release.count > 0) {
+                    try {
+                        release.await()
+                    } catch (_: InterruptedException) {
+                        }
+                }
+            },
+            )
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertNull(ManagedRuntime::class.java.methods.singleOrNull { it.name == "access\$getDomains\$p" })
+            assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.retire(Duration.ofMillis(100)))
+        } finally {
+            release.countDown()
+            domain.resource.beginDrain()
+            domain.resource.awaitRetirement(
+                io.mazewall.enforcer.internal.execution
+                .Deadline(timeout),
+            )
+        }
+    }
+
+    @Test
+    fun `late startup fatal preserves earlier timeout and is delivered only once`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val failure = AssertionError("late installation failure")
+        engine.process.onPrctl = { command ->
+            if (command is PrctlCommand.SetNoNewPrivs) {
+                entered.countDown()
+                while (release.count > 0) {
+                    try {
+                        release.await()
+                    } catch (_: InterruptedException) {
+                        }
+                }
+                throw failure
+            }
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        try {
+            val timeoutFailure = assertFailsWith<TimeoutException> { owner.start(Duration.ofMillis(100), timeout) }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            release.countDown()
+            val unknown = assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+            assertSame(failure, unknown.history)
+            assertTrue(failure.suppressed.any { it === timeoutFailure })
+            assertSame(failure, assertFailsWith<AssertionError> { owner.close() })
+            assertSame(failure, assertFailsWith<RuntimeAcquisitionUnknownException> { owner.close() }.cause)
+        } finally {
+            release.countDown()
+        }
+    }
+
+    @Test
+    fun `runtime acquisition owner closes inertly before start`() {
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        assertIs<ManagedRuntimeAcquisitionStatus.NotStarted>(owner.status())
+        owner.close()
+        assertIs<ManagedRuntimeAcquisitionStatus.Complete>(owner.status())
+        assertFailsWith<IllegalStateException> { owner.start(timeout, timeout) }
+    }
+
+    @Test
+    fun `runtime acquisition owner retains actual started runtime until physical retirement`() {
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        val runtime = owner.start(timeout, timeout)
+        assertIs<ManagedRuntimeAcquisitionStatus.Active>(owner.status())
+        assertEquals(DrainReport.Complete, runtime.drain(timeout))
+        assertIs<ManagedRuntimeAcquisitionStatus.Complete>(owner.retire(timeout))
+        owner.close()
+    }
+
+    @Test
+    fun `runtime acquisition timeout retains physically running original manager`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        engine.process.onPrctl = { command ->
+            if (command is PrctlCommand.SetNoNewPrivs && Thread.currentThread().name.startsWith("mazewall-manager-")) {
+                entered.countDown()
+                while (release.count > 0) {
+                    try {
+                        release.await()
+                    } catch (_: InterruptedException) {
+                        // The delegated native operation is still physically in progress.
+                    }
+                }
+            }
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        try {
+            assertFailsWith<TimeoutException> { owner.start(Duration.ofMillis(100), Duration.ofMillis(100)) }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.retire(Duration.ofMillis(100)))
+        } finally {
+            release.countDown()
+        }
+        assertIs<ManagedRuntimeAcquisitionStatus.Complete>(owner.retire(timeout))
+    }
+
+    @Test
+    fun `runtime acquisition owner reconciles concurrent same runtime drain`() {
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        val runtime = owner.start(timeout, timeout)
+        val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val drained = AtomicReference<DrainReport>()
+        val started = CountDownLatch(1)
+        try {
+            runtime.submit(
+                domain,
+                Callable {
+                entered.countDown()
+                while (release.count > 0) {
+                    try {
+                        release.await()
+                    } catch (_: InterruptedException) {
+                        }
+                }
+                42
+            },
+            )
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val thread = Thread.ofPlatform().start {
+                started.countDown()
+                drained.set(runtime.drain(timeout))
+            }
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.retire(Duration.ofMillis(100)))
+            release.countDown()
+            thread.join(timeout.toMillis())
+            assertFalse(thread.isAlive)
+            assertEquals(DrainReport.Complete, drained.get())
+            assertIs<ManagedRuntimeAcquisitionStatus.Complete>(owner.retire(timeout))
+        } finally {
+            release.countDown()
+        }
+    }
+
+    @Test
+    fun `Java try with resources retains startup Error without self suppression`() {
+        val source = java.nio.file.Files.writeString(
+            directDirectory.resolve("OwnerTry.java"),
+            "public class OwnerTry { public static void run(AutoCloseable c, Runnable r) throws Exception { try (c) { r.run(); } } }",
+        )
+        assertEquals(
+            0,
+            javax.tools.ToolProvider
+            .getSystemJavaCompiler()
+            .run(null, null, null, "-d", directDirectory.toString(), source.toString()),
+        )
+        val failure = AssertionError("Java startup fatal")
+        engine.process.onPrctl = { command ->
+            if (command is PrctlCommand.SetNoNewPrivs) throw failure
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        java.net.URLClassLoader(arrayOf(directDirectory.toUri().toURL()), javaClass.classLoader).use { loader ->
+            val method = loader.loadClass("OwnerTry").getMethod("run", AutoCloseable::class.java, Runnable::class.java)
+            val thrown = assertFailsWith<java.lang.reflect.InvocationTargetException> {
+                method.invoke(null, owner, Runnable { owner.start(timeout, timeout) })
+            }
+            assertSame(failure, thrown.cause)
+            assertFalse(failure.suppressed.any { it === failure })
+            val suppressed = failure.suppressed.filterIsInstance<RuntimeAcquisitionUnknownException>().single()
+            assertSame(failure, suppressed.cause)
+            assertIs<ManagedRuntimeAcquisitionStatus.Unknown>(owner.retire(timeout))
+            assertSame(failure, assertFailsWith<RuntimeAcquisitionUnknownException> { owner.close() }.cause)
+            val protocol = owner.javaClass
+                .getDeclaredField("protocol")
+                .apply { isAccessible = true }
+                .get(owner)
+            assertTrue(
+                protocol.javaClass
+                .getDeclaredField("physicalComplete")
+                .apply { isAccessible = true }
+                .getBoolean(protocol),
+            )
+        }
+    }
+
+    @Test
+    fun `checked runtime request validation is inert until the original owner starts`() {
+        val calls = AtomicInteger()
+        engine.process.onPrctl = { command ->
+            calls.incrementAndGet()
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        io.mazewall.ffi.internal.OwnedStackScopingPackagedBridge
+            .run(arrayOf("canonical-request-validation"))
+        assertEquals(0, calls.get())
+    }
+
+    @Test
+    fun `original runtime state is not exposed through ordinary same package reflection`() {
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        val runtime = owner.start(timeout, timeout)
+        try {
+            val stateType = Class.forName("io.mazewall.enforcer.api.execution.ManagedRuntime\$RuntimeState")
+            val shared = ManagedRuntime::class.java.getDeclaredField("shared")
+            val operationsField = ManagedRuntime::class.java.getDeclaredField("operations")
+            assertFailsWith<IllegalAccessException> { shared.get(runtime) }
+            assertFailsWith<IllegalAccessException> { operationsField.get(runtime) }
+            val accessor = ManagedRuntime::class.java.getMethod("access\$getOperations\$p", ManagedRuntime::class.java)
+            val operations = accessor.invoke(null, runtime)
+            val operationsShared = operations.javaClass.getDeclaredField("shared")
+            assertFailsWith<IllegalAccessException> { operationsShared.get(operations) }
+            val visibleMethods = ManagedRuntime::class.java.declaredMethods + operations.javaClass.declaredMethods
+            assertTrue(
+                visibleMethods.none {
+                !java.lang.reflect.Modifier
+                .isPrivate(it.modifiers) &&
+                    it.returnType == stateType
+            },
+            )
+        } finally {
+            owner.close()
+        }
+    }
+
+    @Test
+    fun `runtime operations reject foreign permit through ordinary same package lookup`() {
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        val runtime = owner.start(timeout, timeout)
+        try {
+            val holder = Class.forName("io.mazewall.enforcer.api.execution.ManagedRuntime\$RuntimeOperations")
+            val accessor = ManagedRuntime::class.java.getMethod("access\$getOperations\$p", ManagedRuntime::class.java)
+            val actual = accessor.invoke(null, runtime)
+            val admission = java.lang.invoke.MethodHandles
+                .lookup()
+                .unreflect(holder.getDeclaredMethod("requireAdmission", Any::class.java))
+            assertFailsWith<IllegalStateException> { admission.invokeWithArguments(actual, Any()) }
+            assertFailsWith<NullPointerException> { admission.invokeWithArguments(actual, null) }
+            val terminated = java.lang.invoke.MethodHandles
+                .lookup()
+                .unreflect(holder.getDeclaredMethod("managerTerminated", Any::class.java))
+            assertEquals(false, terminated.invokeWithArguments(actual, Any()))
+            val nativeCalls = AtomicInteger()
+            engine.process.onPrctl = { command ->
+                nativeCalls.incrementAndGet()
+                LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+            }
+            val installer = java.lang.invoke.MethodHandles.lookup().unreflect(
+                holder.getDeclaredMethod("installInitialBaseline", Any::class.java, Policy::class.java),
+            )
+            assertFailsWith<IllegalStateException> { installer.invokeWithArguments(actual, Any(), Policy.NO_EXEC_HOTSPOT) }
+            assertEquals(0, nativeCalls.get())
+            assertFailsWith<IllegalAccessException> {
+                java.lang.invoke.MethodHandles
+                .lookup()
+                .findGetter(holder, "permit", Any::class.java)
+            }
+            assertIs<ManagedRuntimeAcquisitionStatus.Active>(owner.status())
+            val domain = runtime.prepare(policy(), DomainLimits(1, 1))
+            assertEquals(
+                42,
+                runtime
+                .submit(domain, Callable { 42 })
+                .result()
+                .toCompletableFuture()
+                .get(5, TimeUnit.SECONDS),
+            )
+        } finally {
+            owner.close()
+        }
+    }
+
+    @Test
+    fun `synthetic canonical constructor refuses a foreign permit before bootstrap`() {
+        val canonical = ManagedRuntime.newCanonicalAcquisition()
+        val ctor = ManagedRuntime::class.java.getConstructor(
+            canonical.javaClass,
+            Any::class.java,
+            Duration::class.java,
+            Duration::class.java,
+            kotlin.jvm.internal.DefaultConstructorMarker::class.java,
+        )
+        val calls = AtomicInteger()
+        engine.process.onPrctl = {
+            calls.incrementAndGet()
+            LinuxNative.SyscallResult.Success(0L)
+        }
+        val failure = assertFailsWith<java.lang.reflect.InvocationTargetException> {
+            ctor.newInstance(canonical, Any(), timeout, timeout, null)
+        }
+        assertIs<IllegalStateException>(failure.cause)
+        assertEquals(0, calls.get())
+    }
+
+    @Test
+    fun `owner retirement winning its gate prevents queued manager baseline dispatch`() {
+        val calls = AtomicInteger()
+        engine.process.onPrctl = { command ->
+            calls.incrementAndGet()
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        val owner = ManagedRuntimeAcquisitionOwner.create()
+        val protocol = owner.javaClass
+            .getDeclaredField("protocol")
+            .apply { isAccessible = true }
+            .get(owner)
+        val gate = protocol.javaClass
+            .getDeclaredField("gate")
+            .apply { isAccessible = true }
+            .get(protocol)
+        synchronized(gate) {
+            assertFailsWith<TimeoutException> { owner.start(Duration.ofMillis(100), Duration.ofMillis(100)) }
+            val original = protocol.javaClass
+                .getDeclaredField("original")
+                .apply { isAccessible = true }
+                .get(protocol)
+            val managerRef = ManagedRuntime::class.java
+                .getDeclaredField("managerThread")
+                .apply { isAccessible = true }
+                .get(original) as AtomicReference<*>
+            val manager = managerRef.get() as Thread
+            val threadBean = java.lang.management.ManagementFactory
+                .getThreadMXBean()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            var info = threadBean.getThreadInfo(manager.threadId())
+            while (info?.threadState != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                Thread.yield()
+                info = threadBean.getThreadInfo(manager.threadId())
+            }
+            assertTrue(manager.isAlive)
+            assertEquals(Thread.State.BLOCKED, info?.threadState)
+            assertEquals(System.identityHashCode(gate), info?.lockInfo?.identityHashCode)
+            assertEquals(Thread.currentThread().threadId(), info?.lockOwnerId)
+            assertIs<ManagedRuntimeAcquisitionStatus.Pending>(owner.retire(Duration.ofMillis(100)))
+            assertEquals(0, calls.get())
+        }
+        assertIs<ManagedRuntimeAcquisitionStatus.Complete>(owner.retire(timeout))
+        assertEquals(0, calls.get())
+    }
+
+    @Test
+    fun `runtime owner identity observes only the retained original`() {
+        val calls = AtomicInteger()
+        engine.process.onPrctl = { command ->
+            calls.incrementAndGet()
+            LinuxNative.SyscallResult.Success(if (command is PrctlCommand.GetSeccomp) 2L else 0L)
+        }
+        val first = ManagedRuntimeAcquisitionOwner.create()
+        val second = ManagedRuntimeAcquisitionOwner.create()
+        val fresh = ManagedRuntimeAcquisitionOwner.create()
+        var marker: ManagedRuntime? = null
+        try {
+            val firstRuntime = first.start(timeout, timeout)
+            val secondRuntime = second.start(timeout, timeout)
+            marker = ManagedRuntime::class.java
+                .getConstructor(
+                RuntimeProfile::class.java,
+                Duration::class.java,
+                Duration::class.java,
+                kotlin.jvm.internal.DefaultConstructorMarker::class.java,
+            ).newInstance(RuntimeProfile.HOTSPOT_JIT, timeout, timeout, null)
+            val firstStatus = first.status()
+            val secondStatus = second.status()
+            val freshStatus = fresh.status()
+            val before = calls.get()
+            repeat(3) {
+                assertTrue(first.ownsRuntime(firstRuntime))
+                assertFalse(first.ownsRuntime(secondRuntime))
+                assertFalse(first.ownsRuntime(marker))
+                assertFalse(first.ownsRuntime(null))
+                assertTrue(second.ownsRuntime(secondRuntime))
+                assertFalse(second.ownsRuntime(firstRuntime))
+                assertFalse(fresh.ownsRuntime(firstRuntime))
+                assertFalse(fresh.ownsRuntime(null))
+            }
+            val method = ManagedRuntimeAcquisitionOwner::class.java.getMethod("ownsRuntime", ManagedRuntime::class.java)
+            assertEquals(false, method.invoke(first, null))
+            assertEquals(firstStatus, first.status())
+            assertEquals(secondStatus, second.status())
+            assertEquals(freshStatus, fresh.status())
+            assertEquals(before, calls.get())
+            assertIs<ManagedRuntimeAcquisitionStatus.Complete>(first.retire(timeout))
+            assertTrue(first.ownsRuntime(firstRuntime))
+            assertFalse(first.ownsRuntime(secondRuntime))
+            assertFalse(first.ownsRuntime(null))
+            first.close()
+            assertTrue(first.ownsRuntime(firstRuntime))
+        } finally {
+            try {
+                first.retire(timeout)
+            } finally {
+                try {
+                    second.retire(timeout)
+                } finally {
+                    try {
+                        fresh.close()
+                    } finally {
+                        marker?.drain(timeout)
+                    }
+                }
+            }
+        }
     }
 }

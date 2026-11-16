@@ -2,6 +2,9 @@ package io.mazewall.build;
 
 import com.github.spotbugs.snom.SpotBugsExtension;
 import com.github.spotbugs.snom.SpotBugsTask;
+import java.io.IOException;
+import java.nio.file.Files;
+import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.VersionCatalogsExtension;
@@ -61,6 +64,18 @@ public final class SpotBugsToolchainPlugin implements Plugin<Project> {
                         project.getConfigurations().named("spotbugs"), project.getConfigurations().named("spotbugsSlf4j"));
                 var report = task.getReports().maybeCreate("xml");
                 report.getRequired().set(true);
+                task.doFirst(runningTask -> {
+                    var spotbugs = (SpotBugsTask) runningTask;
+                    if (spotbugs.getUseAuxclasspathFile().get()) {
+                        var auxclasspath = spotbugs.getAuxclasspathFile().get().getAsFile().toPath();
+                        try {
+                            // Plugin 6.5.5 rewrites this file without truncating an existing longer value.
+                            Files.deleteIfExists(auxclasspath);
+                        } catch (IOException failure) {
+                            throw new GradleException("Cannot reset SpotBugs auxiliary classpath: " + auxclasspath, failure);
+                        }
+                    }
+                });
                 task.doLast(new VerifySpotBugsReport(report.getOutputLocation().get().getAsFile()));
             });
         }));

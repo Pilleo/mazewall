@@ -124,12 +124,15 @@ internal class TierEProcessIdentityVerifier(
 
         internal fun observeLinuxIncarnation(pid: Int): Long? =
             runCatching {
-                val stat = Files.readString(Path.of("/proc/$pid/stat"))
-                val closingParenthesis = stat.lastIndexOf(')')
-                require(closingParenthesis >= 0) { "malformed proc stat" }
-                val fields = stat.substring(closingParenthesis + 1).trim().split(Regex("\\s+"))
-                fields.getOrNull(19)?.toLongOrNull()
+                parseLinuxIncarnation(Files.readString(Path.of("/proc/$pid/stat")))
             }.getOrNull()
+
+        internal fun parseLinuxIncarnation(stat: String): Long? {
+            val closingParenthesis = stat.lastIndexOf(')')
+            require(closingParenthesis >= 0) { "malformed proc stat" }
+            val fields = stat.substring(closingParenthesis + 1).trim().split(Regex("\\s+"))
+            return fields.getOrNull(19)?.toLongOrNull()
+        }
     }
 }
 

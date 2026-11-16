@@ -18,6 +18,78 @@ import kotlin.test.assertTrue
 
 class TierEBpfProgramBuilderTest {
     @Test
+    fun diagnosticOffPreservesInstructionBytesAndMapOrder() {
+        val programs = linkedMapOf<String, List<TierEbpfEngine.Insn>>()
+        for ((name, options) in listOf("default" to TierEOptions(), "all-target" to TierEOptions(allTargetCapture = true))) {
+            programs["$name-typed"] = TierEBpfProgramBuilder.buildSysEnterProgram(options)
+            programs["$name-raw"] = TierEBpfProgramBuilder.buildRawTracepointSysEnterProgram(options)
+            programs["$name-marker"] = TierEBpfProgramBuilder.buildMarkerProgram(options)
+            programs["$name-exec"] = TierEBpfProgramBuilder.buildProcessExecProgram(options)
+        }
+
+        fun hash(bytes: ByteArray): String =
+            java.security.MessageDigest
+            .getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+        val actual = programs.mapValues { (_, program) ->
+            java.lang.foreign.Arena.ofConfined().use { arena ->
+                val encoded = BpfProgLoadRequestEncoder.encode(arena, program, (0..11).toList(), 17, "baseline")
+                val maps = java.nio.ByteBuffer
+                    .allocate(program.count { it.code == 0x18 && it.src == 1 } * 4)
+                    .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                program.filter { it.code == 0x18 && it.src == 1 }.forEach { maps.putInt(it.imm) }
+                "${program.size}:${hash(encoded.instructions.toArray(java.lang.foreign.ValueLayout.JAVA_BYTE))}:${hash(maps.array())}"
+            }
+        }
+        println("boundary diagnostic-off instruction-count:instruction-sha256:map-order-sha256 $actual")
+        val disabled = TierEbpfEngine(
+            io.mazewall.enforcer.api
+            .MockNativeEngine(),
+                boundaryDiagnostics = null,
+        )
+        for ((name, options) in listOf("default" to TierEOptions(), "all-target" to TierEOptions(allTargetCapture = true))) {
+            assertEquals(programs["$name-typed"], disabled.buildProgram(options))
+            assertEquals(programs["$name-raw"], disabled.buildRawTracepointProgram(options))
+            assertEquals(programs["$name-marker"], disabled.buildMarkerProgram(options))
+        }
+        assertEquals(
+            mapOf(
+                "default-typed" to "212:482b28b3c16bb1be59b63c8975537b7fea15f690b8d7dcd225686ea8644b0b1e:657a35291c3d5bec51c5639882413df342944fd85d94e9052815bfb4e63e0278",
+                "default-raw" to "248:c6e08427fab91b66323d5b2c95ebd7b3aeafe7ae1c20426d31ade80eda906a70:657a35291c3d5bec51c5639882413df342944fd85d94e9052815bfb4e63e0278",
+                "default-marker" to "90:be918a18ba73010dcbdc45a85d2e4387fc10fd1f2fcb914f671292fdcafc92da:23c851af4c88828d42ebaa41bdf6f68ebe57e2bd2a6aa764a0e782de6e7df2ca",
+                "default-exec" to "31:24fa81ae48247e50b94db223a6e04be2397f0d75a832bbca5ca8d31c4ab32aa3:d86e8112f3c4c4442126f8e9f44f16867da487f29052bf91b810457db34209a4",
+                "all-target-typed" to "260:879e757a09730cc320333afd738e4fed41ae3d5b4f5bdd229794c222347aec75:eac264ad540427aa92380e3f285e2c3fa60a72394f4a88c7d3c85501d9a6e740",
+                "all-target-raw" to "332:f289f285f2745bdaf710f4e2eda38aff2e13cb9f17911d3864a5ce1a104d27b7:eac264ad540427aa92380e3f285e2c3fa60a72394f4a88c7d3c85501d9a6e740",
+                "all-target-marker" to "90:be918a18ba73010dcbdc45a85d2e4387fc10fd1f2fcb914f671292fdcafc92da:23c851af4c88828d42ebaa41bdf6f68ebe57e2bd2a6aa764a0e782de6e7df2ca",
+                "all-target-exec" to "31:24fa81ae48247e50b94db223a6e04be2397f0d75a832bbca5ca8d31c4ab32aa3:d86e8112f3c4c4442126f8e9f44f16867da487f29052bf91b810457db34209a4",
+            ),
+            actual,
+        )
+    }
+
+    @Test
+    fun boundaryDiagnosticStackAndInstructionIdentity() {
+        val options = TierEOptions(allTargetCapture = true)
+        for ((name, program) in listOf(
+            "main" to TierEBpfProgramBuilder.buildBoundaryDiagnosticSysEnterProgram(options, 12345),
+            "marker" to TierEBpfProgramBuilder.buildBoundaryDiagnosticMarkerProgram(options, 12345),
+        )) {
+            val maps = program.filter { it.code == 0x18 && it.src == 1 }.map { it.imm }
+            assertTrue(maps.containsAll(if (name == "main") listOf(12, 13) else listOf(3, 4)))
+            assertTrue(program.filter { it.code in listOf(0x61, 0x79, 0x63, 0x7b) && (it.src == 10 || it.dst == 10) }.all { it.off.toInt() in -512..-1 })
+            java.lang.foreign.Arena.ofConfined().use { arena ->
+                val bytes = BpfProgLoadRequestEncoder.encode(arena, program, (0..13).toList(), if (name == "main") 17 else 2, "boundary").instructions
+                val hash = java.security.MessageDigest
+                    .getInstance("SHA-256")
+                    .digest(bytes.toArray(java.lang.foreign.ValueLayout.JAVA_BYTE))
+                    .joinToString("") { "%02x".format(it) }
+                println("boundary-enabled target=12345 plane=$name instructions=${program.size} sha256=$hash map-order=$maps")
+            }
+        }
+    }
+
+    @Test
     fun `buildMarkerProgram generates valid instruction sequence ending with exit`() {
         val program = TierEBpfProgramBuilder.buildMarkerProgram()
         assertTrue(program.isNotEmpty())

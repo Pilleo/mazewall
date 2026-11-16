@@ -1,3 +1,4 @@
+import java.io.File
 import java.math.BigDecimal
 
 plugins {
@@ -159,9 +160,30 @@ fun Test.configureEnforcerIntegrationPrerequisites() {
     // cliTestPatterns logic above) because CLI --tests patterns are not visible here.
 }
 
+// BEGIN confined helper CI routing
+val mazewallKernelLane = providers.gradleProperty("mazewallKernelLane").orElse("ALL").get()
+require(mazewallKernelLane in setOf("ALL", "BASELINE", "CONFINED")) {
+    "Invalid mazewallKernelLane: $mazewallKernelLane"
+}
+val confinedHelperClasses =
+    listOf(
+        "io.mazewall.enforcer.api.execution.ConfinedHelperReadinessIntegrationTest",
+        "io.mazewall.ffi.networking.ConfinedHelperProcessIntegrationTest",
+        "io.mazewall.landlock.OwnedProcFdReopenKernelTest",
+    )
+
+fun Test.configureConfinedHelperLane() {
+    inputs.property("mazewallKernelLane", mazewallKernelLane)
+    when (mazewallKernelLane) {
+        "BASELINE" -> filter { confinedHelperClasses.forEach { excludeTestsMatching(it) } }
+        "CONFINED" -> filter { confinedHelperClasses.forEach { includeTestsMatching(it) } }
+    }
+}
+// END confined helper CI routing
 val integrationTest =
     tasks.register<Test>("integrationTest") {
         configureEnforcerIntegrationPrerequisites()
+        configureConfinedHelperLane()
         description = "Kernel tests that do not install on the JUnit worker JVM"
         useJUnitPlatform {
             excludeTags("needs-fresh-jvm")
@@ -340,3 +362,141 @@ tasks.named("generateClassDiagrams") {
 }
 // Diagram generation writes checked-in documentation. Keep it explicit (`generateClassDiagrams`)
 // so ordinary builds remain read-only with respect to the source tree.
+
+// Narrow, test-owned final-JAR component fixture; no test classes or helper copies enter production archives.
+val managedLayoutFixtureJar =
+    tasks.register<Jar>("managedLayoutFixtureJar") {
+        dependsOn(tasks.named("testClasses"))
+        archiveClassifier.set("managed-layout-fixture")
+        from(sourceSets.test.get().output) {
+            include("io/mazewall/ffi/internal/OwnedStackScopingPackagedFixture*.class")
+            include("io/mazewall/ffi/internal/OwnedStackScopingPackagedWorkload.class")
+            include("io/mazewall/ffi/internal/OwnedStackScopingPackagedBridge*.class")
+        }
+    }
+
+val managedFixturePlatformJar = platformJar
+tasks.named<Test>("test") {
+    filter {
+        excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture proves checked original native ownership")
+        excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects invalid actual associations")
+        excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects duplicate nested helper class")
+        excludeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture preserves checked helper history retirement")
+    }
+    dependsOn(platformJar, tasks.named("jar"), managedLayoutFixtureJar)
+    jvmArgumentProviders.add(
+        objects.newInstance(io.mazewall.build.ManagedFixtureClasspathArgumentProvider::class.java).apply {
+            getPlatformJar().set(managedFixturePlatformJar)
+            getEnforcerJar().set(tasks.named<Jar>("jar").flatMap { it.archiveFile })
+            getFixtureJar().set(managedLayoutFixtureJar.flatMap { it.archiveFile })
+            getRuntimeFiles().from(configurations.runtimeClasspath)
+        },
+    )
+}
+
+// Explicit fixture-only task. It is not wired into test, check, or production classpaths.
+val managedT4PlatformFixtureJar =
+    providers.provider {
+        project(":platform")
+            .tasks
+            .named<Jar>("managedT4PlatformFixtureJar")
+            .get()
+            .archiveFile
+            .get()
+            .asFile
+    }
+
+val managedT4FixtureEnabled =
+    when (val value = providers.gradleProperty("mazewallManagedT4Fixture").orNull) {
+        null, "false" -> false
+        "true" -> true
+        else -> error("mazewallManagedT4Fixture must be true or false; got '$value'")
+    }
+
+if (managedT4FixtureEnabled) {
+    tasks.register<Test>("managedT4FixtureTest") {
+        group = "verification"
+        description = "Runs the separately authorized synthetic managed t4 native fixture."
+        dependsOn(tasks.named("testClasses"), tasks.named("jar"), managedLayoutFixtureJar, ":platform:managedT4PlatformFixtureJar")
+        testClassesDirs = sourceSets["test"].output.classesDirs
+        classpath = sourceSets["test"].runtimeClasspath
+        filter {
+            includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture proves checked original native ownership")
+            includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects invalid actual associations")
+            includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture rejects duplicate nested helper class")
+            includeTestsMatching("io.mazewall.ffi.internal.OwnedStackScopingPackagedAccessTest.managed t4 fixture preserves checked helper history retirement")
+        }
+        inputs.files(managedT4PlatformFixtureJar, tasks.named<Jar>("jar").flatMap { it.archiveFile }, managedLayoutFixtureJar.flatMap { it.archiveFile }, configurations.runtimeClasspath)
+        doFirst {
+            val expected = providers.gradleProperty("mazewallT4Expected").orNull ?: error("fixture expectation manifest required")
+            val agent = providers.gradleProperty("mazewallT4Agent").orNull ?: error("fixture agent path required")
+            val vmArguments = providers.gradleProperty("mazewallT4VmArguments").orNull ?: error("fixture VM argument manifest required")
+            val runtime = configurations.runtimeClasspath.get().files
+
+            fun dependency(name: String) = runtime.single { it.name == name }.canonicalPath
+            val ordered =
+                listOf(
+                    managedT4PlatformFixtureJar.get().canonicalPath,
+                    tasks
+                        .named<Jar>("jar")
+                        .get()
+                        .archiveFile
+                        .get()
+                        .asFile.canonicalPath,
+                    dependency("kotlin-stdlib-2.4.20-Beta1.jar"),
+                    dependency("kotlinx-serialization-core-jvm-1.9.0.jar"),
+                    dependency("kotlinx-serialization-json-jvm-1.9.0.jar"),
+                    dependency("annotations-13.0.jar"),
+                    managedLayoutFixtureJar
+                        .get()
+                        .archiveFile
+                        .get()
+                        .asFile.canonicalPath,
+                )
+            systemProperty("mazewall.managed.t4.fixture.classpath", ordered.joinToString(File.pathSeparator))
+            systemProperty("mazewall.managed.t4.fixture.expected", file(expected).canonicalPath)
+            systemProperty("mazewall.managed.t4.fixture.agent", file(agent).canonicalPath)
+            systemProperty("mazewall.managed.t4.fixture.vmArguments", file(vmArguments).canonicalPath)
+            providers.gradleProperty("mazewallT4SupportManifest").orNull?.let {
+                systemProperty("mazewall.managed.t4.fixture.supportManifest", file(it).canonicalPath)
+            }
+            providers.gradleProperty("mazewallT4ApplicationRoot").orNull?.let {
+                systemProperty("mazewall.managed.t4.fixture.applicationRoot", file(it).canonicalPath)
+            }
+        }
+    }
+}
+
+// Records the isolated seven-JAR order before any child VM is started.
+tasks.register("managedT4FixtureClasspath") {
+    dependsOn(tasks.named("jar"), managedLayoutFixtureJar, ":platform:managedT4PlatformFixtureJar")
+    val result = layout.buildDirectory.file("managed-t4-fixture/classpath.txt")
+    outputs.file(result)
+    doLast {
+        val runtime = configurations.runtimeClasspath.get().files
+
+        fun dependency(name: String) = runtime.single { it.name == name }.canonicalPath
+        val ordered =
+            listOf(
+                managedT4PlatformFixtureJar.get().canonicalPath,
+                tasks
+                    .named<Jar>("jar")
+                    .get()
+                    .archiveFile
+                    .get()
+                    .asFile.canonicalPath,
+                dependency("kotlin-stdlib-2.4.20-Beta1.jar"),
+                dependency("kotlinx-serialization-core-jvm-1.9.0.jar"),
+                dependency("kotlinx-serialization-json-jvm-1.9.0.jar"),
+                dependency("annotations-13.0.jar"),
+                managedLayoutFixtureJar
+                    .get()
+                    .archiveFile
+                    .get()
+                    .asFile.canonicalPath,
+            )
+        val file = result.get().asFile
+        file.parentFile.mkdirs()
+        file.writeText(ordered.joinToString("\n", postfix = "\n"))
+    }
+}

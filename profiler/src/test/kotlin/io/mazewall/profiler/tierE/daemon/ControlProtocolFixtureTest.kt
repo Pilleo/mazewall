@@ -75,8 +75,9 @@ class ControlProtocolFixtureTest {
                 val post = when (event) {
                     null, "success" -> ControlSessionEvent.AttachSucceeded(
                         AttachedSessionInfo(effect.command.pid, effect.command.sessionTag),
+                        effect.command,
                     )
-                    else -> ControlSessionEvent.AttachFailed(event)
+                    else -> ControlSessionEvent.AttachFailed(event, effect.command)
                 }
                 val completed = ControlSessionMachine.evaluate(transition.state, post)
                 completed.state to assertIs<ControlSessionEffect.SendReply>(completed.effect).reply.render()

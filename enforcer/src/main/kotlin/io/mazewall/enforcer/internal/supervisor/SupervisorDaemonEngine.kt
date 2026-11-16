@@ -8,6 +8,7 @@ import io.mazewall.platform.fd.FileDescriptor
 import io.mazewall.platform.fd.FileDescriptorRole
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
+import io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks
 import io.mazewall.platform.seccomp.daemon.SeccompDaemonEngine
 import io.mazewall.platform.socket.SocketManager
 
@@ -17,8 +18,10 @@ internal class SupervisorDaemonEngine(
     private val engine: NativeEngine = LinuxNative,
     private val socketManager: SocketManager = io.mazewall.platform.socket.RealSocketManager,
     private val socketHelpers: SocketHelperPool = SocketHelperPool(factory = SocketHelperProcess::start),
+    private val confinedBootstrap: SocketHelperProcess.ConfinedStartup? = null,
 ) {
     private val admission = SupervisorAdmission()
+    private var confinedControl: ConfinedHelperControl? = null
 
     // Capture daemon roots before listener admission; helper classpaths/agents cannot widen them.
     private val authorityRoots = BypassPaths.safeBypassPaths.map { it.toString() }
@@ -26,12 +29,38 @@ internal class SupervisorDaemonEngine(
         socketPath = socketPath,
         readySentinel = SupervisorDaemon.DAEMON_READY_SENTINEL,
         notifHandlerFactory = { socketFd, listenerFd ->
-            SupervisorSessionHandler(socketFd, listenerFd, engine, socketManager, socketHelpers = socketHelpers, admission = admission, authorityRoots = authorityRoots)
+            SupervisorSessionHandler(
+                socketFd,
+                listenerFd,
+                engine,
+                socketManager,
+                SupervisorRoutePreparation(),
+                io.mazewall.ffi.memory.NativeArena::ofConfined,
+                socketHelpers,
+                admission,
+                authorityRoots,
+                ControlSocketOwnership.Borrowed,
+            )
         },
         handshakeAckByte = 0xAC.toByte(),
         maxConnections = MAX_CONNECTIONS,
         engine = engine,
         socketManager = socketManager,
+        hooks = SeccompConnectionHooks(
+            beforeListener = confinedBootstrap?.let { { socket, deadline -> requireNotNull(confinedControl).handle(socket, deadline) } },
+            liveListenerFactory = { live, socket, listener ->
+                val original = live as ConfinedHelperControl.LiveAdmission
+                original.attach(socket)
+                val replies = SupervisorReplyInterpreter(
+                    engine,
+                    listener,
+                    SupervisorExecRewriteExchange(engine, socket),
+                    TraceeDescriptorImporter(engine),
+                )
+                LiveListenerHandler(listener, replies, engine, original)
+            },
+            afterConnectionClosed = confinedBootstrap?.let { { socket, outcome -> requireNotNull(confinedControl).connectionClosed(socket, outcome) } },
+        ),
     )
 
     @JvmField
@@ -47,6 +76,10 @@ internal class SupervisorDaemonEngine(
     fun run(block: (() -> Unit)? = null) {
         try {
             socketHelpers.prewarm()
+            confinedBootstrap?.let { startup ->
+                startup.requireCommon()
+                confinedControl = ConfinedHelperControl(socketHelpers, startup, engine, stopping = { delegate.isGlobalShutdown() }, retryConnection = delegate::retryConnectionCleanup)
+            }
             delegate.run()
         } finally {
             socketHelpers.close()

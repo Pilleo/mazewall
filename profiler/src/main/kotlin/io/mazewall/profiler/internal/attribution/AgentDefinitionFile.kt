@@ -33,6 +33,31 @@ internal object AgentDefinitionFile {
         public val stacks: List<StackDefinition> = java.util.List.copyOf(stacks)
         public val invocations: List<InvocationDefinition> = java.util.List.copyOf(invocations)
         public val executions: List<ExecutionContext> = java.util.List.copyOf(executions)
+
+        override fun equals(other: Any?): Boolean =
+            other is Contents &&
+                stacks == other.stacks &&
+                invocations == other.invocations &&
+                executions == other.executions &&
+                agentLosses == other.agentLosses &&
+                virtualPinnedScopes == other.virtualPinnedScopes &&
+                virtualPinnedNanos == other.virtualPinnedNanos &&
+                publication == other.publication &&
+                sourceByteLength == other.sourceByteLength &&
+                sourceSha256 == other.sourceSha256
+
+        override fun hashCode(): Int =
+            listOf(
+                stacks,
+                invocations,
+                executions,
+                agentLosses,
+                virtualPinnedScopes,
+                virtualPinnedNanos,
+                publication,
+                sourceByteLength,
+                sourceSha256,
+            ).hashCode()
     }
 
     public fun read(path: Path): Contents = decode(readBounded(path))

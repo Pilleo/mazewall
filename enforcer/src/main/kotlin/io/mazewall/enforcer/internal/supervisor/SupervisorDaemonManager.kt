@@ -1,7 +1,12 @@
 package io.mazewall.enforcer.internal.supervisor
 
+import io.mazewall.enforcer.diagnostics.requirePlatformThread
 import io.mazewall.enforcer.state.ContainmentStateRegistry
+import io.mazewall.ffi.internal.HelperSecurityObservation
 import io.mazewall.ffi.memory.writeByte
+import io.mazewall.platform.fd.CleanupFailures
+import io.mazewall.platform.lifecycle.Pid
+import io.mazewall.platform.lifecycle.Tid
 import io.mazewall.platform.native.LinuxNative
 import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.getFdOrThrow
@@ -27,6 +32,8 @@ internal data class SupervisorContext(
     val socketDir: Path,
     val daemonProcess: Process,
     val shutdownHook: Thread,
+    val confinedBootstrap: SocketHelperProcess.ConfinedStartup? = null,
+    val confinedHelper: HelperSecurityObservation.Observation? = null,
 )
 
 /**
@@ -36,6 +43,7 @@ internal class SupervisorDaemonManager(
     private val engine: NativeEngine = LinuxNative.snapshot(),
     private val socketManager: SocketManager = RealSocketManager.capture(engine),
     private val processLauncher: ProcessLauncher = RealProcessLauncher,
+    private val observations: HelperSecurityObservation = HelperSecurityObservation(),
 ) {
     private val logger = Logger.getLogger(SupervisorDaemonManager::class.java.name)
     private val daemonLock = Any()
@@ -62,6 +70,15 @@ internal class SupervisorDaemonManager(
 
     @Volatile private var ownedResources: ChildProcessResources? = null
     private var pendingStartup: ChildStartupTransaction? = null
+    private var confinedOriginalProcess: Process? = null
+    private var confinedOriginalContext: SupervisorContext? = null
+    private var confinedRetirementView: HelperSecurityObservation.RetirementView? = null
+    private var confinedCommitted = false
+    private var confinedStartupFailure: Throwable? = null
+    private var confinedPtracerFailure: Throwable? = null
+    private var confinedMetadataFailure: Throwable? = null
+    private var provisioning = PoolProvisioning.Legacy
+    private var confinedAttempted = false
 
     // Visible for testing: allows test suites to intercept unexpected exit without terminating the JVM
     internal var onUnexpectedExit: (exitCode: Int) -> Unit = { exitCode ->
@@ -90,13 +107,28 @@ internal class SupervisorDaemonManager(
 
     public val daemonLogLines: java.util.concurrent.ConcurrentLinkedQueue<String> = java.util.concurrent.ConcurrentLinkedQueue<String>()
 
+    internal fun prepareConfinedReadBootstrap(): SupervisorContext {
+        requirePlatformThread()
+        synchronized(daemonLock) {
+            refuseSpawnIfParentIsFiltered()
+            return getOrSpawn(PoolProvisioning.PrestartedConfined, engine)
+        }
+    }
+
     /**
      * Returns the existing shared daemon context or spawns a new one.
      */
-    public fun getOrSpawnSharedDaemon(callerNative: NativeEngine = engine): SupervisorContext {
+    public fun getOrSpawnSharedDaemon(callerNative: NativeEngine = engine): SupervisorContext = getOrSpawn(PoolProvisioning.Legacy, callerNative)
+
+    private fun getOrSpawn(
+        requested: PoolProvisioning,
+        callerNative: NativeEngine,
+    ): SupervisorContext {
         synchronized(daemonLock) {
+            check(!confinedAttempted || requested == PoolProvisioning.PrestartedConfined) { "Confined daemon cannot switch to legacy mode" }
             when (val handle = daemonHandle) {
                 is DaemonHandle.Running -> {
+                    check(requested == provisioning) { "Supervisor daemon mode differs from requested bootstrap" }
                     if (handle.context.daemonProcess.isAlive) {
                         DaemonPtracer.authorize(callerNative, handle.context.daemonProcess)
                         return handle.context
@@ -107,6 +139,11 @@ internal class SupervisorDaemonManager(
                 is DaemonHandle.Defunct -> cleanupDaemon(handle.context)
                 DaemonHandle.NotStarted -> retirePendingResources()
             }
+            if (requested == PoolProvisioning.PrestartedConfined) {
+                check(!confinedAttempted) { "Confined daemon startup is spent; no replacement is permitted" }
+                confinedAttempted = true
+            }
+            provisioning = requested
             return spawnDaemon()
         }
     }
@@ -122,6 +159,14 @@ internal class SupervisorDaemonManager(
                 DaemonHandle.NotStarted -> retirePendingResources()
             }
             daemonHandle = DaemonHandle.NotStarted
+        }
+    }
+
+    internal fun requireConfinedHelperRetired() {
+        synchronized(daemonLock) {
+            check(daemonHandle == DaemonHandle.NotStarted) { "Confined daemon has not stopped" }
+            val context = checkNotNull(confinedOriginalContext)
+            observations.requireRetiredHelper(checkNotNull(confinedRetirementView), checkNotNull(context.confinedHelper))
         }
     }
 
@@ -159,7 +204,7 @@ internal class SupervisorDaemonManager(
 
     private fun retirePendingResources() {
         pendingStartup?.close()
-        pendingStartup = null
+        if (provisioning != PoolProvisioning.PrestartedConfined) pendingStartup = null
         ownedResources?.close()
         ownedResources = null
     }
@@ -183,11 +228,51 @@ internal class SupervisorDaemonManager(
 
     private fun spawnDaemon(): SupervisorContext {
         refuseSpawnIfParentIsFiltered()
-        val startup = ChildStartupTransaction(processLauncher, "mazewall-supervisor-", "supervisor.sock")
+        val startup = when (provisioning) {
+            PoolProvisioning.Legacy -> ChildStartupTransaction(processLauncher, "mazewall-supervisor-", "supervisor.sock")
+            PoolProvisioning.PrestartedConfined -> ChildStartupTransaction.confined(processLauncher, "mazewall-supervisor-", "supervisor.sock")
+        }
         pendingStartup = startup
-        val context = startup.runStartup(::startDaemon)
+        val context = when (provisioning) {
+            PoolProvisioning.Legacy -> startup.runStartup(::startDaemon)
+            PoolProvisioning.PrestartedConfined -> runConfinedStartup(startup)
+        }
         pendingStartup = null
         return context
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Retain the original rollback result before independent bookkeeping cleanup.
+    private fun runConfinedStartup(startup: ChildStartupTransaction): SupervisorContext =
+        try {
+            startup.runStartup(::startDaemon)
+        } catch (failure: Throwable) {
+            confinedStartupFailure = failure
+            val process = confinedOriginalProcess
+            if (process != null && !confinedCommitted) retireFailedStartupPtracer(process, failure) else throw failure
+        }
+
+    @Suppress("TooGenericExceptionCaught") // Preserve arbitrary bookkeeping and metadata failures after child rollback.
+    private fun retireFailedStartupPtracer(process: Process, startupFailure: Throwable): Nothing {
+        val bookkeepingFailure = try {
+            DaemonPtracer.retire(engine, process)
+            null
+        } catch (failure: InterruptedException) {
+            confinedPtracerFailure = failure
+            Thread.currentThread().interrupt()
+            failure
+        } catch (failure: Throwable) {
+            confinedPtracerFailure = failure
+            failure
+        }
+        if (bookkeepingFailure == null) throw startupFailure
+        val originalFatal = (startupFailure as? Error) ?: (bookkeepingFailure as? Error)
+        val selected = try {
+            CleanupFailures.merge(startupFailure, bookkeepingFailure)
+        } catch (metadataFailure: Throwable) {
+            confinedMetadataFailure = metadataFailure
+            originalFatal ?: (metadataFailure as? Error) ?: startupFailure
+        }
+        throw selected
     }
 
     private fun startDaemon(startup: ChildStartupTransaction): SupervisorContext {
@@ -198,14 +283,35 @@ internal class SupervisorDaemonManager(
         val spec =
             JvmChildSpec(
                 mainClass = SupervisorDaemon::class.java.name,
-                mainArgs = listOf(socketPath),
+                mainArgs = when (provisioning) {
+                    PoolProvisioning.Legacy -> listOf(socketPath)
+                    PoolProvisioning.PrestartedConfined -> listOf(socketPath, "--confined-read-v1")
+                },
                 maxHeap = "64m",
                 javaAgents = JavaAgentSelection.All,
+                extraJvmArgs = SupervisorPrewarmBudget.childArguments(System.getProperty(SupervisorPrewarmBudget.PROPERTY)),
             )
         val pbArgs = JvmChildProcess.commandLine(spec)
         logger.info("Spawning SupervisorDaemon: ${pbArgs.joinToString(" ")}")
 
+        val parent = when (provisioning) {
+            PoolProvisioning.Legacy -> null
+            PoolProvisioning.PrestartedConfined -> {
+                val pid = Pid(ProcessHandle.current().pid().toInt())
+                val bootstrap = observeConfined(pid, Tid(pid.value))
+                observeConfined(pid, engine.process.gettid()).also {
+                    check(it.identity == bootstrap.identity) { "Daemon spawning process changed" }
+                    it.requireLineage(bootstrap, HelperSecurityObservation.Lineage.Bootstrap)
+                }
+            }
+        }
+        if (parent != null) confinedRetirementView = observations.captureRetirementView(parent)
         val daemonProcess = startup.start(spec)
+        if (provisioning == PoolProvisioning.PrestartedConfined) confinedOriginalProcess = daemonProcess
+        val confinedBootstrap = parent?.let {
+            val pid = Pid(Math.toIntExact(daemonProcess.pid()))
+            SocketHelperProcess.ConfinedStartup(it, observeConfined(pid, Tid(pid.value))).also(SocketHelperProcess.ConfinedStartup::requireCommon)
+        }
 
         DaemonPtracer.authorize(engine, daemonProcess)
 
@@ -222,14 +328,36 @@ internal class SupervisorDaemonManager(
 
         startup.registerShutdownHook()
         startup.awaitReady(LATCH_TIMEOUT_SECONDS)
-        val context = SupervisorContext(socketPath, socketDir, daemonProcess, startup.shutdownHook)
+        confinedBootstrap?.let {
+            val pid = it.child.identity.pid
+            val current = observeConfined(pid, Tid(pid.value))
+            check(current.identity == it.child.identity) { "Daemon incarnation changed before readiness" }
+            current.requireLineage(it.child, HelperSecurityObservation.Lineage.Bootstrap)
+        }
+        val confinedHelper = confinedBootstrap?.let { observations.observeOnlyChild(it.child) }
+        val context = SupervisorContext(socketPath, socketDir, daemonProcess, startup.shutdownHook, confinedBootstrap, confinedHelper)
         val running = DaemonHandle.Running(context)
         val resources = startup.commit()
+        if (provisioning == PoolProvisioning.PrestartedConfined) {
+            confinedOriginalContext = context
+            confinedCommitted = true
+        }
         ownedResources = resources
         daemonHandle = running
         if (!daemonProcess.isAlive) markDefunct(context, daemonProcess.exitValue())
         return context
     }
+
+    @Suppress("TooGenericExceptionCaught") // Acquired-child observation failures retain typed errno and their original cause.
+    private fun observeConfined(
+        pid: Pid,
+        tid: Tid,
+    ): HelperSecurityObservation.Observation =
+        try {
+            observations.observeAncestry(pid, tid, HelperSecurityObservation.Lineage.Bootstrap)
+        } catch (observationFailure: Exception) {
+            throw ConfinedHelperRejection.classify(observationFailure, ConfinedRejectReason.Ancestry)
+        }
 
     /** EOF can precede process exit; the owned output thread remains the lifetime observer. */
     private fun observeDaemonExit(process: Process) {

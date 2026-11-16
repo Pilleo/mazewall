@@ -15,18 +15,36 @@ import io.mazewall.platform.native.NativeEngine
 import io.mazewall.platform.native.getFdOrThrow
 import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.NativeArg
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Session-owned Linux eventfd used to wake the daemon reactor after off-reactor preparation.
  * The counter coalesces repeated completions; the reactor drains it before inspecting pending work.
  */
+internal sealed interface SessionRetirement {
+    data object Complete : SessionRetirement
+
+    data object Pending : SessionRetirement
+
+    data class Unknown(
+        val failure: Throwable,
+    ) : SessionRetirement
+}
+
 internal interface SessionCompletionWakeup :
     NotificationCompletionWakeup,
     AutoCloseable {
     val pollFd: Int
 
     fun drain()
+
+    @Suppress("TooGenericExceptionCaught") // default conservatively preserves any unknown close failure
+    fun retire(): SessionRetirement =
+        try {
+        close()
+        SessionRetirement.Complete
+    } catch (failure: Throwable) {
+        SessionRetirement.Unknown(failure)
+    }
 }
 
 internal class EventFdCompletionWakeup private constructor(
@@ -36,7 +54,13 @@ internal class EventFdCompletionWakeup private constructor(
     private val arena = NativeArena.ofShared()
     private val writeBuffer: ManagedSegment = arena.allocate(COUNTER_BYTES)
     private val readBuffer: ManagedSegment = arena.allocate(COUNTER_BYTES)
-    private val closed = AtomicBoolean(false)
+
+    private enum class Phase { OPEN, CLOSING, IN_FLIGHT, COMPLETE, UNKNOWN }
+
+    private val gate = Any()
+    private var phase = Phase.OPEN
+    private var users = 0
+    private var failure: Throwable? = null
 
     init {
         writeBuffer.writeLong(0L, 1L)
@@ -45,47 +69,96 @@ internal class EventFdCompletionWakeup private constructor(
     override val pollFd: Int get() = fd.value
 
     override fun signal() {
-        if (closed.get()) return
-        when (val result = engine.memory.write(fd, writeBuffer, COUNTER_BYTES)) {
-            is LinuxNative.SyscallResult.Success -> check(result.value == COUNTER_BYTES) {
-                "eventfd completion signal short write: ${result.value}"
-            }
-            is LinuxNative.SyscallResult.Error -> {
-                if (result.errno != NativeConstants.EAGAIN) {
-                    result.throwErrno("eventfd completion signal")
+        if (!enter()) return
+        try {
+            when (val result = engine.memory.write(fd, writeBuffer, COUNTER_BYTES)) {
+                is LinuxNative.SyscallResult.Success -> check(result.value == COUNTER_BYTES) {
+                    "eventfd completion signal short write: ${result.value}"
+                }
+                is LinuxNative.SyscallResult.Error -> {
+                    if (result.errno != NativeConstants.EAGAIN) result.throwErrno("eventfd completion signal")
                 }
             }
+        } finally {
+            leave()
         }
     }
 
     override fun drain() {
-        while (!closed.get()) {
-            when (val result = engine.memory.read(fd, readBuffer, COUNTER_BYTES)) {
-                is LinuxNative.SyscallResult.Success -> {
-                    check(result.value == COUNTER_BYTES) {
-                        "eventfd completion drain short read: ${result.value}"
+        if (!enter()) return
+        try {
+            while (true) {
+                when (val result = engine.memory.read(fd, readBuffer, COUNTER_BYTES)) {
+                    is LinuxNative.SyscallResult.Success -> {
+                        check(result.value == COUNTER_BYTES) { "eventfd completion drain short read: ${result.value}" }
+                        check(readBuffer.readLong(0L) > 0L) { "eventfd completion drain returned zero" }
                     }
-                    check(readBuffer.readLong(0L) > 0L) { "eventfd completion drain returned zero" }
-                }
-                is LinuxNative.SyscallResult.Error -> {
-                    if (result.errno == NativeConstants.EAGAIN) return
-                    result.throwErrno("eventfd completion drain")
+                    is LinuxNative.SyscallResult.Error -> {
+                        if (result.errno == NativeConstants.EAGAIN) return
+                        result.throwErrno("eventfd completion drain")
+                    }
                 }
             }
+        } finally {
+            leave()
+        }
+    }
+
+    private fun enter(): Boolean =
+        synchronized(gate) {
+        if (phase != Phase.OPEN) return false
+        users = Math.addExact(users, 1)
+        true
+    }
+
+    private fun leave() {
+        synchronized(gate) {
+            check(users > 0)
+            users--
         }
     }
 
     override fun close() {
-        if (closed.compareAndSet(false, true)) {
-            try {
-                when (val result = engine.fileSystem.close(fd)) {
-                    is LinuxNative.SyscallResult.Success -> Unit
-                    is LinuxNative.SyscallResult.Error -> result.throwErrno("close eventfd completion wakeup")
+        when (val outcome = retire()) {
+            SessionRetirement.Complete -> Unit
+            SessionRetirement.Pending -> error("eventfd completion close is pending")
+            is SessionRetirement.Unknown -> throw outcome.failure
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // retain the exact dispatched close or arena failure before publication
+    override fun retire(): SessionRetirement {
+        val prior = synchronized(gate) {
+            when (phase) {
+                Phase.COMPLETE -> SessionRetirement.Complete
+                Phase.UNKNOWN -> SessionRetirement.Unknown(checkNotNull(failure))
+                Phase.IN_FLIGHT -> SessionRetirement.Pending
+                Phase.OPEN, Phase.CLOSING -> {
+                    phase = Phase.CLOSING
+                    if (users != 0) {
+                        SessionRetirement.Pending
+                    } else {
+                        phase = Phase.IN_FLIGHT
+                        null
+                    }
                 }
-            } finally {
-                FileDescriptor.closedView(fd)
-                arena.close()
             }
+        }
+        if (prior != null) return prior
+        return try {
+            when (val result = engine.fileSystem.close(fd)) {
+                is LinuxNative.SyscallResult.Success -> fd.markClosed()
+                is LinuxNative.SyscallResult.Error -> result.throwErrno("close eventfd completion wakeup")
+            }
+            arena.close()
+            synchronized(gate) { phase = Phase.COMPLETE }
+            SessionRetirement.Complete
+        } catch (problem: Throwable) {
+            synchronized(gate) {
+                failure = problem
+                phase = Phase.UNKNOWN
+            }
+            SessionRetirement.Unknown(problem)
         }
     }
 

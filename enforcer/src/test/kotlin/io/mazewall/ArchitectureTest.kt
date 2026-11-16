@@ -53,6 +53,53 @@ class MazewallProductionLocations : LocationProvider {
     importOptions = [ImportOption.DoNotIncludeTests::class, DoNotIncludeCompiledTestOutputs::class],
 )
 class ArchitectureTest {
+    private class UnrelatedCarrierCatch {
+        fun unrelated() {
+            try {
+                error("negative control")
+            } catch (failure: Throwable) {
+                check(failure.message == "negative control")
+            }
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `carrier helper exception does not exempt unrelated generic catches`() {
+        val classes = com.tngtech.archunit.core.importer
+            .ClassFileImporter()
+            .importClasses(UnrelatedCarrierCatch::class.java)
+        org.junit.jupiter.api
+            .assertThrows<AssertionError> { noGenericExceptionCatchingInEnforcer(classes) }
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `prepared Landlock ownership choices are closed`() {
+        val ownership = Class.forName("io.mazewall.landlock.PreparedLandlock\$ResourceOwnership")
+        org.junit.jupiter.api.Assertions
+            .assertEquals(setOf("Owned", "Borrowed"), ownership.enumConstants.map { (it as Enum<*>).name }.toSet())
+    }
+
+    @ArchTest
+    val retainedRulesetStoreHasNoCalls =
+        methods()
+            .that()
+            .areDeclaredInClassesThat()
+            .haveFullyQualifiedName("io.mazewall.landlock.PreparedLandlock")
+            .and()
+            .haveName("retainAcquiredRuleset")
+            .should(object : com.tngtech.archunit.lang.ArchCondition<com.tngtech.archunit.core.domain.JavaMethod>("be private and call-free") {
+                override fun check(
+                    item: com.tngtech.archunit.core.domain.JavaMethod,
+                    events: com.tngtech.archunit.lang.ConditionEvents,
+                ) {
+                    val valid = com.tngtech.archunit.core.domain.JavaModifier.PRIVATE in item.modifiers && item.callsFromSelf.isEmpty()
+                    events.add(
+                        com.tngtech.archunit.lang
+                        .SimpleConditionEvent(item, valid, "${item.fullName} must be a private call-free store"),
+                    )
+                }
+            })
+
     @ArchTest
     fun supervisorRouteHelpersMustNotLeakOutsideTheirPackage(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         listOf(
@@ -375,6 +422,11 @@ class ArchitectureTest {
             .and()
             .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.PreparedPath\$Companion")
+            // Exact-object reopen rolls back its readable acquisition and rethrows the original
+            // metadata failure; OwnedProcFdReopenProbeTest checks the retained close failure.
+            .and()
+            .areDeclaredInClassesThat()
+            .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.OwnedProcFdReopen")
             .and()
             .areDeclaredInClassesThat()
             .doNotHaveFullyQualifiedName("io.mazewall.ffi.internal.ImplementationArtifact\$Companion")
@@ -405,6 +457,222 @@ class ArchitectureTest {
                     item: com.tngtech.archunit.core.domain.JavaMethod,
                     events: com.tngtech.archunit.lang.ConditionEvents,
                 ) {
+                    // This exact carrier rollback boundary retains Unknown and original fatal failures.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.ManagedRuntimeKt" &&
+                        item.name == "releaseCarrierHelper" &&
+                        item.rawParameterTypes.map { it.name } == listOf("io.mazewall.enforcer.internal.execution.ScopingPreparation\$Retained") &&
+                        item.rawReturnType.name == "kotlin.Pair"
+                    ) {
+                        return
+                    }
+                    // This exact close boundary records the original uncertain typed owner and
+                    // Throwable before its caller reports the failure, including fatal JVM errors.
+                    if (item.owner.name == "io.mazewall.ffi.internal.PreparedPath\$HelperSlot" &&
+                        item.name == "closeOwned" &&
+                        item.rawParameterTypes.isEmpty() &&
+                        item.rawReturnType.name == "io.mazewall.ffi.internal.PreparedPath\$HelperSlot\$CloseFailure"
+                    ) {
+                        return
+                    }
+                    // This exact construction boundary attaches the retained staging owner before
+                    // quiescence and rethrows the original Throwable, including allocation failure.
+                    if (item.owner.name == "io.mazewall.ffi.internal.OwnedStackScopingBootstrap\$Companion" &&
+                        item.name == "captureAdmitted" &&
+                        item.rawParameterTypes.map { it.name } == listOf(
+                            "io.mazewall.enforcer.api.execution.ManagedRuntime",
+                            "io.mazewall.enforcer.internal.execution.ScopingPreparation",
+                            "io.mazewall.ffi.internal.CaptureInputs",
+                            "io.mazewall.platform.native.NativeStackContexts",
+                            "kotlin.jvm.functions.Function1",
+                            "kotlin.jvm.functions.Function1",
+                        )
+                    ) {
+                        return
+                    }
+                    // The reviewed-input boundary records pre-delegation failure before rethrowing it.
+                    if (item.owner.name == "io.mazewall.ffi.internal.OwnedStackScopingBootstrap\$Companion" &&
+                        item.name == "prepare\$io_mazewall_enforcer" &&
+                        item.rawReturnType.name == "io.mazewall.platform.native.LiveSetup" &&
+                        item.rawParameterTypes.map { it.name } == listOf(
+                            "io.mazewall.enforcer.api.execution.ManagedRuntime",
+                            "io.mazewall.enforcer.api.ReviewedOperationArtifact",
+                            "io.mazewall.enforcer.api.execution.DomainLimits",
+                            "io.mazewall.enforcer.api.execution.PreparedOperationResources",
+                            "java.nio.file.Path",
+                            "io.mazewall.ffi.internal.LiveStackBootstrap\$LiveDeploymentIdentity",
+                            "java.util.List",
+                            "java.util.List",
+                            "java.util.List",
+                            "io.mazewall.enforcer.api.StacktraceScopingPolicy",
+                        )
+                    ) {
+                        return
+                    }
+                    // Checked construction retains its original owner and preserves fatal cleanup failures.
+                    if (item.owner.name == "io.mazewall.ffi.internal.OwnedStackScopingBootstrap\$Companion") {
+                        val parameters = item.rawParameterTypes.map { it.name }
+                        val exact = when (item.name) {
+                            "prepareChecked" ->
+                                item.rawReturnType.name == "io.mazewall.platform.native.LiveSetup" &&
+                                parameters == listOf(
+                                "io.mazewall.enforcer.api.execution.ManagedRuntime",
+                                "io.mazewall.enforcer.api.ReviewedOperationArtifact",
+                                "io.mazewall.enforcer.api.execution.DomainLimits",
+                                "io.mazewall.enforcer.api.execution.PreparedOperationResources",
+                                "io.mazewall.ffi.internal.CheckedBootstrapRequest",
+                                "java.util.List",
+                                "java.util.List",
+                                "java.util.List",
+                                "io.mazewall.enforcer.api.StacktraceScopingPolicy",
+                                "io.mazewall.ffi.internal.CheckedObservations",
+                            )
+                            "retainUnpublishedChecked" ->
+                                item.rawReturnType.name == "java.lang.Throwable" &&
+                                    parameters == listOf(
+                                        "io.mazewall.enforcer.api.execution.ManagedRuntime",
+                                        "io.mazewall.enforcer.internal.execution.ScopingPreparation",
+                                        "io.mazewall.platform.native.InstallationOwner",
+                                        "boolean",
+                                        "boolean",
+                                        "java.lang.Throwable",
+                                        "kotlin.jvm.functions.Function0",
+                                    )
+                            "captureCheckedAdmitted" ->
+                                item.rawReturnType.name == "io.mazewall.platform.native.LiveSetup" &&
+                                parameters == listOf(
+                                "io.mazewall.enforcer.api.execution.ManagedRuntime",
+                                "io.mazewall.enforcer.internal.execution.ScopingPreparation",
+                                "io.mazewall.ffi.internal.CaptureInputs",
+                                "io.mazewall.platform.native.LiveSetup",
+                                "kotlin.jvm.functions.Function0",
+                                "kotlin.jvm.functions.Function0",
+                            )
+                            else -> false
+                        }
+                        if (exact) return
+                    }
+                    // Checked operations retain ambiguous native and attachment failures on the original owner.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.ManagedRuntime\$CheckedOperationsImpl") {
+                        val parameters = item.rawParameterTypes.map { it.name }
+                        val exact = when (item.name) {
+                            "reserveCheckedOwner-S1DHTnA" ->
+                                item.rawReturnType.name == "io.mazewall.platform.native.LiveSetup" &&
+                                    parameters == listOf(
+                                        "io.mazewall.enforcer.internal.execution.ScopingPreparation",
+                                        "io.mazewall.platform.native.NativeStackContexts",
+                                        "int",
+                                    )
+                            "validatePublishedOwner" ->
+                                item.rawReturnType.name == "void" &&
+                                    parameters == listOf(
+                                        "io.mazewall.enforcer.internal.execution.ScopingPreparation",
+                                        "io.mazewall.platform.native.InstallationOwner",
+                                        "io.mazewall.platform.native.NativeStackContexts",
+                                    )
+                            "abandon" ->
+                                item.rawReturnType.name == "void" &&
+                                    parameters == listOf(
+                                        "io.mazewall.enforcer.internal.execution.ScopingPreparation",
+                                        "java.lang.Throwable",
+                                        "kotlin.jvm.functions.Function0",
+                                    )
+                            else -> false
+                        }
+                        if (exact) return
+                    }
+                    // The original manager records rollback failures before reconciliation or retry.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.LegacyAcquisition" &&
+                        item.name == "runCleanupStage" &&
+                        item.rawReturnType.name == "java.lang.Error" &&
+                        item.rawParameterTypes.map { it.name } == listOf("boolean")
+                    ) {
+                        return
+                    }
+                    // Canonical acquisition publishes the original failure before preserving its disposition.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.ManagedRuntime\$CanonicalAcquisition") {
+                        val parameters = item.rawParameterTypes.map { it.name }
+                        val exact = when (item.name) {
+                            "start" ->
+                                item.rawReturnType.name == "io.mazewall.enforcer.api.execution.ManagedRuntime" &&
+                                parameters == listOf("java.time.Duration", "java.time.Duration")
+                            "retire" ->
+                                item.rawReturnType.name == "io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionStatus" &&
+                                parameters == listOf("java.time.Duration")
+                            // Helper startup owns rollback failures before they escape to the caller.
+                            "startHelper" ->
+                                item.rawReturnType.name == "io.mazewall.enforcer.internal.supervisor.SupervisorContext" &&
+                                parameters == listOf("io.mazewall.enforcer.internal.supervisor.SupervisorDaemonManager")
+                            // Helper stop records unknown before returning or propagating a fatal failure.
+                            "retireStartedHelper" -> item.rawReturnType.name == "void" && parameters.isEmpty()
+                            "mergeHistory" -> item.rawReturnType.name == "void" && parameters.isEmpty()
+                            else -> false
+                        }
+                        if (exact) return
+                    }
+                    // The original manager task records its exact fatal or ordinary failure on its owner.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.ManagedRuntime\$RuntimeOperations" &&
+                        item.name == "canonicalSubmit\$lambda\$0" &&
+                        item.rawReturnType.name == "kotlin.Unit" &&
+                        item.rawParameterTypes.map { it.name } == listOf(
+                            "io.mazewall.enforcer.api.execution.ManagedRuntime\$RuntimeOperations",
+                            "java.lang.Object",
+                            "io.mazewall.enforcer.api.execution.ManagedRuntime\$CanonicalAcquisition",
+                        )
+                    ) {
+                        return
+                    }
+                    // These exact moved boundaries preserve the original owner and rethrow or record failures.
+                    val failureBoundary = "io.mazewall.enforcer.api.execution.ManagedRuntime\$ScopingFailureBoundary"
+                    if (item.owner.name == failureBoundary) {
+                        val parameters = item.rawParameterTypes.map { it.name }
+                        val preparation = "io.mazewall.enforcer.internal.execution.ScopingPreparation"
+                        val throwable = "java.lang.Throwable"
+                        val exact = when (item.name) {
+                            "executeScopingClaim" ->
+                                item.rawReturnType.name == "io.mazewall.enforcer.api.execution.InProcessDomain" &&
+                                parameters == listOf(
+                                    preparation,
+                                    "io.mazewall.enforcer.internal.execution.ScopingPreparation\$ClaimProgress",
+                                    "io.mazewall.enforcer.api.PolicyDefinition",
+                                    "io.mazewall.enforcer.api.execution.DomainLimits",
+                                    "io.mazewall.enforcer.api.execution.ScopingTestEffects",
+                                )
+                            "finishFailedScopingClaim" ->
+                                item.rawReturnType.name == throwable &&
+                                parameters == listOf(preparation, "io.mazewall.enforcer.internal.execution.OwnedDomain", throwable)
+                            "recordScopingWaitFailure" ->
+                                item.rawReturnType.name == throwable &&
+                                parameters == listOf(preparation, throwable, "kotlin.jvm.functions.Function0")
+                            "invokeWaitFailureObserver" ->
+                                item.rawReturnType.name == throwable &&
+                                parameters == listOf("kotlin.jvm.functions.Function0", throwable)
+                            else -> false
+                        }
+                        if (exact) return
+                    }
+                    // These exact carrier boundaries retain the original acquisition and rethrow fatal cleanup failures.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.LegacyAcquisition" && item.rawParameterTypes.isEmpty()) {
+                        if (item.name == "acquireAndCommit" && item.rawReturnType.name == "io.mazewall.enforcer.internal.execution.OwnedDomain") return
+                        if (item.name == "cleanup" && item.rawReturnType.name == "void") return
+                    }
+                    // Exact caller-owned acquisition and dispatched-close retention boundaries.
+                    if (item.owner.name == "io.mazewall.enforcer.api.execution.DirectResolutionCapture") {
+                        val parameters = item.rawParameterTypes.map { it.name }
+                        if (item.name == "capture" && item.rawReturnType.name == "void" && parameters == listOf("io.mazewall.enforcer.api.PolicyDefinition", "java.util.Set", "java.lang.Class")) return
+                        if (item.name == "prepare" &&
+                            item.rawReturnType.name == "io.mazewall.enforcer.api.execution.PreparedOperationResources" &&
+                            parameters == listOf("io.mazewall.enforcer.api.RuntimeProfile", "io.mazewall.enforcer.api.Policy", "java.lang.Class", "java.util.Set")
+                        ) {
+                                return
+                            }
+                        if (item.name == "retire" && item.rawReturnType.name == "io.mazewall.enforcer.api.execution.DirectResolutionCapture\$Retirement" && parameters.isEmpty()) return
+                        if (item.name == "retireDirect" &&
+                            item.rawReturnType.name == "void" &&
+                            parameters == listOf("io.mazewall.enforcer.api.execution.PreparedOperationResources", "io.mazewall.enforcer.api.execution.DirectClaimAction")
+                        ) {
+                                return
+                            }
+                    }
                     item.tryCatchBlocks.forEach { tryCatchBlock ->
                         tryCatchBlock.caughtThrowables.forEach { caughtException ->
                             val name = caughtException.name
@@ -692,6 +960,95 @@ class ArchitectureTest {
     @ArchTest
     fun sealedSecurityOutcomesHaveAClosedSubclassSet(allClasses: com.tngtech.archunit.core.domain.JavaClasses) {
         val expected = mapOf(
+            "io.mazewall.enforcer.internal.execution.LiveEndpointState" to setOf(
+                "io.mazewall.enforcer.internal.execution.LiveEndpointState\$NotInstalled",
+                "io.mazewall.enforcer.internal.execution.LiveEndpointState\$Installed",
+                "io.mazewall.enforcer.internal.execution.LiveEndpointState\$Lost",
+            ),
+            "io.mazewall.ffi.internal.RealNativeStackContexts\$BootstrapResult" to setOf(
+                "io.mazewall.ffi.internal.RealNativeStackContexts\$BootstrapResult\$Checked",
+                "io.mazewall.ffi.internal.RealNativeStackContexts\$BootstrapResult\$Refused",
+                "io.mazewall.ffi.internal.RealNativeStackContexts\$Companion\$CheckedImpl",
+            ),
+            "io.mazewall.ffi.internal.RealNativeStackContexts\$BootstrapResult\$Checked" to setOf(
+                "io.mazewall.ffi.internal.RealNativeStackContexts\$Companion\$CheckedImpl",
+            ),
+            "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State" to setOf(
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State\$Constructing",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State\$Ready",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State\$Claiming",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State\$DomainOwned",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State\$TransferredSettled",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State\$Retiring",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$State\$PreparedSettled",
+            ),
+            "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event" to setOf(
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$Reserved",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$Enrolled",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$Sealed",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$Publish",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$ConstructionFailed",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$ClaimRequested",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$ResourcesClaimed",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$LandlockPrepared",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$PrepareWaitFailed",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$DomainCommit",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$ClaimFailed",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$DomainSettled",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$CloseRequested",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$DrainRequested",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$ReleaseRequested",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Event\$ReleaseCompleted",
+            ),
+            "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect" to setOf(
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect\$Notify",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect\$SubmitRelease",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect\$SubmitClaim",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect\$ObserveClaim",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect\$ObserveDomain",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect\$FailDomain",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$Effect\$Reject",
+            ),
+            "io.mazewall.enforcer.internal.execution.ScopingPreparation\$PrepareRequest" to setOf(
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$PrepareRequest\$Awaiting",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$PrepareRequest\$Failed",
+            ),
+            "io.mazewall.enforcer.internal.execution.ScopingPreparation\$ObservationOrigin" to setOf(
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$ObservationOrigin\$Claim",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$ObservationOrigin\$Domain",
+            ),
+            "io.mazewall.enforcer.internal.execution.ScopingPreparation\$WaitObservation" to setOf(
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$WaitObservation\$Initial",
+                "io.mazewall.enforcer.internal.execution.ScopingPreparation\$WaitObservation\$HistoryObservation",
+            ),
+            "io.mazewall.enforcer.internal.execution.FrozenStackScoping" to setOf(
+                "io.mazewall.enforcer.internal.execution.FrozenStackScoping\$Legacy",
+                "io.mazewall.enforcer.internal.execution.FrozenStackScoping\$Live",
+            ),
+            "io.mazewall.enforcer.api.execution.ManagedRuntime\$CheckedOperations" to setOf(
+                "io.mazewall.enforcer.api.execution.ManagedRuntime\$CheckedOperationsImpl",
+            ),
+            "io.mazewall.platform.native.InstallationState" to setOf(
+                "io.mazewall.platform.native.InstallationState\$Staging",
+                "io.mazewall.platform.native.InstallationState\$Sealed",
+            ),
+            "io.mazewall.platform.native.LiveRead" to setOf(
+                "io.mazewall.platform.native.LiveRead\$Available",
+                "io.mazewall.platform.native.LiveRead\$Absent",
+                "io.mazewall.platform.native.LiveRead\$Incomplete",
+                "io.mazewall.platform.native.LiveRead\$Busy",
+                "io.mazewall.platform.native.LiveRead\$Stale",
+                "io.mazewall.platform.native.LiveRead\$Unsupported",
+            ),
+            "io.mazewall.platform.native.LiveSetup" to setOf(
+                "io.mazewall.platform.native.LiveSetup\$Ready",
+                "io.mazewall.platform.native.LiveSetup\$Refused",
+            ),
+            "io.mazewall.platform.native.LiveCompletion" to setOf(
+                "io.mazewall.platform.native.LiveCompletion\$Complete",
+                "io.mazewall.platform.native.LiveCompletion\$Pending",
+                "io.mazewall.platform.native.LiveCompletion\$Refused",
+            ),
             "io.mazewall.enforcer.api.CanonicalPolicyArtifact" to setOf(
                 "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Worker",
                 "io.mazewall.enforcer.api.CanonicalPolicyArtifact\$Process",
@@ -735,6 +1092,98 @@ class ArchitectureTest {
                 "io.mazewall.enforcer.internal.supervisor.SocketHelperRequest\$Prewarm",
                 "io.mazewall.enforcer.internal.supervisor.SocketHelperRequest\$Operation",
                 "io.mazewall.enforcer.internal.supervisor.SocketHelperRequest\$Authority",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Setup",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Control",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Root",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Read",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Result",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Denied",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Rejected",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Stop",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperProtocol\$Frame\$Retired",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedHelperState" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperState\$Unsealed",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperState\$Receiving",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperState\$Confining",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperState\$Ready",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperState\$Stopping",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperState\$Terminal",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedSetupResult" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedSetupResult\$Ready",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedSetupResult\$Rejected",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedHelperPreparation" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperPreparation\$Ready",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperPreparation\$Rejected",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedSessionState" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedSessionState\$Unreserved",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedSessionState\$SettingUp",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedSessionState\$ConfinedReady",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedSessionState\$Retiring",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedSessionState\$Retired",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.SocketHelperPool\$Work" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperPool\$Work\$Legacy",
+                "io.mazewall.enforcer.internal.supervisor.SocketHelperPool\$Work\$Confined",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedStage" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$SetupAccepted",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$RootAdopted",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$Quarantined",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$Forwarded",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$UpstreamAccepted",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$IntermediateCommitted",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$Done",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$Denied",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedStage\$Failed",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedRelayEvent" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedRelayEvent\$ParentFrame",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedRelayEvent\$StageCompleted",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedRelayEvent\$Tick",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedRelayEvent\$Cancel",
+            ),
+            "io.mazewall.platform.seccomp.daemon.PreludeOutcome" to setOf(
+                "io.mazewall.platform.seccomp.daemon.PreludeOutcome\$LegacyListener",
+                "io.mazewall.platform.seccomp.daemon.PreludeOutcome\$Handled",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$BeginSetup",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$OfferRoot",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$FinishSetup",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$BeginRead",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$ResultForwarded",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$UpstreamReceived",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$IntermediateClosed",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperJob\$Command\$Cancel",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$ParentFrame",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$SetupValidated",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$RootAdopted",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$Sealed",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$Opened",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$Denied",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$ResultSent",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$ReadCompleted",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$Stopped",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEvent\$Cancel",
+            ),
+            "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect" to setOf(
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$Send",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$Validate",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$ReceiveRoot",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$Seal",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$Open",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$SendResult",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$CommitResult",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$Stop",
+                "io.mazewall.enforcer.internal.supervisor.ConfinedHelperEffect\$Abort",
             ),
             "io.mazewall.ffi.networking.SeccompInstallState" to setOf(
                 "io.mazewall.ffi.networking.SeccompInstallState\$Pending",

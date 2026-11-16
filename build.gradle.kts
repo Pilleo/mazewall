@@ -1,8 +1,11 @@
 import io.mazewall.build.TriageArguments
 import io.mazewall.build.VerifyDependencyState
+import io.mazewall.build.VerifySecuritySnapshotTask
 import org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension
+import org.owasp.dependencycheck.gradle.tasks.Analyze
 import org.owasp.dependencycheck.gradle.tasks.ConfiguredTask
 import java.io.File
+import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
 import java.util.jar.JarFile
 
@@ -412,7 +415,22 @@ tasks.register<Test>("optionalIntegrationCheck") {
     outputs.cacheIf { false }
 }
 
+fun securityMode(name: String): Boolean =
+    when (providers.gradleProperty(name).orNull) {
+        null, "false" -> false
+        "true" -> true
+        else -> error("$name must be true or false")
+    }
+val securitySnapshotScan = securityMode("mazewall.securitySnapshotScan")
+val securitySnapshotUpdate = securityMode("mazewall.securitySnapshotUpdate")
+require(!(securitySnapshotScan && securitySnapshotUpdate)) { "Security snapshot scan and update modes cannot be combined" }
+
 dependencyCheck {
+    if (securitySnapshotScan) autoUpdate = false
+    if (securitySnapshotUpdate) {
+        nvd.validForHours.set(0)
+        nvd.resultsPerPage.set(500)
+    }
     failBuildOnCVSS = 7.0f
     format = "ALL"
     suppressionFile = "$rootDir/config/dependency-check/suppressions.xml"
@@ -434,11 +452,95 @@ dependencyCheck {
 tasks.withType<ConfiguredTask>().configureEach {
     val extension = project.extensions.getByType<DependencyCheckExtension>()
     data.directory.set(extension.data.directory)
+    if (securitySnapshotScan) autoUpdate.set(false)
+    if (securitySnapshotUpdate) {
+        nvd.validForHours.set(0)
+        nvd.resultsPerPage.set(500)
+    }
+}
+
+val scannerRuntime = ConfiguredTask::class.java.classLoader
+val scannerDefaults =
+    Properties().apply {
+        scannerRuntime.getResourceAsStream("dependencycheck.properties").use { input ->
+            requireNotNull(input) { "Missing scanner defaults" }
+            load(input)
+        }
+    }
+val h2Driver = Class.forName("org.h2.Driver", false, scannerRuntime)
+val securityData = extensions.getByType<DependencyCheckExtension>().data
+val verifySecuritySnapshot =
+    tasks.register<VerifySecuritySnapshotTask>("verifySecuritySnapshot") {
+        dataDirectory.set(securityData.directory)
+        username.set(securityData.username.orElse(scannerDefaults.getProperty("data.user")))
+        password.set(securityData.password.orElse(scannerDefaults.getProperty("data.password")))
+        connectionString.set(securityData.connectionString.orElse(scannerDefaults.getProperty("data.connection_string")))
+        driverName.set(securityData.driver.orElse(scannerDefaults.getProperty("data.driver_name")))
+        driverClasspath.from(
+            files(
+                h2Driver.protectionDomain.codeSource.location
+                    .toURI(),
+            ),
+        )
+    }
+
+if (securitySnapshotScan) {
+    val ownerPaths = listOf(":", ":platform", ":enforcer", ":profiler", ":portals:runtime", ":portals:worker", ":portals:codegen")
+    val excludedRoots = setOf(":demos", ":integrations", ":tools")
+    val actualSdk =
+        allprojects
+            .map { it.path }
+            .filter { path ->
+                excludedRoots.none { excluded -> path == excluded || path.startsWith("$excluded:") }
+            }.toSet()
+    check(actualSdk == (ownerPaths + ":portals").toSet()) { "Default SDK project set changed; classify scanner ownership" }
+    project(":portals").pluginManager.withPlugin("java") {
+        error("The portals parent now has Java configurations; classify scanner ownership")
+    }
+    project(":portals").configurations.all {
+        check(name !in setOf("compileClasspath", "runtimeClasspath")) {
+            "The portals parent now has production configurations; classify scanner ownership"
+        }
+    }
+    val rootExtension = extensions.getByType<DependencyCheckExtension>()
+    var previous: TaskProvider<Analyze>? = null
+    val ownerTasks =
+        ownerPaths.map { path ->
+            val owner = project(path)
+            if (path != ":") owner.pluginManager.apply("org.owasp.dependencycheck")
+            val task = owner.tasks.named<Analyze>("dependencyCheckAnalyze")
+            val preceding = previous
+            task.configure {
+                data.directory.set(rootExtension.data.directory)
+                autoUpdate.set(false)
+                scanConfigurations.set(rootExtension.scanConfigurations)
+                failBuildOnCVSS.set(rootExtension.failBuildOnCVSS)
+                failOnError.set(rootExtension.failOnError)
+                suppressionFile.set(rootExtension.suppressionFile)
+                format.set(rootExtension.format)
+                analyzers.ossIndex.enabled.set(false)
+                if (path == ":portals:codegen") analyzers.nodeAudit.yarnEnabled.set(false)
+                outputDir.set(owner.layout.buildDirectory.dir("reports"))
+                dependsOn(verifySecuritySnapshot)
+                if (preceding != null) mustRunAfter(preceding)
+            }
+            previous = task
+            if (path == ":") ":dependencyCheckAnalyze" else "$path:dependencyCheckAnalyze"
+        }
+    tasks.register("dependencyCheckSdk") {
+        group = "verification"
+        description = "Scans the production dependencies of the default SDK projects."
+        dependsOn(ownerTasks)
+    }
 }
 
 tasks.named("dependencyCheckAnalyze").configure {
-    onlyIf("NVD API Key is required for CI performance") {
-        System.getenv("CI") != "true" || !System.getenv("NVD_API_KEY").isNullOrBlank()
+    if (securitySnapshotScan) {
+        dependsOn(verifySecuritySnapshot)
+    } else {
+        onlyIf("NVD API Key is required for CI performance") {
+            System.getenv("CI") != "true" || !System.getenv("NVD_API_KEY").isNullOrBlank()
+        }
     }
 }
 

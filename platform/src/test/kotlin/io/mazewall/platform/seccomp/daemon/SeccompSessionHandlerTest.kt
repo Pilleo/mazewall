@@ -30,6 +30,45 @@ import org.junit.jupiter.api.Test
 
 class SeccompSessionHandlerTest {
     @Test
+    fun `fake wakeup unknown is retained and not closed again`() {
+        val failure = IllegalStateException("controlled wakeup close failure")
+        var closes = 0
+        val wakeup = object : SessionCompletionWakeup {
+            override val pollFd: Int = -1
+
+            override fun signal() = Unit
+
+            override fun drain() = Unit
+
+            override fun close() {
+                closes++
+                throw failure
+            }
+        }
+        val handler = SeccompSessionHandler(
+            TestFileDescriptors.replace(10),
+            TestFileDescriptors.replace(11),
+            object : SeccompNotifHandler {
+                context(arena: NativeArena) override fun beginNotification(
+                    notif: ManagedSegment,
+                    resp: ManagedSegment,
+                    listenerFd: FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>,
+                    socketFd: FileDescriptor<FileDescriptorRole.UnixSocket, FdState.Open, FdOwnership.Owned>,
+                    deadline: Deadline,
+                ): NotificationWork = error("unused")
+            },
+            engine = MockNativeEngine(),
+            socketManager = recordingSocketManager {},
+            providedCompletionWakeup = wakeup,
+        )
+        val first = kotlin.test.assertIs<SeccompCleanupOutcome.Incomplete>(handler.closeWithResult())
+        kotlin.test.assertSame(failure, first.failures.single())
+        val second = kotlin.test.assertIs<SeccompCleanupOutcome.Incomplete>(handler.closeWithResult())
+        kotlin.test.assertSame(failure, second.failures.single())
+        assertEquals(1, closes)
+    }
+
+    @Test
     fun `only a lone kernel producer HUP certifies normal stream completion`() {
         val hup = NativeConstants.POLLHUP.toInt()
         val errors = listOf(NativeConstants.POLLERR.toInt(), NativeConstants.POLLNVAL.toInt(), hup or NativeConstants.POLLERR.toInt(), hup or NativeConstants.POLLIN.toInt())
@@ -156,6 +195,7 @@ class SeccompSessionHandlerTest {
             assertEquals(LoopAction.Continue, with(arena) { handler.handleActiveListener(pollFds) })
         }
 
+        kotlin.test.assertFalse(completionWakeup is SessionCompletionWakeup, "work receives only signal authority")
         assertEquals(1, wakeup.drainCount)
         assertEquals(0, replyAttempts)
         assertEquals(1, readyReplies)

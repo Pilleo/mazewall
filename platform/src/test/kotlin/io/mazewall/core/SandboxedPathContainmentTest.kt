@@ -68,11 +68,7 @@ class SandboxedPathContainmentTest {
     ) {
         val real = Files.createDirectories(tempDir.resolve("real"))
         val link = tempDir.resolve("link")
-        try {
-            Files.createSymbolicLink(link, real)
-        } catch (e: UnsupportedOperationException) {
-            return // filesystem without symlink support: nothing to assert
-        }
+        Files.createSymbolicLink(link, real)
         val viaLink = SandboxedPath.of(link.toString(), true).resolveReal()
         val viaReal = SandboxedPath.of(real.toString(), true)
         assertEquals(viaReal, viaLink, "resolveReal must collapse the symlink to its target")

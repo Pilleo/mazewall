@@ -69,6 +69,18 @@ internal object BpfFilter {
         return BpfStaticVerifier.verify(unverified)
     }
 
+    private fun validateSpawnComposition(
+        defaultAction: SeccompAction,
+        actions: Map<Int, SeccompAction>,
+        spawnSyscalls: List<Int>,
+        profilingMode: Boolean,
+    ) {
+        val auditDefault = defaultAction == SeccompAction.ACT_LOG || defaultAction is SeccompAction.ACT_TRACE
+        require(profilingMode || !auditDefault || spawnSyscalls.all { it in actions }) {
+            "Supervised exec cannot compose with inherited LOG or TRACE spawn action"
+        }
+    }
+
     internal fun getSyscallInspectionPipeline(): SyscallInspectionPipeline {
         return DefaultSyscallInspectionPipeline(
             listOf(
@@ -150,9 +162,15 @@ internal object BpfFilter {
 
         if (isExecSupervised) {
             val spawnSyscalls = listOf(arch.fork, arch.vfork, arch.clone).filter { it >= 0 }
+            validateSpawnComposition(defaultAction, effectiveSyscallActions, spawnSyscalls, profilingMode)
             for (nr in spawnSyscalls) {
                 // Only upgrade if not already explicitly set to something else by the user
-                if (effectiveSyscallActions[nr] == null || effectiveSyscallActions[nr] == SeccompAction.ACT_ALLOW) {
+                val existing = effectiveSyscallActions[nr]
+                val inheritedDenial = when (defaultAction) {
+                    SeccompAction.ACT_KILL_PROCESS, SeccompAction.ACT_KILL_THREAD, SeccompAction.ACT_TRAP, is SeccompAction.ACT_ERRNO -> true
+                    SeccompAction.ACT_ALLOW, SeccompAction.ACT_NOTIFY, SeccompAction.ACT_LOG, is SeccompAction.ACT_TRACE -> false
+                }
+                if (existing == SeccompAction.ACT_ALLOW || existing == null && (profilingMode || !inheritedDenial)) {
                     effectiveSyscallActions[nr] = SeccompAction.ACT_NOTIFY
                 }
             }

@@ -45,6 +45,43 @@ internal class SeccompSessionHandler(
     private val buffers: SeccompSessionBuffers
     private val completionWakeup: SessionCompletionWakeup = providedCompletionWakeup ?: EventFdCompletionWakeup.create(engine)
 
+    private class WakeupSignal(
+        private val wakeup: SessionCompletionWakeup,
+    ) : NotificationCompletionWakeup {
+        override fun signal() = wakeup.signal()
+    }
+
+    private val completionSignal: NotificationCompletionWakeup = WakeupSignal(completionWakeup)
+    private val retirementGate = Any()
+    private var completionRetirement: SessionRetirement? = null
+    private var retirementInFlight = false
+    private val closeGate = Any()
+    private var closeInFlight = false
+
+    internal fun completionRetirementSnapshot(): SessionRetirement? = synchronized(retirementGate) { completionRetirement }
+
+    @Suppress("TooGenericExceptionCaught") // retain any fake or native wakeup failure as unknown
+    internal fun retireCompletion(): SessionRetirement {
+        synchronized(retirementGate) {
+            when (val current = completionRetirement) {
+                SessionRetirement.Complete, is SessionRetirement.Unknown -> return current
+                SessionRetirement.Pending, null -> Unit
+            }
+            if (retirementInFlight) return SessionRetirement.Pending
+            retirementInFlight = true
+        }
+        val outcome = try {
+            completionWakeup.retire()
+        } catch (failure: Throwable) {
+            SessionRetirement.Unknown(failure)
+        }
+        synchronized(retirementGate) {
+            completionRetirement = outcome
+            retirementInFlight = false
+        }
+        return outcome
+    }
+
     init {
         configureListenerNonblocking()
         buffers = SeccompSessionBuffers.acquire()
@@ -88,23 +125,41 @@ internal class SeccompSessionHandler(
     }
 
     @io.mazewall.platform.lifecycle.MazewallInternal
-    @Synchronized
     public fun closeWithResult(): SeccompCleanupOutcome = closeWithResult { }
 
-    @Synchronized
-    internal fun closeWithResult(recordOutcome: (SeccompCleanupOutcome) -> Unit): SeccompCleanupOutcome =
-        SeccompCleanupInterpreter.closeResources(
-        listOf(
-        {
-            isTerminated = true
-            val current = pending
-            if (current != null) denyAndTerminate(current)
-        },
-        { completionWakeup.close() },
-        { buffers.close() },
-        ),
-        recordOutcome,
-    )
+    internal fun closeWithResult(recordOutcome: (SeccompCleanupOutcome) -> Unit): SeccompCleanupOutcome {
+        synchronized(closeGate) {
+            if (closeInFlight) return SeccompCleanupOutcome.Incomplete(emptyList(), emptyList())
+            closeInFlight = true
+        }
+        try {
+        var pendingRetirement = false
+
+        fun withPending(outcome: SeccompCleanupOutcome): SeccompCleanupOutcome =
+            if (pendingRetirement && outcome is SeccompCleanupOutcome.Complete) SeccompCleanupOutcome.Incomplete(emptyList(), emptyList()) else outcome
+        val outcome = SeccompCleanupInterpreter.closeResources(
+            listOf(
+                {
+                    isTerminated = true
+                    val current = pending
+                    if (current != null) denyAndTerminate(current)
+                },
+                {
+                    when (val retirement = retireCompletion()) {
+                        SessionRetirement.Complete -> Unit
+                        SessionRetirement.Pending -> pendingRetirement = true
+                        is SessionRetirement.Unknown -> throw retirement.failure
+                    }
+                },
+                { buffers.close() },
+            ),
+            { recordOutcome(withPending(it)) },
+        )
+        return withPending(outcome)
+        } finally {
+            synchronized(closeGate) { closeInFlight = false }
+        }
+    }
 
     @Suppress("UseCheckOrError")
     context(arena: NativeArena) public fun handleActiveListener(pollFds: ManagedSegment): LoopAction {
@@ -175,7 +230,7 @@ internal class SeccompSessionHandler(
                 } else {
                     current.work = notifHandler.beginNotification(notif, resp, listenerFd, socketFd, current.deadline)
                 }
-                checkNotNull(current.work).bindCompletionWakeup(completionWakeup)
+                checkNotNull(current.work).bindCompletionWakeup(completionSignal)
             } catch (expectedNotificationFailure: Throwable) {
                 terminateAfterFailure(current, expectedNotificationFailure)
             }

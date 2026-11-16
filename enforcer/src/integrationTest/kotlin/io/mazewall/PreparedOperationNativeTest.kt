@@ -3,7 +3,11 @@ package io.mazewall.enforcer.api
 import io.mazewall.enforcer.api.execution.DomainLimits
 import io.mazewall.enforcer.api.execution.DrainReport
 import io.mazewall.enforcer.api.execution.ManagedRuntime
+import io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionOwner
+import io.mazewall.enforcer.api.execution.ManagedRuntimeAcquisitionStatus
 import io.mazewall.enforcer.api.execution.PreparedOperationResources
+import io.mazewall.enforcer.api.execution.PreparedResolutionOwner
+import io.mazewall.enforcer.api.execution.PreparedResolutionRetirement
 import io.mazewall.ffi.NativeConstants
 import io.mazewall.platform.fd.FdOwnership
 import io.mazewall.platform.fd.FdState
@@ -46,6 +50,20 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
     @Test
     @EnabledIfLinuxAndSupported
     fun `actual reviewed implementation owns exact recipes through physical retirement`() = withFixture("verifyBoundOperation")
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `public direct Legacy owner runs allowed and denied actions in a physically retired worker`() {
+        assumeLandlockAbiAtLeast(3)
+        withFixture("verifyPublicDirectLegacy")
+    }
+
+    @Test
+    @EnabledIfLinuxAndSupported
+    fun `canonical acquisition owner installs baseline and retires actual Legacy worker`() {
+        assumeLandlockAbiAtLeast(3)
+        withFixture("verifyCanonicalOwnerDirectLegacy")
+    }
 
     @Test
     @EnabledIfLinuxAndSupported
@@ -356,6 +374,144 @@ class PreparedOperationNativeTest : BaseIntegrationTest() {
         val binding = OperationBinding("reviewed-operation", OperationAdapter.CALLABLE, resources.implementationSha256, resources.resourceGeneration, mapOf("entryPoint" to "call()I"))
         val document = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy), emptySet(), emptyMap())
         return ReviewedOperationArtifact.load(document.toJson(), TrustedPolicyReview("external-review", document.sha256(), emptySet()), binding)
+    }
+
+    fun verifyPublicDirectLegacy(rootName: String) {
+        val root = Path.of(rootName)
+        val jar = root.resolve("operation.jar")
+        val template = root.resolve("template.txt")
+        val privateFile = root.resolve("private.txt")
+        val timeout = Duration.ofSeconds(10)
+        val caller = Thread.currentThread()
+        assertEquals("private", Files.readString(privateFile))
+        URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
+            val selected = loader.loadClass("fixture.Operation")
+            val target = selected.getConstructor().newInstance()
+            val call = selected.getMethod("call")
+            val policy = WorkerPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .allowFsRead(jar, template)
+                .build()
+            PreparedResolutionOwner.create().use { owner ->
+                val resources = owner.resolve(RuntimeProfile.HOTSPOT_JIT, policy, selected, setOf(template))
+                val binding = OperationBinding("public-direct-operation", OperationAdapter.CALLABLE, resources.implementationSha256, resources.resourceGeneration, mapOf("entryPoint" to "call()I"))
+                val document = OperationPolicyDocument(binding, CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy), emptySet(), emptyMap())
+                val artifact = ReviewedOperationArtifact.load(document.toJson(), TrustedPolicyReview("external-test-review", document.sha256(), emptySet()), binding)
+                val worker = AtomicReference<Thread>()
+                val entered = AtomicBoolean()
+                val completed = AtomicBoolean()
+                ManagedRuntime.open(RuntimeProfile.HOTSPOT_JIT, Policy.NO_EXEC_HOTSPOT, timeout, timeout).use { runtime ->
+                    val domain = runtime.prepare(artifact, DomainLimits(1, 1), resources)
+                    owner.close()
+                    resources.close()
+                    assertEquals(PreparedResolutionRetirement.Transferred(null), owner.retirement())
+                    assertEquals(
+                        42,
+                        Mazewall.callContained(
+                            runtime,
+                            domain,
+                            Callable {
+                                val current = Thread.currentThread()
+                                worker.set(current)
+                                entered.set(true)
+                                assertFalse(current.isVirtual)
+                                assertTrue(current !== caller)
+                                assertEquals("template", Files.readString(template))
+                                assertFailsWith<AccessDeniedException> { Files.readString(privateFile) }
+                                val result = call.invoke(target)
+                                completed.set(true)
+                                result
+                            },
+                        ),
+                    )
+                    assertTrue(entered.get())
+                    assertTrue(completed.get())
+                    assertEquals(DrainReport.Complete, runtime.drain(timeout))
+                    assertFalse(checkNotNull(worker.get()).isAlive)
+                }
+            }
+        }
+    }
+
+    fun verifyCanonicalOwnerDirectLegacy(rootName: String) {
+        val root = Path.of(rootName)
+        val jar = root.resolve("operation.jar")
+        val template = root.resolve("template.txt")
+        val privateFile = root.resolve("private.txt")
+        val timeout = Duration.ofSeconds(10)
+        val caller = Thread.currentThread()
+        assertEquals("private", Files.readString(privateFile))
+        URLClassLoader(arrayOf(jar.toUri().toURL()), ClassLoader.getPlatformClassLoader()).use { loader ->
+            val selected = loader.loadClass("fixture.Operation")
+            val target = selected.getConstructor().newInstance()
+            val call = selected.getMethod("call")
+            val policy = WorkerPolicyBuilder
+                .denyList(RuntimeProfile.HOTSPOT_JIT)
+                .allowFsRead(jar, template)
+                .build()
+            PreparedResolutionOwner.create().use { resolutionOwner ->
+                val resources = resolutionOwner.resolve(RuntimeProfile.HOTSPOT_JIT, policy, selected, setOf(template))
+                val binding = OperationBinding(
+                    "canonical-direct-operation",
+                    OperationAdapter.CALLABLE,
+                    resources.implementationSha256,
+                    resources.resourceGeneration,
+                    mapOf("entryPoint" to "call()I"),
+                )
+                val document = OperationPolicyDocument(
+                    binding,
+                    CanonicalPolicyArtifact.worker(RuntimeProfile.HOTSPOT_JIT, policy),
+                    emptySet(),
+                    emptyMap(),
+                )
+                // This is synthetic fixture authority, not an independent deployment review.
+                val artifact = ReviewedOperationArtifact.load(
+                    document.toJson(),
+                    TrustedPolicyReview("external-test-review", document.sha256(), emptySet()),
+                    binding,
+                )
+                val worker = AtomicReference<Thread>()
+                val entered = AtomicBoolean()
+                val completed = AtomicBoolean()
+                ManagedRuntimeAcquisitionOwner.create().use { acquisitionOwner ->
+                    val runtime = acquisitionOwner.start(timeout, timeout)
+                    assertEquals(ManagedRuntimeAcquisitionStatus.Active, acquisitionOwner.status())
+                    val domain = runtime.prepare(artifact, DomainLimits(1, 1), resources)
+                    resolutionOwner.close()
+                    resources.close()
+                    assertEquals(PreparedResolutionRetirement.Transferred(null), resolutionOwner.retirement())
+
+                    assertEquals(
+                        42,
+                        Mazewall.callContained(
+                            runtime,
+                            domain,
+                            Callable {
+                                val current = Thread.currentThread()
+                                worker.set(current)
+                                entered.set(true)
+                                assertFalse(current.isVirtual)
+                                assertTrue(current !== caller)
+                                assertEquals("template", Files.readString(template))
+                                assertFailsWith<AccessDeniedException> { Files.readString(privateFile) }
+                                val result = call.invoke(target)
+                                completed.set(true)
+                                result
+                            },
+                        ),
+                    )
+                    assertTrue(entered.get())
+                    assertTrue(completed.get())
+                    assertEquals(ManagedRuntimeAcquisitionStatus.Complete(null), acquisitionOwner.retire(timeout))
+                    assertFalse(checkNotNull(worker.get()).isAlive)
+                    assertEquals(ManagedRuntimeAcquisitionStatus.Complete(null), acquisitionOwner.status())
+                    assertEquals(ManagedRuntimeAcquisitionStatus.Complete(null), acquisitionOwner.retire(timeout))
+                    acquisitionOwner.close()
+                    acquisitionOwner.close()
+                    assertEquals(ManagedRuntimeAcquisitionStatus.Complete(null), acquisitionOwner.status())
+                }
+            }
+        }
     }
 
     fun verifyBoundOperation(rootName: String) {

@@ -27,6 +27,7 @@ public final class VerificationActionsTest {
             BtfRelocationFunctionalTest.verify(rootBuild.getParent());
             NativeTestDiscoveryFunctionalTest.verify(rootBuild.getParent());
             CoreLaneFunctionalTest.verify(rootBuild.getParent());
+            ConfinedHelperLaneFunctionalTest.verify(rootBuild.getParent());
         } catch (Exception failure) {
             throw new AssertionError("Relocatable producer compilation failed", failure);
         }
@@ -57,6 +58,11 @@ public final class VerificationActionsTest {
         equal(true, malformedRejected);
         verifiesFreshJvmClassMetadata();
         CiCachePolicyTest.run();
+        try {
+            SecuritySnapshotVerificationFunctionalTest.verify();
+        } catch (Exception failure) {
+            throw new AssertionError("Security snapshot verifier contract failed", failure);
+        }
         VerificationWorkflowInputFunctionalTest.verify(rootBuild.getParent());
         CiCacheKeyFunctionalTest.verify(rootBuild.getParent());
         PitestLimitsFunctionalTest.verify(rootBuild.getParent());
