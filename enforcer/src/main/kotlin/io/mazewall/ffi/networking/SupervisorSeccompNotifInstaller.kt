@@ -41,7 +41,7 @@ internal object SupervisorSeccompNotifInstaller {
     private fun synchronizeProcessFilter(
         native: NativeEngine,
         arch: Arch,
-        dummyBpf: List<BpfInstruction>,
+        dummyBpf: BpfProgram<BpfStatus.Verified>,
         installationGate: SeccompInstallationGate,
     ) {
         val tsyncRes = ScopedBpfProgram.withProgram(dummyBpf, native) { dummyProg ->
@@ -377,13 +377,7 @@ internal object SupervisorSeccompNotifInstaller {
         val arch = Arch.current()
 
         // Pre-charge BpfProgram classloading to avoid deadlocks under active seccomp filters
-        val dummyBpf = if (processWide) {
-            BpfProgram.dsl(arch) { allow() }.instructions
-        } else {
-            // Also build a dummy program unconditionally to pre-charge classloading
-            BpfProgram.dsl(arch) { allow() }.instructions
-            null
-        }
+        val dummyBpf = BpfStaticVerifier.verify(BpfProgram.dsl(arch) { allow() }).takeIf { processWide }
 
         val handshake = SeccompInstallHandshake(onFilterApplied)
         val listenerFdVal: AtomicReference<FileDescriptor<FileDescriptorRole.SeccompNotif, FdState.Open, FdOwnership.Owned>?> =
@@ -407,7 +401,7 @@ internal object SupervisorSeccompNotifInstaller {
             handshake.checkActive()
 
             // Install seccomp user notifier filter (applied to the current tracee thread)
-            val r = ScopedBpfProgram.withProgram(filter.instructions, native) { prog ->
+            val r = ScopedBpfProgram.withProgram(filter, native) { prog ->
                 installationGate.commit {
                     native.raw.syscall(
                         arch.seccompSyscallNumber.toLong(),

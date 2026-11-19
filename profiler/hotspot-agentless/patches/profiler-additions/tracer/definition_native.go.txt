@@ -1,0 +1,310 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"fmt"
+	"runtime"
+	"sync"
+	"time"
+	"unsafe"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"golang.org/x/sys/unix"
+)
+
+const traceDefinitionConfigMap = "trace_definition_config"
+
+// Private schema-2 mirrors; their existence does not establish native ownership.
+type reportProducerConfig struct {
+	Schema, Enabled, PID, Reserved uint32
+	Birth, Generation uint64
+}
+
+type reportPIDCounts struct {
+	Entered, Returned, Active uint64
+	Terminal [4]uint64
+	TokenAttempted, TokenSucceeded, TokenFailed, ResetBypass uint64
+	PIDAttempted, PIDInserted, PIDCoalesced, PIDFailed uint64
+	ResetAttempted, ResetSucceeded, ResetNotFound, ResetFailed uint64
+}
+
+type reportTriggerCounts struct {
+	Entered, Returned, Active uint64
+	LatchAccepted, LatchInhibited, LatchFailed uint64
+	OutputAttempted, OutputSubmitted, OutputFailed uint64
+}
+
+type reportProducerCounts struct {
+	PID [4]reportPIDCounts
+	Trigger [3]reportTriggerCounts
+	Errors uint64
+}
+
+type reportProducerMapFacts struct {
+	Type, ID, KeySize, ValueSize, MaxEntries, Flags uint32
+}
+
+// Session is original envelope metadata, not a value read from the native maps.
+// Map order: counts, config, report_events, pid_events, reported_pids, inhibit_events.
+type reportProducerBinding struct {
+	Session string
+	PossibleCPUs int
+	Config reportProducerConfig
+	Maps [6]reportProducerMapFacts
+}
+
+type reportProducerSample struct {
+	CPU int
+	Counts reportProducerCounts
+}
+
+type reportProducerPhase uint8
+
+const (
+	reportProducerMissing reportProducerPhase = iota
+	reportProducerPrepared
+)
+
+// The loader owns these maps; this source borrows them and never closes them.
+type reportProducerSource struct {
+	phase reportProducerPhase
+	expected reportProducerBinding
+	maps [6]*cebpf.Map
+	readerAccounting reportReaderAccounting
+	readerMu sync.Mutex
+	readerControl *reportReaderControl
+}
+
+// reportPrepareOps is the synchronous effect boundary shared by production and controls.
+type reportPrepareOps struct {
+	possibleCPU func() (int, error)
+	info func(int) (reportProducerMapFacts, error)
+	readConfig func() (reportProducerConfig, error)
+	readCounts func(int) ([]reportProducerCounts, error)
+	writeConfig func(reportProducerConfig) error
+}
+
+func prepareReportProducer(ctx context.Context, cfg *Config, maps map[string]*cebpf.Map) (*reportProducerSource, error) {
+	names := [6]string{"report_producer_counts", "report_producer_config", "report_events", "pid_events", "reported_pids", "inhibit_events"}
+	var borrowed [6]*cebpf.Map
+	for i, name := range names {
+		borrowed[i] = maps[name]
+	}
+	key := uint32(0)
+	ops := reportPrepareOps{
+		possibleCPU: cebpf.PossibleCPU,
+		info: func(i int) (reportProducerMapFacts, error) {
+			if borrowed[i] == nil { return reportProducerMapFacts{}, fmt.Errorf("report map %s missing", names[i]) }
+			info, err := borrowed[i].Info()
+			if err != nil { return reportProducerMapFacts{}, err }
+			if info == nil { return reportProducerMapFacts{}, fmt.Errorf("report map %s info missing", names[i]) }
+			id, ok := info.ID()
+			if !ok || id == 0 { return reportProducerMapFacts{}, fmt.Errorf("report map %s identity missing", names[i]) }
+			return reportProducerMapFacts{Type: uint32(info.Type), ID: uint32(id), KeySize: info.KeySize, ValueSize: info.ValueSize, MaxEntries: info.MaxEntries, Flags: info.Flags}, nil
+		},
+		readConfig: func() (reportProducerConfig, error) {
+			var config reportProducerConfig
+			err := borrowed[1].Lookup(&key, &config)
+			return config, err
+		},
+		readCounts: func(cpus int) ([]reportProducerCounts, error) {
+			rows := make([]reportProducerCounts, cpus)
+			err := borrowed[0].Lookup(&key, rows)
+			return rows, err
+		},
+		writeConfig: func(config reportProducerConfig) error {
+			return borrowed[1].Update(&key, &config, cebpf.UpdateAny)
+		},
+	}
+	source, err := prepareReportProducerWith(ctx, cfg, ops)
+	if err != nil { return nil, err }
+	if source.phase == reportProducerPrepared { source.maps = borrowed }
+	return source, nil
+}
+
+func reportPreparationDeadline(ctx context.Context, deadline time.Time, hasDeadline bool) error {
+	if hasDeadline && !time.Now().Before(deadline) { return context.DeadlineExceeded }
+	return ctx.Err()
+}
+
+func prepareReportProducerWith(ctx context.Context, cfg *Config, ops reportPrepareOps) (*reportProducerSource, error) {
+	if ctx == nil || cfg == nil { return nil, fmt.Errorf("report producer preparation requires context and config") }
+	deadline, hasDeadline := ctx.Deadline()
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	lifetime := cfg.TraceDefinitionLifetime
+	if lifetime == nil { return &reportProducerSource{phase: reportProducerMissing}, nil }
+	if err := lifetime.Validate(); err != nil { return nil, fmt.Errorf("report producer target: %w", err) }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	session, pid, birth := lifetime.Session(), lifetime.HostTGID(), lifetime.Birth()
+	if session == "" || pid == 0 || birth == 0 || (cfg.HotSpotObservedPID != 0 && uint32(cfg.HotSpotObservedPID) != pid) {
+		return nil, fmt.Errorf("report producer target identity invalid")
+	}
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	if unsafe.Sizeof(reportProducerCounts{}) != 832 || unsafe.Sizeof(reportProducerConfig{}) != 32 {
+		return nil, fmt.Errorf("report producer Go layout invalid")
+	}
+	if ops.possibleCPU == nil || ops.info == nil || ops.readConfig == nil || ops.readCounts == nil || ops.writeConfig == nil {
+		return nil, fmt.Errorf("report producer preparation effects unavailable")
+	}
+	cpus, err := ops.possibleCPU()
+	if err != nil { return nil, fmt.Errorf("report producer possible CPUs: %w", err) }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	if cpus <= 0 { return nil, fmt.Errorf("report producer CPU cardinality invalid") }
+	binding := reportProducerBinding{Session: session, PossibleCPUs: cpus, Config: reportProducerConfig{Schema: 2, Enabled: 1, PID: pid, Birth: birth, Generation: 1}}
+	for i := range binding.Maps {
+		if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+		binding.Maps[i], err = ops.info(i)
+		if err != nil { return nil, fmt.Errorf("report producer map %d: %w", i, err) }
+		if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	}
+	if uint64(binding.Maps[2].MaxEntries) < uint64(cpus) { return nil, fmt.Errorf("report producer perf CPU capacity invalid") }
+	samples := make([]reportProducerSample, cpus)
+	for i := range samples { samples[i].CPU = i }
+	if err := validateReportProducerRows(binding, binding, samples); err != nil { return nil, fmt.Errorf("report producer maps invalid: %w", err) }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	initial, err := ops.readConfig()
+	if err != nil { return nil, fmt.Errorf("report producer initial config: %w", err) }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	if initial != (reportProducerConfig{}) { return nil, fmt.Errorf("report producer config not fresh") }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	rows, err := ops.readCounts(cpus)
+	if err != nil { return nil, fmt.Errorf("report producer initial counts: %w", err) }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	if len(rows) != cpus { return nil, fmt.Errorf("report producer CPU rows invalid") }
+	for _, row := range rows {
+		if row != (reportProducerCounts{}) { return nil, fmt.Errorf("report producer counts not fresh") }
+	}
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	if err := ops.writeConfig(binding.Config); err != nil { return nil, fmt.Errorf("report producer configure: %w", err) }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	actual, err := ops.readConfig()
+	if err != nil { return nil, fmt.Errorf("report producer config readback: %w", err) }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	if actual != binding.Config { return nil, fmt.Errorf("report producer config readback mismatch") }
+	if err := reportPreparationDeadline(ctx, deadline, hasDeadline); err != nil { return nil, err }
+	return &reportProducerSource{phase: reportProducerPrepared, expected: binding}, nil
+}
+
+type traceDefinitionConfig struct {
+	PID, Enabled      uint32
+	Birth, Generation uint64
+}
+
+// The bounded prefix of Linux UAPI bpf_map_info; no fdinfo/proc fallback.
+type traceDefinitionMapInfo struct {
+	Type, ID, KeySize, ValueSize, MaxEntries, Flags uint32
+}
+
+type traceDefinitionInfoRequest struct {
+	FD, Length uint32
+	Info       unsafe.Pointer
+}
+
+func traceDefinitionInfo(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+	var info traceDefinitionMapInfo
+	if m == nil || m.FD() < 0 {
+		return info, fmt.Errorf("definition original map: %w", unix.EBADF)
+	}
+	attr := traceDefinitionInfoRequest{uint32(m.FD()), uint32(unsafe.Sizeof(info)), unsafe.Pointer(&info)}
+	_, _, errno := unix.Syscall(unix.SYS_BPF, unix.BPF_OBJ_GET_INFO_BY_FD, uintptr(unsafe.Pointer(&attr)), unsafe.Sizeof(attr))
+	runtime.KeepAlive(m)
+	runtime.KeepAlive(&info)
+	if errno != 0 {
+		return info, fmt.Errorf("definition original map info: %w", errno)
+	}
+	if info.ID == 0 {
+		return info, fmt.Errorf("definition map identity unavailable")
+	}
+	return info, nil
+}
+
+type traceDefinitionMapOps struct {
+	info   func(*cebpf.Map) (traceDefinitionMapInfo, error)
+	lookup func(*cebpf.Map, any, any) error
+	update func(*cebpf.Map, any, any, cebpf.MapUpdateFlags) error
+	close  func(*cebpf.Map) error
+}
+
+func defaultTraceDefinitionMapOps() traceDefinitionMapOps {
+	return traceDefinitionMapOps{
+		info: traceDefinitionInfo,
+		lookup: func(m *cebpf.Map, key, value any) error {
+			if m == nil {
+				return unix.EBADF
+			}
+			return m.Lookup(key, value)
+		},
+		update: func(m *cebpf.Map, key, value any, flags cebpf.MapUpdateFlags) error {
+			if m == nil {
+				return unix.EBADF
+			}
+			return m.Update(key, value, flags)
+		},
+		close: func(m *cebpf.Map) error {
+			if m == nil {
+				return nil
+			}
+			return m.Close()
+		},
+	}
+}
+
+func configureTraceDefinitionSource(s *traceDefinitionSource, config *cebpf.Map, checkAdmit func() error) error {
+	ops := s.ops
+	if ops.info == nil {
+		ops = defaultTraceDefinitionMapOps()
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+	}
+	info, err := ops.info(config)
+	if err != nil {
+		return err
+	}
+	if info.Type != uint32(cebpf.Array) || info.KeySize != 4 || info.ValueSize != 24 || info.MaxEntries != 1 || info.ID == s.binding.CounterMapID || info.ID == s.binding.PerfMapID {
+		return fmt.Errorf("definition original config layout mismatch")
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+	}
+	var prior traceDefinitionConfig
+	if err := ops.lookup(config, uint32(0), &prior); err != nil {
+		return fmt.Errorf("read original definition config: %w", err)
+	}
+	if prior != (traceDefinitionConfig{}) {
+		return fmt.Errorf("definition original config already used")
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+	}
+	rows := make([]libpf.TraceDefinitionCPUCounts, s.binding.PossibleCPUs)
+	if err := ops.lookup(s.counter, uint32(0), &rows); err != nil {
+		return fmt.Errorf("read original definition rows: %w", err)
+	}
+	for _, row := range rows {
+		if row != (libpf.TraceDefinitionCPUCounts{}) {
+			return fmt.Errorf("definition original rows already used")
+		}
+	}
+	if checkAdmit != nil {
+		if err := checkAdmit(); err != nil {
+			return err
+		}
+	}
+	s.config = config
+	s.configID = info.ID
+	s.nativeConfig = traceDefinitionConfig{PID: s.binding.HostTGID, Enabled: 1, Birth: s.binding.Birth, Generation: s.binding.Generation}
+	if err := ops.update(config, uint32(0), s.nativeConfig, cebpf.UpdateAny); err != nil {
+		return fmt.Errorf("configure definition target: %w", err)
+	}
+	return nil
+}

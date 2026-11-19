@@ -1,0 +1,102 @@
+//go:build mw_kernel && linux
+
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"golang.org/x/sys/unix"
+)
+
+// Genuine-map negative controls only: no process capability/window is supplied
+// and no final observation is requested or fabricated by this fixture.
+func TestKernelTraceDefinitionMapIdentityRefusals(t *testing.T) {
+	for _, kind := range []string{"counter_replaced", "perf_replaced", "config_replaced", "wrong_actual_layout", "closed_original", "cpu_rows", "config_changed"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newDefinitionNativeFixture(t, false)
+			counter, err := traceDefinitionInfo(f.maps[traceDefinitionCounterMap])
+			if err != nil {
+				t.Fatal(err)
+			}
+			perf, err := traceDefinitionInfo(f.maps["trace_events"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			config, err := traceDefinitionInfo(f.maps[traceDefinitionConfigMap])
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected := traceDefinitionConfig{PID: f.target, Enabled: 1, Birth: 1, Generation: 1}
+			source := &traceDefinitionSource{counter: f.maps[traceDefinitionCounterMap], perf: f.maps["trace_events"], config: f.maps[traceDefinitionConfigMap], configID: config.ID, nativeConfig: expected, binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "isolated-map-refusal", HostTGID: f.target, Birth: 1, CounterMapID: counter.ID, PerfMapID: perf.ID, PossibleCPUs: f.cpus, Generation: 1}}
+			maps := map[string]*ebpf.Map{}
+			for name, m := range f.maps {
+				maps[name] = m
+			}
+			tr := &Tracer{definitionSource: source, ebpfMaps: maps}
+			if kind == "counter_replaced" || kind == "perf_replaced" || kind == "config_replaced" || kind == "wrong_actual_layout" {
+				name := traceDefinitionCounterMap
+				spec := &ebpf.MapSpec{Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 40, MaxEntries: 1}
+				switch kind {
+				case "perf_replaced":
+					name = "trace_events"
+					spec.Type, spec.ValueSize, spec.MaxEntries = ebpf.PerfEventArray, 4, uint32(f.cpus)
+				case "config_replaced":
+					name = traceDefinitionConfigMap
+					spec.Type, spec.ValueSize = ebpf.Array, 24
+				case "wrong_actual_layout":
+					spec.ValueSize = 32
+				}
+				replacement, err := ebpf.NewMap(spec)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := replacement.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				if kind == "wrong_actual_layout" {
+					if s, err := newTraceDefinitionSource(definitionLifetimeFixture{}, replacement, source.perf, f.cpus); err == nil || s != nil {
+						t.Fatal("correct logical spec hid wrong actual row layout", s, err)
+					}
+					return
+				}
+				maps[name] = replacement
+			}
+			switch kind {
+			case "closed_original":
+				if err := source.counter.Close(); err != nil {
+					t.Fatal(err)
+				}
+			case "cpu_rows":
+				source.binding.PossibleCPUs++
+			case "config_changed":
+				changed := expected
+				changed.Birth++
+				if err := source.config.Update(uint32(0), changed, ebpf.UpdateAny); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if value, err := tr.TraceDefinitionBinding(); err == nil || value.CounterMapID != 0 || (kind == "closed_original" && !errors.Is(err, unix.EBADF)) {
+				t.Fatal("invalid genuine original-map binding accepted or errno lost", kind, value, err)
+			}
+			if source.err == nil {
+				t.Fatal("binding refusal was not sticky")
+			}
+			// Fix only fixture input; the failed source owner must never recover.
+			tr.ebpfMaps = f.maps
+			source.binding.PossibleCPUs = f.cpus
+			if err := source.config.Update(uint32(0), expected, ebpf.UpdateAny); err != nil {
+				t.Fatal(err)
+			}
+			if value, err := tr.TraceDefinitionBinding(); err == nil || value.CounterMapID != 0 {
+				t.Fatal("retry erased a genuine-map refusal", value, err)
+			}
+		})
+	}
+}

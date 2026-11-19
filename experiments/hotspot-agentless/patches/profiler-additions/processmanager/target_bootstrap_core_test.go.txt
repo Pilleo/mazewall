@@ -1,0 +1,72 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+)
+
+type deniedBootstrapPIDMaps struct{ pmebpf.EbpfHandler }
+
+func (deniedBootstrapPIDMaps) UpdatePidPageMappingInfo(libpf.PID, lpm.Prefix, uint64, uint64) error {
+	return syscall.EPERM
+}
+
+type bootstrapPIDProcess struct{ process.Process }
+
+type failingCoreProcess struct {
+	process.Process
+	calls int
+}
+
+func (*failingCoreProcess) PID() libpf.PID { return 123 }
+func (p *failingCoreProcess) GetMappings() ([]process.Mapping, uint32, error) {
+	p.calls++
+	return nil, 0, syscall.EPERM
+}
+
+func TestCheckedCoreMappingErrorAndCancellation(t *testing.T) {
+	pm := &ProcessManager{epochTarget: libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}}
+	pr := &failingCoreProcess{}
+	if err := pm.synchronizeProcessChecked(context.Background(), pr, strictEpochBootstrap, &bootstrapJournal{}, nil); !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("expected mapping permission cause, got %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	pr.calls = 0
+	if err := pm.synchronizeProcessChecked(ctx, pr, strictEpochBootstrap, &bootstrapJournal{}, nil); !errors.Is(err, context.Canceled) || pr.calls != 0 {
+		t.Fatalf("canceled: error=%v calls=%d", err, pr.calls)
+	}
+	pm.SynchronizeProcess(pr)
+	if pr.calls != 1 {
+		t.Fatalf("ordinary synchronization changed: calls=%d", pr.calls)
+	}
+}
+
+func TestBootstrapDummyPIDWriteError(t *testing.T) {
+	pm := &ProcessManager{ebpf: deniedBootstrapPIDMaps{}, pidToProcessInfo: make(map[libpf.PID]*processInfo)}
+	info, err := pm.getPidInformation(123, bootstrapPIDProcess{})
+	if info != nil || !errors.Is(err, syscall.EPERM) || len(pm.pidToProcessInfo) != 0 {
+		t.Fatalf("info=%v err=%v entries=%d", info, err, len(pm.pidToProcessInfo))
+	}
+}
+
+func TestBootstrapMappingWriteError(t *testing.T) {
+	pm := &ProcessManager{ebpf: deniedBootstrapPIDMaps{}}
+	mapping := &Mapping{Vaddr: 0x1000, FrameMapping: libpf.NewFrameMapping(libpf.FrameMappingData{
+		File: libpf.NewFrameMappingFile(libpf.FrameMappingFileData{}), Start: 0, End: 0x1000,
+	})}
+	added, err := pm.processNewMapping(123, mapping)
+	if added != 0 || !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("added=%d err=%v", added, err)
+	}
+}

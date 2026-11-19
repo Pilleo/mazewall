@@ -1,0 +1,122 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"syscall"
+	"testing"
+
+	lru "github.com/elastic/go-freelru"
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	"go.opentelemetry.io/ebpf-profiler/util"
+)
+
+type cachedBootstrapProcess struct{ process.Process }
+
+func (cachedBootstrapProcess) PID() libpf.PID                                    { return 123 }
+func (cachedBootstrapProcess) GetMappingFileLastModified(*process.Mapping) int64 { return 42 }
+
+func TestBootstrapNonELFClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name, path string
+		cause      error
+		tag        bool
+	}{
+		{"benign", "/lib/data", pfelf.ErrNotELF, true},
+		{"libjvm", "/lib/libjvm.so", pfelf.ErrNotELF, false},
+		{"mixed", "/lib/data", errors.Join(pfelf.ErrNotELF, syscall.EPERM), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cache, err := lru.New[util.OnDiskFileIdentifier, elfInfo](8, util.OnDiskFileIdentifier.Hash32)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mapping := &process.Mapping{Path: libpf.Intern(tc.path)}
+			cache.Add(mapping.GetOnDiskFileIdentifier(), elfInfo{lastModified: 42, err: tc.cause})
+			pm := &ProcessManager{elfInfoCache: cache}
+			_, err = pm.newFrameMappingChecked(context.Background(), cachedBootstrapProcess{}, mapping, strictEpochBootstrap, &bootstrapJournal{})
+			if errors.Is(err, errBootstrapNonELF) != tc.tag || !errors.Is(err, pfelf.ErrNotELF) || (tc.name == "mixed" && !errors.Is(err, syscall.EPERM)) {
+				t.Fatalf("unexpected classification: %v", err)
+			}
+		})
+	}
+}
+
+func TestBootstrapLoaderNonELFOwnership(t *testing.T) {
+	for _, cause := range []error{pfelf.ErrNotELF, errors.Join(pfelf.ErrNotELF, syscall.EPERM)} {
+		m := &fakeAcquisitionManager{loaderErr: cause}
+		j := &bootstrapJournal{}
+		_, err := j.acquireELF(context.Background(), m, host.FileID(42), nil)
+		if !errors.Is(err, pfelf.ErrNotELF) || errors.Is(err, errBootstrapNonELF) || (errors.Is(cause, syscall.EPERM) && !errors.Is(err, syscall.EPERM)) || len(j.entries) != 1 {
+			t.Fatalf("loader error=%v entries=%d", err, len(j.entries))
+		}
+		err = j.rollback(&ProcessManager{}, err)
+		if !errors.Is(err, pfelf.ErrNotELF) || m.releases != 1 || len(j.entries) != 0 {
+			t.Fatalf("rollback=%v releases=%d", err, m.releases)
+		}
+	}
+}
+
+type countedRollbackMaps struct {
+	*integrationPageMaps
+	deletes int
+}
+
+func (m *countedRollbackMaps) DeletePidPageMappingInfo(pid libpf.PID, prefixes []lpm.Prefix) (int, error) {
+	m.deletes++
+	return m.integrationPageMaps.DeletePidPageMappingInfo(pid, prefixes)
+}
+
+func TestBootstrapPendingRollbackRetainsOwnership(t *testing.T) {
+	prefix := lpm.Prefix{Key: 0x1000, Length: 52}
+	maps := &countedRollbackMaps{integrationPageMaps: &integrationPageMaps{pages: map[lpm.Prefix]bool{prefix: true}, deleteErr: syscall.EBUSY}}
+	pm := &ProcessManager{ebpf: maps, pidPageToMappingInfoSize: 1}
+	j := &bootstrapJournal{pid: 123, prefixes: []lpm.Prefix{prefix}}
+	err := j.rollback(pm, syscall.EPERM)
+	var pending *bootstrapRollbackError
+	if !errors.As(err, &pending) || pending.manager != pm || pending.journal != j || !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EBUSY) {
+		t.Fatalf("pending ownership or causes lost: %v", err)
+	}
+	if len(j.prefixes) != 1 || j.prefixes[0] != prefix || !maps.pages[prefix] || pm.pidPageToMappingInfoSize != 1 || maps.deletes != 1 {
+		t.Fatalf("failed prefix ownership changed: %+v", j.prefixes)
+	}
+}
+
+func TestBootstrapMappingMetricRace(t *testing.T) {
+	maps := &integrationPageMaps{pages: make(map[lpm.Prefix]bool)}
+	pm := &ProcessManager{ebpf: maps}
+	mapping := &Mapping{Vaddr: 0x1000, FrameMapping: libpf.NewFrameMapping(libpf.FrameMappingData{
+		File: libpf.NewFrameMappingFile(libpf.FrameMappingFileData{}), Start: 0, End: 0x1000,
+	})}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			pm.mu.RLock()
+			_ = pm.pidPageToMappingInfoSize
+			pm.mu.RUnlock()
+		}
+	}()
+	for i := 0; i < 1000; i++ {
+		mapping.Vaddr = libpf.Address((i + 1) * 0x1000)
+		if _, err := pm.processNewMappingChecked(context.Background(), 123, mapping, &bootstrapJournal{pid: 123}); err != nil {
+			t.Error(err)
+			break
+		}
+	}
+	wg.Wait()
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	if pm.pidPageToMappingInfoSize != 1000 {
+		t.Fatalf("counter=%d", pm.pidPageToMappingInfoSize)
+	}
+}

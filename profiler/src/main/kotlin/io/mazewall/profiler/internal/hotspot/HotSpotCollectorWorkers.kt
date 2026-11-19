@@ -12,6 +12,7 @@ internal class HotSpotCollectorWorkers(
     private val launcher: ProcessLauncher,
     private val limits: HotSpotReplayLimits,
     private val callbacks: HotSpotCollectorCallbacks,
+    private val schema: ULong = 2uL,
 ) {
     private val process = AtomicReference<Process?>()
     private val leases = CopyOnWriteArrayList<Thread>()
@@ -31,7 +32,8 @@ internal class HotSpotCollectorWorkers(
             val acquired = launcher.startProcess(argv, redirectErrorStream = false)
             process.set(acquired)
             worker("stdout") {
-                HotSpotWireReader(limits, 2uL).read(acquired.inputStream, callbacks::record)
+                val receipt = HotSpotWireReader(limits, schema).read(acquired.inputStream, callbacks::record)
+                callbacks.wireReceipt(receipt)
                 callbacks.event(HotSpotSessionEvent.StdoutEnded)
             }
             worker("stderr") {

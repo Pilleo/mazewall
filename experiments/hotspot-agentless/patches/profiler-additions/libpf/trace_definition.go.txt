@@ -1,0 +1,218 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package libpf
+
+import (
+	"fmt"
+	"math"
+)
+
+// TraceDefinitionSource identifies the aggregate native emission boundary.
+type TraceDefinitionSource uint8
+
+const TraceDefinitionPerfOutputV1 TraceDefinitionSource = 1
+
+type TraceDefinitionBinding struct {
+	Source                  TraceDefinitionSource
+	Session                 string
+	HostTGID                uint32
+	Birth                   uint64
+	CounterMapID, PerfMapID uint32
+	PossibleCPUs            int
+	Generation              uint64
+}
+
+// TraceDefinitionCPUCounts matches the five-u64 native per-CPU row.
+type TraceDefinitionCPUCounts struct {
+	Attempted, Submitted, OutputFailed, RejectedSize, Overflow uint64
+}
+
+type TraceDefinitionReaderCounts struct {
+	Received, HandedOff, RejectedRecord, HandoffAborted, LostSamples uint64
+	Overflow                                                         bool
+}
+
+type TraceDefinitionOutcome uint8
+
+const (
+	TraceDefinitionFinal TraceDefinitionOutcome = iota + 1
+	TraceDefinitionNotExercised
+)
+
+type TraceDefinitionObservation struct {
+	Binding                   TraceDefinitionBinding
+	Rows                      []TraceDefinitionCPUCounts
+	Reader                    TraceDefinitionReaderCounts
+	Outcome                   TraceDefinitionOutcome
+	Undelivered, EmissionLoss uint64
+}
+
+// TraceDefinitionLifetime supplies independently held target identity.
+type TraceDefinitionLifetime interface {
+	Session() string
+	HostTGID() uint32
+	Birth() uint64
+	Validate() error
+}
+
+// TraceDefinitionReadoutAuthority bounds acquisition/publication to native Join.
+// Process Validate must run outside this action and its owner's mutex.
+type TraceDefinitionReadoutAuthority interface {
+	WithDefinitionReadout(action func() error) error
+}
+
+// TraceDefinitionRetainer optionally provides a retained view of the definition lifetime.
+type TraceDefinitionRetainer interface {
+	RetainDefinitionLifetime() (TraceDefinitionLifetime, func() error, error)
+}
+
+// AuxiliarySource identifies the auxiliary owner source kind.
+type AuxiliarySource uint8
+
+const (
+	AuxiliarySourceUnknown             AuxiliarySource = 0
+	AuxiliarySourcePeriodicCaller      AuxiliarySource = 1
+	AuxiliarySourcePeriodicMetrics     AuxiliarySource = 2
+	AuxiliarySourcePIDCleanup          AuxiliarySource = 3
+	AuxiliarySourceInterpreterMetrics  AuxiliarySource = 4
+	AuxiliarySourcePruneCycle          AuxiliarySource = 5
+	AuxiliarySourcePruneScanOtel       AuxiliarySource = 6
+	AuxiliarySourcePruneScanSymtab     AuxiliarySource = 7
+	AuxiliarySourcePruneScanDebuginfod AuxiliarySource = 8
+	AuxiliarySourceKobjectReceive      AuxiliarySource = 9
+	AuxiliarySourceModuleQueued        AuxiliarySource = 10
+	AuxiliarySourceModuleCoalesced     AuxiliarySource = 11
+	AuxiliarySourceSymbolQueued        AuxiliarySource = 12
+	AuxiliarySourceSymbolCoalesced     AuxiliarySource = 13
+	AuxiliarySourceModuleExec          AuxiliarySource = 14
+	AuxiliarySourceSymbolExec          AuxiliarySource = 15
+	AuxiliarySourceReportReloadRecord  AuxiliarySource = 16
+)
+
+type AuxiliaryBinding struct {
+	Source     AuxiliarySource
+	Session    string
+	HostTGID   uint32
+	Birth      uint64
+	Generation uint64
+}
+
+func ValidateAuxiliaryBinding(expected, actual AuxiliaryBinding) error {
+	switch expected.Source {
+	case AuxiliarySourcePeriodicCaller,
+		AuxiliarySourcePeriodicMetrics,
+		AuxiliarySourcePIDCleanup,
+		AuxiliarySourceInterpreterMetrics,
+		AuxiliarySourcePruneCycle,
+		AuxiliarySourcePruneScanOtel,
+		AuxiliarySourcePruneScanSymtab,
+		AuxiliarySourcePruneScanDebuginfod,
+		AuxiliarySourceKobjectReceive,
+		AuxiliarySourceModuleQueued,
+		AuxiliarySourceModuleCoalesced,
+		AuxiliarySourceSymbolQueued,
+		AuxiliarySourceSymbolCoalesced,
+		AuxiliarySourceModuleExec,
+		AuxiliarySourceSymbolExec,
+		AuxiliarySourceReportReloadRecord:
+	default:
+		return fmt.Errorf("invalid auxiliary binding source")
+	}
+	if expected.Session == "" || expected.HostTGID == 0 || expected.Birth == 0 || expected.Generation == 0 {
+		return fmt.Errorf("invalid auxiliary expected binding identity")
+	}
+	if actual.Session == "" || actual.HostTGID == 0 || actual.Birth == 0 || actual.Generation == 0 {
+		return fmt.Errorf("invalid auxiliary actual binding identity")
+	}
+	if expected != actual {
+		return fmt.Errorf("changed auxiliary binding identity: expected %+v, got %+v", expected, actual)
+	}
+	return nil
+}
+
+// AuxiliaryCounts records owned callback/operation admission, terminals and residual.
+type AuxiliaryCounts struct {
+	Admitted, Completed, Failed, Aborted uint64
+	InFlight                             uint64
+	Overflow                             bool
+}
+
+type AuxiliaryOutcome uint8
+
+const (
+	AuxiliaryFinal AuxiliaryOutcome = iota + 1
+	AuxiliaryNotExercised
+	SourceLocalNonfinal
+)
+
+const AuxiliarySourceLocalNonfinal = SourceLocalNonfinal
+
+type AuxiliaryObservation struct {
+	Binding  AuxiliaryBinding
+	Counts   AuxiliaryCounts
+	Outcome  AuxiliaryOutcome
+	HeldWork bool
+}
+
+func SumAuxiliaryCounts(values ...uint64) (uint64, error) {
+	var total uint64
+	for _, n := range values {
+		if n > math.MaxUint64-total {
+			return 0, fmt.Errorf("auxiliary count overflow")
+		}
+		total += n
+	}
+	return total, nil
+}
+
+func ReconcileAuxiliaryCounts(counts AuxiliaryCounts) error {
+	if counts.Overflow {
+		return fmt.Errorf("auxiliary counter overflow")
+	}
+	terminals, err := SumAuxiliaryCounts(counts.Completed, counts.Failed, counts.Aborted)
+	if err != nil {
+		return err
+	}
+	total, err := SumAuxiliaryCounts(terminals, counts.InFlight)
+	if err != nil {
+		return err
+	}
+	if total != counts.Admitted {
+		return fmt.Errorf("auxiliary conservation failed: admitted=%d != terminals=%d + inflight=%d", counts.Admitted, terminals, counts.InFlight)
+	}
+	return nil
+}
+
+// KindLedger records per-kind invocation accounting.
+type KindLedger struct {
+	Admitted, Completed, Failed, Aborted uint64
+	Skipped, Incomplete                  uint64
+	InFlight                             uint64
+	Overflow                             bool
+}
+
+type KindObservation struct {
+	Binding  AuxiliaryBinding
+	Counts   KindLedger
+	Outcome  AuxiliaryOutcome
+	HeldWork bool
+	Err      error
+}
+
+func ReconcileKindLedger(counts KindLedger) error {
+	if counts.Overflow {
+		return fmt.Errorf("kind counter overflow")
+	}
+	terminals, err := SumAuxiliaryCounts(counts.Completed, counts.Failed, counts.Aborted, counts.Skipped, counts.Incomplete)
+	if err != nil {
+		return err
+	}
+	total, err := SumAuxiliaryCounts(terminals, counts.InFlight)
+	if err != nil {
+		return err
+	}
+	if total != counts.Admitted {
+		return fmt.Errorf("kind conservation failed: admitted=%d != terminals=%d + inflight=%d", counts.Admitted, terminals, counts.InFlight)
+	}
+	return nil
+}

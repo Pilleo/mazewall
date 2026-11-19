@@ -97,8 +97,8 @@ class LinuxNativeDelegationTest {
     fun `test newSockFProg manual packing`() =
         nativeScope {
         val filters = listOf(
-            BpfInstruction.Jmp(0x01, 2, 3, 0x12345678),
-            BpfInstruction.Ld(0x05, 0x00000001),
+            BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 255, 128, 0x12345678),
+            BpfInstruction.Ld(4),
         )
         val prog = SockFprogSegment.of(LinuxNative.memory.newSockFProg(filters))
         assertNotNull(prog.segment)
@@ -107,9 +107,9 @@ class LinuxNativeDelegationTest {
         val f1 = SockFilterSegment.of(prog.managedFilter.asSlice(0, Layouts.SOCK_FILTER_SIZE))
 
         // Verify first filter
-        assertEquals(0x01.toShort(), f1.getCode())
-        assertEquals(2, f1.getJt().toInt())
-        assertEquals(3, f1.getJf().toInt())
+        assertEquals(0x15.toShort(), f1.getCode())
+        assertEquals(255, f1.getJt().toInt() and 0xff)
+        assertEquals(128, f1.getJf().toInt() and 0xff)
         assertEquals(0x12345678, f1.getK())
     }
 

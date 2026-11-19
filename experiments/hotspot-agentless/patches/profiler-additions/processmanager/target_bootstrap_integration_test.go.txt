@@ -1,0 +1,331 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+	"go.opentelemetry.io/ebpf-profiler/util"
+)
+
+type integrationPageMaps struct {
+	pmebpf.EbpfHandler
+	pages     map[lpm.Prefix]bool
+	writes    int
+	failAt    int
+	deleteErr error
+}
+
+type integrationCoreProcess struct {
+	process.Process
+	getMappings func() ([]process.Mapping, uint32, error)
+	getExe      func() (libpf.String, error)
+}
+
+func (integrationCoreProcess) PID() libpf.PID { return 123 }
+func (p integrationCoreProcess) GetMappings() ([]process.Mapping, uint32, error) {
+	return p.getMappings()
+}
+func (p integrationCoreProcess) GetExe() (libpf.String, error) { return p.getExe() }
+func (integrationCoreProcess) GetProcessMeta(process.MetaConfig) process.ProcessMeta {
+	return process.ProcessMeta{}
+}
+
+func TestStrictCoreReadFailuresHaveNoMapEffects(t *testing.T) {
+	target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	for _, mode := range []string{"exe-denied", "parse-errors", "cancel-mappings", "cancel-exe"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			maps := &integrationPageMaps{pages: make(map[lpm.Prefix]bool)}
+			pm := &ProcessManager{ebpf: maps, epochTarget: target}
+			exeCalls := 0
+			pr := integrationCoreProcess{
+				getMappings: func() ([]process.Mapping, uint32, error) {
+					if mode == "cancel-mappings" {
+						cancel()
+					}
+					if mode == "parse-errors" {
+						return []process.Mapping{{}}, 1, nil
+					}
+					return []process.Mapping{{}}, 0, nil
+				},
+				getExe: func() (libpf.String, error) {
+					exeCalls++
+					if mode == "exe-denied" {
+						return libpf.NullString, syscall.EACCES
+					}
+					if mode == "cancel-exe" {
+						cancel()
+					}
+					return libpf.NullString, nil
+				},
+			}
+			err := pm.synchronizeProcessChecked(ctx, pr, strictEpochBootstrap, &bootstrapJournal{}, nil)
+			if err == nil || maps.writes != 0 {
+				t.Fatalf("error=%v writes=%d", err, maps.writes)
+			}
+			if mode == "exe-denied" && !errors.Is(err, syscall.EACCES) {
+				t.Fatalf("lost cause: %v", err)
+			}
+			if (mode == "cancel-mappings" || mode == "cancel-exe") && !errors.Is(err, context.Canceled) {
+				t.Fatalf("lost cancellation: %v", err)
+			}
+			if (mode == "parse-errors" || mode == "cancel-mappings") && exeCalls != 0 {
+				t.Fatalf("unexpected exe reads: %d", exeCalls)
+			}
+		})
+	}
+}
+
+func TestStrictBootstrapDummyOnlyRollsBack(t *testing.T) {
+	target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	maps := &integrationPageMaps{pages: make(map[lpm.Prefix]bool)}
+	pm := &ProcessManager{ebpf: maps, epochTarget: target, pidToProcessInfo: make(map[libpf.PID]*processInfo), interpreters: make(map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance)}
+	pr := integrationCoreProcess{
+		getMappings: func() ([]process.Mapping, uint32, error) { return []process.Mapping{{}}, 0, nil },
+		getExe:      func() (libpf.String, error) { return libpf.NullString, nil },
+	}
+	lifetime := &integrationLifetime{pm: pm, pid: 123, birth: 456, session: "session"}
+	err := pm.BootstrapHotSpotEpoch(context.Background(), pr, lifetime)
+	if err == nil || len(maps.pages) != 0 || len(pm.pidToProcessInfo) != 0 || pm.pidPageToMappingInfoSize != 0 {
+		t.Fatalf("dummy-only error=%v pages=%v info=%v count=%d", err, maps.pages, pm.pidToProcessInfo, pm.pidPageToMappingInfoSize)
+	}
+}
+
+func (m *integrationPageMaps) UpdatePidPageMappingInfo(_ libpf.PID, prefix lpm.Prefix, _, _ uint64) error {
+	m.writes++
+	if m.writes == m.failAt {
+		return syscall.EPERM
+	}
+	if m.pages[prefix] {
+		return syscall.EEXIST
+	}
+	m.pages[prefix] = true
+	return nil
+}
+
+func (m *integrationPageMaps) DeletePidPageMappingInfo(_ libpf.PID, prefixes []lpm.Prefix) (int, error) {
+	if m.deleteErr != nil {
+		return 0, m.deleteErr
+	}
+	count := 0
+	for _, prefix := range prefixes {
+		if m.pages[prefix] {
+			delete(m.pages, prefix)
+			count++
+		}
+	}
+	return count, nil
+}
+
+func TestStrictInvalidFrameDoesNotWrite(t *testing.T) {
+	maps := &integrationPageMaps{pages: make(map[lpm.Prefix]bool)}
+	pm := &ProcessManager{ebpf: maps}
+	_, err := pm.processNewMappingChecked(context.Background(), 123, &Mapping{Vaddr: 0x1000}, &bootstrapJournal{pid: 123})
+	if err == nil || maps.writes != 0 {
+		t.Fatalf("invalid frame: err=%v writes=%d", err, maps.writes)
+	}
+}
+
+func TestStrictInvalidMappingBoundsDoNotWrite(t *testing.T) {
+	file := libpf.NewFrameMappingFile(libpf.FrameMappingFileData{})
+	for _, tc := range []struct{ address, start, end libpf.Address }{
+		{0, 0, 0x1000},
+		{0x1000, 0, 0},
+		{0x1000, 0x3000, 0x1000},
+		{libpf.Address(^uint64(0) - 0x7ff), 0, 0x1000},
+	} {
+		maps := &integrationPageMaps{pages: make(map[lpm.Prefix]bool)}
+		pm := &ProcessManager{ebpf: maps}
+		fm := libpf.NewFrameMapping(libpf.FrameMappingData{File: file, Start: tc.start, End: tc.end})
+		_, err := pm.processNewMappingChecked(context.Background(), 123, &Mapping{Vaddr: tc.address, FrameMapping: fm}, &bootstrapJournal{pid: 123})
+		if err == nil || maps.writes != 0 {
+			t.Fatalf("bounds=%+v err=%v writes=%d", tc, err, maps.writes)
+		}
+	}
+}
+
+func TestStrictCanceledMappingDoesNotWrite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	maps := &integrationPageMaps{pages: make(map[lpm.Prefix]bool)}
+	pm := &ProcessManager{ebpf: maps}
+	_, err := pm.processNewMappingChecked(ctx, 123, nil, &bootstrapJournal{pid: 123})
+	if !errors.Is(err, context.Canceled) || maps.writes != 0 {
+		t.Fatalf("err=%v writes=%d", err, maps.writes)
+	}
+}
+
+func TestStrictPrefixPartialRollback(t *testing.T) {
+	other := lpm.Prefix{Key: 0x8000, Length: 64}
+	maps := &integrationPageMaps{pages: map[lpm.Prefix]bool{dummyPrefix: true, other: true}, failAt: 2}
+	info := &processInfo{}
+	pm := &ProcessManager{ebpf: maps, pidToProcessInfo: map[libpf.PID]*processInfo{123: info}, pidPageToMappingInfoSize: 1}
+	j := &bootstrapJournal{pid: 123, info: info, prefixes: []lpm.Prefix{dummyPrefix}}
+	fm := libpf.NewFrameMapping(libpf.FrameMappingData{File: libpf.NewFrameMappingFile(libpf.FrameMappingFileData{}), Start: 0, End: 0x5000})
+	added, err := pm.processNewMappingChecked(context.Background(), 123, &Mapping{Vaddr: 0x1000, FrameMapping: fm}, j)
+	if added != 1 || !errors.Is(err, syscall.EPERM) {
+		t.Fatalf("added=%d err=%v", added, err)
+	}
+	err = j.rollback(pm, err)
+	if !errors.Is(err, syscall.EPERM) || len(maps.pages) != 1 || !maps.pages[other] || pm.pidPageToMappingInfoSize != 0 || len(j.prefixes) != 0 {
+		t.Fatalf("err=%v pages=%v count=%d owned=%v", err, maps.pages, pm.pidPageToMappingInfoSize, j.prefixes)
+	}
+}
+
+func TestStrictPrefixRollbackFailureRetainsOwnership(t *testing.T) {
+	maps := &integrationPageMaps{pages: map[lpm.Prefix]bool{dummyPrefix: true}, failAt: 2, deleteErr: syscall.EACCES}
+	info := &processInfo{}
+	pm := &ProcessManager{ebpf: maps, pidToProcessInfo: map[libpf.PID]*processInfo{123: info}, pidPageToMappingInfoSize: 1}
+	j := &bootstrapJournal{pid: 123, info: info, prefixes: []lpm.Prefix{dummyPrefix}}
+	fm := libpf.NewFrameMapping(libpf.FrameMappingData{File: libpf.NewFrameMappingFile(libpf.FrameMappingFileData{}), Start: 0, End: 0x5000})
+	_, err := pm.processNewMappingChecked(context.Background(), 123, &Mapping{Vaddr: 0x1000, FrameMapping: fm}, j)
+	if !errors.Is(err, syscall.EPERM) || len(j.prefixes) != 2 {
+		t.Fatalf("initial err=%v prefixes=%v", err, j.prefixes)
+	}
+	prefix := j.prefixes[1]
+	err = j.rollback(pm, err)
+	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) || !strings.Contains(err.Error(), fmt.Sprintf("%#x/%d", prefix.Key, prefix.Length)) || len(j.prefixes) != 2 || pm.pidPageToMappingInfoSize != 2 || !maps.pages[prefix] || !maps.pages[dummyPrefix] {
+		t.Fatalf("err=%v pages=%v count=%d owned=%v", err, maps.pages, pm.pidPageToMappingInfoSize, j.prefixes)
+	}
+}
+
+type integrationLifetime struct {
+	pm      *ProcessManager
+	err     error
+	calls   int
+	birth   uint64
+	session string
+	pid     uint32
+}
+
+func (l *integrationLifetime) Session() string  { return l.session }
+func (l *integrationLifetime) HostTGID() uint32 { return l.pid }
+func (l *integrationLifetime) Birth() uint64    { return l.birth }
+func (l *integrationLifetime) Validate() error {
+	l.calls++
+	if !l.pm.mu.TryLock() {
+		return errors.New("lifetime validation held PM lock")
+	}
+	l.pm.mu.Unlock()
+	return l.err
+}
+
+type readinessOnlyInstance struct {
+	interpreter.InstanceStubs
+	target libpf.HotSpotEpochTarget
+	calls  int
+	err    error
+	pm     *ProcessManager
+}
+
+func (*readinessOnlyInstance) Detach(interpreter.EbpfHandler, libpf.PID) error { return nil }
+
+func (i *readinessOnlyInstance) CheckHotSpotEpochBootstrap(target libpf.HotSpotEpochTarget) error {
+	if i.pm != nil {
+		if !i.pm.mu.TryLock() {
+			return errors.New("readiness held PM lock")
+		}
+		i.pm.mu.Unlock()
+	}
+	i.target = target
+	i.calls++
+	return i.err
+}
+
+type integrationReadyInstance struct {
+	readinessOnlyInstance
+	detaches int
+}
+
+func (*integrationReadyInstance) ConfigureHotSpotEpoch(libpf.HotSpotEpochTarget) error { return nil }
+func (*integrationReadyInstance) BeginHotSpotEpoch(libpf.HotSpotIdentity) (interpreter.HotSpotEpochDecoder, error) {
+	return nil, nil
+}
+func (i *integrationReadyInstance) Detach(interpreter.EbpfHandler, libpf.PID) error {
+	i.detaches++
+	return nil
+}
+
+func TestStrictFinisherRejectsReadinessWithoutEpochCapability(t *testing.T) {
+	target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	info := &processInfo{mappings: []Mapping{{Vaddr: 0x1000}}}
+	instance := &readinessOnlyInstance{}
+	pm := &ProcessManager{epochTarget: target, pidToProcessInfo: map[libpf.PID]*processInfo{123: info}, interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{123: {{DeviceID: 1}: instance}}}
+	j := &bootstrapJournal{pid: 123, info: info}
+	lifetime := &integrationLifetime{pm: pm, pid: 123, birth: 456, session: "session"}
+	err := pm.finishHotSpotBootstrap(context.Background(), bootstrapTestProcess{}, lifetime, target, 123, 456, "session", j)
+	if err == nil || instance.calls != 0 {
+		t.Fatalf("non-epoch instance accepted: error=%v calls=%d", err, instance.calls)
+	}
+}
+
+func TestStrictFinisherReadinessAndLifetimeRollback(t *testing.T) {
+	target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	for _, mode := range []string{"ready", "lifetime-error", "birth-changed", "pid-changed", "session-changed", "not-ready", "dummy-only"} {
+		t.Run(mode, func(t *testing.T) {
+			maps := &integrationPageMaps{pages: map[lpm.Prefix]bool{dummyPrefix: true}}
+			fm := libpf.NewFrameMapping(libpf.FrameMappingData{File: libpf.NewFrameMappingFile(libpf.FrameMappingFileData{}), Start: 0, End: 0x1000})
+			info := &processInfo{mappings: []Mapping{{Vaddr: 0x1000, FrameMapping: fm}}}
+			if mode == "dummy-only" {
+				info.mappings = nil
+			}
+			instance := &integrationReadyInstance{}
+			if mode == "not-ready" {
+				instance.err = syscall.EACCES
+			}
+			key := util.OnDiskFileIdentifier{DeviceID: 1}
+			pm := &ProcessManager{ebpf: maps, epochTarget: target, pidPageToMappingInfoSize: 1, pidToProcessInfo: map[libpf.PID]*processInfo{123: info}, interpreters: map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{123: {key: instance}}}
+			instance.pm = pm
+			j := &bootstrapJournal{pid: 123, info: info, prefixes: []lpm.Prefix{dummyPrefix}, entries: []bootstrapAcquisition{{instance: instance, pid: 123, key: key, installed: true}}}
+			lifetime := &integrationLifetime{pm: pm, pid: 123, birth: 456, session: "session"}
+			if mode == "lifetime-error" {
+				lifetime.err = syscall.EPERM
+			}
+			if mode == "birth-changed" {
+				lifetime.birth = 457
+			}
+			if mode == "pid-changed" {
+				lifetime.pid = 124
+			}
+			if mode == "session-changed" {
+				lifetime.session = "other"
+			}
+			run := func() (err error) {
+				defer j.rollbackOnFailure(pm, &err)
+				return pm.finishHotSpotBootstrap(context.Background(), bootstrapTestProcess{}, lifetime, target, 123, 456, "session", j)
+			}
+			err := run()
+			if mode == "ready" {
+				if err != nil || instance.calls != 1 || instance.target != target || lifetime.calls != 1 || instance.detaches != 0 {
+					t.Fatalf("err=%v readyCalls=%d lifetimeCalls=%d detaches=%d", err, instance.calls, lifetime.calls, instance.detaches)
+				}
+				return
+			}
+			if err == nil || instance.detaches != 1 || maps.pages[dummyPrefix] || pm.pidPageToMappingInfoSize != 0 || pm.pidToProcessInfo[123] != nil {
+				t.Fatalf("err=%v detaches=%d pages=%v count=%d", err, instance.detaches, maps.pages, pm.pidPageToMappingInfoSize)
+			}
+			if mode == "lifetime-error" && !errors.Is(err, syscall.EPERM) {
+				t.Fatalf("lost lifetime cause: %v", err)
+			}
+			if mode == "not-ready" && !errors.Is(err, syscall.EACCES) {
+				t.Fatalf("lost readiness cause: %v", err)
+			}
+			if mode == "dummy-only" && instance.calls != 0 {
+				t.Fatalf("dummy-only called readiness: %d", instance.calls)
+			}
+		})
+	}
+}

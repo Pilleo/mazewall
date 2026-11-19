@@ -1,0 +1,116 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
+)
+
+func TestDefinitionAccountingNativeRequestLayout(t *testing.T) {
+	var request traceDefinitionInfoRequest
+	var config traceDefinitionConfig
+	if unsafe.Sizeof(request) != 16 || unsafe.Offsetof(request.FD) != 0 || unsafe.Offsetof(request.Length) != 4 || unsafe.Offsetof(request.Info) != 8 || unsafe.Sizeof(traceDefinitionMapInfo{}) != 24 {
+		t.Fatal("Linux BPF map-info request ABI changed")
+	}
+	if unsafe.Sizeof(config) != 24 || unsafe.Offsetof(config.PID) != 0 || unsafe.Offsetof(config.Enabled) != 4 || unsafe.Offsetof(config.Birth) != 8 || unsafe.Offsetof(config.Generation) != 16 {
+		t.Fatal("native definition target config ABI changed")
+	}
+	if _, err := traceDefinitionInfo(nil); !errors.Is(err, unix.EBADF) {
+		t.Fatal("missing original map did not fail closed", err)
+	}
+}
+
+func TestDefinitionAccountingPossibleCPUCardinality(t *testing.T) {
+	for _, counts := range [][2]int{{1, 1}, {2, 2}, {0, 0}, {-1, 1}, {1, 0}, {1, 2}} {
+		err := validateTraceDefinitionCardinality(counts[0], counts[1])
+		if valid := counts[0] > 0 && counts[0] == counts[1]; valid != (err == nil) {
+			t.Fatal("possible CPU cardinality was not independently retained", counts, err)
+		}
+	}
+}
+
+func TestDefinitionAccountingFailureAndAbandonmentStaySticky(t *testing.T) {
+	source := &traceDefinitionSource{}
+	tr := &Tracer{definitionSource: source}
+	source.fail(errTraceDefinitionSourceClosed)
+	source.fail(unix.EPERM)
+	source.fail(unix.EACCES)
+	for range 2 {
+		binding, err := tr.TraceDefinitionBinding()
+		if binding.CounterMapID != 0 || !errors.Is(err, errTraceDefinitionSourceClosed) || !errors.Is(err, unix.EPERM) || !errors.Is(err, unix.EACCES) {
+			t.Fatal("binding recovered or lost an owned failure", binding, err)
+		}
+		observation, err := tr.TraceDefinitionFinal(context.Background())
+		if observation.Outcome != 0 || !errors.Is(err, errTraceDefinitionSourceClosed) || !errors.Is(err, unix.EPERM) || !errors.Is(err, unix.EACCES) {
+			t.Fatal("failed/abandoned source invented finality", observation, err)
+		}
+	}
+}
+
+// Focused source regression for the reviewed lock violation, not native proof.
+// Both files are the entire private binding/sampling acquisition implementation.
+func TestDefinitionAccountingGuardedReadoutHasNoTopologyIO(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("test source location unavailable")
+	}
+	preflight := map[string]bool{"newTraceDefinitionSource": false, "acquireTraceDefinitionSource": false}
+	for _, name := range []string{"definition_accounting.go", "definition_native.go"} {
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(filepath.Dir(testFile), name), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imported := range file.Imports {
+			switch imported.Path.Value {
+			case `"os"`, `"io"`, `"io/fs"`, `"path/filepath"`:
+				t.Error("filesystem preflight reachable from guarded acquisition", name, imported.Path.Value)
+			}
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				switch selector.Sel.Name {
+				case "PossibleCPU":
+					if _, allowed := preflight[function.Name.Name]; !allowed {
+						t.Error("lazy CPU acquisition under readout guard", function.Name.Name)
+					} else {
+						preflight[function.Name.Name] = true
+					}
+				case "Open", "Openat", "Read", "Pread", "ReadFile", "Readlink", "Info":
+					t.Error("filesystem/fdinfo fallback in guarded acquisition files", function.Name.Name, selector.Sel.Name)
+				case "Lock", "RLock", "WithDefinitionReadout":
+					if _, constructor := preflight[function.Name.Name]; constructor {
+						t.Error("CPU preflight constructor acquired a readout/source lock", function.Name.Name)
+					}
+				}
+				return true
+			})
+		}
+	}
+	for name, initialized := range preflight {
+		if !initialized {
+			t.Error("possible CPU cache was not warmed before source publication", name)
+		}
+	}
+}

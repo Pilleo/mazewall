@@ -328,8 +328,43 @@ class HotSpotPublicIntegrationTest {
 
     private fun verifyUnprovenSources(evidence: StructuredProfileEvidence) {
         val summary = Json.parseToJsonElement(evidence.summary.rawJson).jsonObject
+        val enrichment = summary
+            .getValue("production_accounting")
+            .jsonObject
+            .getValue("sources")
+            .jsonObject
+            .getValue("enrichment")
+            .jsonObject
+        for (key in listOf("Known", "Quiesced", "Joined")) {
+            val value = enrichment.getValue(key).jsonPrimitive
+            assertFalse(value.isString)
+            assertEquals("true", value.content)
+        }
+
+        fun enrichmentCount(key: String): ULong {
+            val value = enrichment.getValue(key).jsonPrimitive
+            assertFalse(value.isString)
+            return value.content.toULong()
+        }
+        val attempted = enrichmentCount("Attempted")
+        val submitted = enrichmentCount("Submitted")
+        val received = enrichmentCount("Received")
+        assertTrue(submitted <= attempted)
+        assertEquals(attempted - submitted, enrichmentCount("ReserveFailed"))
+        assertTrue(received <= submitted)
+        assertEquals(received, enrichmentCount("Terminals"))
+        val selected = summary.getValue("selected_event_accounting").jsonObject
+        val selectedReceived = selected.getValue("received").jsonPrimitive
+        assertFalse(selectedReceived.isString)
+        assertEquals(selectedReceived.content.toULong(), received)
+        val selectedTerminals = selected.getValue("terminals").jsonPrimitive
+        assertFalse(selectedTerminals.isString)
+        assertEquals(received, selectedTerminals.content.toULong())
+        assertEquals(evidence.summary.received, received)
+        assertTrue(evidence.terminalAccountingComplete)
+        assertEquals(0uL, evidence.pendingOccurrences)
         assertEquals(
-            listOf("definitions", "enrichment", "wire", "retention"),
+            listOf("definitions", "wire", "retention"),
             summary
                 .getValue("unproven_collection_sources")
                 .jsonArray

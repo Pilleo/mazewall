@@ -8,15 +8,29 @@
  	"time"
  )
  
-@@ -51,6 +52,7 @@
+@@ -51,6 +52,21 @@
  	resolvers []ResolverInstance
  
  	pruneLoopStarted bool
 +	pruneMu          sync.Mutex
++	localStopClaim   *localStopClaim
++	localStopReady   chan struct{}
++	localStopDone    <-chan struct{}
++	localStopDeadline time.Time
++	localStopHasDeadline bool
++	localPruneDiagnostic []byte
++	localChildInvoked bool
++	localChildIndex int
++	pruneFrozenDiagnostic []byte
++	pruneFreezeActive int
++	pruneFreezeOverlapped bool
++	localStopPending bool
++	localDiagnosticMemo []byte
++	localDiagnosticMemoReady chan struct{}
  	pruneTickerTime  time.Duration
  	pruneObjTTL      time.Duration
  	exit             chan struct{}
-@@ -236,21 +238,7 @@
+@@ -236,21 +252,7 @@
  	}
  
  	// Most gadgets won't use the symbolizer, so don't start the prune loop until we need it.
@@ -52,12 +66,17 @@
  		pruneCandidate: make(map[uint64]bool),
  	}
  	ctx := options.Context
-@@ -77,10 +77,10 @@
+@@ -77,10 +77,14 @@
  	// eBPF ring buffers or hash maps), each calling Resolve()
  	// concurrently on the same correlation ID.
- 	mu             sync.Mutex
+-	mu             sync.Mutex
++	mu                sync.Mutex
++	storeBook         storeAccounting
++	channelBook       channelAccounting
++	accountingLife    sync.RWMutex
++	accountingRetired bool
 -	correlationMap map[uint64]libpf.Frames
-+	correlationMap map[uint64]correlatedFrames
++	correlationMap    map[uint64]correlatedFrames
  	// waiters holds channels for Resolve() calls waiting on a correlation ID.
  	// The channel is closed by traceReporter when the trace arrives.
 -	waiters map[uint64]chan struct{}
@@ -65,7 +84,7 @@
  	// pruneCandidate holds correlation IDs that were absent from the
  	// BPF stack cache map on the previous prune cycle. An entry is
  	// deleted from correlationMap only if it remains absent for two
-@@ -301,11 +301,23 @@
+@@ -301,11 +305,23 @@
  // Linux < 5.8 where bpf_ktime_get_boot_ns is unavailable), the fixed
  // correlationTimeout is used.
  func (o *otelResolverInstance) lookupOrWait(correlationID uint64, eventBootTimestamp uint64) (libpf.Frames, bool) {
@@ -90,7 +109,7 @@
  	}
  
  	// Register a waiter. If another Resolve() call from a different
-@@ -313,9 +325,10 @@
+@@ -313,9 +329,10 @@
  	// its channel so that close() wakes all waiters.
  	ch, exists := o.waiters[correlationID]
  	if !exists {
@@ -102,7 +121,7 @@
  	o.mu.Unlock()
  
  	timeout := correlationTimeout
-@@ -324,7 +337,10 @@
+@@ -324,7 +341,10 @@
  		// struct gadget_user_stack.boot_timestamp. Compare with
  		// CLOCK_BOOTTIME which uses the same clock source.
  		var ts unix.Timespec
@@ -114,7 +133,7 @@
  		nowBootNs := uint64(ts.Sec)*1e9 + uint64(ts.Nsec)
  		if nowBootNs < eventBootTimestamp {
  			// Clock anomaly: skip waiting entirely.
-@@ -346,10 +362,11 @@
+@@ -346,10 +366,11 @@
  
  	if timeout > 0 {
  		select {
@@ -127,7 +146,7 @@
  		}
  	}
  
-@@ -357,11 +374,28 @@
+@@ -357,11 +378,28 @@
  	// already removed it by closing the channel).
  	o.mu.Lock()
  	if w, ok := o.waiters[correlationID]; ok && w == ch {
@@ -158,7 +177,7 @@
  }
  
  func bpfVerifierLogLevel() uint32 {
-@@ -417,13 +451,7 @@
+@@ -417,13 +455,7 @@
  		log.Debugf("Received OpenTelemetry trace (correlation ID %d, pid %d, tid %d):\n%s\n",
  			meta.CorrelationID, meta.PID, meta.TID, stackStr)
  

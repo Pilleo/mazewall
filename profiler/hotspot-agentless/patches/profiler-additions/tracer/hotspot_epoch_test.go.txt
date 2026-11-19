@@ -6,9 +6,12 @@ import (
 	"encoding/binary"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/processmanager"
+	"go.opentelemetry.io/ebpf-profiler/reporter"
+	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
 	"go.opentelemetry.io/ebpf-profiler/support"
 	"strings"
 	"testing"
+	"time"
 	"unsafe"
 )
 
@@ -47,5 +50,189 @@ func TestHotSpotEpochOversizedRawPacketIsRejected(t *testing.T) {
 	tr := &Tracer{tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}}
 	if _, err := tr.loadBpfTrace(epochTracePacket(3073), 0); err == nil || !strings.Contains(err.Error(), "invalid raw frame counts: 0/3073") {
 		t.Fatal("oversized frame array did not reach bounds rejection", err)
+	}
+}
+
+func TestBPFTraceCustomLabelsBounds(t *testing.T) {
+	labels := [][2]string{
+		{"key0", "value0"},
+		{"key1", "value1"},
+		{"key2", "value2"},
+		{"key3", "value3"},
+		{"key4", "value4"},
+		{"key5", "value5"},
+		{"key6", "value6"},
+		{"key7", "value7"},
+		{"key8", "value8"},
+		{"key9", "value9"},
+	}
+	capacity := uint32(len(support.Trace{}.Custom_labels.Labels))
+	for _, tc := range []struct {
+		name    string
+		count   uint32
+		invalid bool
+	}{
+		{name: "zero", count: 0},
+		{name: "full_capacity", count: capacity},
+		{name: "over_capacity", count: capacity + 1, invalid: true},
+		{name: "max_uint32", count: ^uint32(0), invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tr := &Tracer{tracePool: newTracePool(), processManager: &processmanager.ProcessManager{}}
+			b := epochTracePacket(0)
+			off := int(unsafe.Offsetof(support.Trace{}.Custom_labels))
+			binary.LittleEndian.PutUint32(b[off+int(unsafe.Offsetof(support.CustomLabelsArray{}.Len)):], tc.count)
+			for i, label := range labels {
+				labelOff := off + int(unsafe.Offsetof(support.CustomLabelsArray{}.Labels)) + i*int(unsafe.Sizeof(support.CustomLabel{}))
+				copy(b[labelOff+int(unsafe.Offsetof(support.CustomLabel{}.Key)):], label[0])
+				copy(b[labelOff+int(unsafe.Offsetof(support.CustomLabel{}.Val)):], label[1])
+			}
+			trace, err := tr.loadBpfTrace(b, 0)
+			if tc.invalid {
+				if trace != nil || err == nil {
+					t.Fatalf("invalid custom label count %d: trace=%v, err=%v", tc.count, trace, err)
+				}
+				message := strings.ToLower(err.Error())
+				if !strings.Contains(message, "custom label") || !strings.Contains(message, "invalid") {
+					t.Fatalf("expected invalid custom label diagnostic, got %v", err)
+				}
+				return
+			}
+			if err != nil || trace == nil {
+				t.Fatalf("valid custom label count %d: trace=%v, err=%v", tc.count, trace, err)
+			}
+			if tc.count == 0 {
+				if trace.CustomLabels != nil {
+					t.Fatalf("zero count produced custom labels: %v", trace.CustomLabels)
+				}
+				return
+			}
+			if len(trace.CustomLabels) != len(labels) {
+				t.Fatalf("full capacity: got %d custom labels, want %d", len(trace.CustomLabels), len(labels))
+			}
+			for _, label := range labels {
+				if got, ok := trace.CustomLabels[libpf.Intern(label[0])]; !ok || got != libpf.Intern(label[1]) {
+					t.Errorf("custom label %q: got %q (present=%t), want %q", label[0], got, ok, label[1])
+				}
+			}
+		})
+	}
+}
+
+type poolTestTraceReporter struct {
+	reporter.ExecutableReporter
+	trace *libpf.Trace
+	meta  *samples.TraceEventMeta
+	err   error
+}
+
+func (r *poolTestTraceReporter) ReportTraceEvent(t *libpf.Trace, m *samples.TraceEventMeta) error {
+	r.trace, r.meta = t, m
+	return r.err
+}
+
+func TestTracerHandleTracePoolReclaimPreservesProcessingScalarSnapshot(t *testing.T) {
+	rep := &poolTestTraceReporter{}
+	pm, err := processmanager.New(
+		t.Context(),
+		0,
+		time.Hour,
+		time.Hour,
+		nil,
+		rep,
+		nil,
+		nil,
+		false,
+		libpf.Set[string]{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := definitionBindingFixture()
+	src := &traceDefinitionSource{binding: binding}
+	configureProcessManagerTraceDefinitionBinding(pm, src)
+
+	tr := &Tracer{
+		definitionSource: src,
+		processManager:   pm,
+		tracePool:        newTracePool(),
+	}
+
+	pooled := tr.tracePool.Get().(*libpf.EbpfTrace)
+	*pooled = libpf.EbpfTrace{
+		PID:             libpf.PID(binding.HostTGID),
+		TID:             456,
+		CPU:             2,
+		Origin:          support.TraceOriginProbe,
+		KTime:           123456,
+		CorrelationID:   8888,
+		HotSpotIdentity: libpf.HotSpotIdentity{Epoch: 5, State: libpf.HotSpotEpochStable},
+		KernelFrames:    make(libpf.Frames, 0, 4),
+	}
+	pooled.KernelFrames.Append(&libpf.Frame{Type: libpf.KernelFrame, AddressOrLineno: 0xdeadbeef})
+
+	tr.HandleTrace(pooled)
+
+	if len(pooled.KernelFrames) != 0 {
+		t.Fatalf("expected tracer.HandleTrace to reset KernelFrames slice before pool.Put, len=%d", len(pooled.KernelFrames))
+	}
+
+	// Mutate the pooled struct in-place to prove PM admission copied scalars before pool.Put/reuse.
+	pooled.PID = 9999
+	pooled.TID = 7777
+	pooled.CPU = 99
+	pooled.Origin = support.TraceOriginOffCPU
+	pooled.KTime = 1
+	pooled.CorrelationID = 1
+	pooled.HotSpotIdentity = libpf.HotSpotIdentity{Epoch: 99, State: libpf.HotSpotEpochRegressed}
+
+	obs, err := pm.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected processing proof error: %v", err)
+	}
+	if !obs.HasBinding || obs.ExpectedBinding != binding {
+		t.Fatalf("expected startup binding %+v, got has=%v %+v", binding, obs.HasBinding, obs.ExpectedBinding)
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.ReporterOK != 1 || obs.Counts.TargetBound != 1 || obs.Counts.InFlight != 0 {
+		t.Fatalf("unexpected counts after tracer.HandleTrace: %+v", obs.Counts)
+	}
+	want := processmanager.TraceProcessingScalarSnapshot{
+		PID:             libpf.PID(binding.HostTGID),
+		TID:             456,
+		CPU:             2,
+		Origin:          support.TraceOriginProbe,
+		KTime:           123456,
+		CorrelationID:   8888,
+		HotSpotIdentity: libpf.HotSpotIdentity{Epoch: 5, State: libpf.HotSpotEpochStable},
+	}
+	if !obs.HasLastAdmitted || obs.LastAdmitted != want || !obs.HasLastClassified || obs.LastClassified != want {
+		t.Fatalf("pooled trace mutation corrupted processing scalar snapshot: admitted=%+v classified=%+v want=%+v",
+			obs.LastAdmitted, obs.LastClassified, want)
+	}
+
+	// Also verify nil definitionSource leaves PM binding UNKNOWN.
+	pmNil, err := processmanager.New(
+		t.Context(),
+		0,
+		time.Hour,
+		time.Hour,
+		nil,
+		rep,
+		nil,
+		nil,
+		false,
+		libpf.Set[string]{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configureProcessManagerTraceDefinitionBinding(pmNil, nil)
+	pmNil.HandleTrace(&libpf.EbpfTrace{PID: 123, TID: 456, CorrelationID: 99})
+	obsNil, err := pmNil.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected nil-source proof error: %v", err)
+	}
+	if obsNil.HasBinding || obsNil.Counts.BindingUnknown != 1 || obsNil.Counts.TargetBound != 0 || obsNil.Counts.ForeignToBinding != 0 {
+		t.Fatalf("expected nil definitionSource to leave binding UNKNOWN, got %+v", obsNil)
 	}
 }

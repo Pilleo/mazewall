@@ -1,0 +1,127 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package ebpf
+
+import (
+	"errors"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/support"
+)
+
+func TestPageOwnershipBorrowedEntries(t *testing.T) {
+	key := support.StackDeltaPageKey{FileID: 1, Page: 1}
+	prefix := support.StackDeltaPageKey{FileID: 1, Page: 0}
+	wanted := support.StackDeltaPageInfo{MapID: 7}
+	for _, borrowed := range []support.StackDeltaPageInfo{wanted, {MapID: 99}} {
+		for _, race := range []bool{false, true} {
+			entries := map[support.StackDeltaPageKey]support.StackDeltaPageInfo{}
+			if !race {
+				entries[key] = borrowed
+			}
+			deletes := 0
+			ops := stackDeltaPageOps{
+				insert: func(k support.StackDeltaPageKey, v support.StackDeltaPageInfo) error {
+					if race && k == key {
+						entries[k] = borrowed
+					}
+					if _, exists := entries[k]; exists {
+						return syscall.EEXIST
+					}
+					entries[k] = v
+					return nil
+				},
+				remove: func(k support.StackDeltaPageKey) error { deletes++; delete(entries, k); return nil },
+			}
+			err := installStackDeltaPages([]support.StackDeltaPageKey{prefix, key}, []support.StackDeltaPageInfo{wanted, wanted}, ops)
+			if !errors.Is(err, syscall.EEXIST) || deletes != 1 || len(entries) != 1 || entries[key] != borrowed {
+				t.Fatalf("race=%v entries=%v deletes=%d err=%v", race, entries, deletes, err)
+			}
+		}
+	}
+}
+
+func TestPageOwnershipRollbackPrefix(t *testing.T) {
+	keys := []support.StackDeltaPageKey{{FileID: 1, Page: 1}, {FileID: 1, Page: 2}, {FileID: 1, Page: 3}}
+	values := []support.StackDeltaPageInfo{{MapID: 1}, {MapID: 2}, {MapID: 3}}
+	for fail := range keys {
+		entries := make(map[support.StackDeltaPageKey]support.StackDeltaPageInfo)
+		var deleted []support.StackDeltaPageKey
+		calls := 0
+		ops := stackDeltaPageOps{
+			insert: func(k support.StackDeltaPageKey, v support.StackDeltaPageInfo) error {
+				if calls == fail {
+					return syscall.EPERM
+				}
+				calls++
+				entries[k] = v
+				return nil
+			},
+			remove: func(k support.StackDeltaPageKey) error { deleted = append(deleted, k); delete(entries, k); return nil },
+		}
+		err := installStackDeltaPages(keys, values, ops)
+		if !errors.Is(err, syscall.EPERM) || len(entries) != 0 || len(deleted) != fail {
+			t.Fatalf("fail=%d entries=%v deleted=%v err=%v", fail, entries, deleted, err)
+		}
+		for i, k := range deleted {
+			if k != keys[i] {
+				t.Fatalf("unexpected rollback: %v", deleted)
+			}
+		}
+	}
+}
+
+func TestPageOwnershipRollbackError(t *testing.T) {
+	keys := []support.StackDeltaPageKey{{Page: 1}, {Page: 2}}
+	values := []support.StackDeltaPageInfo{{MapID: 7}, {MapID: 8}}
+	ops := stackDeltaPageOps{
+		insert: func(k support.StackDeltaPageKey, _ support.StackDeltaPageInfo) error {
+			if k == keys[1] {
+				return syscall.EEXIST
+			}
+			return nil
+		},
+		remove: func(support.StackDeltaPageKey) error { return syscall.EACCES },
+	}
+	err := installStackDeltaPages(keys, values, ops)
+	var pending *stackDeltaRollbackError
+	if !errors.Is(err, syscall.EEXIST) || !errors.Is(err, syscall.EACCES) || !errors.As(err, &pending) || len(pending.remaining) != 1 || pending.remaining[keys[0]] != values[0] {
+		t.Fatalf("lost insertion or rollback failure: %v", err)
+	}
+}
+
+func TestPageOwnershipDuplicateAndMismatch(t *testing.T) {
+	key := support.StackDeltaPageKey{Page: 1}
+	value := support.StackDeltaPageInfo{MapID: 7}
+	entries := map[support.StackDeltaPageKey]support.StackDeltaPageInfo{}
+	deletes := 0
+	ops := stackDeltaPageOps{
+		insert: func(k support.StackDeltaPageKey, v support.StackDeltaPageInfo) error {
+			if _, exists := entries[k]; exists {
+				return syscall.EEXIST
+			}
+			entries[k] = v
+			return nil
+		},
+		remove: func(k support.StackDeltaPageKey) error { deletes++; delete(entries, k); return nil },
+	}
+	if err := installStackDeltaPages([]support.StackDeltaPageKey{key}, nil, ops); err == nil || deletes != 0 || len(entries) != 0 {
+		t.Fatalf("mismatch mutated entries: %v", err)
+	}
+	err := installStackDeltaPages([]support.StackDeltaPageKey{key, key}, []support.StackDeltaPageInfo{value, value}, ops)
+	if !errors.Is(err, syscall.EEXIST) || deletes != 1 || len(entries) != 0 {
+		t.Fatalf("duplicate: entries=%v deletes=%d err=%v", entries, deletes, err)
+	}
+}
+
+func TestPageOwnershipSuccessfulInsert(t *testing.T) {
+	key := support.StackDeltaPageKey{Page: 1}
+	value := support.StackDeltaPageInfo{MapID: 7}
+	entries := map[support.StackDeltaPageKey]support.StackDeltaPageInfo{}
+	ops := stackDeltaPageOps{insert: func(k support.StackDeltaPageKey, v support.StackDeltaPageInfo) error { entries[k] = v; return nil }}
+	if err := installStackDeltaPages([]support.StackDeltaPageKey{key}, []support.StackDeltaPageInfo{value}, ops); err != nil || entries[key] != value {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+}

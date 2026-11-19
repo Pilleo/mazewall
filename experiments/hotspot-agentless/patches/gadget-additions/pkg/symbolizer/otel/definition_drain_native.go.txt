@@ -4,11 +4,45 @@ package otel
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
 )
 
 type resolverDefinitionDrainBackend struct{ resolver *otelResolverInstance }
+
+func (b resolverDefinitionDrainBackend) diagnosticChild() cachedDiagnosticChild {
+	if b.resolver.trc == nil { return nil }
+	return b.resolver.trc
+}
+
+func (o *otelResolverInstance) DefinitionSourceDiagnosticsReady() <-chan struct{} {
+	if owner := o.ownedDefinitionDrain(); owner != nil { return owner.diagnosticReady() }
+	return nil
+}
+
+func (o *otelResolverInstance) DefinitionSourceDiagnostics() (json.RawMessage, error) {
+	if owner := o.ownedDefinitionDrain(); owner != nil { return owner.diagnostic() }
+	return nil, errLocalDiagnosticUnavailable
+}
+
+func (b resolverDefinitionDrainBackend) localDiagnosticSnapshot() (channelDiagnostic, storeDiagnostic) {
+	return projectChannelDiagnostic(b.resolver.channelAccountingSnapshot()), projectStoreDiagnostic(b.resolver.storeAccountingSnapshot())
+}
+
+func (b resolverDefinitionDrainBackend) stopAuxiliaryFinal(ctx context.Context) (tracer.DefinitionAuxiliaryObservation, error) {
+	return b.resolver.nativeStopAuxiliaryFinal(ctx)
+}
+
+func (b resolverDefinitionDrainBackend) DefinitionLifetime() libpf.TraceDefinitionLifetime {
+	return b.resolver.options.TraceDefinitionLifetime
+}
+
+func (b resolverDefinitionDrainBackend) SampleDefinitions(ctx context.Context) (libpf.TraceDefinitionObservation, error) {
+	return b.resolver.trc.TraceDefinitionFinal(ctx)
+}
 
 func (b resolverDefinitionDrainBackend) Quiesce(ctx context.Context) error {
 	return b.resolver.trc.QuiesceDefinitionSources(ctx)
@@ -29,15 +63,29 @@ func (o *otelResolverInstance) ownedDefinitionDrain() *definitionDrainOwner {
 	defer o.definitionDrainMu.Unlock()
 	return o.definitionDrain
 }
+func (o *otelResolverInstance) getOrCreateDefinitionDrain() *definitionDrainOwner {
+	o.definitionDrainMu.Lock()
+	defer o.definitionDrainMu.Unlock()
+	if o.definitionDrain == nil { o.definitionDrain = newDefinitionDrainOwner(resolverDefinitionDrainBackend{resolver: o}) }
+	return o.definitionDrain
+}
 func (o *otelResolverInstance) DrainDefinitions(ctx context.Context) (symbolizer.DefinitionStopObservation, error) {
 	if (o.options.HotSpotEpochTarget.PID == 0 && o.options.HotSpotObservedPID == 0) || o.trc == nil || o.consumerDone == nil {
 		return symbolizer.DefinitionStopObservation{}, fmt.Errorf("owned definition drain requires initialized HotSpot profiler")
 	}
-	o.definitionDrainMu.Lock()
-	if o.definitionDrain == nil {
-		o.definitionDrain = newDefinitionDrainOwner(resolverDefinitionDrainBackend{resolver: o})
+	return o.getOrCreateDefinitionDrain().drain(ctx)
+}
+
+func (o *otelResolverInstance) TraceDefinitionBinding() (libpf.TraceDefinitionBinding, error) {
+	if (o.options.HotSpotEpochTarget.PID == 0 && o.options.HotSpotObservedPID == 0) || o.trc == nil {
+		return libpf.TraceDefinitionBinding{}, fmt.Errorf("trace definition binding requires initialized HotSpot profiler")
 	}
-	owner := o.definitionDrain
-	o.definitionDrainMu.Unlock()
-	return owner.stop(ctx)
+	return forwardDefinitionBinding(o.options.TraceDefinitionLifetime, o.trc)
+}
+
+func forwardDefinitionBinding(lifetime libpf.TraceDefinitionLifetime, tracer interface {
+	TraceDefinitionBinding() (libpf.TraceDefinitionBinding, error)
+}) (libpf.TraceDefinitionBinding, error) {
+	_ = lifetime
+	return tracer.TraceDefinitionBinding()
 }

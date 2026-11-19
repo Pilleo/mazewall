@@ -1,5 +1,6 @@
 package io.mazewall.profiler.hotspot
 
+import io.mazewall.profiler.api.HotSpotObservationTarget
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -18,7 +19,9 @@ internal object HotSpotChildFixture {
         mode: String,
         directory: Path,
         wrongGeneration: Boolean = false,
+        observedTarget: HotSpotObservationTarget? = null,
     ): List<String> {
+        if (observedTarget != null) return observedArgv(mode, directory, observedTarget)
         val lifecycle = requireNotNull(javaClass.getResourceAsStream("/hotspot/production-lifecycle-projection.jsonl")).bufferedReader().use { it.readLines() }
         val payload = requireNotNull(javaClass.getResourceAsStream("/hotspot/measured-event-projection.jsonl")).bufferedReader().use { it.readLines() }
 
@@ -30,7 +33,7 @@ internal object HotSpotChildFixture {
             objectValue(
                 text.replace(
                 "e908bb2689936481f8a696dd2347457cc44b6344c1fa78ca65b37772032703eb",
-                "b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3",
+                "22f66bf56bb3b9a00c47186a53bff07ab932ca48dff8b3900666348685ff5035",
             ),
             ).toMutableMap().apply {
             put("schema_version", JsonPrimitive(2))
@@ -97,6 +100,29 @@ internal object HotSpotChildFixture {
         )
         val file = directory.resolve("$mode.jsonl")
         Files.writeString(file, listOf(headers[0], headers[1], event, identify(payload[1]), summary, error).joinToString("\n") + "\n")
+        return listOf(Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-cp", classes.toString(), "HotSpotTestCollector", mode, file.toString())
+    }
+
+    private fun observedArgv(
+        mode: String,
+        directory: Path,
+        target: HotSpotObservationTarget,
+    ): List<String> {
+        val text = requireNotNull(javaClass.getResourceAsStream("/hotspot/observed-consumer.jsonl"))
+            .bufferedReader()
+            .use { it.readText() }
+            .replace("\"pid\":123", "\"pid\":${target.pid.value}")
+            .replace("\"host_pid\":123", "\"host_pid\":${target.pid.value}")
+            .replace("\"process_start_ticks\":456", "\"process_start_ticks\":${target.processStartTicks}")
+            .replace("\"cgroup_id\":789", "\"cgroup_id\":${target.cgroupId}")
+            .replace("\"mount_namespace\":42", "\"mount_namespace\":${target.mountNamespace}")
+        val rows = text.lines().filter { it.isNotEmpty() }
+        val failure = rows
+            .first()
+            .replace("\"kind\":\"session_started\"", "\"kind\":\"collector_error\"")
+            .replace("\"lifecycle\":{", "\"lifecycle\":{\"errno\":5,\"errno_causes\":[5,13],\"message\":\"synthetic original native failure\",")
+        val file = directory.resolve("$mode-observed.jsonl")
+        Files.writeString(file, (rows + failure).joinToString("\n", postfix = "\n"))
         return listOf(Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-cp", classes.toString(), "HotSpotTestCollector", mode, file.toString())
     }
 }

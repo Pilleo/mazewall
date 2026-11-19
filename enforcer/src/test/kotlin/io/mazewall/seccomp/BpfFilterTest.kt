@@ -207,14 +207,14 @@ class BpfFilterTest {
         val inspections = listOf(
             SyscallInspection(
                 syscallNumber = 100,
-                argIndex = 1,
+                argument = SyscallArgument.SECOND,
                 check = ArgCheck.MaskEquals(0x04L, 0x00L),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
             SyscallInspection(
                 syscallNumber = 101,
-                argIndex = 2,
+                argument = SyscallArgument.THIRD,
                 check = ArgCheck.MaskEquals(0x04L, 0x04L),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
@@ -243,14 +243,14 @@ class BpfFilterTest {
         val inspections = listOf(
             SyscallInspection(
                 syscallNumber = 200,
-                argIndex = 0,
+                argument = SyscallArgument.FIRST,
                 check = ArgCheck.EqualsAny(listOf(5L)),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
             SyscallInspection(
                 syscallNumber = 201,
-                argIndex = 0,
+                argument = SyscallArgument.FIRST,
                 check = ArgCheck.EqualsAny(listOf(10L, 20L)),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
@@ -282,7 +282,7 @@ class BpfFilterTest {
         val inspections = listOf(
             SyscallInspection(
                 syscallNumber = 300,
-                argIndex = 0,
+                argument = SyscallArgument.FIRST,
                 check = ArgCheck.MaskEquals(maskVal, maskVal),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
@@ -314,7 +314,7 @@ class BpfFilterTest {
         val inspections = listOf(
             SyscallInspection(
                 syscallNumber = 400,
-                argIndex = 0,
+                argument = SyscallArgument.FIRST,
                 check = ArgCheck.EqualsAny(listOf(largeVal1, largeVal2)),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
@@ -601,14 +601,14 @@ class BpfFilterTest {
         val inspections = listOf(
             SyscallInspection(
                 syscallNumber = arch.prctl,
-                argIndex = 0,
+                argument = SyscallArgument.FIRST,
                 check = ArgCheck.EqualsAny32(listOf(15)),
                 ifMatched = SeccompAction.ACT_ALLOW,
                 ifNotMatched = SeccompAction.ACT_ERRNO(),
             ),
         )
-        BpfFilter.emitInspections(builder, inspections, profilingMode = false, handledNrs = mutableSetOf(arch.prctl))
-        val program = builder.ret(NativeConstants.SECCOMP_RET_ALLOW).build()
+        BpfFilter.emitInspections(builder, inspections, profilingMode = false, handledNrs = mutableSetOf())
+        val program = builder.allow().build()
         BpfStaticVerifier.verify(program)
         val instructions = program.instructions
 

@@ -1,0 +1,1008 @@
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"reflect"
+	"runtime"
+	"sync"
+	"time"
+
+	"github.com/mdlayher/kobject"
+	"go.opentelemetry.io/ebpf-profiler/kallsyms"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+type kobjectMonitorStarter interface { StartOwnedMonitor(context.Context, kallsyms.OwnedKobjectReceiver) error; FlushOwnedMonitor(context.Context) error }
+
+type kwFactoryClaimPhase uint8
+const (
+	kwFactoryClaimPending kwFactoryClaimPhase = iota
+	kwFactoryClaimRejected
+)
+
+type kwFactoryPinPhase uint8
+const (
+	kwFactoryPinAbsent kwFactoryPinPhase = iota
+	kwFactoryPinCallerOwned
+	kwFactoryPinCleanupOwned
+	kwFactoryPinTerminalizing
+	kwFactoryPinTerminalized
+	kwFactoryPinTerminalUnknown
+)
+
+type kwFactoryEnrollmentPhase uint8
+const (
+	kwEnrollmentAbsent kwFactoryEnrollmentPhase = iota
+	kwEnrollmentPending
+	kwEnrollmentFailed
+	kwEnrollmentOwned
+	kwEnrollmentUnknown
+)
+type kwEnrollmentLaunchPhase uint8
+const (
+	kwEnrollmentLaunchNotStarted kwEnrollmentLaunchPhase = iota
+	kwEnrollmentLaunchInFlight
+	kwEnrollmentLaunchRejected
+	kwEnrollmentLaunchAccepted
+	kwEnrollmentLaunchUnknown
+)
+type kwFactoryAcquisitionPhase uint8
+const (
+	kwAcquisitionNotStarted kwFactoryAcquisitionPhase = iota
+	kwAcquisitionRunning
+	kwAcquisitionReturned
+)
+type kwFactoryLaunchPhase uint8
+const (
+	kwLaunchAbsent kwFactoryLaunchPhase = iota
+	kwLaunchPending
+	kwLaunchStarted
+	kwLaunchRejected
+)
+type kwFactoryStopPhase uint8
+const (
+	kwStopAbsent kwFactoryStopPhase = iota
+	kwStopResolving
+	kwStopNegative
+	kwStopDelegated
+)
+
+type kwFactoryStartClaim struct {
+	phase kwFactoryClaimPhase
+	first, worker context.Context
+	deadline time.Time
+	hasDeadline bool
+	monitor kobjectMonitorStarter
+	binding libpf.AuxiliaryBinding
+	cause error
+	decision chan struct{}
+	pinPhase kwFactoryPinPhase
+	pin *periodiccaller.OwnedOperation
+	unadoptedPin *periodiccaller.OwnedOperation
+	pinResult error
+	pinTerminalErr error
+	pinDone chan struct{}
+	enrollment kwFactoryEnrollmentPhase
+	enrollmentLaunch kwEnrollmentLaunchPhase
+	request, publication, cleanupDone chan struct{}
+	cleanupWake chan struct{}
+	cleanupErr error
+	acquisition kwFactoryAcquisitionPhase
+	acquisitionDone chan struct{}
+	launchPhase kwFactoryLaunchPhase
+	launchPublication chan struct{}
+	stopFirst context.Context
+	stopComponent *kobjectWitness
+	stopErr error
+	stopPhase kwFactoryStopPhase
+	stopDone chan struct{}
+	stopDeadline time.Time
+	stopHasDeadline bool
+	finishCalls int
+	retireRequested bool
+	handoffRetired bool
+	startEntryClaimed bool
+	startSetupDone chan struct{}
+	startSetupErr error
+	startWorkerDeadline time.Time
+	startHasWorkerDeadline bool
+	startScopeDeadline time.Time
+	startHasScopeDeadline bool
+	startClocksCaptured bool
+}
+
+type kobjectFactoryError struct { cause error; cleanup *preparedKobjectWitness; unadopted *periodiccaller.OwnedOperation }
+func (e *kobjectFactoryError) Error() string { return fmt.Sprintf("factory cleanup retained: %v", e.cause) }
+func (e *kobjectFactoryError) Unwrap() error { return e.cause }
+
+func (p *preparedKobjectWitness) Finish(ctx context.Context) (kobjectWitnessReadout, error) {
+	var empty kobjectWitnessReadout
+	if p == nil || ctx == nil { return empty, errors.New("missing factory or first-stop context") }
+	for {
+		p.mu.Lock(); c, scope := p.startClaim, p.scope
+		validPhase := p.phase == kwFactoryPrepared || p.phase == kwFactoryAcquiring || p.phase == kwFactoryHandedOff || p.phase == kwFactoryRejected || p.phase == kwFactoryRetired
+		if !validPhase || scope == nil || p.spec == nil || p.binding.Generation == 0 || c == nil && p.phase != kwFactoryPrepared && p.phase != kwFactoryRetired || p.phase == kwFactoryPrepared && (c != nil || p.transport != nil || p.reader != nil || p.objects != nil || p.epoch != nil || p.component != nil) { p.mu.Unlock(); return empty, &kobjectFactoryError{cause: errors.New("factory lifecycle state unknown"), cleanup: p} }
+		if c == nil { c = &kwFactoryStartClaim{phase: kwFactoryClaimPending, decision: make(chan struct{})}; p.startClaim = c }
+		claimClosed := false; if c.decision != nil { select { case <-c.decision: claimClosed = true; default: } }; if c.decision == nil || c.phase != kwFactoryClaimPending && c.phase != kwFactoryClaimRejected || c.phase == kwFactoryClaimPending && claimClosed || c.phase == kwFactoryClaimRejected && (!claimClosed || c.cause == nil) { p.mu.Unlock(); return empty, &kobjectFactoryError{cause: errors.New("factory claim state unknown"), cleanup: p} }
+		closed := false; if c.stopDone != nil { select { case <-c.stopDone: closed = true; default: } }
+		valid := c.stopPhase == kwStopAbsent && c.stopFirst == nil && c.stopDone == nil && c.stopErr == nil && c.stopComponent == nil || c.stopPhase == kwStopResolving && c.stopFirst != nil && c.stopDone != nil && !closed && c.stopErr == nil && c.stopComponent == nil || c.stopPhase == kwStopNegative && c.stopFirst != nil && c.stopDone != nil && closed && c.stopErr != nil && c.stopComponent == nil || c.stopPhase == kwStopDelegated && c.stopFirst != nil && c.stopDone != nil && closed && c.stopErr == nil && c.stopComponent != nil
+		if !valid || ((p.phase == kwFactoryHandedOff || c.handoffRetired) && p.component == nil) { p.mu.Unlock(); return empty, &kobjectFactoryError{cause: errors.New("factory stop state unknown"), cleanup: p} }
+		if c.stopPhase == kwStopResolving { done := c.stopDone; p.mu.Unlock(); <-done; continue }
+		if c.stopPhase == kwStopAbsent {
+			c.stopFirst = ctx; c.stopDone = make(chan struct{})
+			if (p.phase == kwFactoryHandedOff || c.handoffRetired) && p.component != nil { c.stopComponent = p.component; c.stopPhase = kwStopDelegated; close(c.stopDone) } else {
+				c.stopPhase = kwStopResolving; p.stopRequested = true; if p.phase == kwFactoryPrepared { p.phase = kwFactoryRejected }; binding, worker, latched, stopDone := p.binding, c.worker, c.startClocksCaptured, c.stopDone; workerDeadline, hasWorkerDeadline, scopeDeadline, hasScopeDeadline := c.startWorkerDeadline, c.startHasWorkerDeadline, c.startScopeDeadline, c.startHasScopeDeadline; p.mu.Unlock()
+				deadline, hasDeadline := ctx.Deadline(); scopeCtx := scope.Context(); if !latched { if worker != nil { workerDeadline, hasWorkerDeadline = worker.Deadline() }; if scopeCtx != nil { scopeDeadline, hasScopeDeadline = scopeCtx.Deadline() } }; actual, bindingErr := scope.AuxiliaryBinding(); var workerErr, scopeErr error; if worker != nil { workerErr = worker.Err() }; if scopeCtx != nil { scopeErr = scopeCtx.Err() } else { scopeErr = errors.New("missing factory scope context") }; cause := errors.Join(errors.New("factory stopped before handoff"), ctx.Err(), workerErr, scopeErr, scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(binding, actual))
+				p.mu.Lock(); if c.stopPhase != kwStopResolving || c.stopDone != stopDone { p.mu.Unlock(); return empty, &kobjectFactoryError{cause: errors.Join(cause, errors.New("factory stop publication changed")), cleanup: p} }; now := time.Now(); var clock error; if hasDeadline && !now.Before(deadline) || hasWorkerDeadline && !now.Before(workerDeadline) || hasScopeDeadline && !now.Before(scopeDeadline) { clock = context.DeadlineExceeded }; c.stopDeadline, c.stopHasDeadline = deadline, hasDeadline; c.stopErr = errors.Join(cause, clock, c.cause, p.err); if p.startClaim != c || p.scope != scope || !reflect.DeepEqual(p.binding, binding) || reflect.ValueOf(c.worker) != reflect.ValueOf(worker) || c.startClocksCaptured != latched || latched && (c.startWorkerDeadline != workerDeadline || c.startHasWorkerDeadline != hasWorkerDeadline || c.startScopeDeadline != scopeDeadline || c.startHasScopeDeadline != hasScopeDeadline) { c.stopErr = errors.Join(c.stopErr, errors.New("factory stop ownership changed")); c.stopPhase = kwStopNegative; close(stopDone); p.mu.Unlock(); return empty, &kobjectFactoryError{cause: c.stopErr, cleanup: p} }; p.rejectFactoryClaimLocked(c, c.stopErr); c.stopPhase = kwStopNegative; close(stopDone); p.mu.Unlock(); continue
+			}
+		}
+		first, component, result, request := c.stopFirst, c.stopComponent, c.stopErr, c.request != nil && p.phase != kwFactoryRetired
+		if component != nil { c.finishCalls++ }; p.mu.Unlock()
+		if component == nil { if request { _ = p.requestFactoryCleanup(c) }; return empty, result }
+		readout, err := component.finish(first)
+		if err != nil { component.mu.Lock(); frozen := component.finishClaim; if component.componentState != kwComponentAvailable && frozen != nil && frozen.phase == kwFinishCommitted && kwFinishStateError(frozen) == nil { readout, err = frozen.readout, frozen.cause }; component.mu.Unlock() }
+		p.mu.Lock(); c.finishCalls--; cleanup := c.finishCalls == 0 && c.retireRequested && c.request != nil && p.phase != kwFactoryRetired; p.mu.Unlock()
+		if cleanup { _ = p.requestFactoryCleanup(c) }; return readout, err
+	}
+}
+
+func (p *preparedKobjectWitness) Retire() error {
+	if p == nil { return errors.New("missing factory") }
+	p.mu.Lock(); c := p.startClaim
+	valid := p.scope != nil && p.spec != nil && p.binding.Generation != 0 && (p.phase == kwFactoryPrepared || p.phase == kwFactoryAcquiring || p.phase == kwFactoryHandedOff || p.phase == kwFactoryRejected || p.phase == kwFactoryRetired) && (c != nil || p.phase == kwFactoryPrepared || p.phase == kwFactoryRetired) && (p.phase != kwFactoryPrepared || c == nil && p.transport == nil && p.reader == nil && p.objects == nil && p.epoch == nil && p.component == nil)
+	if c != nil { decisionClosed, stopClosed := false, false; if c.decision != nil { select { case <-c.decision: decisionClosed = true; default: } }; if c.stopDone != nil { select { case <-c.stopDone: stopClosed = true; default: } }; claimValid := c.decision != nil && (c.phase == kwFactoryClaimPending && !decisionClosed || c.phase == kwFactoryClaimRejected && decisionClosed && c.cause != nil); stopValid := c.stopPhase == kwStopAbsent && c.stopFirst == nil && c.stopDone == nil && c.stopErr == nil && c.stopComponent == nil || c.stopPhase == kwStopResolving && c.stopFirst != nil && c.stopDone != nil && !stopClosed && c.stopErr == nil && c.stopComponent == nil || c.stopPhase == kwStopNegative && c.stopFirst != nil && c.stopDone != nil && stopClosed && c.stopErr != nil && c.stopComponent == nil || c.stopPhase == kwStopDelegated && c.stopFirst != nil && c.stopDone != nil && stopClosed && c.stopErr == nil && c.stopComponent != nil; valid = valid && claimValid && stopValid && (!(p.phase == kwFactoryHandedOff || c.handoffRetired) || p.component != nil) }
+	if !valid { p.mu.Unlock(); return &kobjectFactoryError{cause: errors.New("factory lifecycle state unknown"), cleanup: p} }
+	if c != nil && c.stopPhase == kwStopResolving { c.retireRequested = true; p.stopRequested = true; p.mu.Unlock(); return &kobjectFactoryError{cause: errors.New("factory stop resolution pending"), cleanup: p} }
+	empty := p.transport == nil && p.reader == nil && p.objects == nil && p.epoch == nil && p.component == nil
+	if empty && (c == nil || c.enrollment == kwEnrollmentAbsent && c.enrollmentLaunch == kwEnrollmentLaunchNotStarted && c.pinPhase == kwFactoryPinAbsent && c.pin == nil && c.unadoptedPin == nil && c.pinDone == nil && c.acquisition == kwAcquisitionNotStarted && c.acquisitionDone == nil && c.launchPhase == kwLaunchAbsent && c.launchPublication == nil && c.request == nil && c.publication == nil && c.cleanupDone == nil && c.cleanupWake == nil && c.finishCalls == 0) { p.stopRequested = true; p.phase = kwFactoryRetired; cause, scope := p.err, p.scope; p.mu.Unlock(); if scope != nil { cause = errors.Join(cause, scope.Failure()) }; return cause }
+	var request, deferRequest bool
+	if c != nil { c.retireRequested = true; c.handoffRetired = c.handoffRetired || p.phase == kwFactoryHandedOff; request = c.request != nil && p.phase != kwFactoryRetired; deferRequest = c.finishCalls != 0 }
+	p.stopRequested = true; p.mu.Unlock()
+	var requestErr error; if request && !deferRequest { requestErr = p.requestFactoryCleanup(c) }
+	p.mu.Lock(); c = p.startClaim; scope := p.scope; cause := errors.Join(p.err, requestErr); component := p.component; rawEmpty := p.transport == nil && p.reader == nil && p.objects == nil && p.epoch == nil
+	released := false
+	if c != nil { cause = errors.Join(cause, c.cause, c.cleanupErr, c.pinResult); cleanupDone := false; if c.cleanupDone != nil { select { case <-c.cleanupDone: cleanupDone = true; default: } }; pinDone := c.pinPhase == kwFactoryPinAbsent && c.pin == nil && c.pinDone == nil; if c.pinPhase == kwFactoryPinTerminalized && c.pin != nil && c.pinDone != nil { select { case <-c.pinDone: pinDone = true; default: } }; published := false; if c.launchPublication != nil { select { case <-c.launchPublication: published = true; default: } }; enrollmentPublished := false; if c.publication != nil { select { case <-c.publication: enrollmentPublished = true; default: } }; enrollmentDone := c.request != nil && c.cleanupWake != nil && enrollmentPublished && (c.enrollment == kwEnrollmentOwned && c.enrollmentLaunch == kwEnrollmentLaunchAccepted || c.enrollment == kwEnrollmentFailed && (c.enrollmentLaunch == kwEnrollmentLaunchNotStarted || c.enrollmentLaunch == kwEnrollmentLaunchRejected) && c.pinTerminalErr == nil); acquisitionDone := c.acquisition == kwAcquisitionNotStarted && c.launchPhase == kwLaunchAbsent && c.launchPublication == nil && c.acquisitionDone == nil; if c.acquisition == kwAcquisitionNotStarted && c.launchPhase == kwLaunchRejected && published && c.acquisitionDone != nil { select { case <-c.acquisitionDone: default: acquisitionDone = true } }; if c.acquisition == kwAcquisitionReturned && c.launchPhase == kwLaunchStarted && published && c.acquisitionDone != nil { select { case <-c.acquisitionDone: acquisitionDone = true; default: } }; released = cleanupDone && pinDone && c.unadoptedPin == nil && enrollmentDone && acquisitionDone && rawEmpty && !deferRequest }
+	p.mu.Unlock()
+	if scope != nil { cause = errors.Join(cause, scope.Failure()) }
+	if released && component != nil { component.mu.Lock(); released = component.physicalState == kwPhysicalReleased; cause = errors.Join(cause, component.physicalErr); component.mu.Unlock() }
+	if released { p.mu.Lock(); p.phase = kwFactoryRetired; p.mu.Unlock(); return cause }
+	return &kobjectFactoryError{cause: errors.Join(cause, errors.New("factory ownership pending or retained")), cleanup: p}
+}
+
+// The caller must retain any operation that this helper cannot adopt.
+func (p *preparedKobjectWitness) adoptFactoryPin(c *kwFactoryStartClaim, op *periodiccaller.OwnedOperation, admitErr error) error {
+	_, err := p.adoptFactoryPinWithDone(c, op, admitErr); return err
+}
+
+func (p *preparedKobjectWitness) adoptFactoryPinWithDone(c *kwFactoryStartClaim, op *periodiccaller.OwnedOperation, admitErr error) (chan struct{}, error) {
+	p.mu.Lock(); defer p.mu.Unlock()
+	if c == nil || p.startClaim != c || c.pinPhase != kwFactoryPinAbsent || c.pin != nil || c.pinDone != nil { return nil, errors.Join(admitErr, errors.New("factory pin adoption unavailable")) }
+	if op != nil { c.pin = op; c.pinPhase = kwFactoryPinCallerOwned; c.pinDone = make(chan struct{}) }
+	if op == nil && admitErr == nil { return nil, errors.New("factory admission returned no pin") }; return c.pinDone, admitErr
+}
+
+// Transfer is reserved for the future successful Scope.Go enrollment path.
+func (p *preparedKobjectWitness) transferFactoryPin(c *kwFactoryStartClaim) error {
+	return p.transferFactoryPinExpected(c, nil)
+}
+
+func (p *preparedKobjectWitness) transferFactoryPinExpected(c *kwFactoryStartClaim, expected *periodiccaller.OwnedOperation) error {
+	p.mu.Lock(); defer p.mu.Unlock()
+	if c == nil || p.startClaim != c || c.pinPhase != kwFactoryPinCallerOwned || c.pin == nil || c.pinDone == nil || expected != nil && c.pin != expected { return errors.New("factory pin transfer unavailable") }
+	c.pinPhase = kwFactoryPinCleanupOwned; return nil
+}
+
+type kwFactoryWorld struct {
+	graph kwFactoryGraphSnapshot
+	preparedBinding libpf.AuxiliaryBinding
+	workerDeadline, scopeDeadline time.Time
+	hasWorkerDeadline, hasScopeDeadline bool
+	latched bool
+	err error
+}
+
+// Snapshot ownership under p.mu, query external authorities without it, then recheck under p.mu.
+func (p *preparedKobjectWitness) sampleFactoryWorld(c *kwFactoryStartClaim) kwFactoryWorld {
+	p.mu.Lock(); if c == nil || p.startClaim != c { p.mu.Unlock(); return kwFactoryWorld{err: errors.New("factory claim unavailable")} }; w := kwFactoryWorld{graph: p.factoryGraphSnapshotLocked(c), preparedBinding: p.binding, latched: c.startClocksCaptured, workerDeadline: c.startWorkerDeadline, hasWorkerDeadline: c.startHasWorkerDeadline, scopeDeadline: c.startScopeDeadline, hasScopeDeadline: c.startHasScopeDeadline}; p.mu.Unlock()
+	if w.graph.scope == nil || w.graph.first == nil || w.graph.worker == nil { w.err = errors.New("factory context or scope unavailable"); return w }
+	scopeCtx := w.graph.scope.Context(); if scopeCtx == nil { w.err = errors.New("factory scope context unavailable"); return w }
+	if !w.latched { w.workerDeadline, w.hasWorkerDeadline = w.graph.worker.Deadline(); w.scopeDeadline, w.hasScopeDeadline = w.workerDeadline, w.hasWorkerDeadline }; actual, bindingErr := w.graph.scope.AuxiliaryBinding()
+	if !reflect.ValueOf(w.graph.worker).Comparable() || !reflect.ValueOf(scopeCtx).Comparable() || w.graph.worker != scopeCtx { w.err = errors.New("factory worker context changed") }
+	w.err = errors.Join(w.err, w.graph.first.Err(), w.graph.worker.Err(), scopeCtx.Err(), w.graph.scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(w.graph.binding, actual), libpf.ValidateAuxiliaryBinding(w.preparedBinding, actual)); return w
+}
+
+func (p *preparedKobjectWitness) factoryWorldMatchesLocked(c *kwFactoryStartClaim, w kwFactoryWorld) bool {
+	return c != nil && p.startClaim == c && w.graph.matchesLocked(p, c) && reflect.DeepEqual(p.binding, w.preparedBinding) && c.startClocksCaptured == w.latched && (!w.latched || c.startWorkerDeadline == w.workerDeadline && c.startHasWorkerDeadline == w.hasWorkerDeadline && c.startScopeDeadline == w.scopeDeadline && c.startHasScopeDeadline == w.hasScopeDeadline)
+}
+
+func (p *preparedKobjectWitness) factoryWorldErrorLocked(c *kwFactoryStartClaim, w kwFactoryWorld) error {
+	if !p.factoryWorldMatchesLocked(c, w) { return errors.Join(w.err, errors.New("factory authority snapshot changed")) }
+	now := time.Now(); var clock error; if w.graph.hasDeadline && !now.Before(w.graph.deadline) || w.hasWorkerDeadline && !now.Before(w.workerDeadline) || w.hasScopeDeadline && !now.Before(w.scopeDeadline) { clock = context.DeadlineExceeded }; return errors.Join(w.err, clock)
+}
+
+func (p *preparedKobjectWitness) factoryPinCauseLocked(c *kwFactoryStartClaim, cause error, w kwFactoryWorld) error {
+	return errors.Join(cause, c.cause, p.err, p.factoryWorldErrorLocked(c, w))
+}
+
+func (p *preparedKobjectWitness) factoryPinWaitLocked(c *kwFactoryStartClaim) (chan struct{}, error) {
+	if c.pin == nil || c.pinDone == nil { return nil, errors.New("factory terminalizing pin ownership unavailable") }
+	select { case <-c.pinDone: return nil, errors.New("factory terminalizing pin completion already closed"); default: return c.pinDone, nil }
+}
+
+type kwEnrollmentAbortGuard struct {
+	scope *periodiccaller.OwnedScope
+	request, publication, cleanupDone, wake, pinDone chan struct{}
+	launch kwEnrollmentLaunchPhase
+	terminalPublished bool
+}
+
+func (p *preparedKobjectWitness) factoryNoAcquiredGraphLocked(c *kwFactoryStartClaim) bool {
+	return c != nil && c.unadoptedPin == nil && !p.graphBodyClaimed && p.transport == nil && p.reader == nil && p.objects == nil && p.epoch == nil && p.component == nil && c.launchPhase == kwLaunchAbsent && c.launchPublication == nil && c.acquisition == kwAcquisitionNotStarted && c.acquisitionDone == nil
+}
+
+func (p *preparedKobjectWitness) factoryEmptyEnrollmentLocked(c *kwFactoryStartClaim, g kwEnrollmentAbortGuard) bool {
+	if p.startClaim != c || p.scope != g.scope || c.enrollment != kwEnrollmentPending || c.enrollmentLaunch != g.launch || g.launch != kwEnrollmentLaunchNotStarted && g.launch != kwEnrollmentLaunchRejected || c.request != g.request || c.publication != g.publication || c.cleanupDone != g.cleanupDone || c.cleanupWake != g.wake || g.request == nil || g.publication == nil || g.cleanupDone == nil || g.wake == nil || !p.factoryNoAcquiredGraphLocked(c) { return false }
+	select { case <-g.publication: return false; default: }; select { case <-g.cleanupDone: return false; default: }; return true
+}
+
+func (p *preparedKobjectWitness) abortFactoryPin(c *kwFactoryStartClaim, cause error) error {
+	return p.abortFactoryPinExpected(c, cause, nil)
+}
+
+func (p *preparedKobjectWitness) abortFactoryPinExpected(c *kwFactoryStartClaim, cause error, expected *periodiccaller.OwnedOperation) error {
+	return p.abortFactoryPinGuarded(c, cause, expected, nil)
+}
+
+func (p *preparedKobjectWitness) abortFactoryPinGuarded(c *kwFactoryStartClaim, cause error, expected *periodiccaller.OwnedOperation, guard *kwEnrollmentAbortGuard) error {
+	if cause == nil { cause = errors.New("factory enrollment failed") }
+	for {
+	w := p.sampleFactoryWorld(c)
+	p.mu.Lock()
+	if c == nil || p.startClaim != c { p.mu.Unlock(); return errors.Join(cause, errors.New("factory pin claim unavailable")) }
+	if !p.factoryWorldMatchesLocked(c, w) { result := p.factoryPinCauseLocked(c, cause, w); c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result }
+	if expected != nil && c.pin != expected { result := p.factoryPinCauseLocked(c, errors.Join(cause, errors.New("factory pin owner changed")), w); c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result }
+	if guard != nil { pinOpen := guard.pinDone != nil; if guard.pinDone != nil { select { case <-guard.pinDone: pinOpen = false; default: } }; if !p.factoryEmptyEnrollmentLocked(c, *guard) || c.pinDone != guard.pinDone || c.pinPhase != kwFactoryPinCallerOwned || !pinOpen { result := p.factoryPinCauseLocked(c, errors.Join(cause, errors.New("factory empty abort proof unavailable")), w); c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result } }
+	if c.pinPhase == kwFactoryPinTerminalizing {
+		done, err := p.factoryPinWaitLocked(c)
+		if err != nil { result := p.factoryPinCauseLocked(c, errors.Join(cause, err), w); c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result }
+		p.mu.Unlock(); <-done; p.mu.Lock(); if c.pinPhase != kwFactoryPinTerminalized { result := p.factoryPinCauseLocked(c, errors.Join(cause, errors.New("factory pin completion state invalid")), w); c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result }; p.mu.Unlock(); continue
+	}
+	if c.pinPhase == kwFactoryPinTerminalized { result := errors.Join(c.pinResult, p.factoryPinCauseLocked(c, cause, w)); c.pinResult = result; c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result }
+	if c.pinPhase != kwFactoryPinCallerOwned || c.pin == nil || c.pinDone == nil { result := errors.Join(p.factoryPinCauseLocked(c, cause, w), errors.New("factory pin not caller-owned")); c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result }
+	c.pinPhase = kwFactoryPinTerminalizing; op := c.pin; p.mu.Unlock()
+	terminalErr := op.Abort()
+	w = p.sampleFactoryWorld(c); p.mu.Lock(); result := errors.Join(p.factoryPinCauseLocked(c, cause, w), terminalErr); if p.startClaim != c || c.pin != op || c.pinPhase != kwFactoryPinTerminalizing || c.pinDone == nil { p.mu.Unlock(); return errors.Join(result, errors.New("factory terminal ownership changed")) }; if guard != nil { pinOpen := c.pinDone == guard.pinDone; select { case <-c.pinDone: pinOpen = false; default: }; if terminalErr != nil || !pinOpen || !p.factoryEmptyEnrollmentLocked(c, *guard) || !p.factoryWorldMatchesLocked(c, w) { result = errors.Join(result, errors.New("factory abort terminal proof unknown")); c.pinResult, c.pinTerminalErr, c.pinPhase = result, terminalErr, kwFactoryPinTerminalUnknown; c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); p.mu.Unlock(); return result }; guard.terminalPublished = true }; c.pinResult, c.pinTerminalErr = result, terminalErr; p.rejectFactoryClaimLocked(c, result); c.pinPhase = kwFactoryPinTerminalized; close(c.pinDone); p.mu.Unlock(); return result
+	}
+}
+
+func kwFactoryLaunch(scope *periodiccaller.OwnedScope, job func()) bool { return scope.Go(job) }
+
+func (p *preparedKobjectWitness) requestFactoryCleanup(c *kwFactoryStartClaim) error {
+	p.mu.Lock()
+	if c == nil || p.startClaim != c || c.request == nil { p.mu.Unlock(); return errors.New("factory cleanup request unavailable") }
+	cause := errors.New("factory cleanup requested"); p.stopRequested = true; if c.phase == kwFactoryClaimPending && p.phase != kwFactoryHandedOff { p.rejectFactoryClaimLocked(c, cause) }
+	component, wake := p.component, c.cleanupWake; select { case <-c.request: default: close(c.request) }; p.mu.Unlock()
+	if wake != nil { select { case wake <- struct{}{}: default: } }; if component != nil { component.requestStartupRejection(cause) }; return nil
+}
+
+func (p *preparedKobjectWitness) failFactoryEnrollment(c *kwFactoryStartClaim, cause error, adopted *periodiccaller.OwnedOperation, scope *periodiccaller.OwnedScope, request, publication, cleanupDone, wake, pinDone chan struct{}) error {
+	p.mu.Lock(); guard := kwEnrollmentAbortGuard{scope: scope, request: request, publication: publication, cleanupDone: cleanupDone, wake: wake, pinDone: pinDone, launch: c.enrollmentLaunch}; valid := p.factoryEmptyEnrollmentLocked(c, guard)
+	if adopted == nil { valid = valid && c.pinPhase == kwFactoryPinAbsent && c.pin == nil && c.pinDone == nil && pinDone == nil } else { pinOpen := pinDone != nil && c.pinDone == pinDone; if pinDone != nil { select { case <-pinDone: pinOpen = false; default: } }; valid = valid && c.pinPhase == kwFactoryPinCallerOwned && c.pin == adopted && pinOpen }
+	if !valid { cause = errors.Join(cause, errors.New("factory empty enrollment proof unavailable")); if p.startClaim == c { c.cleanupErr = errors.Join(c.cleanupErr, cause); p.err = errors.Join(p.err, cause); p.stopRequested = true }; p.mu.Unlock(); return &kobjectFactoryError{cause: cause, cleanup: p} }; p.mu.Unlock()
+	if adopted != nil { cause = p.abortFactoryPinGuarded(c, cause, adopted, &guard) }
+	w := p.sampleFactoryWorld(c); p.mu.Lock(); cause = errors.Join(cause, p.factoryPinCauseLocked(c, nil, w)); valid = p.factoryEmptyEnrollmentLocked(c, guard) && p.factoryWorldMatchesLocked(c, w)
+	if adopted == nil { valid = valid && c.pinPhase == kwFactoryPinAbsent && c.pin == nil && c.pinDone == nil } else { terminal := false; if c.pinDone == guard.pinDone && c.pinDone != nil { select { case <-c.pinDone: terminal = true; default: } }; valid = valid && guard.terminalPublished && c.pin == adopted && c.pinPhase == kwFactoryPinTerminalized && terminal && c.pinTerminalErr == nil }
+	if !valid { cause = errors.Join(cause, errors.New("factory enrollment terminal proof unavailable")); if p.startClaim == c { c.cleanupErr = errors.Join(c.cleanupErr, cause); p.err = errors.Join(p.err, cause); p.stopRequested = true }; p.mu.Unlock(); return &kobjectFactoryError{cause: cause, cleanup: p} }
+	p.rejectFactoryClaimLocked(c, cause); c.cleanupErr = cause; c.enrollment = kwEnrollmentFailed; close(publication); close(cleanupDone); p.mu.Unlock(); return cause
+}
+
+// launch must call the real scope Go method; its boundary permits a deterministic rejection control.
+func (p *preparedKobjectWitness) enrollFactoryPin(c *kwFactoryStartClaim, first, worker context.Context, launch func(*periodiccaller.OwnedScope, func()) bool) error {
+	return p.enrollFactoryPinWithAdmission(c, first, worker, launch, (*periodiccaller.OwnedScope).AdmitCallback)
+}
+
+func (p *preparedKobjectWitness) enrollFactoryPinWithAdmission(c *kwFactoryStartClaim, first, worker context.Context, launch func(*periodiccaller.OwnedScope, func()) bool, admit func(*periodiccaller.OwnedScope) (*periodiccaller.OwnedOperation, error)) error {
+	if p == nil || c == nil || first == nil || worker == nil || launch == nil || admit == nil { return errors.New("invalid factory enrollment") }
+	p.mu.Lock()
+	if p.startClaim == c && c.enrollment == kwEnrollmentAbsent && !p.factoryNoAcquiredGraphLocked(c) { cause := errors.New("factory enrollment graph not provably empty"); p.stopRequested = true; if c.phase == kwFactoryClaimPending { p.rejectFactoryClaimLocked(c, cause) }; p.mu.Unlock(); return &kobjectFactoryError{cause: cause, cleanup: p} }
+	if p.startClaim != c || c.phase != kwFactoryClaimPending || p.phase != kwFactoryAcquiring || p.stopRequested || c.enrollment != kwEnrollmentAbsent || c.enrollmentLaunch != kwEnrollmentLaunchNotStarted || c.pinPhase != kwFactoryPinAbsent || c.pin != nil || c.pinDone != nil || c.request != nil || c.publication != nil || c.cleanupDone != nil || c.cleanupWake != nil || p.scope == nil || !reflect.ValueOf(first).Comparable() || !reflect.ValueOf(worker).Comparable() || first != c.first || worker != c.worker { p.mu.Unlock(); return errors.New("factory enrollment claim unavailable") }
+	c.enrollment = kwEnrollmentPending; c.request = make(chan struct{}); c.publication = make(chan struct{}); c.cleanupDone = make(chan struct{}); c.cleanupWake = make(chan struct{}, 1)
+	scope, request, publication, cleanupDone, wake := p.scope, c.request, c.publication, c.cleanupDone, c.cleanupWake; p.mu.Unlock(); w := p.sampleFactoryWorld(c); p.mu.Lock(); err := p.factoryClaimErrorLocked(c, w); if w.graph.scope != scope || c.enrollment != kwEnrollmentPending || c.enrollmentLaunch != kwEnrollmentLaunchNotStarted || c.request != request || c.publication != publication || c.cleanupDone != cleanupDone || c.cleanupWake != wake || c.pinPhase != kwFactoryPinAbsent || c.pin != nil || !p.factoryNoAcquiredGraphLocked(c) { err = errors.Join(err, errors.New("factory enrollment reservation changed")) }; p.mu.Unlock()
+	if err != nil { return p.failFactoryEnrollment(c, err, nil, scope, request, publication, cleanupDone, wake, nil) }
+	op, admitErr := admit(scope); pinDone, err := p.adoptFactoryPinWithDone(c, op, admitErr)
+	if err != nil { adopted := op != nil && pinDone != nil; if op != nil && !adopted { terminalErr := op.Abort(); err = errors.Join(err, terminalErr); if terminalErr != nil { p.mu.Lock(); if p.startClaim == c { if c.unadoptedPin == nil { c.unadoptedPin = op }; c.cleanupErr = errors.Join(c.cleanupErr, err); p.err = errors.Join(p.err, err); p.stopRequested = true }; p.mu.Unlock(); return &kobjectFactoryError{cause: errors.Join(err, errors.New("unadopted operation terminal unknown")), cleanup: p, unadopted: op} }; op = nil }; return p.failFactoryEnrollment(c, err, op, scope, request, publication, cleanupDone, wake, pinDone) }
+	p.mu.Lock(); pinOpen := pinDone != nil; if pinDone != nil { select { case <-pinDone: pinOpen = false; default: } }; emptyAfterAdmit := p.startClaim == c && p.scope == scope && c.enrollment == kwEnrollmentPending && c.enrollmentLaunch == kwEnrollmentLaunchNotStarted && c.request == request && c.publication == publication && c.cleanupDone == cleanupDone && c.cleanupWake == wake && c.pinPhase == kwFactoryPinCallerOwned && c.pin == op && c.pinDone == pinDone && pinOpen && p.factoryNoAcquiredGraphLocked(c); p.mu.Unlock(); if !emptyAfterAdmit { return p.failFactoryEnrollment(c, errors.New("factory graph changed after pin admission"), op, scope, request, publication, cleanupDone, wake, pinDone) }
+	if err = scope.AddCloser(func() error { return p.requestFactoryCleanup(c) }); err != nil { return p.failFactoryEnrollment(c, err, op, scope, request, publication, cleanupDone, wake, pinDone) }
+	w = p.sampleFactoryWorld(c); p.mu.Lock(); err = p.factoryClaimErrorLocked(c, w); if w.graph.scope != scope || c.enrollment != kwEnrollmentPending || c.enrollmentLaunch != kwEnrollmentLaunchNotStarted || c.request != request || c.publication != publication || c.cleanupDone != cleanupDone || c.cleanupWake != wake || c.pinPhase != kwFactoryPinCallerOwned || c.pin != op || c.pinDone != pinDone || !p.factoryNoAcquiredGraphLocked(c) { err = errors.Join(err, errors.New("factory enrollment ownership changed")) }; if err == nil { c.enrollmentLaunch = kwEnrollmentLaunchInFlight }; p.mu.Unlock(); if err != nil { return p.failFactoryEnrollment(c, err, op, scope, request, publication, cleanupDone, wake, pinDone) }
+	launched := launch(scope, func() { p.cleanupFactoryPin(c, scope) }); p.mu.Lock(); if p.startClaim != c || p.scope != scope || c.enrollment != kwEnrollmentPending || c.enrollmentLaunch != kwEnrollmentLaunchInFlight || c.request != request || c.publication != publication || c.cleanupDone != cleanupDone || c.cleanupWake != wake || c.pin != op || c.pinDone != pinDone { c.enrollmentLaunch = kwEnrollmentLaunchUnknown } else if launched { c.enrollmentLaunch = kwEnrollmentLaunchAccepted } else { c.enrollmentLaunch = kwEnrollmentLaunchRejected }; p.mu.Unlock()
+	if !launched { return p.failFactoryEnrollment(c, errors.New("factory cleanup launch rejected"), op, scope, request, publication, cleanupDone, wake, pinDone) }
+	err = p.transferFactoryPinExpected(c, op)
+	p.mu.Lock(); if p.startClaim != c || p.scope != scope || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.request != request || c.publication != publication || c.cleanupDone != cleanupDone || c.cleanupWake != wake || c.pin != op || c.pinDone != pinDone || c.pinPhase != kwFactoryPinCleanupOwned || !p.factoryNoAcquiredGraphLocked(c) { err = errors.Join(err, errors.New("factory accepted enrollment ownership changed")) }; if err == nil { c.enrollment = kwEnrollmentOwned } else { c.enrollment = kwEnrollmentUnknown }; select { case <-publication: err = errors.Join(err, errors.New("factory enrollment publication already closed")); c.enrollment = kwEnrollmentUnknown; default: close(publication) }; if err != nil { c.cleanupErr = errors.Join(c.cleanupErr, err) }; p.mu.Unlock(); w = p.sampleFactoryWorld(c); p.mu.Lock(); late := p.factoryClaimErrorLocked(c, w); p.mu.Unlock()
+	if err != nil || late != nil { _ = p.requestFactoryCleanup(c) }; return errors.Join(err, late)
+}
+
+// The job owns its admitted operation only after Go accepts it.
+func (p *preparedKobjectWitness) launchFactoryAcquisition(c *kwFactoryStartClaim, launch func(*periodiccaller.OwnedScope, func()) bool, job func() error) error {
+	if p == nil || c == nil || launch == nil || job == nil { return errors.New("invalid factory acquisition launch") }
+	p.mu.Lock()
+	if p.startClaim != c || p.scope == nil || c.phase != kwFactoryClaimPending || c.enrollment != kwEnrollmentOwned || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.pinPhase != kwFactoryPinCleanupOwned || c.pin == nil || c.acquisition != kwAcquisitionNotStarted || c.acquisitionDone != nil || c.launchPhase != kwLaunchAbsent || c.launchPublication != nil { p.mu.Unlock(); return errors.New("factory acquisition launch unavailable") }
+	c.launchPhase = kwLaunchPending; c.launchPublication = make(chan struct{}); c.acquisition = kwAcquisitionRunning; c.acquisitionDone = make(chan struct{}); scope, publication, done, pin, request, enrollmentPublication, cleanupDone := p.scope, c.launchPublication, c.acquisitionDone, c.pin, c.request, c.publication, c.cleanupDone; p.mu.Unlock()
+	var op *periodiccaller.OwnedOperation
+	reject := func(cause error) error {
+		if op != nil { cause = errors.Join(cause, op.Abort()) }
+		w := p.sampleFactoryWorld(c); p.mu.Lock(); cause = p.factoryPinCauseLocked(c, cause, w); if p.startClaim != c || p.scope != scope || c.launchPhase != kwLaunchPending || c.launchPublication != publication || c.acquisition != kwAcquisitionRunning || c.acquisitionDone != done || c.enrollment != kwEnrollmentOwned || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.pinPhase != kwFactoryPinCleanupOwned || c.pin != pin || c.request != request || c.publication != enrollmentPublication || c.cleanupDone != cleanupDone { p.mu.Unlock(); return errors.Join(cause, errors.New("factory launch rejection ownership changed")) }; p.rejectFactoryClaimLocked(c, cause); c.launchPhase = kwLaunchRejected; c.acquisition = kwAcquisitionNotStarted; select { case <-publication: cause = errors.Join(cause, errors.New("factory launch publication already closed")); default: close(publication) }; p.mu.Unlock(); _ = p.requestFactoryCleanup(c); return cause
+	}
+	w := p.sampleFactoryWorld(c); p.mu.Lock(); eligible := p.factoryClaimErrorLocked(c, w); if w.graph.scope != scope || c.launchPhase != kwLaunchPending || c.launchPublication != publication || c.acquisition != kwAcquisitionRunning || c.acquisitionDone != done || c.enrollment != kwEnrollmentOwned || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.pinPhase != kwFactoryPinCleanupOwned || c.pin != pin || c.request != request || c.publication != enrollmentPublication || c.cleanupDone != cleanupDone { eligible = errors.Join(eligible, errors.New("factory launch reservation changed")) }; p.mu.Unlock(); if eligible != nil { return reject(eligible) }
+	var admitErr error; op, admitErr = scope.AdmitCallback()
+	if admitErr != nil { return reject(admitErr) }; if op == nil { return reject(errors.New("factory acquisition admission returned no operation")) }
+	w = p.sampleFactoryWorld(c); p.mu.Lock(); eligible = p.factoryClaimErrorLocked(c, w); if w.graph.scope != scope || c.launchPhase != kwLaunchPending || c.launchPublication != publication || c.acquisition != kwAcquisitionRunning || c.acquisitionDone != done || c.enrollment != kwEnrollmentOwned || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.pinPhase != kwFactoryPinCleanupOwned || c.pin != pin || c.request != request || c.publication != enrollmentPublication || c.cleanupDone != cleanupDone { eligible = errors.Join(eligible, errors.New("factory launch ownership changed")) }; p.mu.Unlock(); if eligible != nil { return reject(eligible) }
+	if !launch(scope, func() {
+		<-publication
+		w := p.sampleFactoryWorld(c); p.mu.Lock(); result := p.factoryClaimErrorLocked(c, w); if w.graph.scope != scope || c.launchPhase != kwLaunchStarted || c.acquisition != kwAcquisitionRunning || c.acquisitionDone != done || c.enrollment != kwEnrollmentOwned || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.pinPhase != kwFactoryPinCleanupOwned || c.pin != pin || c.request != request || c.publication != enrollmentPublication || c.cleanupDone != cleanupDone { result = errors.Join(result, errors.New("factory acquisition launch classification invalid")) }; p.mu.Unlock()
+		if result == nil { result = job() }
+		if result != nil { result = errors.Join(result, op.Fail(result)) } else { result = op.Complete() }
+		defer func() { p.mu.Lock(); c.acquisition = kwAcquisitionReturned; close(done); p.mu.Unlock() }()
+		p.mu.Lock(); if result != nil { c.cause = errors.Join(c.cause, result); p.err = errors.Join(p.err, result); if p.phase == kwFactoryAcquiring && c.phase == kwFactoryClaimPending { p.rejectFactoryClaimLocked(c, result) } }; p.mu.Unlock()
+		if result != nil { _ = p.requestFactoryCleanup(c) }
+	}) { return reject(errors.New("factory acquisition launch rejected")) }
+	p.mu.Lock(); var launchErr error; if p.startClaim != c || p.scope != scope || c.launchPhase != kwLaunchPending || c.launchPublication != publication || c.acquisition != kwAcquisitionRunning || c.acquisitionDone != done || c.enrollment != kwEnrollmentOwned || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.pinPhase != kwFactoryPinCleanupOwned || c.pin != pin || c.request != request || c.publication != enrollmentPublication || c.cleanupDone != cleanupDone { launchErr = errors.New("factory accepted launch ownership changed"); c.launchPhase = kwFactoryLaunchPhase(255) } else { c.launchPhase = kwLaunchStarted }; select { case <-publication: launchErr = errors.Join(launchErr, errors.New("factory launch publication already closed")); c.launchPhase = kwFactoryLaunchPhase(255); default: close(publication) }; p.mu.Unlock(); return launchErr
+}
+
+func kwRawNativeReleased(o *kwNativeObjects) bool {
+	if o == nil { return false }; o.mu.Lock(); defer o.mu.Unlock()
+	return o.gate == nil && (o.gateOwnership == kwOwnerGateReleased || o.gateOwnership == kwOwnerBeforeMapping && !o.epochOwned) && len(o.maps) == 0 && len(o.acquiredPrograms) == 0 && len(o.acquiredProbes) == 0
+}
+
+// Only the frozen factory cleanup job may retire these exclusive slots.
+func (p *preparedKobjectWitness) retireRawFactoryOwners() (kwPhysicalRetirement, error) {
+	p.mu.Lock(); component, epoch, objects, reader, transport := p.component, p.epoch, p.objects, p.reader, p.transport; p.mu.Unlock()
+	if component != nil || epoch != nil && objects != nil || reader != nil && transport != nil { return kwPhysicalRetained, fmt.Errorf("duplicate factory ownership: %w", errors.ErrUnsupported) }
+	var result error
+	if epoch != nil {
+		epoch.mu.Lock(); phase, operation, owner, cached := epoch.phase, epoch.operation, epoch.objects, epoch.cleanupErr; epoch.mu.Unlock(); result = errors.Join(result, cached)
+		if owner == nil || operation != kwEpochIdle || phase != kwEpochCold && phase != kwEpochRetired { return kwPhysicalRetained, fmt.Errorf("native epoch ownership unavailable: %w", errors.ErrUnsupported) }
+		if phase != kwEpochRetired { result = errors.Join(result, epoch.Retire()) }
+		epoch.mu.Lock(); released := epoch.phase == kwEpochRetired && epoch.operation == kwEpochIdle && epoch.objects == owner; epoch.mu.Unlock()
+		if !released || !kwRawNativeReleased(owner) { return kwPhysicalRetained, errors.Join(result, fmt.Errorf("native epoch retained: %w", errors.ErrUnsupported)) }
+		p.mu.Lock(); unchanged := p.epoch == epoch && p.objects == nil && p.reader == reader && p.transport == transport && p.component == nil; if unchanged { p.epoch = nil }; p.mu.Unlock(); if !unchanged { return kwPhysicalRetained, errors.Join(result, errors.New("factory owner changed during retirement")) }
+	} else if objects != nil {
+		objects.mu.Lock(); transferred := objects.epochOwned; objects.mu.Unlock(); if transferred { return kwPhysicalRetained, fmt.Errorf("native object ownership transferred: %w", errors.ErrUnsupported) }
+		result = errors.Join(result, objects.retire()); if !kwRawNativeReleased(objects) { return kwPhysicalRetained, errors.Join(result, fmt.Errorf("native objects retained: %w", errors.ErrUnsupported)) }
+		p.mu.Lock(); unchanged := p.objects == objects && p.epoch == nil && p.reader == reader && p.transport == transport && p.component == nil; if unchanged { p.objects = nil }; p.mu.Unlock(); if !unchanged { return kwPhysicalRetained, errors.Join(result, errors.New("factory owner changed during retirement")) }
+	}
+	if reader != nil {
+		reader.mu.Lock(); socket := reader.transport; idle := !reader.joinPending && !reader.active && reader.facts.pending == 0 && reader.phase != kwReaderJoining && reader.phase != kwReaderRetiring; if reader.cutDone != nil { select { case <-reader.cutDone: default: idle = false } }; valid := reader.phase == kwReaderFresh || reader.phase == kwReaderJoined || reader.phase == kwReaderDraining || reader.phase == kwReaderQuarantined || reader.phase == kwReaderRetired; if reader.phase != kwReaderRetired && (reader.cancel == nil || reader.progress == nil) { valid = false }; reader.mu.Unlock()
+		if socket == nil || !idle || !valid { return kwPhysicalRetained, errors.Join(result, fmt.Errorf("reader ownership or borrowers unknown: %w", errors.ErrUnsupported)) }
+		socket.mu.Lock(); socketValid := socket.readerOwned && socket.reader == reader && socket.joinReturn != kwReturnPending && socket.cutReturn != kwReturnPending && (socket.closed || socket.closeFD != nil); socket.mu.Unlock(); if !socketValid { return kwPhysicalRetained, errors.Join(result, fmt.Errorf("reader transport ownership unknown: %w", errors.ErrUnsupported)) }
+		result = errors.Join(result, reader.Retire()); reader.mu.Lock(); retired := reader.phase == kwReaderRetired && reader.transport == socket; reader.mu.Unlock(); socket.mu.Lock(); closed := socket.closed; socket.mu.Unlock(); if !retired || !closed { return kwPhysicalRetained, errors.Join(result, fmt.Errorf("reader retained: %w", errors.ErrUnsupported)) }
+		p.mu.Lock(); unchanged := p.reader == reader && p.transport == nil && p.objects == nil && p.epoch == nil && p.component == nil; if unchanged { p.reader = nil }; p.mu.Unlock(); if !unchanged { return kwPhysicalRetained, errors.Join(result, errors.New("factory reader changed during retirement")) }
+	} else if transport != nil {
+		transport.mu.Lock(); valid := !transport.readerOwned && transport.reader == nil && (transport.phase == kwSocketUnjoined || transport.phase == kwSocketRetired) && transport.joinReturn != kwReturnPending && transport.cutReturn != kwReturnPending && (transport.closed || transport.closeFD != nil); transport.mu.Unlock()
+		if !valid { return kwPhysicalRetained, errors.Join(result, fmt.Errorf("unjoined socket ownership unknown: %w", errors.ErrUnsupported)) }
+		result = errors.Join(result, transport.close()); transport.mu.Lock(); closed := transport.closed; transport.mu.Unlock(); if !closed { return kwPhysicalRetained, errors.Join(result, fmt.Errorf("socket retained: %w", errors.ErrUnsupported)) }
+		p.mu.Lock(); unchanged := p.transport == transport && p.reader == nil && p.objects == nil && p.epoch == nil && p.component == nil; if unchanged { p.transport = nil }; p.mu.Unlock(); if !unchanged { return kwPhysicalRetained, errors.Join(result, errors.New("factory transport changed during retirement")) }
+	}
+	return kwPhysicalReleased, result
+}
+
+func (p *preparedKobjectWitness) waitFactoryCleanup(wake, progress, cut <-chan struct{}) {
+	select { case <-wake: case <-progress: case <-cut: }; runtime.KeepAlive(p)
+}
+
+func (p *preparedKobjectWitness) factoryCleanupReaderProgress() (<-chan struct{}, <-chan struct{}) {
+	p.mu.Lock(); reader := p.reader; eligible := p.component == nil && p.epoch == nil && p.objects == nil && p.transport == nil; p.mu.Unlock(); if reader == nil || !eligible { return nil, nil }
+	reader.mu.Lock(); busy := reader.joinPending || reader.active || reader.facts.pending != 0; var cut <-chan struct{}; if reader.cutDone != nil { select { case <-reader.cutDone: default: cut = reader.cutDone; busy = true } }; var cancel context.CancelFunc; if busy && !reader.stopReads && reader.cancel != nil && reader.progress != nil { select { case <-reader.progress: default: reader.stopReads = true; reader.signal(); cancel = reader.cancel } }; var progress <-chan struct{}; if busy && reader.progress != nil { select { case <-reader.progress: default: progress = reader.progress } }; reader.mu.Unlock(); if cancel != nil { cancel() }; return progress, cut
+}
+
+func (p *preparedKobjectWitness) cleanupFactoryPin(c *kwFactoryStartClaim, scope *periodiccaller.OwnedScope) {
+	initial := false; terminalCalled := false; var pin *periodiccaller.OwnedOperation; var pinDone chan struct{}
+	p.mu.Lock(); wake, pub, request, originalDone := c.cleanupWake, c.publication, c.request, c.cleanupDone; p.mu.Unlock()
+	for {
+		wakeClosed := false; select { case _, ok := <-wake: wakeClosed = !ok; default: }; if wakeClosed { p.mu.Lock(); c.cleanupErr = errors.Join(c.cleanupErr, errors.New("factory cleanup wake closed")); p.mu.Unlock(); p.waitFactoryCleanup(nil, nil, nil); continue }
+		p.mu.Lock(); published := false; if pub != nil { select { case <-pub: published = true; default: } }; owned := p.startClaim == c && p.scope == scope && c.enrollment == kwEnrollmentOwned && c.enrollmentLaunch == kwEnrollmentLaunchAccepted && c.unadoptedPin == nil && c.cleanupWake == wake && c.publication == pub && c.request == request && c.cleanupDone == originalDone
+		if !published { if pub == nil { c.cleanupErr = errors.Join(c.cleanupErr, errors.New("factory enrollment publication unavailable")) }; p.mu.Unlock(); p.waitFactoryCleanup(wake, pub, nil); continue }
+		if !owned || wake == nil || request == nil { c.cleanupErr = errors.Join(c.cleanupErr, errors.New("factory enrollment ownership unknown")); p.mu.Unlock(); p.waitFactoryCleanup(wake, nil, nil); continue }
+		if pin == nil && c.pinPhase == kwFactoryPinCleanupOwned && c.pin != nil && c.pinDone != nil { pin, pinDone = c.pin, c.pinDone }
+		pinOpen, cleanupOpen := pinDone != nil, originalDone != nil; if pinDone != nil { select { case <-pinDone: pinOpen = false; default: } }; if originalDone != nil { select { case <-originalDone: cleanupOpen = false; default: } }; if pin == nil || c.pin != pin || c.pinDone != pinDone || c.pinPhase != kwFactoryPinCleanupOwned || terminalCalled || !pinOpen || !cleanupOpen { c.cleanupErr = errors.Join(c.cleanupErr, errors.New("factory cleanup pin ownership unknown")); p.mu.Unlock(); p.waitFactoryCleanup(wake, nil, nil); continue }
+		if !initial { p.mu.Unlock(); scopeCtx := scope.Context(); if scopeCtx == nil { p.mu.Lock(); c.cleanupErr = errors.Join(c.cleanupErr, errors.New("factory scope context unavailable")); p.mu.Unlock(); p.waitFactoryCleanup(wake, nil, nil); continue }; select { case <-request: case <-scopeCtx.Done(): }; runtime.KeepAlive(p); _ = p.requestFactoryCleanup(c); initial = true; continue }
+		launchPhase, launchPub, phase, done := c.launchPhase, c.launchPublication, c.acquisition, c.acquisitionDone; publishedLaunch, doneClosed := false, false; if launchPub != nil { select { case <-launchPub: publishedLaunch = true; default: } }; if done != nil { select { case <-done: doneClosed = true; default: } }
+		if launchPhase == kwLaunchPending && launchPub != nil && !publishedLaunch && phase == kwAcquisitionRunning && done != nil && !doneClosed { p.mu.Unlock(); p.waitFactoryCleanup(wake, launchPub, nil); continue }
+		if launchPhase == kwLaunchStarted && publishedLaunch && phase == kwAcquisitionRunning && done != nil && !doneClosed { p.mu.Unlock(); p.waitFactoryCleanup(wake, done, nil); continue }
+		valid := launchPhase == kwLaunchAbsent && launchPub == nil && phase == kwAcquisitionNotStarted && done == nil || launchPhase == kwLaunchRejected && publishedLaunch && phase == kwAcquisitionNotStarted && done != nil && !doneClosed || launchPhase == kwLaunchStarted && publishedLaunch && phase == kwAcquisitionReturned && done != nil && doneClosed
+		if !valid { c.cleanupErr = errors.Join(c.cleanupErr, errors.New("factory acquisition ownership unknown")); p.mu.Unlock(); p.waitFactoryCleanup(wake, nil, nil); continue }
+		component := p.component; mixed := component != nil && (p.transport != nil || p.reader != nil || p.objects != nil || p.epoch != nil); empty := component == nil && p.transport == nil && p.reader == nil && p.objects == nil && p.epoch == nil; p.mu.Unlock()
+		if mixed { p.mu.Lock(); c.cleanupErr = errors.Join(c.cleanupErr, fmt.Errorf("mixed component and raw ownership: %w", errors.ErrUnsupported)); p.mu.Unlock(); p.waitFactoryCleanup(wake, nil, nil); continue }
+		state := kwPhysicalReleased; var physicalErr error; if component != nil { state, physicalErr = component.retirePhysical() } else if !empty { state, physicalErr = p.retireRawFactoryOwners() }; p.mu.Lock(); c.cleanupErr = errors.Join(c.cleanupErr, physicalErr); p.mu.Unlock()
+		if state != kwPhysicalReleased { progress, cut := p.factoryCleanupReaderProgress(); p.waitFactoryCleanup(wake, progress, cut); continue }
+		p.mu.Lock(); slotsValid := p.startClaim == c && p.scope == scope && c.enrollment == kwEnrollmentOwned && c.enrollmentLaunch == kwEnrollmentLaunchAccepted && c.unadoptedPin == nil && c.cleanupWake == wake && c.publication == pub && c.request == request && c.cleanupDone == originalDone && c.pinPhase == kwFactoryPinCleanupOwned && c.pin == pin && c.pinDone == pinDone && p.component == component && p.transport == nil && p.reader == nil && p.objects == nil && p.epoch == nil && c.cleanupDone != nil; pinOpen, cleanupOpen = true, true; select { case <-pinDone: pinOpen = false; default: }; if c.cleanupDone != nil { select { case <-c.cleanupDone: cleanupOpen = false; default: } }; if !slotsValid || !pinOpen || !cleanupOpen { c.cleanupErr = errors.Join(c.cleanupErr, errors.New("cleanup terminal ownership unknown")); p.mu.Unlock(); p.waitFactoryCleanup(wake, nil, nil); continue }; c.pinPhase = kwFactoryPinTerminalizing; cleanupDone := c.cleanupDone; p.mu.Unlock()
+		terminalCalled = true; err := pin.Complete(); p.mu.Lock(); pinOpen, cleanupOpen = true, true; select { case <-pinDone: pinOpen = false; default: }; select { case <-cleanupDone: cleanupOpen = false; default: }; if p.startClaim != c || p.scope != scope || c.enrollment != kwEnrollmentOwned || c.enrollmentLaunch != kwEnrollmentLaunchAccepted || c.unadoptedPin != nil || c.cleanupWake != wake || c.publication != pub || c.request != request || c.pin != pin || c.pinDone != pinDone || c.pinPhase != kwFactoryPinTerminalizing || c.cleanupDone != cleanupDone || !pinOpen || !cleanupOpen { c.cleanupErr = errors.Join(c.cleanupErr, err, errors.New("factory terminal publication unknown")); p.mu.Unlock(); p.waitFactoryCleanup(wake, nil, nil); continue }; c.pinResult, c.pinTerminalErr = err, err; c.cleanupErr = errors.Join(c.cleanupErr, err); p.err = errors.Join(p.err, err); c.pinPhase = kwFactoryPinTerminalized; close(pinDone); close(cleanupDone); p.mu.Unlock(); runtime.KeepAlive(p); return
+	}
+}
+
+func (p *preparedKobjectWitness) factoryClaimErrorLocked(c *kwFactoryStartClaim, w kwFactoryWorld) error {
+	var stopErr error; if p.stopRequested { stopErr = fmt.Errorf("factory stop requested: %w", errors.ErrUnsupported) }; if p.phase != kwFactoryAcquiring || c.phase != kwFactoryClaimPending { stopErr = errors.Join(stopErr, errors.New("factory acquisition no longer eligible")) }
+	return errors.Join(p.factoryWorldErrorLocked(c, w), stopErr, p.err)
+}
+
+func (p *preparedKobjectWitness) rejectFactoryClaimLocked(c *kwFactoryStartClaim, cause error) {
+	if cause == nil { cause = errors.New("factory startup rejected") }; c.cause = errors.Join(c.cause, cause); p.err = errors.Join(p.err, cause); if p.phase != kwFactoryRetired { p.phase = kwFactoryRejected }; c.phase = kwFactoryClaimRejected; if c.decision == nil { c.decision = make(chan struct{}) }; select { case <-c.decision: default: close(c.decision) }
+}
+
+// Reservation alone neither acquires resources nor activates a monitor.
+func (p *preparedKobjectWitness) reserveFactoryStart(first, worker context.Context, monitor kobjectMonitorStarter) (*kwFactoryStartClaim, error) {
+	if p == nil { return nil, errors.New("missing prepared witness") }
+	for {
+		p.mu.Lock(); c, scope, binding := p.startClaim, p.scope, p.binding; p.mu.Unlock()
+		if c != nil {
+			w := p.sampleFactoryWorld(c); p.mu.Lock(); if p.startClaim != c { p.mu.Unlock(); continue }
+			switch c.phase { case kwFactoryClaimPending: if p.scope == nil || c.first == nil || c.worker == nil || c.decision == nil { p.rejectFactoryClaimLocked(c, errors.New("invalid factory claim")) } else if p.phase != kwFactoryHandedOff && !c.handoffRetired { if err := p.factoryClaimErrorLocked(c, w); err != nil { p.rejectFactoryClaimLocked(c, err) } }; case kwFactoryClaimRejected: if c.cause == nil || c.decision == nil { p.rejectFactoryClaimLocked(c, errors.New("invalid factory rejection")) } else { select { case <-c.decision: default: p.rejectFactoryClaimLocked(c, errors.New("unsignaled factory rejection")) }; if c.first != nil && c.worker != nil { if late := p.factoryWorldErrorLocked(c, w); late != nil { c.cause = errors.Join(c.cause, late); p.err = errors.Join(p.err, late) } } }; default: p.rejectFactoryClaimLocked(c, errors.New("unknown factory claim phase")) }; err := c.cause; p.mu.Unlock(); return c, err
+		}
+		if !kwComponentPresent(first) || !kwComponentPresent(worker) || !kwComponentPresent(monitor) || scope == nil { return nil, errors.New("invalid factory startup arguments") }
+		actualWorker := scope.Context(); if !reflect.ValueOf(worker).Comparable() || !reflect.ValueOf(actualWorker).Comparable() || worker != actualWorker { return nil, errors.New("factory worker is not the original scope context") }
+		deadline, hasDeadline := first.Deadline(); workerDeadline, hasWorkerDeadline := worker.Deadline(); scopeDeadline, hasScopeDeadline := workerDeadline, hasWorkerDeadline; actual, bindingErr := scope.AuxiliaryBinding(); worldErr := errors.Join(first.Err(), worker.Err(), actualWorker.Err(), scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(binding, actual))
+		p.mu.Lock(); if p.startClaim != nil { p.mu.Unlock(); continue }; if p.scope != scope || !reflect.DeepEqual(p.binding, binding) || p.phase != kwFactoryPrepared || p.stopRequested { err := errors.Join(p.err, errors.New("factory startup unavailable")); p.mu.Unlock(); return nil, err }
+		c = &kwFactoryStartClaim{phase: kwFactoryClaimPending, first: first, worker: worker, deadline: deadline, hasDeadline: hasDeadline, monitor: monitor, binding: binding, decision: make(chan struct{}), startClocksCaptured: true, startWorkerDeadline: workerDeadline, startHasWorkerDeadline: hasWorkerDeadline, startScopeDeadline: scopeDeadline, startHasScopeDeadline: hasScopeDeadline}; p.startClaim = c; p.phase = kwFactoryAcquiring; now := time.Now(); if hasDeadline && !now.Before(deadline) || hasWorkerDeadline && !now.Before(workerDeadline) || hasScopeDeadline && !now.Before(scopeDeadline) { worldErr = errors.Join(worldErr, context.DeadlineExceeded) }; if worldErr != nil { p.rejectFactoryClaimLocked(c, worldErr) }; err := c.cause; p.mu.Unlock(); return c, err
+	}
+}
+
+func (p *preparedKobjectWitness) start(first, worker context.Context, symbolizer *kallsyms.Symbolizer) error {
+	calls := kwDefaultFactoryLowLevelCalls(); return p.startWithCalls(first, worker, symbolizer, &calls, kwFactoryLaunch)
+}
+
+func (p *preparedKobjectWitness) startWithCalls(first, worker context.Context, monitor kobjectMonitorStarter, calls *kwFactoryLowLevelCalls, launch func(*periodiccaller.OwnedScope, func()) bool) error {
+	if p == nil || !kwComponentPresent(first) || !kwComponentPresent(worker) || !kwComponentPresent(monitor) || calls == nil || launch == nil { return errors.New("invalid factory start") }
+	p.mu.Lock(); scope, binding := p.scope, p.binding; p.mu.Unlock(); if scope == nil { return errors.New("missing factory scope") }
+	actualWorker := scope.Context(); if !reflect.ValueOf(worker).Comparable() || !reflect.ValueOf(actualWorker).Comparable() || worker != actualWorker || !reflect.ValueOf(first).Comparable() { return errors.New("factory contexts unavailable or worker is not the original scope context") }
+	deadline, hasDeadline := first.Deadline(); workerDeadline, hasWorkerDeadline := worker.Deadline(); scopeDeadline, hasScopeDeadline := workerDeadline, hasWorkerDeadline; actual, bindingErr := scope.AuxiliaryBinding(); initialErr := errors.Join(first.Err(), worker.Err(), scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(binding, actual))
+	p.mu.Lock(); if p.scope != scope || !reflect.DeepEqual(p.binding, binding) { p.mu.Unlock(); return errors.New("factory scope or binding changed") }; c := p.startClaim; var err error
+	if c == nil { if p.phase != kwFactoryPrepared || p.stopRequested { err = errors.Join(p.err, errors.New("factory startup unavailable")); p.mu.Unlock(); return err }; c = &kwFactoryStartClaim{phase: kwFactoryClaimPending, first: first, worker: worker, deadline: deadline, hasDeadline: hasDeadline, monitor: monitor, binding: binding, decision: make(chan struct{}), startClocksCaptured: true, startWorkerDeadline: workerDeadline, startHasWorkerDeadline: hasWorkerDeadline, startScopeDeadline: scopeDeadline, startHasScopeDeadline: hasScopeDeadline}; p.startClaim = c; p.phase = kwFactoryAcquiring; now := time.Now(); if hasDeadline && !now.Before(deadline) || hasWorkerDeadline && !now.Before(workerDeadline) || hasScopeDeadline && !now.Before(scopeDeadline) { initialErr = errors.Join(initialErr, context.DeadlineExceeded) }; if initialErr != nil { p.rejectFactoryClaimLocked(c, initialErr) } } else if c.phase == kwFactoryClaimPending { if c.first == nil || c.worker == nil || c.decision == nil { p.rejectFactoryClaimLocked(c, errors.New("invalid factory claim")) } else if p.phase != kwFactoryHandedOff && !c.handoffRetired && (p.phase != kwFactoryAcquiring || p.stopRequested || p.err != nil) { p.rejectFactoryClaimLocked(c, errors.Join(p.err, errors.New("factory startup unavailable"))) } } else if c.phase != kwFactoryClaimRejected { p.rejectFactoryClaimLocked(c, errors.New("unknown factory claim phase")) }; err = c.cause
+	setup := err == nil && c.phase == kwFactoryClaimPending && !c.startEntryClaimed
+	if setup { c.startEntryClaimed = true; c.startSetupDone = make(chan struct{}); if !c.startClocksCaptured { c.startClocksCaptured = true; c.startWorkerDeadline, c.startHasWorkerDeadline = workerDeadline, hasWorkerDeadline; c.startScopeDeadline, c.startHasScopeDeadline = scopeDeadline, hasScopeDeadline } }; p.mu.Unlock()
+	if setup {
+		setupErr := p.enrollFactoryPin(c, c.first, c.worker, kwFactoryLaunch)
+		if setupErr == nil { setupErr = p.launchFactoryAcquisition(c, launch, func() error { return p.acquireFactoryGraph(c, calls) }) }
+		p.mu.Lock(); c.startSetupErr = setupErr; if setupErr != nil && c.phase == kwFactoryClaimPending && p.phase == kwFactoryAcquiring { p.rejectFactoryClaimLocked(c, setupErr) }; close(c.startSetupDone); p.mu.Unlock()
+	}
+	return p.awaitFactoryStart(c)
+}
+
+func (p *preparedKobjectWitness) factoryStartFailure(c *kwFactoryStartClaim, cause error) error {
+	if cause == nil { cause = errors.New("factory start rejected") }; return errors.Join(cause, p.Retire())
+}
+
+func (p *preparedKobjectWitness) awaitFactoryStart(c *kwFactoryStartClaim) error {
+	if c == nil || c.first == nil || c.worker == nil { return errors.New("factory start claim unavailable") }
+	var timer *time.Timer; var deadline <-chan time.Time
+	earliest, hasEarliest := c.deadline, c.hasDeadline; if c.startHasWorkerDeadline && (!hasEarliest || c.startWorkerDeadline.Before(earliest)) { earliest, hasEarliest = c.startWorkerDeadline, true }; if c.startHasScopeDeadline && (!hasEarliest || c.startScopeDeadline.Before(earliest)) { earliest, hasEarliest = c.startScopeDeadline, true }; if hasEarliest { timer = time.NewTimer(time.Until(earliest)); deadline = timer.C; defer timer.Stop() }
+	var wake error
+	for {
+		p.mu.Lock(); if p.startClaim != c || p.scope == nil || c.decision == nil { p.mu.Unlock(); return p.factoryStartFailure(c, errors.New("factory start ownership unknown")) }
+		handed := p.phase == kwFactoryHandedOff || c.handoffRetired; component := p.component; rejected := c.phase == kwFactoryClaimRejected; cause := errors.Join(c.cause, c.startSetupErr); setup, done, request, scope, acquisition := c.startSetupDone, c.acquisitionDone, c.request, p.scope, c.acquisition
+		decisionClosed := false; select { case <-c.decision: decisionClosed = true; default: }; if c.phase == kwFactoryClaimPending && decisionClosed || c.phase == kwFactoryClaimRejected && !decisionClosed || c.phase != kwFactoryClaimPending && c.phase != kwFactoryClaimRejected || c.startEntryClaimed && setup == nil || acquisition == kwAcquisitionReturned && done == nil { wake = errors.Join(wake, errors.New("factory start state invalid")) }
+		if !handed && wake != nil && !rejected { p.stopRequested = true; p.rejectFactoryClaimLocked(c, wake); rejected = true; cause = errors.Join(cause, wake) }; p.mu.Unlock()
+		if handed {
+			if component == nil { return p.factoryStartFailure(c, errors.New("factory handoff owner missing")) }
+			component.mu.Lock(); decided, activated, startErr, decision := component.decided, component.activated, component.startErr, component.startDecision; component.mu.Unlock()
+			if decided { if activated && startErr == nil { return nil }; if activated { return p.factoryStartFailure(c, startErr) }; return p.factoryStartFailure(c, errors.Join(startErr, wake)) }
+			if wake != nil { component.requestStartupRejection(wake); component.mu.Lock(); decided, activated, startErr = component.decided, component.activated, component.startErr; component.mu.Unlock(); if decided && activated && startErr == nil { return nil }; if decided && activated { return p.factoryStartFailure(c, startErr) }; return p.factoryStartFailure(c, errors.Join(startErr, wake)) }
+			if decision == nil { return p.factoryStartFailure(c, errors.New("component start decision unavailable")) }
+			select { case <-decision: case <-c.first.Done(): wake = c.first.Err(); if wake == nil { wake = context.Canceled }; case <-c.worker.Done(): wake = errors.Join(c.worker.Err(), scope.Failure()); if wake == nil { wake = context.Canceled }; case <-request: wake = errors.New("factory stop requested"); case <-deadline: wake = context.DeadlineExceeded; case <-done: wake = errors.New("acquisition returned before component decision") }; continue
+		}
+		if rejected { return p.factoryStartFailure(c, cause) }
+		if setup != nil { select { case <-setup: setup = nil; default: } }; if acquisition == kwAcquisitionReturned && done != nil { select { case <-done: return p.factoryStartFailure(c, errors.Join(cause, errors.New("acquisition returned without handoff"))); default: } }
+		select { case <-c.decision: case <-setup: case <-done: case <-c.first.Done(): wake = c.first.Err(); if wake == nil { wake = context.Canceled }; case <-c.worker.Done(): wake = errors.Join(c.worker.Err(), scope.Failure()); if wake == nil { wake = context.Canceled }; case <-request: wake = errors.New("factory stop requested"); case <-deadline: wake = context.DeadlineExceeded }
+	}
+}
+
+type kwFinishClaimPhase uint8
+const (
+	kwFinishPending kwFinishClaimPhase = iota
+	kwFinishRejected
+	kwFinishCommitted
+)
+
+type kwFinishJobState uint8
+const (
+	kwFinishJobNotStarted kwFinishJobState = iota
+	kwFinishJobRunning
+	kwFinishJobReturned
+	kwFinishJobNotLaunched
+)
+
+type kwComponentQuiescence uint8
+const (
+	kwComponentAvailable kwComponentQuiescence = iota
+	kwComponentQuiescing
+	kwComponentQuiesced
+	kwComponentQuiescenceUnknown
+)
+
+type kwPhysicalRetirement uint8
+const (
+	kwPhysicalNotStarted kwPhysicalRetirement = iota
+	kwPhysicalRunning
+	kwPhysicalReleased
+	kwPhysicalRetained
+)
+
+type kwFinishClaim struct {
+	phase kwFinishClaimPhase
+	ctx context.Context
+	deadline time.Time
+	hasDeadline bool
+	scope *periodiccaller.OwnedScope
+	readout kobjectWitnessReadout
+	cause, diagnostics error
+	decision chan struct{}
+	jobState kwFinishJobState
+	jobDone chan struct{}
+	jobReadout kobjectWitnessReadout
+	jobErr error
+	progressErr error
+}
+
+type kobjectWitness struct {
+	mu sync.Mutex
+	state kobjectWitnessState
+	scope *periodiccaller.OwnedScope
+	native kobjectNativeEpoch
+	socket kobjectSocket
+	monitor kobjectMonitorStarter
+	binding kobjectSocketBinding
+	scopeBinding libpf.AuxiliaryBinding
+	started, decided, activated bool
+	stopIntent bool
+	finishClaim *kwFinishClaim
+	componentState kwComponentQuiescence
+	componentCalls uint64
+	componentCallsDone, quiesceDone chan struct{}
+	quiesceErr error
+	physicalState kwPhysicalRetirement
+	physicalDone chan struct{}
+	physicalErr error
+	physicalNativeErr, physicalSocketErr error
+	startCtx context.Context
+	startDeadline time.Time
+	hasDeadline bool
+	startErr, monitorStartErr error
+	activate, reject, startDecision, startJobDone chan struct{}
+}
+
+func kwComponentPresent(v any) bool {
+	if v == nil { return false }; r := reflect.ValueOf(v); switch r.Kind() { case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice: return !r.IsNil() }; return true
+}
+
+func (w *kobjectWitness) enterComponentCall() error {
+	w.mu.Lock(); defer w.mu.Unlock(); if w.componentState != kwComponentAvailable { var cause error; if w.finishClaim != nil && w.finishClaim.phase != kwFinishCommitted { cause = w.finishClaim.cause }; return errors.Join(errors.New("witness component is quiescing"), w.startErr, cause) }; if w.componentCalls == math.MaxUint64 { return errors.New("witness invocation overflow") }; if w.componentCalls == 0 { w.componentCallsDone = make(chan struct{}) }; w.componentCalls++; return nil
+}
+
+func (w *kobjectWitness) leaveComponentCall() {
+	w.mu.Lock(); defer w.mu.Unlock(); w.componentCalls--; if w.componentCalls == 0 { close(w.componentCallsDone) }
+}
+
+// Quiescence is only borrower exclusion; it is not physical retirement authority.
+func (w *kobjectWitness) quiesceComponent() error {
+	if w == nil { return errors.New("missing witness") }
+	w.mu.Lock(); switch w.componentState { case kwComponentQuiesced: err := w.quiesceErr; w.mu.Unlock(); return err; case kwComponentQuiescenceUnknown: err := errors.Join(w.quiesceErr, errors.New("component quiescence unknown")); w.mu.Unlock(); return err; case kwComponentQuiescing: done := w.quiesceDone; if done == nil { w.mu.Unlock(); return errors.New("quiescence completion unavailable") }; w.mu.Unlock(); <-done; w.mu.Lock(); err := w.quiesceErr; w.mu.Unlock(); return err; case kwComponentAvailable: default: w.mu.Unlock(); return errors.New("unknown component quiescence state") }
+	w.componentState = kwComponentQuiescing; w.quiesceDone = make(chan struct{}); w.stopIntent = true
+	if !w.activated { w.rejectStartupLocked(errors.New("component quiescence requested")) }; if w.finishClaim != nil && w.finishClaim.phase != kwFinishCommitted { w.rejectFinishClaimLocked(errors.New("component quiescence requested")) }
+	var callsDone <-chan struct{}; var result error; if w.componentCalls != 0 { callsDone = w.componentCallsDone; if callsDone == nil { result = errors.New("invocation completion unavailable") } }; w.mu.Unlock()
+	if callsDone != nil { <-callsDone }
+	w.mu.Lock(); started, startDone := w.started, w.startJobDone; w.mu.Unlock()
+	if result == nil && started { if startDone == nil { result = errors.New("startup job completion unavailable") } else { <-startDone } }
+	if result == nil {
+		w.mu.Lock(); c := w.finishClaim; var done <-chan struct{}
+		if c != nil { switch c.jobState { case kwFinishJobNotStarted, kwFinishJobNotLaunched: if c.jobDone != nil { select { case <-c.jobDone: result = errors.New("unlaunched finish job reported return"); default: } }; case kwFinishJobRunning: if c.jobDone == nil { result = errors.New("finish job completion unavailable") } else { done = c.jobDone }; case kwFinishJobReturned: if c.jobDone == nil { result = errors.New("finish job completion unavailable") } else { select { case <-c.jobDone: default: result = errors.New("finish job return not observed") } }; default: result = errors.New("unknown finish job state") } }; w.mu.Unlock()
+		if done != nil { <-done; w.mu.Lock(); if c.jobState != kwFinishJobReturned { result = errors.New("finish job return not observed") }; w.mu.Unlock() }
+	}
+	w.mu.Lock(); defer w.mu.Unlock(); w.quiesceErr = result; if result != nil { w.componentState = kwComponentQuiescenceUnknown } else { w.componentState = kwComponentQuiesced }; close(w.quiesceDone); return result
+}
+
+// This bars the actual reader and waits for borrowers; it does not close it.
+func (w *kobjectWitness) quiesceReaderBorrowers() error {
+	if err := w.quiesceComponent(); err != nil { return err }
+	w.mu.Lock(); socket := w.socket; w.mu.Unlock(); reader, ok := socket.(*kwSocketReader); if !ok || reader == nil { return fmt.Errorf("reader borrower proof unavailable: %w", errors.ErrUnsupported) }
+	reader.mu.Lock(); if reader.progress == nil || reader.cancel == nil || reader.transport == nil { reader.mu.Unlock(); return fmt.Errorf("reader ownership unavailable: %w", errors.ErrUnsupported) }; reader.stopReads = true; if reader.phase == kwReaderFresh { reader.phase = kwReaderQuarantined }; reader.signal(); cancel := reader.cancel; reader.mu.Unlock(); cancel()
+	for {
+		reader.mu.Lock(); switch reader.phase { case kwReaderFresh, kwReaderJoining, kwReaderJoined, kwReaderDraining, kwReaderQuarantined, kwReaderRetiring, kwReaderRetired: default: reader.mu.Unlock(); return fmt.Errorf("reader state unknown: %w", errors.ErrUnsupported) }
+		progress, cut := reader.progress, reader.cutDone; cutPending := false; if cut != nil { select { case <-cut: default: cutPending = true } }; busy := reader.joinPending || reader.active || reader.facts.pending != 0 || reader.phase == kwReaderRetiring || cutPending; cause := reader.err; reader.mu.Unlock()
+		if !busy { return nil }; if progress == nil { return errors.Join(cause, fmt.Errorf("reader progress unavailable: %w", errors.ErrUnsupported)) }; if cutPending { select { case <-progress: case <-cut: } } else { <-progress }
+	}
+}
+
+// Retained means physical ownership remains or could not be proved absent.
+func (w *kobjectWitness) retirePhysical() (state kwPhysicalRetirement, result error) {
+	if w == nil { return kwPhysicalRetained, errors.New("missing witness") }
+	w.mu.Lock(); switch w.physicalState { case kwPhysicalReleased, kwPhysicalRetained: state, err := w.physicalState, w.physicalErr; w.mu.Unlock(); return state, err; case kwPhysicalRunning: done := w.physicalDone; if done == nil { w.mu.Unlock(); return kwPhysicalRetained, errors.New("physical cleanup completion unavailable") }; w.mu.Unlock(); <-done; w.mu.Lock(); state, err := w.physicalState, w.physicalErr; w.mu.Unlock(); if state != kwPhysicalReleased && state != kwPhysicalRetained { return kwPhysicalRetained, errors.Join(err, errors.New("physical cleanup did not return")) }; return state, err; case kwPhysicalNotStarted: default: w.mu.Unlock(); return kwPhysicalRetained, errors.New("unknown physical cleanup state") }
+	w.physicalState = kwPhysicalRunning; w.physicalDone = make(chan struct{}); w.mu.Unlock()
+	state = kwPhysicalRetained
+	defer func() { w.mu.Lock(); result = errors.Join(result, w.startErr, w.monitorStartErr); if w.finishClaim != nil { if w.finishClaim.phase != kwFinishCommitted { result = errors.Join(result, w.finishClaim.cause) }; w.finishClaim.diagnostics = errors.Join(w.finishClaim.diagnostics, result) }; w.physicalState, w.physicalErr = state, result; if state == kwPhysicalReleased { w.state = kwRetired } else { w.state = kwQuarantined }; close(w.physicalDone); w.mu.Unlock() }()
+	result = w.quiesceReaderBorrowers(); if result != nil { return state, result }
+	w.mu.Lock(); n, nativeOK := w.native.(*kwNativeEpoch); reader, readerOK := w.socket.(*kwSocketReader); prior := errors.Join(w.startErr, w.monitorStartErr); if w.finishClaim != nil && w.finishClaim.phase != kwFinishCommitted { prior = errors.Join(prior, w.finishClaim.cause) }; w.mu.Unlock(); if readerOK && reader != nil { reader.mu.Lock(); prior = errors.Join(prior, reader.err); reader.mu.Unlock() }; if !nativeOK || n == nil || !readerOK || reader == nil { result = errors.Join(prior, fmt.Errorf("physical owner proof unavailable: %w", errors.ErrUnsupported)); return state, result }
+	n.mu.Lock(); operation, phase, owner, nativeErr := n.operation, n.phase, n.objects, n.cleanupErr; n.mu.Unlock(); if operation != kwEpochIdle || owner == nil { result = errors.Join(prior, nativeErr, fmt.Errorf("native borrower or owner unknown: %w", errors.ErrUnsupported)); return state, result }; switch phase { case kwEpochCold, kwEpochClosing, kwEpochSettled, kwEpochQuarantined, kwEpochRetired: default: result = errors.Join(prior, nativeErr, fmt.Errorf("native lifecycle unknown: %w", errors.ErrUnsupported)); return state, result }
+	if phase != kwEpochRetired { nativeErr = errors.Join(nativeErr, n.Retire()) }
+	n.mu.Lock(); phase, operation, nativeErr = n.phase, n.operation, errors.Join(nativeErr, n.cleanupErr); n.mu.Unlock(); w.mu.Lock(); w.physicalNativeErr = nativeErr; w.mu.Unlock(); owner.mu.Lock(); nativeGone := owner.gate == nil && len(owner.maps) == 0 && len(owner.acquiredPrograms) == 0 && len(owner.acquiredProbes) == 0; owner.mu.Unlock()
+	if phase != kwEpochRetired || operation != kwEpochIdle || !nativeGone { result = errors.Join(prior, nativeErr, fmt.Errorf("native resources retained: %w", errors.ErrUnsupported)); return state, result }
+	reader.mu.Lock(); readerPhase, readerErr := reader.phase, errors.Join(reader.err, reader.cleanupErr); reader.mu.Unlock(); var socketErr error; if readerPhase != kwReaderRetired { socketErr = reader.Retire() }
+	reader.mu.Lock(); readerPhase, transport, storedSocketErr, readerErr := reader.phase, reader.transport, reader.cleanupErr, errors.Join(readerErr, reader.err, reader.cleanupErr); reader.mu.Unlock(); w.mu.Lock(); w.physicalSocketErr = errors.Join(socketErr, storedSocketErr); w.mu.Unlock(); if transport == nil { result = errors.Join(nativeErr, readerErr, socketErr, fmt.Errorf("socket ownership unavailable: %w", errors.ErrUnsupported)); return state, result }; transport.mu.Lock(); socketClosed, transportErr := transport.closed && transport.phase == kwSocketRetired, transport.closeErr; transport.mu.Unlock(); w.mu.Lock(); w.physicalSocketErr = errors.Join(w.physicalSocketErr, transportErr); w.mu.Unlock()
+	result = errors.Join(nativeErr, readerErr, socketErr, transportErr); if readerPhase != kwReaderRetired || !socketClosed { result = errors.Join(result, fmt.Errorf("socket resources retained: %w", errors.ErrUnsupported)); return state, result }; state = kwPhysicalReleased; return state, result
+}
+
+// The caller transfers exclusive ownership only after this constructor succeeds.
+func newKobjectWitness(scope *periodiccaller.OwnedScope, native kobjectNativeEpoch, socket kobjectSocket, monitor kobjectMonitorStarter) (*kobjectWitness, error) {
+	if scope == nil || !kwComponentPresent(native) || !kwComponentPresent(socket) || !kwComponentPresent(monitor) { return nil, errors.New("missing witness component") }
+	if !reflect.ValueOf(socket).Comparable() { return nil, errors.New("socket receiver is not comparable") }
+	scopeBinding, err := scope.AuxiliaryBinding(); if err != nil { return nil, err }; if err := scope.Failure(); err != nil { return nil, err }
+	binding, err := socket.Binding(); if err != nil { return nil, err }; current, bindingErr := scope.AuxiliaryBinding(); if err := errors.Join(scope.Context().Err(), scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(scopeBinding, current)); err != nil { return nil, err }; if binding.cookie == 0 || binding.portID == 0 || binding.generation == 0 || binding.generation != scopeBinding.Generation { return nil, errors.New("invalid socket binding or scope generation") }
+	return &kobjectWitness{state: kwPrepared, scope: scope, native: native, socket: socket, monitor: monitor, binding: binding, scopeBinding: scopeBinding, activate: make(chan struct{}), reject: make(chan struct{}), startDecision: make(chan struct{}), startJobDone: make(chan struct{})}, nil
+}
+
+func (w *kobjectWitness) startupErrorLocked() error {
+	var deadlineErr error; if w.hasDeadline && !time.Now().Before(w.startDeadline) { deadlineErr = context.DeadlineExceeded }
+	current, bindingErr := w.scope.AuxiliaryBinding()
+	return errors.Join(w.startCtx.Err(), deadlineErr, w.scope.Context().Err(), w.scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(w.scopeBinding, current), w.monitorStartErr)
+}
+
+func (w *kobjectWitness) rejectStartupLocked(err error) {
+	if w.decided { if !w.activated { w.startErr = errors.Join(w.startErr, err) }; return }
+	w.startErr = errors.Join(w.startErr, err); w.state = kwQuarantined; w.decided = true; close(w.reject); close(w.startDecision)
+}
+
+func (w *kobjectWitness) requestStartupRejection(err error) {
+	if w == nil { return }; if err == nil { err = errors.New("startup rejected") }; w.mu.Lock(); defer w.mu.Unlock(); w.rejectStartupLocked(err)
+}
+
+func kwFinishContextError(c *kwFinishClaim) error {
+	var deadlineErr error; if c.hasDeadline && !time.Now().Before(c.deadline) { deadlineErr = context.DeadlineExceeded }
+	scope := c.scope.Context(); var scopeDeadlineErr error; if deadline, ok := scope.Deadline(); ok && !time.Now().Before(deadline) { scopeDeadlineErr = context.DeadlineExceeded }
+	return errors.Join(c.ctx.Err(), deadlineErr, scope.Err(), scopeDeadlineErr, c.scope.Failure())
+}
+
+func kwFinishStateError(c *kwFinishClaim) error {
+	if c == nil || c.ctx == nil || c.scope == nil || c.decision == nil || c.jobDone == nil { return errors.New("invalid finish claim channels or context") }
+	decisionClosed := false; select { case <-c.decision: decisionClosed = true; default: }
+	switch c.phase { case kwFinishPending: if decisionClosed { return errors.New("pending finish decision already closed") }; case kwFinishRejected: if !decisionClosed || c.cause == nil { return errors.New("invalid rejected finish decision") }; case kwFinishCommitted: if !decisionClosed { return errors.New("terminal finish decision still open") }; default: return errors.New("unknown finish claim phase") }
+	jobClosed := false; select { case <-c.jobDone: jobClosed = true; default: }
+	switch c.jobState { case kwFinishJobNotStarted, kwFinishJobRunning: if jobClosed { return errors.New("unreturned finish job channel closed") }; case kwFinishJobNotLaunched: if jobClosed || c.phase == kwFinishPending { return errors.New("invalid unlaunched finish job") }; case kwFinishJobReturned: if !jobClosed { return errors.New("returned finish job channel open") }; default: return errors.New("unknown finish job state") }; if c.phase == kwFinishCommitted && c.jobState != kwFinishJobReturned { return errors.New("committed finish lacks returned job") }
+	return nil
+}
+
+func (w *kobjectWitness) rejectFinishClaimLocked(cause error) {
+	c := w.finishClaim; if c == nil { return }; if c.phase == kwFinishCommitted { c.diagnostics = errors.Join(c.diagnostics, cause); return }
+	if cause == nil { cause = errors.New("finish rejected") }; var contextErr error; if c.ctx != nil && c.scope != nil { contextErr = kwFinishContextError(c) }; c.cause = errors.Join(c.cause, cause, c.progressErr, c.jobErr, contextErr); if w.state != kwRetired { w.state = kwQuarantined }; c.phase = kwFinishRejected; if c.decision == nil { c.decision = make(chan struct{}) }; select { case <-c.decision: default: close(c.decision) }
+}
+
+func (w *kobjectWitness) rejectFinishClaim(cause error) {
+	if w == nil { return }; w.mu.Lock(); defer w.mu.Unlock(); w.rejectFinishClaimLocked(cause)
+}
+
+func (w *kobjectWitness) reserveFinish(ctx context.Context) (*kwFinishClaim, error) {
+	if w == nil || ctx == nil { return nil, errors.New("missing witness or first-stop context") }
+	w.mu.Lock(); defer w.mu.Unlock()
+	if w.componentState != kwComponentAvailable { return nil, errors.New("witness component is quiescing") }
+	if c := w.finishClaim; c != nil { if err := kwFinishStateError(c); err != nil { if c.phase == kwFinishCommitted { return c, errors.Join(c.cause, err) }; w.rejectFinishClaimLocked(err); return c, c.cause }; switch c.phase { case kwFinishPending: if err := kwFinishContextError(c); err != nil { w.rejectFinishClaimLocked(err) }; case kwFinishRejected: c.cause = errors.Join(c.cause, c.jobErr, kwFinishContextError(c)); case kwFinishCommitted: }; return c, c.cause }
+	deadline, hasDeadline := ctx.Deadline(); c := &kwFinishClaim{phase: kwFinishPending, ctx: ctx, deadline: deadline, hasDeadline: hasDeadline, scope: w.scope, decision: make(chan struct{}), jobDone: make(chan struct{})}; for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ { c.readout.native.guards[h][d].err = fmt.Errorf("guard not observed: %w", errors.ErrUnsupported) } }; w.finishClaim = c; w.stopIntent = true
+	var prior error; if w.state == kwQuarantined || w.state == kwRetired { prior = errors.Join(w.startErr, errors.New("witness unavailable for finish")) }
+	if !w.activated { w.rejectStartupLocked(errors.Join(prior, kwFinishContextError(c), errors.New("finish requested before startup commit"))) } else if prior == nil { w.state = kwClosing }
+	if err := errors.Join(prior, kwFinishContextError(c)); err != nil { w.rejectFinishClaimLocked(err) }
+	return c, c.cause
+}
+
+func kwWaitFinishContext(c *kwFinishClaim, done <-chan struct{}) error {
+	if err := kwFinishContextError(c); err != nil { return err }
+	var firstTimer, scopeTimer *time.Timer; var firstWake, scopeWake <-chan time.Time
+	if c.hasDeadline { firstTimer = time.NewTimer(time.Until(c.deadline)); defer firstTimer.Stop(); firstWake = firstTimer.C }
+	if deadline, ok := c.scope.Context().Deadline(); ok { scopeTimer = time.NewTimer(time.Until(deadline)); defer scopeTimer.Stop(); scopeWake = scopeTimer.C }
+	select { case <-done: case <-c.decision: case <-c.ctx.Done(): case <-c.scope.Context().Done(): case <-firstWake: case <-scopeWake: }
+	return kwFinishContextError(c)
+}
+
+func (w *kobjectWitness) launchFinish(c *kwFinishClaim, op *periodiccaller.OwnedOperation) error {
+	if w.scope.Go(func() {
+		result, err := w.runFinishSequence(c); terminalErr := op.Complete()
+		w.mu.Lock(); c.jobReadout, c.jobErr, c.jobState = result, errors.Join(err, terminalErr), kwFinishJobReturned; if c.phase == kwFinishRejected && c.jobErr != nil { w.rejectFinishClaimLocked(c.jobErr) }; close(c.jobDone); w.mu.Unlock()
+	}) { return nil }
+	terminalErr := op.Abort(); w.mu.Lock(); c.jobState = kwFinishJobNotLaunched; actual, bindingErr := w.scope.AuxiliaryBinding(); err := errors.Join(errors.New("finish scope job rejected"), terminalErr, kwFinishContextError(c), w.scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(w.scopeBinding, actual), w.startErr, w.monitorStartErr); w.rejectFinishClaimLocked(err); w.mu.Unlock(); return err
+}
+
+func (w *kobjectWitness) finish(ctx context.Context) (kobjectWitnessReadout, error) {
+	var empty kobjectWitnessReadout
+	if w == nil || ctx == nil { return empty, errors.New("missing witness or first-stop context") }; if err := w.enterComponentCall(); err != nil { return empty, err }; defer w.leaveComponentCall()
+	c, err := w.reserveFinish(ctx); if c == nil { return empty, err }
+	w.mu.Lock(); if err != nil && c.phase == kwFinishCommitted { result := c.readout; w.mu.Unlock(); return result, err }; if stateErr := kwFinishStateError(c); stateErr != nil { if c.phase == kwFinishCommitted { result := c.readout; w.mu.Unlock(); return result, stateErr }; w.rejectFinishClaimLocked(stateErr) }; if c.phase != kwFinishPending { result, cause := c.readout, c.cause; w.mu.Unlock(); return result, cause }; launch := c.jobState == kwFinishJobNotStarted; if launch { c.jobState = kwFinishJobRunning }; started, active := w.started, w.activated; w.mu.Unlock()
+	if launch {
+		if !started { w.mu.Lock(); c.jobState = kwFinishJobNotLaunched; w.rejectFinishClaimLocked(errors.New("startup never committed")); w.mu.Unlock() } else if err := kwWaitFinishContext(c, w.startJobDone); err != nil { w.mu.Lock(); c.jobState = kwFinishJobNotLaunched; w.rejectFinishClaimLocked(err); w.mu.Unlock() } else if !active { w.mu.Lock(); c.jobState = kwFinishJobNotLaunched; w.rejectFinishClaimLocked(errors.Join(w.startErr, errors.New("startup did not commit"))); w.mu.Unlock() } else {
+			w.mu.Lock(); if err := kwFinishContextError(c); err != nil { w.rejectFinishClaimLocked(err) }; pending := c.phase == kwFinishPending; w.mu.Unlock()
+			if pending { op, admitErr := w.scope.AdmitCallback(); if admitErr != nil { w.mu.Lock(); c.jobState = kwFinishJobNotLaunched; actual, bindingErr := w.scope.AuxiliaryBinding(); w.rejectFinishClaimLocked(errors.Join(admitErr, kwFinishContextError(c), w.scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(w.scopeBinding, actual))); w.mu.Unlock() } else { w.mu.Lock(); if err := kwFinishContextError(c); err != nil { w.rejectFinishClaimLocked(err) }; pending = c.phase == kwFinishPending; w.mu.Unlock(); if pending { _ = w.launchFinish(c, op) } else { terminalErr := op.Abort(); w.mu.Lock(); c.jobState = kwFinishJobNotLaunched; c.diagnostics = errors.Join(c.diagnostics, terminalErr); w.mu.Unlock() } } } else { w.mu.Lock(); c.jobState = kwFinishJobNotLaunched; w.mu.Unlock() }
+		}
+	}
+	for {
+		w.mu.Lock(); if stateErr := kwFinishStateError(c); stateErr != nil { if c.phase == kwFinishCommitted { result := c.readout; w.mu.Unlock(); return result, stateErr }; w.rejectFinishClaimLocked(stateErr) }; if c.phase != kwFinishPending { result, cause := c.readout, c.cause; w.mu.Unlock(); return result, cause }; w.mu.Unlock()
+		if err := kwWaitFinishContext(c, c.jobDone); err != nil { w.mu.Lock(); w.rejectFinishClaimLocked(err); result, cause := c.readout, c.cause; w.mu.Unlock(); return result, cause }
+		w.mu.Lock(); if stateErr := kwFinishStateError(c); stateErr != nil { if c.phase == kwFinishCommitted { result := c.readout; w.mu.Unlock(); return result, stateErr }; w.rejectFinishClaimLocked(stateErr) }; if c.phase != kwFinishPending { result, cause := c.readout, c.cause; w.mu.Unlock(); return result, cause }; if c.jobState != kwFinishJobReturned { w.rejectFinishClaimLocked(errors.New("finish job did not return")); result, cause := c.readout, c.cause; w.mu.Unlock(); return result, cause }
+		actual, bindingErr := w.scope.AuxiliaryBinding(); finalErr := errors.Join(c.jobErr, kwFinishContextError(c), w.scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(w.scopeBinding, actual), w.startErr, w.monitorStartErr); if !w.activated || w.state != kwClosing || w.finishClaim != c { finalErr = errors.Join(finalErr, errors.New("finish owner no longer eligible")) }; c.readout = c.jobReadout
+		if finalErr != nil { w.rejectFinishClaimLocked(finalErr) } else { c.phase = kwFinishCommitted; close(c.decision) }; result, cause := c.readout, c.cause; w.mu.Unlock(); return result, cause
+	}
+}
+
+// The caller retains the owner borrow until every actual callback returns.
+func (w *kobjectWitness) runFinishSequence(c *kwFinishClaim) (kobjectWitnessReadout, error) {
+	var result kobjectWitnessReadout
+	for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ { result.native.guards[h][d].err = fmt.Errorf("guard not observed: %w", errors.ErrUnsupported) } }
+	if w == nil || c == nil { return result, errors.New("missing witness or finish claim") }
+	eligible := func() error {
+		w.mu.Lock(); defer w.mu.Unlock()
+		if w.finishClaim != c || c.phase != kwFinishPending || !w.activated || w.state != kwClosing || w.scope == nil || c.scope != w.scope { return errors.Join(c.cause, errors.New("finish claim unavailable")) }
+		select { case <-w.startJobDone: default: return errors.New("startup job still pending") }
+		actual, bindingErr := w.scope.AuxiliaryBinding(); return errors.Join(kwFinishContextError(c), w.startErr, w.monitorStartErr, bindingErr, libpf.ValidateAuxiliaryBinding(w.scopeBinding, actual))
+	}
+	guardErrors := func(r kobjectNativeReadout) error { var all []error; for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ { all = append(all, r.guards[h][d].err) } }; return errors.Join(all...) }
+	markUnknown := func(r *kobjectNativeReadout) { for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ { g := &r.guards[h][d]; if g.availability == kwGuardMissing && g.err == nil { g.err = fmt.Errorf("guard not observed: %w", errors.ErrUnsupported) } } } }
+	var observed error
+	finish := func(err error) (kobjectWitnessReadout, error) { return result, errors.Join(err, observed, guardErrors(result.native)) }
+	publish := func(err error) { w.mu.Lock(); defer w.mu.Unlock(); if w.finishClaim != c { return }; switch c.phase { case kwFinishPending: c.readout = result; c.progressErr = errors.Join(c.progressErr, err); case kwFinishRejected: c.jobReadout = result; c.diagnostics = errors.Join(c.diagnostics, err); case kwFinishCommitted: } }
+	if err := eligible(); err != nil { return finish(err) }
+	result.binding = w.binding; publish(nil)
+	err := w.socket.Cut(c.ctx); if err == nil { result.cut = kwReturnSucceeded } else { result.cut = kwReturnFailed }; publish(err); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	if err = eligible(); err != nil { return finish(err) }; err = w.native.CloseAdmission(); publish(err); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	if err = eligible(); err != nil { return finish(err) }; err = w.native.Settle(c.ctx); publish(err); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	if err = eligible(); err != nil { return finish(err) }; err = w.native.Fence(c.ctx); if err == nil { result.fence = kwReturnSucceeded } else { result.fence = kwReturnFailed }; publish(err); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	if err = eligible(); err != nil { return finish(err) }; intermediate, err := w.native.Readout(); markUnknown(&intermediate); result.native = intermediate; observed = errors.Join(observed, guardErrors(intermediate)); publish(errors.Join(err, guardErrors(intermediate))); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	if err = eligible(); err != nil { return finish(err) }; err = w.socket.DrainTo(c.ctx, intermediate.recipient.queued); publish(err); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	if err = eligible(); err != nil { return finish(err) }; err = w.monitor.FlushOwnedMonitor(c.ctx); if err == nil { result.workerFlush = kwReturnSucceeded } else { result.workerFlush = kwReturnFailed }; publish(err); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	if err = eligible(); err != nil { return finish(err) }; terminal, err := w.native.Readout(); markUnknown(&terminal); result.native = terminal; observed = errors.Join(observed, guardErrors(terminal)); publish(errors.Join(err, guardErrors(terminal))); if err = errors.Join(err, eligible()); err != nil { return finish(err) }
+	reader, ok := w.socket.(interface { readerFacts() (kwReaderFacts, error) }); if !ok { return finish(fmt.Errorf("reader facts unavailable: %w", errors.ErrUnsupported)) }
+	if err = eligible(); err != nil { return finish(err) }; result.reader, err = reader.readerFacts(); publish(err); err = errors.Join(err, eligible())
+	if intermediate.faults != terminal.faults || intermediate.firstError != terminal.firstError || intermediate.stages != terminal.stages || intermediate.recipient != terminal.recipient || intermediate.rootStarted != terminal.rootStarted || intermediate.rootReturned != terminal.rootReturned || intermediate.binding != terminal.binding { err = errors.Join(err, errors.New("native counts changed between readouts")) }
+	return finish(errors.Join(err, validateKobjectReadout(w.binding, result)))
+}
+
+func (w *kobjectWitness) launchStartup(op *periodiccaller.OwnedOperation, job func()) error {
+	if w.scope.Go(func() { defer close(w.startJobDone); defer op.Complete(); job() }) { return nil }
+	terminalErr := op.Abort(); w.mu.Lock(); err := errors.Join(errors.New("startup scope job rejected"), terminalErr, w.startupErrorLocked()); w.rejectStartupLocked(err); w.mu.Unlock(); close(w.startJobDone); return err
+}
+
+func (w *kobjectWitness) start(ctx context.Context) error {
+	if w == nil || ctx == nil { return errors.New("missing startup context") }
+	if err := w.enterComponentCall(); err != nil { return err }; defer w.leaveComponentCall()
+	w.mu.Lock(); if w.stopIntent { err := errors.Join(w.startErr, errors.New("witness stop already requested")); w.mu.Unlock(); return err }; if w.started { err := w.startErr; if err == nil { err = errors.New("witness startup already claimed") }; w.mu.Unlock(); return err }; w.started = true; w.startCtx = ctx; w.startDeadline, w.hasDeadline = ctx.Deadline()
+	if err := w.startupErrorLocked(); err != nil { w.rejectStartupLocked(err) }; w.mu.Unlock()
+	op, err := w.scope.AdmitCallback(); if err != nil { w.mu.Lock(); w.rejectStartupLocked(errors.Join(err, w.startupErrorLocked())); w.mu.Unlock(); close(w.startJobDone); w.mu.Lock(); defer w.mu.Unlock(); return w.startErr }
+	if err = w.launchStartup(op, w.runStartup); err != nil { w.mu.Lock(); defer w.mu.Unlock(); return w.startErr }
+	var deadline <-chan time.Time; var timer *time.Timer; if w.hasDeadline { timer = time.NewTimer(time.Until(w.startDeadline)); defer timer.Stop(); deadline = timer.C }
+	select { case <-w.startDecision: case <-ctx.Done(): w.requestStartupRejection(ctx.Err()); case <-w.scope.Context().Done(): w.requestStartupRejection(w.scope.Context().Err()); case <-deadline: w.requestStartupRejection(context.DeadlineExceeded) }
+	w.mu.Lock(); defer w.mu.Unlock(); return w.startErr
+}
+
+func (w *kobjectWitness) runStartup() {
+	eligible := func() error { w.mu.Lock(); defer w.mu.Unlock(); if w.decided { return errors.Join(w.startErr, errors.New("startup claim consumed")) }; return w.startupErrorLocked() }
+	envelope := struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&w.mu, w.activate, w.reject, &w.monitorStartErr}
+	worker := context.WithValue(w.scope.Context(), w.socket, envelope)
+	err := eligible(); if err == nil && !w.scope.Go(func() { <-w.scope.Context().Done(); w.mu.Lock(); defer w.mu.Unlock(); if w.activated { w.state = kwQuarantined; w.startErr = errors.Join(w.startErr, w.scope.Context().Err()) } else { w.rejectStartupLocked(w.scope.Context().Err()) } }) { err = errors.New("scope watcher registration failed") }; if err == nil { err = eligible() }; if err == nil { err = w.monitor.StartOwnedMonitor(worker, w.socket) }; if err == nil { err = eligible() }; if err == nil { err = w.native.Open(w.binding) }; if err == nil { err = eligible() }
+	joined := false; if err == nil { joined = true; err = w.socket.Join() }; if err == nil { err = eligible() }
+	w.mu.Lock(); err = errors.Join(err, w.startupErrorLocked()); if err == nil && !w.decided { w.decided = true; w.activated = true; w.state = kwJoined; close(w.activate); close(w.startDecision); w.mu.Unlock(); return }; if err == nil { err = w.startErr }; w.rejectStartupLocked(err); w.mu.Unlock()
+	var cleanup error; if joined { cleanup = w.socket.Cut(w.startCtx) }; cleanup = errors.Join(cleanup, w.native.CloseAdmission()); if cleanup == nil { cleanup = w.native.Retire() }; if cleanup == nil { cleanup = w.socket.Retire() }
+	w.mu.Lock(); w.startErr = errors.Join(w.startErr, cleanup); w.mu.Unlock()
+}
+
+type kobjectSocketBinding struct {
+	cookie uint64
+	portID uint32
+	generation uint64
+}
+
+type kobjectWitnessState uint8
+const (
+	kwPrepared kobjectWitnessState = iota
+	kwJoined
+	kwClosing
+	kwQuarantined
+	kwRetired
+)
+
+type kobjectNativeEpoch interface {
+	Open(kobjectSocketBinding) error
+	CloseAdmission() error
+	Settle(context.Context) error
+	Fence(context.Context) error
+	Readout() (kobjectNativeReadout, error)
+	Retire() error
+}
+
+type kobjectSocket interface {
+	Binding() (kobjectSocketBinding, error)
+	Join() error
+	Cut(context.Context) error
+	Receive() (*kobject.Event, error)
+	Acknowledge(error) error
+	DrainTo(context.Context, uint64) error
+	Retire() error
+}
+
+type kwStage uint8
+const (
+	kwEnv kwStage = iota
+	kwBroadcast
+	kwAllocation
+	kwRelay
+	kwStageCount
+)
+
+type kwHook uint8
+const (
+	kwHookEnv kwHook = iota
+	kwHookBroadcast
+	kwHookAllocation
+	kwHookRelay
+	kwHookRecipient
+	kwHookEnqueue
+	kwHookOverrun
+	kwHookCount
+)
+
+type kwDirection uint8
+const (
+	kwEnter kwDirection = iota
+	kwExit
+	kwDirectionCount
+)
+
+type kwGuardAvailability uint8
+const (
+	kwGuardMissing kwGuardAvailability = iota
+	kwGuardAvailable
+	kwGuardShort
+	kwGuardWrong
+	kwGuardNativeError
+)
+
+type kwActualReturn uint8
+const (
+	kwReturnPending kwActualReturn = iota
+	kwReturnSucceeded
+	kwReturnFailed
+)
+
+type kwStageFacts struct { attempted, succeeded, failed, skipped, active uint64 }
+type kwRecipientFacts struct { admitted, queued, overrun, filteredOrFailed uint64 }
+type kwReaderFacts struct { consumed, dispatched, rejected, aborted, pending uint64 }
+
+type kwReturnMissPolicy uint8
+const (
+	kwMissPolicyUnqualified kwReturnMissPolicy = iota
+	kwMissPolicyEntryBoundedSigned32
+)
+
+type kwProgramInfo struct { programType, id, returnedLength uint32; recursionMisses uint64 }
+type kwLinkInfo struct { linkType, id, programID, perfType, returnedLength uint32; address, missed uint64 }
+type kwHookGuard struct {
+	availability kwGuardAvailability
+	program kwProgramInfo
+	link kwLinkInfo
+	tracingAttachmentID, tracingAttachmentType uint32
+	recursionWidth, missWidth uint8
+	missPolicy kwReturnMissPolicy
+	lifetimeBound bool
+	err error
+}
+
+// This is an arithmetic and metadata snapshot, never an observation certificate.
+type kobjectNativeReadout struct {
+	binding kobjectSocketBinding
+	faults uint64
+	firstError int64
+	stages [kwStageCount]kwStageFacts
+	recipient kwRecipientFacts
+	rootStarted, rootReturned uint64
+	classicEntries [kwStageCount]uint64
+	guards [kwHookCount][kwDirectionCount]kwHookGuard
+	barrier kwActualReturn
+}
+
+type kobjectWitnessReadout struct {
+	binding kobjectSocketBinding
+	native kobjectNativeReadout
+	reader kwReaderFacts
+	cut, fence, workerFlush kwActualReturn
+}
+
+func kwSum(values ...uint64) (uint64, bool) {
+	var sum uint64
+	for _, value := range values {
+		if value > math.MaxUint64-sum { return 0, false }
+		sum += value
+	}
+	return sum, true
+}
+
+func validateKobjectClassicGuard(native kobjectNativeReadout, hook kwHook, direction kwDirection) error {
+	if hook > kwHookRelay || direction >= kwDirectionCount {
+		return errors.New("kobject classic guard slot out of range")
+	}
+	slotValid := func(slot kwHookGuard, dir kwDirection) bool {
+		return slot.err == nil &&
+			slot.availability == kwGuardAvailable &&
+			slot.lifetimeBound &&
+			slot.recursionWidth == 64 &&
+			slot.program.returnedLength >= 216 &&
+			slot.program.id != 0 &&
+			slot.program.programType == kwProgramKprobe &&
+			slot.program.recursionMisses == 0 &&
+			slot.link.returnedLength >= 56 &&
+			slot.link.linkType == kwLinkPerfEvent &&
+			slot.link.id != 0 &&
+			slot.link.programID == slot.program.id &&
+			slot.link.perfType == kwPerfKprobe+uint32(dir) &&
+			slot.link.address != 0 &&
+			slot.link.missed == 0
+	}
+	g := native.guards[hook][direction]
+	if !slotValid(g, direction) {
+		return errors.New("kobject classic link guard invalid")
+	}
+	switch g.missPolicy {
+	case kwMissPolicyUnqualified:
+		if g.missWidth != 64 {
+			return errors.New("kobject classic link guard invalid")
+		}
+		return nil
+	case kwMissPolicyEntryBoundedSigned32:
+		if direction != kwExit || g.missWidth != 32 {
+			return errors.New("kobject bounded return-miss policy invalid")
+		}
+		if native.barrier != kwReturnSucceeded {
+			return errors.New("kobject bounded return-miss barrier not succeeded")
+		}
+		entry := native.guards[hook][kwEnter]
+		if entry.missPolicy != kwMissPolicyUnqualified || entry.missWidth != 64 || !slotValid(entry, kwEnter) {
+			return errors.New("kobject bounded return-miss entry guard invalid")
+		}
+		entries := native.classicEntries[hook]
+		if entries >= (uint64(1)<<31) || entries < native.stages[hook].attempted {
+			return errors.New("kobject bounded return-miss entry bound invalid")
+		}
+		return nil
+	default:
+		return fmt.Errorf("kobject unknown return-miss policy %d", g.missPolicy)
+	}
+}
+
+// Validation cannot establish that adapters actually performed the operations.
+func validateKobjectReadout(expected kobjectSocketBinding, actual kobjectWitnessReadout) (result error) {
+	var guardErrors []error
+	for hook := kwHook(0); hook < kwHookCount; hook++ {
+		for direction := kwDirection(0); direction < kwDirectionCount; direction++ {
+			if err := actual.native.guards[hook][direction].err; err != nil {
+				guardErrors = append(guardErrors, fmt.Errorf("kobject program guard %d/%d: %w", hook, direction, err))
+			}
+		}
+	}
+	defer func() { result = errors.Join(append(guardErrors, result)...) }()
+	if expected.cookie == 0 || expected.portID == 0 || expected.generation == 0 || actual.binding != expected || actual.native.binding != expected {
+		return errors.New("kobject binding mismatch")
+	}
+	if err := validateKobjectCounters(actual.native); err != nil { return err }
+	for hook := kwHook(0); hook < kwHookCount; hook++ {
+		for direction := kwDirection(0); direction < kwDirectionCount; direction++ {
+			g := actual.native.guards[hook][direction]
+			if g.availability != kwGuardAvailable || !g.lifetimeBound || g.recursionWidth != 64 || g.program.returnedLength < 216 || g.program.id == 0 || g.program.programType == 0 || g.program.recursionMisses != 0 {
+				return errors.New("kobject program guard unavailable or missed")
+			}
+			if hook <= kwHookRelay {
+				if err := validateKobjectClassicGuard(actual.native, hook, direction); err != nil { return err }
+			} else {
+				if g.missPolicy != kwMissPolicyUnqualified { return errors.New("kobject tracing miss policy invalid") }
+				if g.program.programType != kwProgramTracing || g.tracingAttachmentID == 0 || g.tracingAttachmentType == 0 { return errors.New("kobject tracing attachment missing") }
+			}
+		}
+	}
+	r := actual.reader
+	total, ok := kwSum(r.dispatched, r.rejected, r.aborted, r.pending)
+	if !ok || r.consumed != total || r.consumed != actual.native.recipient.queued || r.dispatched != r.consumed || r.rejected != 0 || r.aborted != 0 || r.pending != 0 { return errors.New("kobject reader accounting invalid") }
+	if actual.cut != kwReturnSucceeded || actual.fence != kwReturnSucceeded || actual.workerFlush != kwReturnSucceeded || actual.native.barrier != kwReturnSucceeded { return errors.New("kobject operation not returned successfully") }
+	return nil
+}

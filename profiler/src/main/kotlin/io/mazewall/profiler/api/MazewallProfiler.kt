@@ -203,6 +203,12 @@ public class MazewallProfiler private constructor(
         )
 
     public companion object {
+        /** Observe an ordinary JVM without granting policy eligibility. Keep the target alive through finish. */
+        public fun observeHotSpot(
+            target: HotSpotObservationTarget,
+            options: HotSpotOptions,
+        ): HotSpotProfilingSession = RealHotSpotSessionFactory.observe(target, options)
+
         public fun open(options: ProfileOptions = ProfileOptions()): MazewallProfiler {
             return open(options, null, RealHotSpotSessionFactory)
         }

@@ -1,0 +1,1128 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"reflect"
+	"sync"
+	"syscall"
+	"time"
+	"unsafe"
+
+	cebpf "github.com/cilium/ebpf"
+	log "go.opentelemetry.io/ebpf-profiler/internal/log"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"golang.org/x/sys/unix"
+)
+
+// pidEventsMapper matches v0.22.0 NextKey/Lookup/Delete/BatchDelete/BatchLookupAndDelete.
+type pidEventsMapper interface {
+	NextKey(key, nextKeyOut any) error
+	Lookup(key, valueOut any) error
+	Delete(key any) error
+	BatchDelete(keys any, opts *cebpf.BatchOptions) (int, error)
+	BatchLookupAndDelete(cursor *cebpf.MapBatchCursor, keysOut, valuesOut any, opts *cebpf.BatchOptions) (int, error)
+}
+
+type pidMapInfoFunc func(m pidEventsMapper) (traceDefinitionMapInfo, error)
+
+func defaultPIDMapInfo(m pidEventsMapper) (traceDefinitionMapInfo, error) {
+	if cm, ok := m.(*cebpf.Map); ok {
+		return traceDefinitionInfo(cm)
+	}
+	return traceDefinitionMapInfo{}, fmt.Errorf("pid events map is not an original eBPF map")
+}
+
+// PIDMailboxOutcome captures the terminal or pre-terminal mailbox status.
+type PIDMailboxOutcome uint8
+
+const (
+	PIDMailboxNotConfigured PIDMailboxOutcome = iota
+	PIDMailboxNotSealed
+	PIDMailboxObservedSealed
+	PIDMailboxFailed
+)
+
+func (o PIDMailboxOutcome) String() string {
+	switch o {
+	case PIDMailboxNotConfigured:
+		return "NotConfigured"
+	case PIDMailboxNotSealed:
+		return "NotSealed"
+	case PIDMailboxObservedSealed:
+		return "ObservedSealed"
+	case PIDMailboxFailed:
+		return "Failed"
+	default:
+		return fmt.Sprintf("PIDMailboxOutcome(%d)", o)
+	}
+}
+
+// PIDMailboxBinding captures expected target and map identity.
+type PIDMailboxBinding struct {
+	Session    string
+	HostTGID   uint32
+	Birth      uint64
+	Generation uint64
+	MapID      uint32
+}
+
+// PIDMailboxCounts tracks owner-local returned keys, terminals, residuals, and partitions.
+type PIDMailboxCounts struct {
+	Admitted, Queued, DeletionFailed, Aborted, HeldResidual uint64
+	TargetAdmitted, ForeignAdmitted, Unpartitioned          uint64
+	Overflow                                                bool
+}
+
+// PIDMailboxObservation is the tracer-local snapshot of mailbox accounting.
+type PIDMailboxObservation struct {
+	Binding                 PIDMailboxBinding
+	Counts                  PIDMailboxCounts
+	Outcome                 PIDMailboxOutcome
+	ScanIncomplete          bool
+	UnpolledResidualUnknown bool
+	Err                     error
+}
+
+// pidRemovalFacts are private map-mutation facts, not returned-key or queue counts.
+type pidRemovalFacts struct {
+	binding         PIDMailboxBinding
+	committed       uint64
+	partialReported uint64
+	unknown         bool
+	overflow        bool
+	partialError    bool
+	residualObserved bool
+}
+
+type pidResidualState uint8
+
+const (
+	pidResidualUnobserved pidResidualState = iota
+	pidResidualObservedUnknown
+)
+
+type pidResidualReason uint8
+
+const (
+	pidResidualUnavailable pidResidualReason = iota
+	pidResidualIncomplete
+	pidResidualEOF
+	pidResidualDuplicate
+	pidResidualBound
+	pidResidualInvalidValue
+	pidResidualBindingChanged
+)
+
+type pidResidualObservation struct {
+	state pidResidualState
+	reason pidResidualReason
+	count uint64
+	eof, returned, overflow, bindingChanged bool
+}
+
+// scanPIDResidual is read-only; capacity limits work and is never an observed count.
+func scanPIDResidual(m pidEventsMapper, maxEntries uint32, step func(func() error) error) (pidResidualObservation, error) {
+	obs := pidResidualObservation{reason: pidResidualUnavailable}
+	if m == nil || step == nil || maxEntries == 0 || maxEntries > 65536 {
+		return obs, fmt.Errorf("pid residual scan unavailable")
+	}
+	seen := make(map[uint64]struct{}, int(maxEntries))
+	var previous, next uint64
+	first := true
+	for calls := uint64(0); calls <= uint64(maxEntries); calls++ {
+		var queryErr error
+		var queryEOF bool
+		var entered bool
+		var input any
+		if !first { input = unsafe.Pointer(&previous) }
+		err := step(func() error {
+			entered = true
+			obs.state, obs.reason, obs.returned = pidResidualObservedUnknown, pidResidualIncomplete, false
+			queryErr = m.NextKey(input, unsafe.Pointer(&next))
+			obs.returned = true
+			_, nativeMap := m.(*cebpf.Map)
+			if nativeMap || pidBatchKnownFakeError(queryErr) { queryEOF = errors.Is(queryErr, cebpf.ErrKeyNotExist) }
+			if queryEOF { return nil }
+			return queryErr
+		})
+		if err != nil { return obs, err }
+		if !entered { return obs, fmt.Errorf("pid residual query was not entered") }
+		if queryEOF {
+			obs.eof, obs.reason = true, pidResidualEOF
+			return obs, nil
+		}
+		if queryErr != nil { return obs, queryErr }
+		if _, exists := seen[next]; exists { obs.reason = pidResidualDuplicate; return obs, fmt.Errorf("pid residual duplicate key") }
+		if obs.count >= uint64(maxEntries) { obs.reason = pidResidualBound; return obs, fmt.Errorf("pid residual iteration bound") }
+		var value bool
+		var lookupErr error
+		var lookupEntered bool
+		err = step(func() error {
+			lookupEntered = true
+			obs.returned = false
+			lookupErr = m.Lookup(unsafe.Pointer(&next), unsafe.Pointer(&value))
+			obs.returned = true
+			return lookupErr
+		})
+		if err != nil { return obs, err }
+		if !lookupEntered { return obs, fmt.Errorf("pid residual lookup was not entered") }
+		if lookupErr != nil { return obs, lookupErr }
+		if !value { obs.reason = pidResidualInvalidValue; return obs, fmt.Errorf("pid residual value invalid") }
+		if obs.count == math.MaxUint64 { obs.overflow = true; return obs, fmt.Errorf("pid residual count overflow") }
+		seen[next] = struct{}{}
+		obs.count++
+		previous, first = next, false
+	}
+	obs.reason = pidResidualBound
+	return obs, fmt.Errorf("pid residual iteration bound")
+}
+
+// The caller supplies original expected values; no result here can assert stability.
+func observePIDResidual(m pidEventsMapper, expectedInfo traceDefinitionMapInfo, expectedConfig reportProducerConfig,
+	step func(func() error) error, info func() (traceDefinitionMapInfo, error), config func() (reportProducerConfig, error)) (pidResidualObservation, error) {
+	obs := pidResidualObservation{reason: pidResidualUnavailable}
+	if step == nil || info == nil || config == nil || m == nil { return obs, fmt.Errorf("pid residual readout unavailable") }
+	if expectedInfo.Type != uint32(cebpf.Hash) || expectedInfo.ID == 0 || expectedInfo.KeySize != 8 || expectedInfo.ValueSize != 1 || expectedInfo.MaxEntries == 0 || expectedInfo.MaxEntries > 65536 ||
+		expectedConfig.Schema != 2 || expectedConfig.Enabled != 1 || expectedConfig.PID == 0 || expectedConfig.Birth == 0 || expectedConfig.Generation == 0 || expectedConfig.Reserved != 0 {
+		return obs, fmt.Errorf("pid residual expected binding invalid")
+	}
+	check := func() error {
+		var actualInfo traceDefinitionMapInfo
+		if err := step(func() error { var err error; actualInfo, err = info(); return err }); err != nil { return err }
+		if actualInfo != expectedInfo { obs.bindingChanged, obs.reason = true, pidResidualBindingChanged; return fmt.Errorf("pid residual map binding changed") }
+		var actualConfig reportProducerConfig
+		if err := step(func() error { var err error; actualConfig, err = config(); return err }); err != nil { return err }
+		if actualConfig != expectedConfig { obs.bindingChanged, obs.reason = true, pidResidualBindingChanged; return fmt.Errorf("pid residual config binding changed") }
+		return nil
+	}
+	if err := check(); err != nil { return obs, err }
+	var err error
+	obs, err = scanPIDResidual(m, expectedInfo.MaxEntries, step)
+	if err != nil { return obs, err }
+	if err := check(); err != nil { return obs, err }
+	return obs, nil
+}
+
+type pidMailbox struct {
+	mu                      sync.Mutex
+	scope                   *periodiccaller.OwnedScope
+	lifetime                libpf.TraceDefinitionLifetime
+	origMap                 pidEventsMapper
+	expectedBinding         PIDMailboxBinding
+	counts                  PIDMailboxCounts
+	removals                pidRemovalFacts
+	outcome                 PIDMailboxOutcome
+	sealed                  bool
+	normalWorkSealed        bool
+	postSealMutation        bool
+	scanIncomplete          bool
+	unpolledResidualUnknown bool
+	stickyErr               error
+	localSnapshot           mailboxLocalCache
+}
+
+func validatePIDResidualBinding(actual libpf.AuxiliaryBinding, mailbox PIDMailboxBinding, report reportProducerBinding) error {
+	if actual.Source != libpf.AuxiliarySourcePeriodicCaller || actual.Session == "" || actual.HostTGID == 0 || actual.Birth == 0 || actual.Generation == 0 ||
+		report.Config.Schema != 2 || report.Config.Enabled != 1 || report.Config.Generation == 0 || report.Config.Reserved != 0 ||
+		mailbox.Session != actual.Session || mailbox.HostTGID != actual.HostTGID || mailbox.Birth != actual.Birth || mailbox.Generation != actual.Generation ||
+		report.Session != actual.Session || report.Config.PID != actual.HostTGID || report.Config.Birth != actual.Birth ||
+		mailbox.MapID == 0 || mailbox.MapID != report.Maps[3].ID {
+		return fmt.Errorf("pid residual original binding mismatch")
+	}
+	// The report config generation is independently authored, not the scope generation.
+	return nil
+}
+
+type pidResidualEffects struct {
+	admit func() error
+	step func(func() error) error
+	validateBinding func() (bool, error)
+	configInfo func() (traceDefinitionMapInfo, error)
+	pidInfo func() (traceDefinitionMapInfo, error)
+	config func() (reportProducerConfig, error)
+}
+
+func bindPIDResidualEffects(report *reportProducerSource, ops traceDefinitionMapOps) (*cebpf.Map, *cebpf.Map, pidResidualEffects) {
+	pidMap, configMap := report.maps[3], report.maps[1]
+	return pidMap, configMap, pidResidualEffects{
+		configInfo: func() (traceDefinitionMapInfo, error) { return ops.info(configMap) },
+		pidInfo: func() (traceDefinitionMapInfo, error) { return ops.info(pidMap) },
+		config: func() (reportProducerConfig, error) {
+			var config reportProducerConfig
+			err := ops.lookup(configMap, uint32(0), &config)
+			return config, err
+		},
+	}
+}
+
+// The caller owns readout coverage; the gate remains held through every effect.
+func guardedPIDResidual(gate *sync.Mutex, expected reportProducerBinding, pidMap pidEventsMapper, effects pidResidualEffects) (obs pidResidualObservation, err error) {
+	obs.reason = pidResidualUnavailable
+	if err := effects.admit(); err != nil { return obs, err }
+	gate.Lock()
+	defer gate.Unlock()
+	if err := effects.admit(); err != nil { return obs, err }
+	changed, err := effects.validateBinding()
+	if changed { obs.bindingChanged, obs.reason = true, pidResidualBindingChanged }
+	if err != nil { return obs, err }
+	checkConfigMap := func() error {
+		var info traceDefinitionMapInfo
+		if err := effects.step(func() error { var err error; info, err = effects.configInfo(); return err }); err != nil { return err }
+		if info != traceDefinitionMapInfo(expected.Maps[1]) {
+			obs.bindingChanged, obs.reason = true, pidResidualBindingChanged
+			return fmt.Errorf("pid residual config map binding changed")
+		}
+		return nil
+	}
+	if err := checkConfigMap(); err != nil { return obs, err }
+	obs, err = observePIDResidual(pidMap, traceDefinitionMapInfo(expected.Maps[3]), expected.Config, effects.step, effects.pidInfo, effects.config)
+	if err != nil { return obs, err }
+	err = checkConfigMap()
+	return obs, err
+}
+
+// readPIDResidual is for the original post-job stop/readout phase, never normal polling.
+func (t *Tracer) readPIDResidual() (obs pidResidualObservation, err error) {
+	obs.reason = pidResidualUnavailable
+	if t == nil || t.pidMailbox == nil || t.auxiliaryScope == nil || t.definitionOwner == nil || t.definitionSource == nil || t.reportProducer == nil {
+		return obs, fmt.Errorf("pid residual original ownership unavailable")
+	}
+	scope, owner, source, mailbox, report := t.auxiliaryScope, t.definitionOwner, t.definitionSource, t.pidMailbox, t.reportProducer
+	mailbox.requestNormalWorkSeal()
+	if source.ops.info == nil || source.ops.lookup == nil { return obs, fmt.Errorf("pid residual original effects unavailable") }
+	pidMap, configMap, effects := bindPIDResidualEffects(report, source.ops)
+	if pidMap == nil || configMap == nil || t.ebpfMaps["pid_events"] != pidMap || t.ebpfMaps["report_producer_config"] != configMap {
+		return obs, fmt.Errorf("pid residual original maps unavailable")
+	}
+	checkAdmit := func() error {
+		source.mu.Lock()
+		sourceErr, sameOwner := source.err, source.owner == owner
+		source.mu.Unlock()
+		if sourceErr != nil { return sourceErr }
+		if !sameOwner || !t.originalPIDMapValid() || t.ebpfMaps["pid_events"] != pidMap || t.ebpfMaps["report_producer_config"] != configMap {
+			return fmt.Errorf("pid residual original ownership changed")
+		}
+		// Entry is available only after the scope's actual normal-job join.
+		if err := scope.CommitStopReadout(func() error { return nil }); err != nil { return err }
+		return owner.readoutAdmissionError()
+	}
+	step := func(action func() error) error {
+		if err := checkAdmit(); err != nil { return err }
+		if err := scope.WithStopReadoutStep(action); err != nil { return err }
+		return checkAdmit()
+	}
+	err = owner.WithCoveredReadout(func() error {
+		expected := report.expected
+		validateBinding := func() (bool, error) {
+		mailbox.mu.Lock()
+		originalMap, original := mailbox.origMap.(*cebpf.Map)
+		binding, sameScope, sealed := mailbox.expectedBinding, mailbox.scope == scope, mailbox.normalWorkSealed
+		mailbox.mu.Unlock()
+		if !original || originalMap != pidMap || !sameScope || !sealed { return false, fmt.Errorf("pid residual original mailbox unavailable") }
+		actualBinding, _, err := t.readAuxiliaryStopFacts()
+		if err != nil { return false, err }
+		if err := validatePIDResidualBinding(actualBinding, binding, expected); err != nil {
+			return true, err
+		}
+		return false, nil
+		}
+		effects.admit, effects.step, effects.validateBinding = checkAdmit, step, validateBinding
+		obs, err = guardedPIDResidual(&t.pidPollMu, expected, pidMap, effects)
+		return err
+	})
+	if err == nil { err = checkAdmit() }
+	return obs, err
+}
+
+func (m *pidMailbox) removalSnapshot() pidRemovalFacts {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	facts := m.removals
+	facts.binding = m.expectedBinding
+	if m.origMap == nil || facts.binding.MapID == 0 || facts.binding.Generation == 0 || m.stickyErr != nil {
+		facts.unknown = true
+	}
+	return facts
+}
+
+func (m *pidMailbox) requestNormalWorkSeal() {
+	m.mu.Lock()
+	m.normalWorkSealed = true
+	m.mu.Unlock()
+}
+
+func (t *Tracer) pidRemovalSnapshot() pidRemovalFacts {
+	if t == nil || t.pidMailbox == nil {
+		return pidRemovalFacts{unknown: true}
+	}
+	return t.pidMailbox.removalSnapshot()
+}
+
+func (m *pidMailbox) committedRemoval(n uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if n > math.MaxUint64-m.removals.committed {
+		m.removals.overflow = true
+		m.removals.unknown = true
+		return
+	}
+	m.removals.committed += n
+}
+
+func (m *pidMailbox) uncertainRemoval(reported int, limit int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.removals.unknown = true
+	m.removals.partialError = true
+	if reported < 0 || reported > limit {
+		return
+	}
+	n := uint64(reported)
+	if n > math.MaxUint64-m.removals.partialReported {
+		m.removals.overflow = true
+		return
+	}
+	m.removals.partialReported += n
+}
+
+func (t *Tracer) recordCommittedPIDRemoval(n uint64) {
+	if t.pidMailbox != nil {
+		t.pidMailbox.committedRemoval(n)
+	}
+}
+
+func (t *Tracer) recordUncertainPIDRemoval(reported, limit int) {
+	if t.pidMailbox != nil {
+		t.pidMailbox.uncertainRemoval(reported, limit)
+	}
+}
+
+func (t *Tracer) recordFailedPIDRemoval() {
+	if m := t.pidMailbox; m != nil {
+		m.mu.Lock()
+		m.removals.unknown = true
+		m.mu.Unlock()
+	}
+}
+
+func (m *pidMailbox) admit(pidTid libpf.PIDTID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.sealed {
+		m.postSealMutation = true
+		err := fmt.Errorf("post-seal admit mutation")
+		m.stickyErr = errors.Join(m.stickyErr, err)
+		m.outcome = PIDMailboxFailed
+		return err
+	}
+
+	if m.counts.Admitted == math.MaxUint64 {
+		m.counts.Overflow = true
+		err := fmt.Errorf("admitted count overflow")
+		m.stickyErr = errors.Join(m.stickyErr, err)
+		m.outcome = PIDMailboxFailed
+		return err
+	}
+
+	m.counts.Admitted++
+	m.counts.HeldResidual++
+
+	pid := uint32(pidTid.PID())
+	if m.expectedBinding.HostTGID == 0 || pid == 0 {
+		m.counts.Unpartitioned++
+	} else if pid == m.expectedBinding.HostTGID {
+		m.counts.TargetAdmitted++
+	} else {
+		m.counts.ForeignAdmitted++
+	}
+
+	return nil
+}
+
+func (m *pidMailbox) recordQueued(pidTid libpf.PIDTID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.counts.HeldResidual == 0 {
+		m.counts.Overflow = true
+		m.stickyErr = errors.Join(m.stickyErr, fmt.Errorf("queued without held residual"))
+		m.outcome = PIDMailboxFailed
+		return
+	}
+	m.counts.HeldResidual--
+	m.counts.Queued++
+}
+
+func (m *pidMailbox) recordAborted(keys []libpf.PIDTID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for range keys {
+		if m.counts.HeldResidual == 0 {
+			m.counts.Overflow = true
+			m.stickyErr = errors.Join(m.stickyErr, fmt.Errorf("aborted without held residual"))
+			m.outcome = PIDMailboxFailed
+			return
+		}
+		m.counts.HeldResidual--
+		m.counts.Aborted++
+	}
+}
+
+func (m *pidMailbox) recordDeletionFailed(key libpf.PIDTID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.counts.HeldResidual == 0 {
+		m.counts.Overflow = true
+		m.stickyErr = errors.Join(m.stickyErr, fmt.Errorf("deletion failed without held residual"))
+		m.outcome = PIDMailboxFailed
+		return
+	}
+	m.counts.HeldResidual--
+	m.counts.DeletionFailed++
+}
+
+func (m *pidMailbox) recordBatchDeletionFailed(batchKeys []uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for range batchKeys {
+		if m.counts.HeldResidual == 0 {
+			m.counts.Overflow = true
+			m.stickyErr = errors.Join(m.stickyErr, fmt.Errorf("batch deletion failed without held residual"))
+			m.outcome = PIDMailboxFailed
+			return
+		}
+		m.counts.HeldResidual--
+		m.counts.DeletionFailed++
+	}
+}
+
+func (m *pidMailbox) setScanIncomplete() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.scanIncomplete = true
+}
+
+func (m *pidMailbox) reconcileLocked() error {
+	c := m.counts
+	if c.Overflow {
+		return fmt.Errorf("pid mailbox count overflow")
+	}
+	terminals, err := libpf.SumAuxiliaryCounts(c.Queued, c.DeletionFailed, c.Aborted)
+	if err != nil {
+		return err
+	}
+	total, err := libpf.SumAuxiliaryCounts(terminals, c.HeldResidual)
+	if err != nil {
+		return err
+	}
+	if total != c.Admitted {
+		return fmt.Errorf("pid mailbox accounting mismatch: admitted %d != terminals %d + held %d",
+			c.Admitted, terminals, c.HeldResidual)
+	}
+	partitioned, err := libpf.SumAuxiliaryCounts(c.TargetAdmitted, c.ForeignAdmitted, c.Unpartitioned)
+	if err != nil {
+		return err
+	}
+	if partitioned != c.Admitted {
+		return fmt.Errorf("pid mailbox partition mismatch: admitted %d != target %d + foreign %d + unpartitioned %d",
+			c.Admitted, c.TargetAdmitted, c.ForeignAdmitted, c.Unpartitioned)
+	}
+	return nil
+}
+
+func (m *pidMailbox) checkParentFailed(scope *periodiccaller.OwnedScope) (bool, error) {
+	if scope == nil {
+		return false, nil
+	}
+	if parentErr := scope.ParentErr(); parentErr != nil {
+		return true, parentErr
+	}
+	if scope.IsExpired() {
+		return true, fmt.Errorf("parent auxiliary deadline expired")
+	}
+	parentObs, err := scope.Observation()
+	if err != nil {
+		return true, err
+	}
+	if parentObs.HeldWork {
+		return true, fmt.Errorf("parent auxiliary work held at retirement")
+	}
+	if parentObs.Counts.Failed > 0 {
+		return true, fmt.Errorf("parent auxiliary failed counts: %d", parentObs.Counts.Failed)
+	}
+	if !scope.Joined() {
+		return true, fmt.Errorf("parent auxiliary stop not successfully published")
+	}
+	return false, nil
+}
+
+func (m *pidMailbox) seal(t *Tracer) error {
+	var readout mailboxSealReadout
+	m.mu.Lock()
+	if m.sealed {
+		err := m.stickyErr
+		m.mu.Unlock()
+		return err
+	}
+	expected, original, initialErr := m.expectedBinding, m.origMap, m.stickyErr
+	m.mu.Unlock()
+	var actual libpf.AuxiliaryBinding
+	var info traceDefinitionMapInfo
+	err := initialErr
+	if err == nil {
+		actual, info, err = t.readAuxiliaryStopFacts()
+		if err == nil {
+			readout = mailboxSealReadout{infoReturned: true, infoID: info.ID, infoType: info.Type, infoKeySize: info.KeySize, infoValueSize: info.ValueSize, infoMaxEntries: info.MaxEntries, lifetimeReturned: true, lifetimeSession: actual.Session, lifetimeTGID: actual.HostTGID, lifetimeBirth: actual.Birth}
+		}
+	}
+	m.mu.Lock()
+	if m.sealed {
+		sealedErr := m.stickyErr
+		m.mu.Unlock()
+		return errors.Join(err, sealedErr)
+	}
+	err = errors.Join(m.stickyErr, err)
+	if err == nil {
+		err = t.commitAuxiliaryStop(func() error {
+			orig, ok := original.(*cebpf.Map)
+			if !ok || orig == nil || m.origMap != orig || t.ebpfMaps["pid_events"] != orig || (t.pidEventsMapOverride != nil && t.pidEventsMapOverride != orig) || m.expectedBinding != expected ||
+				expected.Session != actual.Session || expected.HostTGID != actual.HostTGID || expected.Birth != actual.Birth || expected.Generation != actual.Generation || expected.MapID == 0 || expected.MapID != info.ID {
+				return fmt.Errorf("pid mailbox binding changed")
+			}
+			if err := m.reconcileLocked(); err != nil { return err }
+			if m.scanIncomplete || m.counts.HeldResidual != 0 || m.counts.DeletionFailed != 0 || m.counts.Aborted != 0 || m.counts.Unpartitioned != 0 || m.postSealMutation {
+				return fmt.Errorf("pid mailbox accounting incomplete")
+			}
+			return nil
+		})
+	}
+	m.sealed = true
+	if err != nil {
+		m.outcome = PIDMailboxFailed
+		m.unpolledResidualUnknown = true
+		m.stickyErr = err
+	} else {
+		m.outcome = PIDMailboxObservedSealed
+	}
+	m.publishMailboxLocalLocked(readout)
+	m.mu.Unlock()
+	return err
+}
+func (m *pidMailbox) observation() (PIDMailboxObservation, error) {
+	m.mu.Lock()
+	sealed, scope := m.sealed, m.scope
+	obs := PIDMailboxObservation{
+		Binding:                 m.expectedBinding,
+		Counts:                  m.counts,
+		Outcome:                 m.outcome,
+		ScanIncomplete:          m.scanIncomplete,
+		UnpolledResidualUnknown: m.unpolledResidualUnknown,
+		Err:                     m.stickyErr,
+	}
+	m.mu.Unlock()
+	if scope != nil {
+		if parentErr := scope.ParentErr(); parentErr != nil {
+			obs.Outcome = PIDMailboxFailed
+			obs.Err = errors.Join(obs.Err, parentErr)
+		} else if sealed {
+			if failed, parentErr := m.checkParentFailed(scope); failed {
+				obs.Outcome = PIDMailboxFailed
+				obs.Err = errors.Join(obs.Err, parentErr)
+			}
+		}
+	}
+	if obs.Outcome == PIDMailboxFailed {
+		return obs, obs.Err
+	}
+	return obs, nil
+}
+
+// Tracer methods
+
+func (t *Tracer) pidEventsMap() pidEventsMapper {
+	if t == nil {
+		return nil
+	}
+	if t.pidEventsMapOverride != nil {
+		return t.pidEventsMapOverride
+	}
+	if t.ebpfMaps != nil {
+		if m := t.ebpfMaps["pid_events"]; m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+func (t *Tracer) preparePIDMailbox(cfg *Config) {
+	if t == nil || t.auxiliaryScope == nil || cfg == nil {
+		if t != nil {
+			t.pidMailbox = nil
+		}
+		return
+	}
+
+	scope := t.auxiliaryScope
+	eventsMap := t.pidEventsMap()
+	if eventsMap == nil {
+		return
+	}
+
+	origMap := eventsMap
+	var lifetime libpf.TraceDefinitionLifetime
+	var auxBinding libpf.AuxiliaryBinding
+	var pidID uint32
+	owner := t.definitionOwner
+	stickyErr := errors.New("pid map info unavailable: no covering lease")
+	if owner != nil && t.definitionSource != nil && t.definitionSource.owner == owner {
+		stickyErr = owner.WithCoveredReadout(func() error {
+			t.definitionSource.mu.Lock()
+			sourceErr := t.definitionSource.err
+			t.definitionSource.mu.Unlock()
+			if sourceErr != nil { return sourceErr }
+			orig, ok := origMap.(*cebpf.Map)
+			if !ok || orig == nil || t.ebpfMaps["pid_events"] != orig || t.pidEventsMap() != orig {
+				return fmt.Errorf("pid mailbox original map unavailable")
+			}
+			var err error
+			auxBinding, err = scope.AuxiliaryBinding()
+			if err != nil { return err }
+			if err = libpf.ValidateAuxiliaryBinding(auxBinding, auxBinding); err != nil { return err }
+			pidID, lifetime = owner.PIDID(), owner.HeldLifetime()
+			if pidID == 0 || owner.PIDMap() == nil || lifetime == nil {
+				return fmt.Errorf("pid mailbox owner unavailable")
+			}
+			return nil
+		})
+	}
+
+	expected := PIDMailboxBinding{
+		Session:    auxBinding.Session,
+		HostTGID:   auxBinding.HostTGID,
+		Birth:      auxBinding.Birth,
+		Generation: auxBinding.Generation,
+		MapID:      pidID,
+	}
+
+	outcome := PIDMailboxNotSealed
+	if stickyErr != nil {
+		outcome = PIDMailboxFailed
+	}
+
+	m := &pidMailbox{
+		scope:                   scope,
+		origMap:                 origMap,
+		lifetime:                lifetime,
+		expectedBinding:         expected,
+		outcome:                 outcome,
+		stickyErr:               stickyErr,
+		unpolledResidualUnknown: true,
+	}
+	t.pidMailbox = m
+	if err := scope.AddFinalizer(func() error {
+		m.requestNormalWorkSeal()
+		t.pidPollMu.Lock()
+		defer t.pidPollMu.Unlock()
+		return m.seal(t)
+	}); err != nil {
+		m.mu.Lock()
+		m.stickyErr = errors.Join(m.stickyErr, err)
+		m.outcome = PIDMailboxFailed
+		m.mu.Unlock()
+		scope.Fail(err)
+	}
+}
+func (t *Tracer) admitPIDEvent(pidTid libpf.PIDTID) error {
+	if t.pidMailbox == nil {
+		return nil
+	}
+	return t.pidMailbox.admit(pidTid)
+}
+
+func (t *Tracer) recordPIDQueued(pidTid libpf.PIDTID) {
+	if t.pidMailbox != nil {
+		t.pidMailbox.recordQueued(pidTid)
+	}
+}
+
+func (t *Tracer) recordPIDAborted(keys []libpf.PIDTID) {
+	if t.pidMailbox != nil {
+		t.pidMailbox.recordAborted(keys)
+	}
+}
+
+func (t *Tracer) recordPIDDeletionFailed(key libpf.PIDTID) {
+	if t.pidMailbox != nil {
+		t.pidMailbox.recordDeletionFailed(key)
+	}
+}
+
+func (t *Tracer) recordPIDBatchDeletionFailed(batchKeys []uint64, keys *[]libpf.PIDTID) {
+	if t.pidMailbox != nil {
+		t.pidMailbox.recordBatchDeletionFailed(batchKeys)
+	}
+	// shortcut: whole batch is DeletionFailed on any BatchDelete error, upgrade only with a tested partial-n contract.
+	if keys != nil && len(*keys) >= len(batchKeys) {
+		*keys = (*keys)[:len(*keys)-len(batchKeys)]
+	}
+}
+
+func (t *Tracer) abortHeldPIDEvents(keys *[]libpf.PIDTID) {
+	if keys != nil && len(*keys) > 0 {
+		t.recordPIDAborted(*keys)
+		*keys = (*keys)[:0]
+	}
+}
+
+func (t *Tracer) setScanIncomplete() {
+	if t.pidMailbox != nil {
+		t.pidMailbox.setScanIncomplete()
+	}
+}
+
+type pidPollClosed struct { cause error }
+
+func (e pidPollClosed) Error() string { return "pid polling closed" }
+func (e pidPollClosed) Unwrap() error { return e.cause }
+
+type pidBatchUnsupported struct { cause error }
+
+func (e pidBatchUnsupported) Error() string { return "pid batch polling unsupported" }
+func (e pidBatchUnsupported) Unwrap() error { return e.cause }
+
+type pidPollDisposition uint8
+
+const (
+	pidPollContinue pidPollDisposition = iota
+	pidPollStop
+	pidPollFallback
+	pidPollFatal
+)
+
+// Only direct private results qualify; map errors wrapped by the poller remain fatal.
+func classifyPIDPoll(err error) pidPollDisposition {
+	if err == nil { return pidPollContinue }
+	switch err.(type) {
+	case pidPollClosed: return pidPollStop
+	case pidBatchUnsupported: return pidPollFallback
+	default: return pidPollFatal
+	}
+}
+
+var pidFmtSingleType = reflect.TypeOf(fmt.Errorf("%w", unix.EOPNOTSUPP))
+var pidErrnoType = reflect.TypeOf(syscall.Errno(0))
+var pidErrorInterfaceType = reflect.TypeOf((*error)(nil)).Elem()
+
+// pidErrnoField reads a numeric field without exposing an unexported interface.
+func pidErrnoField(value reflect.Value, index int) (syscall.Errno, bool) {
+	if !value.IsValid() || value.Kind() != reflect.Struct || index < 0 || index >= value.NumField() { return 0, false }
+	field := value.Field(index)
+	if field.Type() != pidErrnoType || field.Kind() != reflect.Uintptr { return 0, false }
+	n := field.Uint()
+	code := syscall.Errno(n)
+	if uint64(code) != n { return 0, false }
+	return code, true
+}
+
+// Only compiler-identified Cilium scalar leaves with the pinned layouts qualify.
+func pidCiliumErrno(err error) (syscall.Errno, bool) {
+	value := reflect.ValueOf(err)
+	if !value.IsValid() { return 0, false }
+	const path = "github.com/cilium/ebpf/internal/sys"
+	if value.Kind() == reflect.Struct {
+		typ := value.Type()
+		if typ.PkgPath() != path || typ.Name() != "wrappedErrno" || typ.NumField() != 1 { return 0, false }
+		field := typ.Field(0)
+		if field.Name != "Errno" || !field.Anonymous || field.Type != pidErrnoType { return 0, false }
+		return pidErrnoField(value, 0)
+	}
+	if value.Kind() != reflect.Ptr || value.IsNil() { return 0, false }
+	value = value.Elem()
+	if value.Kind() != reflect.Struct { return 0, false }
+	typ := value.Type()
+	if typ.PkgPath() != path || typ.Name() != "syscallError" || typ.NumField() != 2 { return 0, false }
+	first, second := typ.Field(0), typ.Field(1)
+	if first.Name != "error" || !first.Anonymous || first.Type != pidErrorInterfaceType ||
+		second.Name != "errno" || second.Anonymous || second.PkgPath != path || second.Type != pidErrnoType { return 0, false }
+	return pidErrnoField(value, 1)
+}
+
+// Accept only standard fmt wrappers and verified errno leaves.
+func pidBatchUnsupportedErrno(err error) bool {
+	for i := 0; i < 16 && err != nil; i++ {
+		if code, ok := err.(syscall.Errno); ok { return code == unix.EOPNOTSUPP || code == syscall.Errno(524) }
+		if code, ok := pidCiliumErrno(err); ok { return code == unix.EOPNOTSUPP || code == syscall.Errno(524) }
+		if reflect.TypeOf(err) != pidFmtSingleType { return false }
+		err = err.(interface{ Unwrap() error }).Unwrap()
+	}
+	return false
+}
+
+// Test-map errors are trusted only when their entire chain has known types.
+func pidBatchKnownFakeError(err error) bool {
+	for i := 0; i < 16 && err != nil; i++ {
+		if err == cebpf.ErrKeyNotExist { return true }
+		if _, ok := err.(syscall.Errno); ok { return true }
+		if reflect.TypeOf(err) != pidFmtSingleType { return false }
+		err = err.(interface{ Unwrap() error }).Unwrap()
+	}
+	return err == nil
+}
+
+// lockPIDPoll captures worker signals before waiting and rechecks them inside the effect gate.
+func (t *Tracer) lockPIDPoll() error {
+	var done <-chan struct{}
+	var deadline time.Time
+	var hasDeadline bool
+	if scope := t.auxiliaryScope; scope != nil {
+		ctx := scope.Context()
+		done = ctx.Done()
+		deadline, hasDeadline = ctx.Deadline()
+	}
+	t.pidPollMu.Lock()
+	if hasDeadline && !time.Now().Before(deadline) {
+		t.pidPollMu.Unlock()
+		return pidPollClosed{cause: context.DeadlineExceeded}
+	}
+	select {
+	case <-done:
+		t.pidPollMu.Unlock()
+		return pidPollClosed{cause: context.Canceled}
+	default:
+	}
+	if mailbox := t.pidMailbox; mailbox != nil {
+		mailbox.mu.Lock()
+		sealed := mailbox.sealed || mailbox.normalWorkSealed
+		mailbox.mu.Unlock()
+		if sealed {
+			t.pidPollMu.Unlock()
+			return pidPollClosed{cause: errors.New("pid mailbox sealed")}
+		}
+	}
+	return nil
+}
+
+func (t *Tracer) pollPIDEventsSingle(keys *[]libpf.PIDTID) error {
+	if err := t.lockPIDPoll(); err != nil {
+		return err
+	}
+	defer t.pidPollMu.Unlock()
+	eventsMap := t.pidEventsMap()
+	if eventsMap == nil {
+		return nil
+	}
+
+	var key, nextKey uint64
+	var value bool
+	keyFound := true
+	deleteBatch := make(libpf.Set[uint64])
+
+	key = 0
+	if err := eventsMap.NextKey(unsafe.Pointer(&key), unsafe.Pointer(&nextKey)); err != nil {
+		if errors.Is(err, cebpf.ErrKeyNotExist) {
+			return nil
+		}
+		t.abortHeldPIDEvents(keys)
+		return fmt.Errorf("Failed to read from pid_events map: %w", err)
+	}
+
+	for keyFound {
+		key = nextKey
+
+		if err := eventsMap.Lookup(unsafe.Pointer(&key), unsafe.Pointer(&value)); err != nil {
+			t.abortHeldPIDEvents(keys)
+			return fmt.Errorf("Failed to lookup '%v' in pid_events: %w", key, err)
+		}
+
+		// Single, admit on successful Lookup, before Delete or deleteBatch insert.
+		if err := t.admitPIDEvent(libpf.PIDTID(key)); err != nil {
+			t.abortHeldPIDEvents(keys)
+			return err
+		}
+
+		if err := eventsMap.NextKey(unsafe.Pointer(&key), unsafe.Pointer(&nextKey)); err != nil {
+			if !errors.Is(err, cebpf.ErrKeyNotExist) {
+				t.abortHeldPIDEvents(keys)
+				return fmt.Errorf("Failed to read from pid_events map: %w", err)
+			}
+			keyFound = false
+		}
+
+		if !t.hasBatchOperations {
+			if err := eventsMap.Delete(unsafe.Pointer(&key)); err != nil {
+				t.recordFailedPIDRemoval()
+				t.recordPIDDeletionFailed(libpf.PIDTID(key))
+				t.abortHeldPIDEvents(keys)
+				return fmt.Errorf("Failed to delete '%v' from pid_events: %w", key, err)
+			}
+			t.recordCommittedPIDRemoval(1)
+		} else {
+			deleteBatch[key] = libpf.Void{}
+		}
+
+		*keys = append(*keys, libpf.PIDTID(key))
+	}
+
+	keysToDelete := len(deleteBatch)
+	if keysToDelete != 0 {
+		batchKeys := libpf.MapKeysToSlice(deleteBatch)
+		n, err := eventsMap.BatchDelete(batchKeys, nil)
+		if err != nil {
+			t.recordUncertainPIDRemoval(n, len(batchKeys))
+			t.recordPIDBatchDeletionFailed(batchKeys, keys)
+			return fmt.Errorf("Failed to batch delete %d entries from pid_events map: %w", keysToDelete, err)
+		}
+		if n == len(batchKeys) {
+			t.recordCommittedPIDRemoval(uint64(n))
+		} else {
+			t.recordUncertainPIDRemoval(n, len(batchKeys))
+		}
+	}
+	return nil
+}
+
+func (t *Tracer) pollPIDEventsBatch(keys *[]libpf.PIDTID) error {
+	if err := t.lockPIDPoll(); err != nil {
+		return err
+	}
+	defer t.pidPollMu.Unlock()
+	eventsMap := t.pidEventsMap()
+	if eventsMap == nil {
+		return nil
+	}
+
+	removed := make([]uint64, 128)
+	values := make([]bool, len(removed))
+
+	cursor := cebpf.MapBatchCursor{}
+	first := true
+
+	for {
+		n, err := eventsMap.BatchLookupAndDelete(&cursor, removed, values, nil)
+		if first && n == 0 && pidBatchUnsupportedErrno(err) {
+			return pidBatchUnsupported{cause: err}
+		}
+		first = false
+		_, nativeMap := eventsMap.(*cebpf.Map)
+		trustedError := nativeMap || pidBatchKnownFakeError(err)
+		if n < 0 || n > len(removed) {
+			t.recordUncertainPIDRemoval(n, len(removed))
+			t.setScanIncomplete()
+			t.abortHeldPIDEvents(keys)
+			if err != nil {
+				if !trustedError { return err }
+				return fmt.Errorf("invalid pid_events batch result count %d: %w", n, err)
+			}
+			return fmt.Errorf("invalid pid_events batch result count %d", n)
+		}
+		eof := trustedError && errors.Is(err, cebpf.ErrKeyNotExist)
+		if err == nil || eof {
+			t.recordCommittedPIDRemoval(uint64(n))
+		} else {
+			t.recordUncertainPIDRemoval(n, len(removed))
+		}
+
+		// First use of the syscall result is admit(n) before ErrKeyNotExist / other err
+		for i := 0; i < n; i++ {
+			if aErr := t.admitPIDEvent(libpf.PIDTID(removed[i])); aErr != nil {
+				t.abortHeldPIDEvents(keys)
+				return aErr
+			}
+		}
+
+		if eof {
+			for i := 0; i < n; i++ {
+				*keys = append(*keys, libpf.PIDTID(removed[i]))
+			}
+			break
+		}
+
+		if err != nil {
+			// Any other error: those n are deleted-unsent -> Aborted, ScanIncomplete=true, do not enqueue, do not retry.
+			t.setScanIncomplete()
+			t.abortHeldPIDEvents(keys)
+			toAbort := make([]libpf.PIDTID, n)
+			for i := 0; i < n; i++ {
+				toAbort[i] = libpf.PIDTID(removed[i])
+			}
+			t.recordPIDAborted(toAbort)
+			if !trustedError { return err }
+			return fmt.Errorf("Failed to batch lookup and delete entries from pid_events map: %w", err)
+		}
+
+		for i := 0; i < n; i++ {
+			*keys = append(*keys, libpf.PIDTID(removed[i]))
+		}
+	}
+	return nil
+}
+
+func (t *Tracer) pollAndEnqueuePIDEvents(ctx context.Context, keys *[]libpf.PIDTID) bool {
+	t.monitorPIDEventsMapMethod(keys)
+	// Monitor wrappers reserve a nil slice for rejected normal work.
+	if *keys == nil { return false }
+	if !t.enqueuePolledPIDEvents(ctx, keys) { return false }
+	return !t.pidNormalWorkClosed()
+}
+
+func (t *Tracer) pidNormalWorkClosed() bool {
+	if scope := t.auxiliaryScope; scope != nil {
+		ctx := scope.Context()
+		done := ctx.Done()
+		deadline, hasDeadline := ctx.Deadline()
+		if hasDeadline && !time.Now().Before(deadline) { return true }
+		select { case <-done: return true; default: }
+	}
+	if mailbox := t.pidMailbox; mailbox != nil {
+		mailbox.mu.Lock()
+		sealed := mailbox.sealed || mailbox.normalWorkSealed
+		mailbox.mu.Unlock()
+		return sealed
+	}
+	return false
+}
+
+func (t *Tracer) enqueuePolledPIDEvents(ctx context.Context, keys *[]libpf.PIDTID) bool {
+	events := *keys
+	for i, pidTid := range events {
+		log.Debugf("=> %v", pidTid)
+		select {
+		case t.pidEvents <- pidTid:
+			t.recordPIDQueued(pidTid)
+		case <-ctx.Done():
+			t.recordPIDAborted(events[i:])
+			*keys = (*keys)[:0]
+			return false
+		}
+	}
+	*keys = (*keys)[:0]
+	return true
+}
+
+func (t *Tracer) PIDMailboxObservation() (PIDMailboxObservation, error) {
+	if t == nil || t.pidMailbox == nil {
+		return PIDMailboxObservation{Outcome: PIDMailboxNotConfigured}, nil
+	}
+	return t.pidMailbox.observation()
+}
+
+func (t *Tracer) sealPIDMailbox() error {
+	if t == nil || t.pidMailbox == nil {
+		return nil
+	}
+	t.pidMailbox.requestNormalWorkSeal()
+	t.pidPollMu.Lock()
+	defer t.pidPollMu.Unlock()
+	return t.pidMailbox.seal(t)
+}

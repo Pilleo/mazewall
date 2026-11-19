@@ -1,0 +1,188 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package tracer
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+	"unsafe"
+
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	pm "go.opentelemetry.io/ebpf-profiler/processmanager"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+)
+
+type pidCleanupDeleteStub struct {
+	pmebpf.EbpfHandler
+	deleteErr error
+	calls     atomic.Int32
+}
+
+// retainedPIDAccounting is an in-memory test model, not native ownership.
+type retainedPIDAccounting struct {
+	*testPIDProcessLifetime
+	released atomic.Bool
+	once sync.Once
+}
+func (m *retainedPIDAccounting) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	if m.released.Load() { return nil, nil, errors.New("model lifetime released") }
+	return m, func() error { m.once.Do(func() { m.released.Store(true) }); return nil }, nil
+}
+func (m *retainedPIDAccounting) Validate() error {
+	if m.released.Load() { return errors.New("model lifetime released") }
+	return m.testPIDProcessLifetime.Validate()
+}
+func (m *retainedPIDAccounting) Session() string {
+	if m.released.Load() { return "" }; return m.testPIDProcessLifetime.Session()
+}
+func (m *retainedPIDAccounting) HostTGID() uint32 {
+	if m.released.Load() { return 0 }; return m.testPIDProcessLifetime.HostTGID()
+}
+func (m *retainedPIDAccounting) Birth() uint64 {
+	if m.released.Load() { return 0 }; return m.testPIDProcessLifetime.Birth()
+}
+
+type barePIDAccountingProbe struct {
+	*testPIDProcessLifetime
+	calls atomic.Int32
+}
+func (p *barePIDAccountingProbe) Validate() error { p.calls.Add(1); return p.testPIDProcessLifetime.Validate() }
+func (p *barePIDAccountingProbe) Session() string { p.calls.Add(1); return p.testPIDProcessLifetime.Session() }
+func (p *barePIDAccountingProbe) HostTGID() uint32 { p.calls.Add(1); return p.testPIDProcessLifetime.HostTGID() }
+func (p *barePIDAccountingProbe) Birth() uint64 { p.calls.Add(1); return p.testPIDProcessLifetime.Birth() }
+
+func pidAccountingTestScope(t *testing.T) *periodiccaller.OwnedScope {
+	t.Helper()
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := scope.Stop(ctx); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) { t.Errorf("scope cleanup: %v", err) } else { t.Logf("scope cleanup result: %v", err) }
+		}
+	})
+	return scope
+}
+
+func TestProcessPIDEventsConnectedOwnedStop(t *testing.T) {
+	runPIDProcessCoveredStopModel(t, "connected")
+}
+
+func TestPIDAccountingRejectsUnretainedLifetime(t *testing.T) {
+	scope := pidAccountingTestScope(t)
+	bare := &barePIDAccountingProbe{testPIDProcessLifetime: &testPIDProcessLifetime{session: "bare", hostTGID: 100, birth: 1}}
+	bindErr := scope.BindLifetime(bare)
+	require.Error(t, bindErr)
+	require.Contains(t, bindErr.Error(), "lacks retained validated identity")
+	require.Equal(t, int32(0), bare.calls.Load())
+	require.True(t, scope.ExecuteCallback(func() {}))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	stopErr := scope.Stop(ctx)
+	require.Error(t, stopErr)
+	require.Contains(t, stopErr.Error(), "auxiliary stop readout unavailable")
+	obs, err := scope.Observation()
+	require.Error(t, err)
+	require.NotEqual(t, libpf.AuxiliaryFinal, obs.Outcome)
+	require.Equal(t, int32(0), bare.calls.Load())
+}
+
+func (s *pidCleanupDeleteStub) DeletePidPageMappingInfo(libpf.PID, []lpm.Prefix) (int, error) {
+	s.calls.Add(1)
+	return 0, s.deleteErr
+}
+
+func (s *pidCleanupDeleteStub) RemoveReportedPID(libpf.PID) {}
+
+func setUnexported(dst any, name string, val any) {
+	field := reflect.ValueOf(dst).Elem().FieldByName(name)
+	reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr())).Elem().Set(reflect.ValueOf(val))
+}
+
+func tryLockProcessManager(proc *pm.ProcessManager) bool {
+	field := reflect.ValueOf(proc).Elem().FieldByName("mu")
+	mu := reflect.NewAt(field.Type(), unsafe.Pointer(field.UnsafeAddr()))
+	if !mu.MethodByName("TryLock").Call(nil)[0].Bool() {
+		return false
+	}
+	mu.MethodByName("Unlock").Call(nil)
+	return true
+}
+
+func newDeadPIDManager(t *testing.T, deleteErr error) (*pm.ProcessManager, *pidCleanupDeleteStub) {
+	t.Helper()
+	proc := &pm.ProcessManager{}
+	stub := &pidCleanupDeleteStub{deleteErr: deleteErr}
+	infoMap := reflect.ValueOf(proc).Elem().FieldByName("pidToProcessInfo")
+	info := reflect.MakeMap(infoMap.Type())
+	info.SetMapIndex(reflect.ValueOf(libpf.PID(9999999)), reflect.New(infoMap.Type().Elem().Elem()))
+	exits := reflect.ValueOf(proc).Elem().FieldByName("exitEvents")
+	setUnexported(proc, "pidToProcessInfo", info.Interface())
+	setUnexported(proc, "exitEvents", reflect.MakeMap(exits.Type()).Interface())
+	setUnexported(proc, "ebpf", pmebpf.EbpfHandler(stub))
+	return proc, stub
+}
+
+func TestObservePIDCleanup_DeleteErrorPreservesCauseAfterUnlock(t *testing.T) {
+	deleteErr := errors.New("bpf map delete error")
+	proc, stub := newDeadPIDManager(t, deleteErr)
+	scope := pidAccountingTestScope(t)
+	lt := &retainedPIDAccounting{testPIDProcessLifetime: &testPIDProcessLifetime{
+		session: "sess-pid-cleanup", hostTGID: 100, birth: 12345,
+	}}
+	require.NoError(t, scope.BindLifetime(lt))
+	tr := &Tracer{auxiliaryScope: scope, processManager: proc}
+
+	tr.observePIDCleanup(scope.Context())
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, scope.Stop(stopCtx))
+	require.Equal(t, int32(1), stub.calls.Load())
+	require.True(t, tryLockProcessManager(proc), "cause observed while process manager lock still held")
+	require.True(t, lt.released.Load())
+	require.Error(t, lt.Validate())
+	require.Empty(t, lt.Session())
+	require.Zero(t, lt.HostTGID())
+	require.Zero(t, lt.Birth())
+	obs, err := scope.KindObservation(libpf.AuxiliarySourcePIDCleanup)
+	require.ErrorIs(t, err, deleteErr)
+	require.Equal(t, uint64(1), obs.Counts.Admitted)
+	require.Equal(t, uint64(1), obs.Counts.Failed)
+	require.Equal(t, uint64(0), obs.Counts.Completed)
+	require.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+	require.Equal(t, libpf.AuxiliarySourcePIDCleanup, obs.Binding.Source)
+}
+
+func TestObservePIDCleanup_JoinsDeleteAndContextCause(t *testing.T) {
+	deleteErr := errors.New("bpf map delete error")
+	proc, _ := newDeadPIDManager(t, deleteErr)
+	scope := pidAccountingTestScope(t)
+	require.NoError(t, scope.BindLifetime(&retainedPIDAccounting{testPIDProcessLifetime: &testPIDProcessLifetime{
+		session: "sess-pid-join", hostTGID: 100, birth: 12345,
+	}}))
+	tr := &Tracer{auxiliaryScope: scope, processManager: proc}
+	ctx, cancel := context.WithCancel(scope.Context())
+	cancel()
+
+	tr.observePIDCleanup(ctx)
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	require.NoError(t, scope.Stop(stopCtx))
+	obs, err := scope.KindObservation(libpf.AuxiliarySourcePIDCleanup)
+	require.ErrorIs(t, err, deleteErr)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, uint64(1), obs.Counts.Failed)
+	require.Equal(t, uint64(0), obs.Counts.Completed)
+	require.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+}

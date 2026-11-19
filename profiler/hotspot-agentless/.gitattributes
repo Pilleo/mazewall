@@ -1,0 +1,3 @@
+# Unified diff context intentionally contains a leading space before tabs and
+# context-only blank lines. Preserve that syntax when checking stored patches.
+*.patch whitespace=-blank-at-eol,-space-before-tab

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
@@ -19,33 +20,291 @@ type correlatedFrames struct {
 	pid, tid   uint32
 }
 
+type storeTerminal uint8
+
+const (
+	storeInvalidIdentity storeTerminal = iota
+	storeIdentityValidate
+	storeInvalidChecked
+	storeMismatch
+	storeNewDistinct
+	storePreserveChecked
+	storeDedup
+	storeTerminalCount
+)
+
+type storeResult struct {
+	id       uint64
+	pid, tid uint32
+	identity libpf.HotSpotIdentity
+	terminal storeTerminal
+}
+
+type storeSnapshot struct {
+	inputs, inFlight  uint64
+	counts            [storeTerminalCount]uint64
+	overflow, invalid bool
+	last              storeResult
+}
+
+type diagnosticHotSpotIdentity struct {
+	Epoch     uint64 `json:"epoch"`
+	State     uint64 `json:"state"`
+	ReadError int32  `json:"read_error"`
+}
+
+type storeDiagnostic struct {
+	Unit             string `json:"unit"`
+	Inputs           uint64 `json:"inputs"`
+	InFlight         uint64 `json:"in_flight"`
+	InvalidIdentity  uint64 `json:"invalid_identity"`
+	IdentityValidate uint64 `json:"identity_validate"`
+	InvalidChecked   uint64 `json:"invalid_checked"`
+	Mismatch         uint64 `json:"mismatch"`
+	NewDistinct      uint64 `json:"new_distinct"`
+	PreserveChecked  uint64 `json:"preserve_checked"`
+	Dedup            uint64 `json:"dedup"`
+	Overflow         bool   `json:"overflow"`
+	Invalid          bool   `json:"invalid"`
+	Last struct {
+		ID              uint64                    `json:"id"`
+		PID             uint32                    `json:"pid"`
+		TID             uint32                    `json:"tid"`
+		HotSpotIdentity diagnosticHotSpotIdentity `json:"hotspot_identity"`
+		Terminal        uint64                    `json:"terminal"`
+	} `json:"last"`
+}
+
+func projectStoreDiagnostic(s storeSnapshot) storeDiagnostic {
+	var d storeDiagnostic
+	d.Unit, d.Inputs, d.InFlight = "store-call", s.inputs, s.inFlight
+	d.InvalidIdentity, d.IdentityValidate = s.counts[storeInvalidIdentity], s.counts[storeIdentityValidate]
+	d.InvalidChecked, d.Mismatch = s.counts[storeInvalidChecked], s.counts[storeMismatch]
+	d.NewDistinct, d.PreserveChecked, d.Dedup = s.counts[storeNewDistinct], s.counts[storePreserveChecked], s.counts[storeDedup]
+	d.Overflow, d.Invalid = s.overflow, s.invalid
+	d.Last.ID, d.Last.PID, d.Last.TID = s.last.id, s.last.pid, s.last.tid
+	d.Last.HotSpotIdentity = diagnosticHotSpotIdentity{Epoch: s.last.identity.Epoch, State: uint64(s.last.identity.State), ReadError: s.last.identity.ReadError}
+	d.Last.Terminal = uint64(s.last.terminal)
+	return d
+}
+
+// valid is an equation over one snapshot; overflow and invalid transitions fail closed.
+func (s storeSnapshot) valid() bool {
+	if s.overflow || s.invalid {
+		return false
+	}
+	total := s.inFlight
+	for _, n := range s.counts {
+		if ^uint64(0)-total < n {
+			return false
+		}
+		total += n
+	}
+	return total == s.inputs
+}
+
+type storeAccounting struct {
+	mu sync.Mutex
+	storeSnapshot
+}
+
+func (b *storeAccounting) add(n *uint64) {
+	*n++
+	if *n == 0 {
+		b.overflow = true
+	}
+}
+
+type storeAdmission struct {
+	book   *storeAccounting
+	result storeResult
+	done   bool
+}
+
+func (b *storeAccounting) admit(id uint64, pid, tid uint32, identity libpf.HotSpotIdentity) *storeAdmission {
+	b.mu.Lock()
+	b.add(&b.inputs)
+	b.add(&b.inFlight)
+	b.mu.Unlock()
+	return &storeAdmission{book: b, result: storeResult{id: id, pid: pid, tid: tid, identity: identity}}
+}
+
+func (a *storeAdmission) finish(terminal storeTerminal) {
+	b := a.book
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if a.done || b.inFlight == 0 || terminal >= storeTerminalCount {
+		b.invalid = true
+		return
+	}
+	a.done = true
+	b.inFlight--
+	b.add(&b.counts[terminal])
+	a.result.terminal = terminal
+	b.last = a.result
+}
+
+// Only read while the resolver is live; this is not a retirement receipt.
+func (o *otelResolverInstance) storeAccountingSnapshot() storeSnapshot {
+	o.accountingLife.RLock()
+	defer o.accountingLife.RUnlock()
+	if o.accountingRetired {
+		return storeSnapshot{invalid: true}
+	}
+	o.storeBook.mu.Lock()
+	defer o.storeBook.mu.Unlock()
+	return o.storeBook.storeSnapshot
+}
+
+type channelIdentity struct {
+	pid, tid      libpf.PID
+	cpu           int
+	origin        libpf.Origin
+	kTime         int64
+	correlationID uint64
+	identity      libpf.HotSpotIdentity
+}
+
+type channelSnapshot struct {
+	nilBarrier, nonNilToHandleTrace, closeExit, cancelExit uint64
+	overflow, retired                                      bool
+	last                                                   channelIdentity
+}
+
+type channelDiagnostic struct {
+	Unit                string `json:"unit"`
+	NilBarrier          uint64 `json:"nil_barrier"`
+	NonNilToHandleTrace uint64 `json:"non_nil_to_handle_trace"`
+	CloseExit           uint64 `json:"close_exit"`
+	CancelExit          uint64 `json:"cancel_exit"`
+	Overflow            bool   `json:"overflow"`
+	Retired             bool   `json:"retired"`
+	Last struct {
+		PID             uint32                    `json:"pid"`
+		TID             uint32                    `json:"tid"`
+		CPU             int64                     `json:"cpu"`
+		Origin          uint64                    `json:"origin"`
+		KTime           int64                     `json:"k_time"`
+		CorrelationID   uint64                    `json:"correlation_id"`
+		HotSpotIdentity diagnosticHotSpotIdentity `json:"hotspot_identity"`
+	} `json:"last"`
+}
+
+func projectChannelDiagnostic(s channelSnapshot) channelDiagnostic {
+	var d channelDiagnostic
+	d.Unit = "completed-receive"
+	d.NilBarrier, d.NonNilToHandleTrace = s.nilBarrier, s.nonNilToHandleTrace
+	d.CloseExit, d.CancelExit = s.closeExit, s.cancelExit
+	d.Overflow, d.Retired = s.overflow, s.retired
+	d.Last.PID, d.Last.TID = uint32(s.last.pid), uint32(s.last.tid)
+	d.Last.CPU, d.Last.Origin, d.Last.KTime = int64(s.last.cpu), uint64(s.last.origin), s.last.kTime
+	d.Last.CorrelationID = s.last.correlationID
+	d.Last.HotSpotIdentity = diagnosticHotSpotIdentity{Epoch: s.last.identity.Epoch, State: uint64(s.last.identity.State), ReadError: s.last.identity.ReadError}
+	return d
+}
+
+func (s channelSnapshot) valid() bool { return !s.overflow && !s.retired }
+
+type channelAccounting struct {
+	mu sync.Mutex
+	channelSnapshot
+}
+
+func (b *channelAccounting) add(n *uint64) {
+	*n++
+	if *n == 0 {
+		b.overflow = true
+	}
+}
+
+// admitChannelTrace copies scalars before HandleTrace can return the trace to its pool.
+func (o *otelResolverInstance) admitChannelTrace(trace *libpf.EbpfTrace) bool {
+	var identity channelIdentity
+	if trace != nil {
+		identity = channelIdentity{pid: trace.PID, tid: trace.TID, cpu: trace.CPU, origin: trace.Origin, kTime: trace.KTime, correlationID: trace.CorrelationID, identity: trace.HotSpotIdentity}
+	}
+	b := &o.channelBook
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if trace == nil {
+		b.add(&b.nilBarrier)
+		return false
+	}
+	b.add(&b.nonNilToHandleTrace)
+	b.last = identity
+	return true
+}
+
+func (o *otelResolverInstance) channelCloseExit() {
+	b := &o.channelBook
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.add(&b.closeExit)
+}
+
+func (o *otelResolverInstance) channelCancelExit() {
+	b := &o.channelBook
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.add(&b.cancelExit)
+}
+
+func (o *otelResolverInstance) channelAccountingSnapshot() channelSnapshot {
+	o.accountingLife.RLock()
+	defer o.accountingLife.RUnlock()
+	if o.accountingRetired {
+		return channelSnapshot{retired: true}
+	}
+	o.channelBook.mu.Lock()
+	defer o.channelBook.mu.Unlock()
+	return o.channelBook.channelSnapshot
+}
+
+// Retirement is separate from stop attempts that can return without closing the owner.
+func (o *otelResolverInstance) retireAccounting() {
+	o.accountingLife.Lock()
+	o.accountingRetired = true
+	o.accountingLife.Unlock()
+}
+
 // storeEpochTrace stores one immutable captured snapshot or explicit rejection.
 func (o *otelResolverInstance) storeEpochTrace(id uint64, frames libpf.Frames, pid, tid uint32, identity libpf.HotSpotIdentity, validation libpf.HotSpotValidation) error {
+	admission := o.storeBook.admit(id, pid, tid, identity)
+	terminal := storeTerminalCount
+	defer func() { admission.finish(terminal) }()
 	if id == 0 || pid == 0 || tid == 0 {
+		terminal = storeInvalidIdentity
 		return fmt.Errorf("invalid epoch definition identity")
 	}
 	if err := identity.Validate(); err != nil {
+		terminal = storeIdentityValidate
 		return err
 	}
 	if validation.State == libpf.HotSpotValidationChecked && (validation.Err != nil || identity.State != libpf.HotSpotEpochStable) {
+		terminal = storeInvalidChecked
 		return fmt.Errorf("invalid checked epoch definition")
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if old, ok := o.correlationMap[id]; ok {
 		if old.pid != pid || old.tid != tid || old.identity != identity {
+			terminal = storeMismatch
 			return symbolizer.ErrStackIdentityMismatch
 		}
 		// A rejected redelivery cannot rewrite an already validated historical snapshot.
 		if old.validation.State == libpf.HotSpotValidationChecked && validation.State == libpf.HotSpotValidationUnavailable {
+			terminal = storePreserveChecked
 			return nil
 		}
 		if old.validation.State != validation.State || !slices.Equal(old.frames, frames) {
+			terminal = storeMismatch
 			return symbolizer.ErrStackIdentityMismatch
 		}
+		terminal = storeDedup
 		return nil
 	}
 	o.correlationMap[id] = correlatedFrames{frames: slices.Clone(frames), pid: pid, tid: tid, identity: identity, validation: validation}
+	terminal = storeNewDistinct
 	if w, ok := o.waiters[id]; ok {
 		close(w.ch)
 		delete(o.waiters, id)

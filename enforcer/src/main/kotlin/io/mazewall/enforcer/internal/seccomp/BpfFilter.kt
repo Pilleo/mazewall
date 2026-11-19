@@ -19,8 +19,8 @@ import java.util.logging.Logger
 // @ref: docs/internals/research/jvm-syscall-floor-research.md — JVM coordination syscalls that must never be blocked
 
 /**
- * Builds seccomp-bpf programs using a robust strictly-forward linear scan approach.
- * This avoids all jump offset overflow and backward-jump issues.
+ * Builds seccomp-bpf programs using checked forward jumps and bounded dispatch groups.
+ * Label resolution rejects backward destinations and conditional-offset overflow.
  *
  * ARCHITECTURAL INVARIANT: System call argument inspections are handled via a
  * [io.mazewall.seccomp.SyscallInspectionPipeline]. This enforces the Open/Closed Principle,
@@ -32,7 +32,6 @@ internal object BpfFilter {
 
     internal const val SECCOMP_DATA_NR_OFFSET = 0
     internal const val SECCOMP_DATA_ARCH_OFFSET = 4
-    private val SECCOMP_ARGS2_OFFSET = Layouts.SECCOMP_ARGS2_OFFSET.toInt()
     private val SECCOMP_DATA_ARGS_OFFSET = Layouts.SECCOMP_DATA_ARGS_OFFSET.toInt()
 
     fun build(
@@ -93,28 +92,10 @@ internal object BpfFilter {
         )
     }
 
-    private fun resolveNativeAction(
+    private fun resolveAction(
         action: SeccompAction,
         profilingMode: Boolean,
-    ): Int {
-        return when (action) {
-            SeccompAction.ACT_KILL_PROCESS -> NativeConstants.SECCOMP_RET_KILL_PROCESS
-            SeccompAction.ACT_KILL_THREAD -> NativeConstants.SECCOMP_RET_KILL_THREAD
-            SeccompAction.ACT_TRAP -> NativeConstants.SECCOMP_RET_TRAP
-            is SeccompAction.ACT_ERRNO -> if (profilingMode) {
-                NativeConstants.SECCOMP_RET_USER_NOTIF
-            } else {
-                (NativeConstants.SECCOMP_RET_ERRNO or (action.errno and 0xFFFF))
-            }
-            is SeccompAction.ACT_TRACE -> {
-                (NativeConstants.SECCOMP_RET_TRACE or (action.traceId and 0xFFFF))
-            }
-
-            SeccompAction.ACT_NOTIFY -> NativeConstants.SECCOMP_RET_USER_NOTIF
-            SeccompAction.ACT_LOG -> NativeConstants.SECCOMP_RET_LOG
-            SeccompAction.ACT_ALLOW -> NativeConstants.SECCOMP_RET_ALLOW
-        }
-    }
+    ): SeccompAction = if (profilingMode && action is SeccompAction.ACT_ERRNO) SeccompAction.ACT_NOTIFY else action
 
     /**
      * Constructs the BPF bytecode using a linear scan approach.
@@ -176,7 +157,7 @@ internal object BpfFilter {
             }
         }
 
-        val defaultNativeAction = resolveNativeAction(defaultAction, profilingMode)
+        val defaultNativeAction = resolveAction(defaultAction, profilingMode)
 
         // Syscalls absolutely required for safepoints, GC, and thread stability.
         val jvmCriticalNrs = getJvmCriticalNrs(arch)
@@ -244,21 +225,21 @@ internal object BpfFilter {
     }
 
     internal fun emitInspections(
-        builder: BpfBuilder<BpfState.Active>,
+        builder: BpfBuilder.Active,
         inspections: List<SyscallInspection>,
         profilingMode: Boolean,
         handledNrs: MutableSet<Int>,
     ) {
         for ((idx, inspection) in inspections.withIndex()) {
             val nr = inspection.syscallNumber
-            handledNrs.add(nr)
+            require(handledNrs.add(nr)) { "Duplicate inspection for syscall $nr" }
 
-            val ifMatchedNative = resolveNativeAction(inspection.ifMatched, profilingMode)
-            val ifNotMatchedNative = resolveNativeAction(inspection.ifNotMatched, profilingMode)
+            val ifMatchedNative = resolveAction(inspection.ifMatched, profilingMode)
+            val ifNotMatchedNative = resolveAction(inspection.ifNotMatched, profilingMode)
 
             val labelPrefix = "inspect_${nr}_$idx"
             builder.expect(nr) {
-                val argOffsetLo = SECCOMP_DATA_ARGS_OFFSET + inspection.argIndex * 8
+                val argOffsetLo = SECCOMP_DATA_ARGS_OFFSET + inspection.argument.index * 8
                 val argOffsetHi = argOffsetLo + 4
 
                 when (val check = inspection.check) {
@@ -330,11 +311,11 @@ internal object BpfFilter {
     }
 
     private fun emitLinearScan(
-        builder: BpfBuilder<BpfState.Active>,
+        builder: BpfBuilder.Active,
         syscallActions: Map<Int, SeccompAction>,
         jvmCriticalNrs: Set<Int>,
         profilingMode: Boolean,
-        defaultNativeAction: Int,
+        defaultNativeAction: SeccompAction,
         handledNrs: MutableSet<Int>,
     ) {
         val actionsToEmit = collectLinearActions(syscallActions, jvmCriticalNrs, profilingMode, defaultNativeAction, handledNrs)
@@ -349,40 +330,40 @@ internal object BpfFilter {
         syscallActions: Map<Int, SeccompAction>,
         jvmCriticalNrs: Set<Int>,
         profilingMode: Boolean,
-        defaultNativeAction: Int,
+        defaultNativeAction: SeccompAction,
         handledNrs: MutableSet<Int>,
-    ): List<Pair<Int, Int>> {
+    ): List<Pair<Int, SeccompAction>> {
         val actions = syscallActions.entries
             .sortedBy { it.key }
             .filter { (nr, _) -> handledNrs.add(nr) }
             .mapNotNull { (nr, action) ->
                 val effectiveAction = if (nr in jvmCriticalNrs) SeccompAction.ACT_ALLOW else action
-                val nativeAction = resolveNativeAction(effectiveAction, profilingMode)
+                val nativeAction = resolveAction(effectiveAction, profilingMode)
                 (nr to nativeAction).takeIf { nativeAction != defaultNativeAction }
             }
         return actions + immutableBaseActions(defaultNativeAction, jvmCriticalNrs, handledNrs)
     }
 
     private fun immutableBaseActions(
-        defaultNativeAction: Int,
+        defaultNativeAction: SeccompAction,
         jvmCriticalNrs: Set<Int>,
         handledNrs: MutableSet<Int>,
-    ): List<Pair<Int, Int>> =
+    ): List<Pair<Int, SeccompAction>> =
         jvmCriticalNrs
             .sorted()
-            .takeIf { defaultNativeAction != NativeConstants.SECCOMP_RET_ALLOW }
+            .takeIf { defaultNativeAction != SeccompAction.ACT_ALLOW }
             ?.filter { handledNrs.add(it) }
-            ?.map { it to NativeConstants.SECCOMP_RET_ALLOW }
+            ?.map { it to SeccompAction.ACT_ALLOW }
             .orEmpty()
 
     private fun shouldUseBst(
-        defaultNativeAction: Int,
-        actions: List<Pair<Int, Int>>,
-    ): Boolean = defaultNativeAction == NativeConstants.SECCOMP_RET_ALLOW && actions.size in 1..32
+        defaultNativeAction: SeccompAction,
+        actions: List<Pair<Int, SeccompAction>>,
+    ): Boolean = defaultNativeAction == SeccompAction.ACT_ALLOW && actions.size in 1..32
 
     private fun emitBstActions(
-        builder: BpfBuilder<BpfState.Active>,
-        actions: List<Pair<Int, Int>>,
+        builder: BpfBuilder.Active,
+        actions: List<Pair<Int, SeccompAction>>,
     ) {
         val sortedActions = actions.sortedBy { it.first }
         val actionLabels = sortedActions.map { it.second }.distinct().associateWith { builder.nextLabel("action_ret") }
@@ -397,13 +378,13 @@ internal object BpfFilter {
     }
 
     private fun emitGroupedActions(
-        builder: BpfBuilder<BpfState.Active>,
-        actions: List<Pair<Int, Int>>,
+        builder: BpfBuilder.Active,
+        actions: List<Pair<Int, SeccompAction>>,
     ) {
         val groups = actions
             .groupBy { it.second }
             .mapValues { (_, pairs) -> pairs.map { it.first }.sorted() }
-            .toSortedMap()
+            .toSortedMap(compareBy { it.toKernelReturnCode() })
 
         for ((nativeAction, nrs) in groups) {
             for (chunk in nrs.chunked(100)) {
@@ -426,11 +407,11 @@ internal object BpfFilter {
     }
 
     private fun emitBst(
-        builder: BpfBuilder<BpfState.Active>,
-        actionsToEmit: List<Pair<Int, Int>>,
+        builder: BpfBuilder.Active,
+        actionsToEmit: List<Pair<Int, SeccompAction>>,
         low: Int,
         high: Int,
-        actionLabels: Map<Int, BpfLabel>,
+        actionLabels: Map<SeccompAction, BpfLabel>,
     ) {
         if (low > high) return
 

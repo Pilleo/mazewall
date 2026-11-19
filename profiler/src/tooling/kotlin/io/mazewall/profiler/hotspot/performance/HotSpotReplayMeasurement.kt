@@ -24,7 +24,7 @@ internal fun measureReplay(
     var records = 0
     var mappingNanos = 0L
     val started = System.nanoTime()
-    HotSpotWireReader(limits).read(input) { row ->
+    val receipt = HotSpotWireReader(limits).read(input) { row ->
         val mappingStarted = System.nanoTime()
         accumulator.accept(row)
         mappingNanos += System.nanoTime() - mappingStarted
@@ -32,7 +32,7 @@ internal fun measureReplay(
     }
     val pipelineNanos = System.nanoTime() - started
     val finishStarted = System.nanoTime()
-    val evidence = accumulator.finish()
+    val evidence = accumulator.finish(receipt)
     val finishNanos = System.nanoTime() - finishStarted
     return HotSpotReplayMeasurement(evidence, records, pipelineNanos, mappingNanos, finishNanos)
 }

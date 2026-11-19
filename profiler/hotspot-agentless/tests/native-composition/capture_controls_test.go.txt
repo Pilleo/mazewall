@@ -1,0 +1,369 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package capture
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/tracer"
+)
+
+func nativeHeldPreparationFailureDiagnostics(name string) bool {
+	return name == "TestKernelCaptureDefinitionComposition/joined" || name == "TestKernelCaptureDefinitionComposition/direct_drain" || name == "TestKernelCaptureDefinitionComposition/held_tail_deadline"
+}
+
+func nativeHeldEarlyRunFailure(ctx context.Context, done <-chan struct{}, runError func() error) error {
+	select {
+	case <-done:
+		return nativeHeldRunFailure(ctx, done, runError)
+	default:
+		return nil
+	}
+}
+
+func heldComposition(t *testing.T) (*compositionFixture, func(), tracer.NativeCompositionSnapshot) {
+	t.Helper()
+	f := newCompositionFixture(t)
+	diagnostic := t.Name() == "TestKernelCaptureDefinitionComposition/joined" || t.Name() == "TestKernelCaptureDefinitionComposition/direct_drain"
+	failureDiagnostic := nativeHeldPreparationFailureDiagnostics(t.Name())
+	heldPrepared := false
+	if failureDiagnostic {
+		defer func() {
+			if !heldPrepared {
+				f.nativeJoinedFailure(t)
+			}
+		}()
+	}
+	if diagnostic {
+		if err := f.nativeJoinedSnapshot(t, "before_hold"); err != nil {
+			nativeJoinedFatal(t, "before hold", err)
+		}
+		f.nativeJoinedStage(t, "hold_begin")
+	}
+	release := f.resolver.HoldConsumer()
+	f.gates = append(f.gates, release)
+	if diagnostic {
+		f.nativeJoinedStage(t, "hold_acquired")
+	}
+	f.burst(t)
+	if diagnostic {
+		f.nativeJoinedStage(t, "burst_completed")
+		if err := f.nativeJoinedSnapshot(t, "after_burst"); err != nil {
+			nativeJoinedFatal(t, "after burst", err)
+		}
+		f.nativeJoinedStage(t, "reporter_wait")
+	}
+	nativeAwaitReporting(t, f.ctx, "actual reporter blocked on existing consumer mutex", func() (bool, nativeAwaitObservation) {
+		if failureDiagnostic {
+			if err := nativeHeldEarlyRunFailure(f.ctx, f.done, func() error { return f.runError }); err != nil {
+				nativeJoinedFatal(t, "held reporter", err)
+			}
+		}
+		matched, observation := nativeObserveBlockedStack("traceReporter.ReportTraceEvent")
+		if matched {
+			return matched, observation
+		}
+		if closed, err := nativeHeldRunCompletion(f.done, func() error { return f.runError }); closed {
+			snapshot, snapshotErr := f.resolver.Tracer.Snapshot()
+			t.Logf("snapshotErr=%v handedOff=%d received=%d sourceError=%v readerJoined=%t", snapshotErr, snapshot.Reader.HandedOff, snapshot.Reader.Received, snapshot.SourceError, snapshot.ReaderJoined)
+			t.Fatalf("actual Run completed before expected reporter observation raw_truncated=%t: %v", observation.rawTruncated, err)
+		}
+		observation.runDoneKnown = true
+		observation.runDoneClosed = false
+		return matched, observation
+	})
+	if failureDiagnostic {
+		if err := nativeHeldRunFailure(f.ctx, f.done, func() error { return f.runError }); err != nil {
+			nativeJoinedFatal(t, "before existing handoff snapshot", err)
+		}
+	}
+	snapshot, err := f.resolver.Tracer.Snapshot()
+	if err != nil || snapshot.Reader.HandedOff == 0 || snapshot.SourceError != nil {
+		t.Fatal("no genuine target handoff", snapshot, err)
+	}
+	var program uint32
+	nativeAwait(t, f.ctx, "Start's actual retained original root", func() bool {
+		id, retired, active, err := f.events.Root()
+		if err != nil || retired || active {
+			t.Fatal("Start did not retain a live original root", id, retired, active, err)
+		}
+		program = id
+		return id != 0
+	})
+	t.Logf("original program=%d binding=%+v", program, snapshot.Binding)
+	heldPrepared = true
+	return f, release, snapshot
+}
+
+func waitNativeWindow(t *testing.T, f *compositionFixture) {
+	t.Helper()
+	nativeAwait(t, f.ctx, "actual root retirement and native Join window", func() bool {
+		_, retired, active, err := f.events.Root()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !retired || !active {
+			return false
+		}
+		s, err := f.resolver.Tracer.Snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s.Retired && s.Requested
+	})
+}
+
+func requireWholeFinal(t *testing.T, observation symbolizer.DefinitionStopObservation, binding libpf.TraceDefinitionBinding) {
+	t.Helper()
+	v := observation.TraceDefinition
+	if !observation.ReaderStopped || !observation.ConsumerStopped || !observation.BuffersDrained || v == nil || v.Outcome != libpf.TraceDefinitionFinal || v.Binding != binding || len(v.Rows) != binding.PossibleCPUs || v.Undelivered != 0 || v.EmissionLoss != 0 {
+		t.Fatal("incomplete original final observation", observation)
+	}
+	var attempted, submitted uint64
+	for _, row := range v.Rows {
+		if row.Overflow != 0 || row.OutputFailed != 0 || row.RejectedSize != 0 || row.Attempted != row.Submitted {
+			t.Fatal("unexpected native row", row)
+		}
+		attempted += row.Attempted
+		submitted += row.Submitted
+	}
+	if attempted == 0 || submitted != v.Reader.Received || v.Reader.Received != v.Reader.HandedOff || v.Reader.RejectedRecord != 0 || v.Reader.HandoffAborted != 0 || v.Reader.LostSamples != 0 || v.Reader.Overflow {
+		t.Fatal("native composition was unexercised or lost target output", v)
+	}
+}
+
+func TestKernelCaptureDefinitionComposition(t *testing.T) {
+	for _, mode := range []string{"joined", "direct_drain", "held_tail_deadline"} {
+		t.Run(mode, func(t *testing.T) {
+			f, release, initial := heldComposition(t)
+			if mode == "direct_drain" {
+				value, err := f.run.symbolizer.DrainDefinitions(f.ctx)
+				var nativeErr syscall.Errno
+				if errors.As(err, &nativeErr) {
+					t.Fatal("native failure is not an authority refusal", err)
+				}
+				if err == nil || value.TraceDefinition != nil {
+					t.Fatal("live root admitted direct finality", value, err)
+				}
+				if n, _, _ := f.resolver.Tracer.Result(); n != 0 {
+					t.Fatal("direct drain reached sampling", n)
+				}
+				release()
+				f.requestStop()
+				if err := f.result(t); err == nil || errors.As(err, &nativeErr) {
+					t.Fatal("later native callback erased refusal or hid native failure", err)
+				}
+				value, err = f.run.symbolizer.DrainDefinitions(f.ctx)
+				if err == nil || value.TraceDefinition != nil {
+					t.Fatal("failed owner recovered", value, err)
+				}
+				return
+			}
+			var expired <-chan error
+			if mode == "held_tail_deadline" {
+				deadline, cancel := context.WithTimeout(f.ctx, time.Second)
+				defer cancel()
+				finished := make(chan error, 1)
+				go func() { finished <- f.events.StopWithDeadline(deadline) }()
+				expired = finished
+				// Wait for the real owner's context to enter Join before Run's Stop.
+				waitNativeWindow(t, f)
+			}
+			f.requestStop()
+			waitNativeWindow(t, f)
+			stopDone := make(chan error, 2)
+			for range 2 {
+				go func() { stopDone <- f.events.Stop() }()
+			}
+			held, cancel := context.WithTimeout(f.ctx, 100*time.Millisecond)
+			value, err := f.run.symbolizer.DrainDefinitions(held)
+			expiry := held.Err()
+			cancel()
+			if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(expiry, context.DeadlineExceeded) || value.TraceDefinition != nil {
+				t.Fatal("held real consumer did not prevent final result", value, err, expiry)
+			}
+			if n, _, _ := f.resolver.Tracer.Result(); n != 0 {
+				t.Fatal("sample while native tail held", n)
+			}
+			nativeAwait(t, f.ctx, "real reader blocked at held consumer handoff", nativeReaderHeld)
+			before, err := f.resolver.Tracer.Snapshot()
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.burst(t)
+			after, err := f.resolver.Tracer.Snapshot()
+			if err != nil || before.Binding != initial.Binding || after.Binding != before.Binding || !reflect.DeepEqual(before.Rows, after.Rows) || before.Reader != after.Reader {
+				t.Fatal("late original-row or reader writes after actual root retirement", before, after, err)
+			}
+			if mode == "held_tail_deadline" {
+				select {
+				case err := <-expired:
+					if !errors.Is(err, context.DeadlineExceeded) {
+						t.Fatal("real owner did not expire", err)
+					}
+				case <-f.ctx.Done():
+					t.Fatal(f.ctx.Err())
+				}
+				state := f.events.Observation()
+				if state.ResourcesRetired || state.ReceiverJoined {
+					t.Fatal("retired under active native tail", state)
+				}
+				if err := f.events.RetainedResources(f.ctx); err != nil {
+					t.Fatal(err)
+				}
+				retained, err := f.resolver.Tracer.Snapshot()
+				if err != nil || retained.Binding != before.Binding || !reflect.DeepEqual(retained.Rows, before.Rows) {
+					t.Fatal("original OTel maps unavailable under held tail", retained, err)
+				}
+			}
+			release()
+			runErr := f.result(t)
+			for range 2 {
+				select {
+				case err := <-stopDone:
+					if mode == "joined" && err != nil {
+						t.Fatal(err)
+					}
+				case <-f.ctx.Done():
+					t.Fatal("repeated Stop did not join", f.ctx.Err())
+				}
+			}
+			published, publishErr := f.resolver.Published()
+			if mode == "held_tail_deadline" {
+				var nativeErr syscall.Errno
+				if errors.As(runErr, &nativeErr) || errors.As(publishErr, &nativeErr) {
+					t.Fatal("native failure is not a held-tail deadline", runErr, publishErr)
+				}
+				if runErr == nil || publishErr == nil || published.TraceDefinition != nil {
+					t.Fatal("deadline invented partial success", runErr, published, publishErr)
+				}
+				return
+			}
+			if runErr != nil || publishErr != nil {
+				t.Fatal("actual Run/AfterReadout", runErr, publishErr)
+			}
+			requireWholeFinal(t, published, initial.Binding)
+			if !reflect.DeepEqual(published.TraceDefinition.Rows, before.Rows) {
+				t.Fatal("final sample differs from original live-map rows", published, before)
+			}
+			if n, _, err := f.resolver.Tracer.Result(); n != 1 || err != nil {
+				t.Fatal("native callback sampled more than once", n, err)
+			}
+			repeated, err := f.run.symbolizer.DrainDefinitions(f.ctx)
+			if err != nil || !reflect.DeepEqual(repeated.TraceDefinition, published.TraceDefinition) {
+				t.Fatal("repeated drain changed final source", repeated, err)
+			}
+			repeated.TraceDefinition.Rows[0].Attempted++
+			again, err := f.resolver.Published()
+			if err != nil || !reflect.DeepEqual(again.TraceDefinition, published.TraceDefinition) {
+				t.Fatal("published rows alias caller copies", again, err)
+			}
+		})
+	}
+}
+
+func TestKernelTraceDefinitionCloseVersusSample(t *testing.T) {
+	for _, mode := range []string{"close_first", "sample_first", "concurrent"} {
+		t.Run(mode, func(t *testing.T) {
+			count := 1
+			if mode == "concurrent" {
+				count = 3
+			}
+			for iteration := range count {
+				t.Run(fmt.Sprintf("fresh_%d", iteration), func(t *testing.T) {
+					f, release, initial := heldComposition(t)
+					closed := make(chan struct{})
+					var entered <-chan struct{}
+					var releaseSample func()
+					if mode == "sample_first" {
+						var err error
+						entered, releaseSample, err = f.resolver.Tracer.ArmSample()
+						if err != nil {
+							t.Fatal(err)
+						}
+						f.gates = append(f.gates, releaseSample)
+					}
+					if mode == "close_first" {
+						go func() { f.resolver.Tracer.Close(); close(closed) }()
+						select {
+						case <-closed:
+						case <-f.ctx.Done():
+							t.Fatal(f.ctx.Err())
+						}
+					}
+					f.requestStop()
+					if mode != "close_first" {
+						waitNativeWindow(t, f)
+					}
+					if mode == "concurrent" {
+						start := make(chan struct{})
+						go func() { <-start; f.resolver.Tracer.Close(); close(closed) }()
+						go func() { <-start; release() }()
+						close(start)
+					} else {
+						release()
+					}
+					if mode == "sample_first" {
+						select {
+						case <-entered:
+						case <-f.ctx.Done():
+							t.Fatal("actual canonical sample never acquired its guard", f.ctx.Err())
+						}
+						go func() { f.resolver.Tracer.Close(); close(closed) }()
+						nativeAwait(t, f.ctx, "actual Close blocked at owned source guard", func() bool {
+							return nativeBlockedStack(fmt.Sprintf("goroutine %d [", f.resolver.Tracer.CloseGoroutine()), "(*traceDefinitionSource).fail", "(*Tracer).Close")
+						})
+						t.Logf("canonical sample guard held; actual Close goroutine=%d observed blocked in source.fail", f.resolver.Tracer.CloseGoroutine())
+						if n, _, _ := f.resolver.Tracer.Result(); n != 0 {
+							t.Fatal("guard gate failed to hold canonical acquisition", n)
+						}
+						releaseSample()
+					}
+					select {
+					case <-closed:
+					case <-f.ctx.Done():
+						t.Fatal("actual Close did not finish", f.ctx.Err())
+					}
+					runErr := f.result(t)
+					published, err := f.resolver.Published()
+					var nativeErr syscall.Errno
+					if errors.As(runErr, &nativeErr) || errors.As(err, &nativeErr) {
+						t.Fatal("native failure is not an accepted Close refusal", runErr, err)
+					}
+					if runErr != nil && !f.resolver.Tracer.Abandoned(runErr) {
+						t.Fatal("unexpected Run failure", runErr)
+					}
+					if err != nil && !f.resolver.Tracer.Abandoned(err) {
+						t.Fatal("refusal did not preserve logical abandonment", err)
+					}
+					if err == nil {
+						requireWholeFinal(t, published, initial.Binding)
+					} else if published.TraceDefinition != nil || published.BuffersDrained {
+						t.Fatal("partial successful source escaped Close", published, err)
+					}
+					n, sampled, sampleErr := f.resolver.Tracer.Result()
+					if n > 1 || (mode == "sample_first" && (n != 1 || sampleErr != nil || sampled.Outcome != libpf.TraceDefinitionFinal)) {
+						t.Fatal("not an entire pre-abandonment acquisition", n, sampled, sampleErr)
+					}
+					if mode == "close_first" && err == nil {
+						t.Fatal("Close-first source qualified")
+					}
+					for range 2 {
+						value, retryErr := f.resolver.Tracer.Retry(f.ctx)
+						if !f.resolver.Tracer.Abandoned(retryErr) || value.Outcome != 0 || errors.As(retryErr, &nativeErr) {
+							t.Fatal("abandoned original source recovered or lost its cause", value, retryErr)
+						}
+					}
+				})
+			}
+		})
+	}
+}

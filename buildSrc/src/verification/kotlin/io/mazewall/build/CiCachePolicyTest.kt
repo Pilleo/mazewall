@@ -215,7 +215,7 @@ object CiCachePolicyTest {
                 .replace("needs: [core-quality, mutation-tests]", "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]")
                 .replace(
                     "test \"\${{ needs.mutation-tests.result }}\" = success",
-                    "test \"\${{ needs.mutation-tests.result }}\" = success && test \"\${{ needs.security-check.result }}\" = success && test \"\${{ needs.build-logic-validation.result }}\" = success && test \"\${{ needs.go-validation.result }}\" = success && test \"\${{ needs.optional-integrations.result }}\" = success && test \"\${{ needs.confined-helper-kernel.result }}\" = success",
+                    "test \"\${{ needs.mutation-tests.result }}\" = success && test \"\${{ needs.security-check.result }}\" = success && test \"\${{ needs.build-logic-validation.result }}\" = success && (test \"\${{ needs.go-validation.result }}\" = success || (test \"\${{ vars.ENABLE_GO_VALIDATION }}\" != true && test \"\${{ inputs.enable_go_validation }}\" != true && test \"\${{ needs.go-validation.result }}\" = skipped)) && test \"\${{ needs.optional-integrations.result }}\" = success && test \"\${{ needs.confined-helper-kernel.result }}\" = success",
                 )
         }
         val failures = mutableListOf<String>()
@@ -355,6 +355,9 @@ object CiCachePolicyTest {
             "if: always()" to "if: always() && !cancelled()",
             "&& test" to "|| test",
             "needs.mutation-tests.result" to "needs.core-quality.result",
+            "test \"\${{ vars.ENABLE_GO_VALIDATION }}\" != true && " to "",
+            "test \"\${{ inputs.enable_go_validation }}\" != true && " to "",
+            "test \"\${{ needs.go-validation.result }}\" = skipped" to "true",
             "    build-test-publish:\n" to "    build-test-publish:\n        continue-on-error: true\n",
             "- name: Require Core and Mutation Success" to "- name: Require Core and Mutation Success\n              continue-on-error: true",
         )) {
@@ -380,6 +383,8 @@ object CiCachePolicyTest {
                     .replace("${'$'}{{ needs.security-check.result }}", "success")
                     .replace("${'$'}{{ needs.build-logic-validation.result }}", "success")
                     .replace("${'$'}{{ needs.go-validation.result }}", "success")
+                    .replace("${'$'}{{ vars.ENABLE_GO_VALIDATION }}", "")
+                    .replace("${'$'}{{ inputs.enable_go_validation }}", "")
                     .replace("${'$'}{{ needs.optional-integrations.result }}", "success")
                     .replace("${'$'}{{ needs.confined-helper-kernel.result }}", "success")
                 check("\${{" !in command) { "Unresolved legacy join expression" }
@@ -451,7 +456,9 @@ object CiCachePolicyTest {
             for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation", "confined-helper-kernel")) {
                 command = command.replace("\${{ needs.$name.result }}", "success")
             }
-            command = command.replace("\${{ needs.optional-integrations.result }}", result)
+            command = command.replace("\${{ vars.ENABLE_GO_VALIDATION }}", "")
+                .replace("\${{ inputs.enable_go_validation }}", "")
+                .replace("\${{ needs.optional-integrations.result }}", result)
             check("\${{" !in command && shellSucceeds(command) == (result == "success")) {
                 "Integration result must be required by the actual final gate: '$result'"
             }
@@ -532,6 +539,8 @@ object CiCachePolicyTest {
                 .replace("\${{ needs.security-check.result }}", security)
                 .replace("\${{ needs.build-logic-validation.result }}", buildLogic)
                 .replace("\${{ needs.go-validation.result }}", "success")
+                .replace("\${{ vars.ENABLE_GO_VALIDATION }}", "")
+                .replace("\${{ inputs.enable_go_validation }}", "")
                 .replace("\${{ needs.optional-integrations.result }}", "success")
                 .replace("\${{ needs.confined-helper-kernel.result }}", "success")
             check("\${{" !in command) { "Unresolved four-way join expression" }
@@ -542,14 +551,19 @@ object CiCachePolicyTest {
         }
         check(checked == 625)
         val prerequisites = listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "go-validation", "optional-integrations", "confined-helper-kernel")
+        val goGuardedClause = " && (test \"\${{ needs.go-validation.result }}\" = success || (test \"\${{ vars.ENABLE_GO_VALIDATION }}\" != true && test \"\${{ inputs.enable_go_validation }}\" != true && test \"\${{ needs.go-validation.result }}\" = skipped))"
         for (prerequisite in prerequisites) {
             val removedNeed = workflow.replace(
                 "needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]",
                 "needs: [${prerequisites.filter { it != prerequisite }.joinToString(", ")}]",
             )
             check(removedNeed != workflow && ciCachePolicyViolations(removedNeed).isNotEmpty()) { "Missing join prerequisite accepted: $prerequisite" }
-            val removedResult = workflow.replace(" && test \"\${{ needs.$prerequisite.result }}\" = success", "")
-                .replace("test \"\${{ needs.$prerequisite.result }}\" = success && ", "")
+            val removedResult = if (prerequisite == "go-validation") {
+                workflow.replace(goGuardedClause, "")
+            } else {
+                workflow.replace(" && test \"\${{ needs.$prerequisite.result }}\" = success", "")
+                    .replace("test \"\${{ needs.$prerequisite.result }}\" = success && ", "")
+            }
             check(removedResult != workflow && ciCachePolicyViolations(removedResult).isNotEmpty()) { "Missing literal success accepted: $prerequisite" }
         }
         for (result in results) {
@@ -557,7 +571,9 @@ object CiCachePolicyTest {
             for (name in prerequisites.filter { it != "confined-helper-kernel" }) {
                 command = command.replace("\${{ needs.$name.result }}", "success")
             }
-            command = command.replace("\${{ needs.confined-helper-kernel.result }}", result)
+            command = command.replace("\${{ vars.ENABLE_GO_VALIDATION }}", "")
+                .replace("\${{ inputs.enable_go_validation }}", "")
+                .replace("\${{ needs.confined-helper-kernel.result }}", result)
             check("\${{" !in command && shellSucceeds(command) == (result == "success")) { "Private lane result must be required: $result" }
         }
         println("Actual four-result projection: 625 tuples with Go/integration success; unsafe build-logic lanes rejected.")
@@ -566,16 +582,24 @@ object CiCachePolicyTest {
     private fun verifyGoLane() {
         val repository = File(System.getProperty("user.dir")).let { if (it.name == "buildSrc") it.parentFile else it }
         val workflow = repository.resolve(".github/workflows/ci.yml").readText()
+        val triggers = workflow.substringBefore("\njobs:")
+        check("workflow_dispatch:" in triggers && "enable_go_validation:" in triggers && "type: boolean" in triggers && "default: false" in triggers) {
+            "CI workflow must expose opt-in workflow_dispatch boolean input enable_go_validation (default false)"
+        }
         val lane = job(workflow, "go-validation")
-        check(lane.isNotEmpty()) { "Missing required path-gated Go validation lane" }
+        check(lane.isNotEmpty()) { "Missing opt-in Go validation lane" }
+        val goFlagGuard = "        if: \${{ vars.ENABLE_GO_VALIDATION == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation) }}\n"
+        val goStepGuard = "steps.go_changes.outputs.go == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation)"
         for ((from, to) in listOf(
             lane to "",
-            "    go-validation:\n" to "    go-validation:\n        if: false\n",
+            goFlagGuard to "",
+            goFlagGuard to "        if: false\n",
             "    go-validation:\n" to "    go-validation:\n        needs: [core-quality]\n",
             "    go-validation:\n" to "    go-validation:\n        continue-on-error: true\n",
             "profiler/hotspot-agentless/**" to "other/**",
             "experiments/hotspot-agentless/**" to "other/**",
-            "steps.go_changes.outputs.go == 'true'" to "false",
+            goStepGuard to "false",
+            goStepGuard to "steps.go_changes.outputs.go == 'true'",
             "actions/setup-go@v6" to "actions/setup-go@v5",
             "go-version-file: profiler/hotspot-agentless/go.mod" to "go-version: stable",
             "govulncheck@v1.9.0" to "govulncheck@latest",
@@ -612,15 +636,34 @@ object CiCachePolicyTest {
             scratch.deleteRecursively()
         }
         val join = shell(step(job(workflow, "build-test-publish"), "Require Core and Mutation Success"))
-        for (result in listOf("success", "failure", "cancelled", "skipped", "")) {
-            var actual = join
-            for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "optional-integrations", "confined-helper-kernel")) {
-                actual = actual.replace("\${{ needs.$name.result }}", "success")
+        val flagMatrix = listOf(
+            "" to "",
+            "false" to "",
+            "" to "false",
+            "false" to "false",
+            "true" to "",
+            "true" to "false",
+            "" to "true",
+            "false" to "true",
+            "true" to "true",
+        )
+        for ((repoVar, dispatchInput) in flagMatrix) {
+            val enabled = repoVar == "true" || dispatchInput == "true"
+            for (result in listOf("success", "failure", "cancelled", "skipped", "")) {
+                var actual = join
+                for (name in listOf("core-quality", "mutation-tests", "security-check", "build-logic-validation", "optional-integrations", "confined-helper-kernel")) {
+                    actual = actual.replace("\${{ needs.$name.result }}", "success")
+                }
+                actual = actual.replace("\${{ needs.go-validation.result }}", result)
+                    .replace("\${{ vars.ENABLE_GO_VALIDATION }}", repoVar)
+                    .replace("\${{ inputs.enable_go_validation }}", dispatchInput)
+                val expectedPass = result == "success" || (!enabled && result == "skipped")
+                check("\${{" !in actual && shellSucceeds(actual) == expectedPass) {
+                    "Go join mismatch for var='$repoVar' input='$dispatchInput' result='$result' (expectedPass=$expectedPass)"
+                }
             }
-            actual = actual.replace("\${{ needs.go-validation.result }}", result)
-            check("\${{" !in actual && shellSucceeds(actual) == (result == "success")) { "Go result must be required: $result" }
         }
-        println("Actual Go workload runs both modules, preserves every failure, and is required by publication.")
+        println("Actual Go workload runs both modules, preserves every failure, stays opt-in by default, and fails closed when enabled.")
     }
 
     private fun shellSucceeds(command: String, environment: Map<String, String> = emptyMap()): Boolean {

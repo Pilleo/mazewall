@@ -1,0 +1,104 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/process"
+)
+
+type bootstrapTestProcess struct{ process.Process }
+
+func (bootstrapTestProcess) PID() libpf.PID { return 123 }
+
+type bootstrapTestLifetime struct{}
+
+func (bootstrapTestLifetime) Session() string  { return "session" }
+func (bootstrapTestLifetime) HostTGID() uint32 { return 123 }
+func (bootstrapTestLifetime) Birth() uint64    { return 456 }
+func (bootstrapTestLifetime) Validate() error  { return nil }
+
+func TestEpochBootstrapCanceledBeforeWork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	pm := &ProcessManager{epochTarget: libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}}
+	err := pm.BootstrapHotSpotEpoch(ctx, bootstrapTestProcess{}, bootstrapTestLifetime{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+}
+
+type invalidBootstrapLifetime struct{ bootstrapTestLifetime }
+
+func (invalidBootstrapLifetime) Validate() error { return syscall.EACCES }
+
+func TestObservedBootstrapRejections(t *testing.T) {
+	t.Run("validation", func(t *testing.T) {
+		pr := &failingCoreProcess{}
+		err := (&ProcessManager{observedPID: 123}).BootstrapHotSpotObserved(context.Background(), pr, invalidBootstrapLifetime{})
+		if !errors.Is(err, syscall.EACCES) || pr.calls != 0 {
+			t.Fatalf("err=%v calls=%d", err, pr.calls)
+		}
+	})
+	t.Run("mapping permission", func(t *testing.T) {
+		pr := &failingCoreProcess{}
+		err := (&ProcessManager{observedPID: 123}).BootstrapHotSpotObserved(context.Background(), pr, bootstrapTestLifetime{})
+		if !errors.Is(err, syscall.EPERM) || pr.calls != 1 {
+			t.Fatalf("err=%v calls=%d", err, pr.calls)
+		}
+	})
+	t.Run("conflicting target", func(t *testing.T) {
+		pr := &failingCoreProcess{}
+		pm := &ProcessManager{observedPID: 123, epochTarget: libpf.HotSpotEpochTarget{PID: 123}}
+		if err := pm.BootstrapHotSpotObserved(context.Background(), pr, bootstrapTestLifetime{}); err == nil || pr.calls != 0 {
+			t.Fatalf("err=%v calls=%d", err, pr.calls)
+		}
+	})
+}
+
+func TestEpochBootstrapRejections(t *testing.T) {
+	target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	t.Run("validation", func(t *testing.T) {
+		pr := &failingCoreProcess{}
+		err := (&ProcessManager{epochTarget: target}).BootstrapHotSpotEpoch(context.Background(), pr, invalidBootstrapLifetime{})
+		if !errors.Is(err, syscall.EACCES) || pr.calls != 0 {
+			t.Fatalf("err=%v calls=%d", err, pr.calls)
+		}
+	})
+	t.Run("mapping", func(t *testing.T) {
+		pr := &failingCoreProcess{}
+		err := (&ProcessManager{epochTarget: target}).BootstrapHotSpotEpoch(context.Background(), pr, bootstrapTestLifetime{})
+		if !errors.Is(err, syscall.EPERM) || pr.calls != 1 {
+			t.Fatalf("err=%v calls=%d", err, pr.calls)
+		}
+	})
+	t.Run("invalid target and lifetime", func(t *testing.T) {
+		pr := &failingCoreProcess{}
+		if err := (&ProcessManager{}).BootstrapHotSpotEpoch(context.Background(), pr, bootstrapTestLifetime{}); err == nil {
+			t.Fatal("accepted missing target")
+		}
+		if err := (&ProcessManager{epochTarget: target}).BootstrapHotSpotEpoch(context.Background(), pr, nil); err == nil {
+			t.Fatal("accepted nil lifetime")
+		}
+		if pr.calls != 0 {
+			t.Fatal("read mappings")
+		}
+	})
+	t.Run("preexisting process", func(t *testing.T) {
+		info := &processInfo{}
+		pm := &ProcessManager{epochTarget: target, pidToProcessInfo: map[libpf.PID]*processInfo{123: info}}
+		pr := &failingCoreProcess{}
+		if err := pm.BootstrapHotSpotEpoch(context.Background(), pr, bootstrapTestLifetime{}); err == nil {
+			t.Fatal("accepted borrowed state")
+		}
+		if pm.pidToProcessInfo[123] != info || pr.calls != 0 {
+			t.Fatal("modified borrowed state or read mappings")
+		}
+	})
+}

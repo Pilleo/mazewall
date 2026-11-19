@@ -1,6 +1,6 @@
 # mazewall CLI demonstration
 
-This application runs executable positive and negative controls and exits non-zero whenever the observed result differs from the declared expectation. A kernel containment denial, successful operation, and infrastructure failure are distinct outcomes; an unavailable daemon or unrelated I/O error never counts as a successful block.
+This application runs executable positive and negative controls and exits non-zero whenever the observed result differs from the declared expectation. Successful operations, controlled permission refusals, authenticated policy denials, and infrastructure failures are distinct outcomes. An unavailable daemon or unrelated I/O error never counts as a successful block.
 
 ## Start here: an owned workspace read
 
@@ -69,13 +69,29 @@ the profiling and lifecycle lessons in the [feature tour](../README.md).
 ## Modes
 
 - `unsafe` expects the simulated JNDI exploit to create a marker inside an owned private temporary directory.
-- `safe` applies the combined `Policy.NO_EXEC` and `Policy.NO_NETWORK` contract and exercises both process execution and a loopback connection. The network control first verifies the destination is reachable without containment.
+- `safe` applies the combined `Policy.NO_EXEC` and `Policy.NO_NETWORK` contract and exercises both process execution and a loopback connection. Before the permanent process baseline, it proves the exact payload command can create its private marker and removes that marker. The network control first verifies the exact loopback destination is reachable. Each prepared worker then completes benign work before attempting the forbidden operation.
 - `profile` profiles a synchronous configuration-file read, refuses incomplete evidence, and reruns the same named operation under the compiled policy. Configuration content changes between runs so cached content cannot satisfy the positive control. It also attempts an unprofiled path read.
 - `both` and the default `all` run `unsafe` and `safe` only. Profiling requires the explicit `profile` command.
 
 Incomplete profiles are printed as diagnostics and never installed for enforcement. A profile run that cannot produce complete evidence exits with code `2`. Profile artifacts are not written over existing repository files.
 
 The profile demonstration reads files synchronously; it does not demonstrate asynchronous io_uring containment. Permission-looking exceptions retain inferred evidence and never count as authenticated policy-denial proof.
+
+Safe-mode verification expects controlled operation refusal. It checks that the
+payload process receives a permission failure without creating its marker, and
+that connecting to the previously reachable loopback destination receives a
+permission failure. These scenarios may pass with `INFERRED_PERMISSION_FAILURE`,
+which remains visible alongside the underlying Java exception in the report.
+Passing establishes the controlled operation's observed refusal; it does not
+authenticate which kernel policy denied the operation or claim general RCE
+isolation. Arbitrary permission-looking exception text is insufficient.
+
+Expect a successful unprotected marker creation, successful benign work on the
+restricted workers, and passing process/network refusal results with explicit
+evidence and causes. Missing executables, connection refusal, setup failures,
+timeouts, interruption, incomplete cleanup, and escaped effects still fail the
+command. Profile mode retains its stricter authenticated-denial expectation;
+inferred evidence from its unprofiled-path probe remains inconclusive.
 
 Required execution uses `ManagedRuntime.open/prepare/submit` and real invocation handles,
 with one dedicated platform worker and one admission per domain. Safe mode explicitly installs

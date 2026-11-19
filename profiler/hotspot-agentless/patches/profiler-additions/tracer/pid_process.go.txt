@@ -1,0 +1,398 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package tracer
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"sync"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	pm "go.opentelemetry.io/ebpf-profiler/processmanager"
+)
+
+type PIDProcessOutcome uint8
+
+const (
+	PIDProcessNotConfigured PIDProcessOutcome = iota
+	PIDProcessNotSealed
+	PIDProcessFailed
+	PIDProcessLocalConservedNonfinal
+	PIDProcessObservedSealed
+)
+
+type PIDProcessCounts struct {
+	Received                uint64
+	ExitWaiting             uint64
+	PermissionIgnored       uint64
+	NoMappings              uint64
+	NotExistExited          uint64
+	ESRCHExited             uint64
+	OtherMappingErrorExited uint64
+	MappingsError           uint64
+	PartialOrEmpty          uint64
+	OrdinaryNil             uint64
+	Context                 uint64
+	InFlight                uint64
+	Overflow                bool
+}
+
+type PIDProcessObservation struct {
+	Binding libpf.AuxiliaryBinding
+	Counts  PIDProcessCounts
+	Outcome PIDProcessOutcome
+	Err     error
+}
+
+type pidProcess struct {
+	mu                   sync.Mutex
+	scope                *periodiccaller.OwnedScope
+	expectedBinding      libpf.AuxiliaryBinding
+	origChannel          chan libpf.PIDTID
+	origPM               *pm.ProcessManager
+	counts               PIDProcessCounts
+	outcome              PIDProcessOutcome
+	sealed               bool
+	postSealMutation     bool
+	stickyErr            error
+	localSnapshot        pidProcessLocalCache
+	syncOrdinaryOverride func(pr process.Process, report func(pm.OrdinarySyncBranch, error))
+	processFactory       func(pid libpf.PID, tid libpf.PID) process.Process
+	validationHook       func()
+}
+
+func (t *Tracer) preparePIDProcess() {
+	if t == nil || t.auxiliaryScope == nil {
+		return
+	}
+	if t.pidProcess != nil {
+		return
+	}
+	var binding libpf.AuxiliaryBinding
+	scope, owner, source := t.auxiliaryScope, t.definitionOwner, t.definitionSource
+	stickyErr := errors.New("pid process owner unavailable")
+	if owner != nil && source != nil && source.owner == owner {
+		stickyErr = owner.WithCoveredReadout(func() error {
+			source.mu.Lock()
+			err := source.err
+			source.mu.Unlock()
+			if err != nil { return err }
+			if t.pidEvents == nil || t.processManager == nil || owner.HeldLifetime() == nil || owner.PIDMap() == nil || owner.PIDID() == 0 {
+				return fmt.Errorf("pid process enrollment resources unavailable")
+			}
+			binding, err = scope.AuxiliaryBinding()
+			if err != nil { return err }
+			return libpf.ValidateAuxiliaryBinding(binding, binding)
+		})
+	}
+	outcome := PIDProcessNotSealed
+	if stickyErr != nil {
+		outcome = PIDProcessFailed
+	}
+	p := &pidProcess{
+		scope:           scope,
+		expectedBinding: binding,
+		origChannel:     t.pidEvents,
+		origPM:          t.processManager,
+		outcome:         outcome,
+		stickyErr:       stickyErr,
+	}
+	t.pidProcess = p
+	if err := scope.AddFinalizer(func() error { return p.seal(t) }); err != nil {
+		p.mu.Lock()
+		p.stickyErr = errors.Join(p.stickyErr, err)
+		p.outcome = PIDProcessFailed
+		p.mu.Unlock()
+		scope.Fail(err)
+	} else if stickyErr != nil {
+		scope.Fail(stickyErr)
+	}
+}
+func (t *Tracer) observePIDProcess(pidTid libpf.PIDTID) {
+	p := t.pidProcess
+	if p == nil {
+		if t.processManager != nil {
+			t.processManager.SynchronizeProcess(process.New(pidTid.PID(), pidTid.TID()))
+		}
+		return
+	}
+
+	p.mu.Lock()
+	if p.sealed {
+		p.postSealMutation = true
+		err := fmt.Errorf("post-seal pid process mutation")
+		p.stickyErr = errors.Join(p.stickyErr, err)
+		p.outcome = PIDProcessFailed
+		p.mu.Unlock()
+		if p.syncOrdinaryOverride != nil {
+			p.syncOrdinaryOverride(process.New(pidTid.PID(), pidTid.TID()), nil)
+		} else if t.processManager != nil {
+			t.processManager.SynchronizeProcess(process.New(pidTid.PID(), pidTid.TID()))
+		}
+		return
+	}
+
+	if p.counts.Received == math.MaxUint64 {
+		p.counts.Overflow = true
+		p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("received count overflow"))
+		p.outcome = PIDProcessFailed
+		p.mu.Unlock()
+		if p.syncOrdinaryOverride != nil {
+			p.syncOrdinaryOverride(process.New(pidTid.PID(), pidTid.TID()), nil)
+		} else if t.processManager != nil {
+			t.processManager.SynchronizeProcess(process.New(pidTid.PID(), pidTid.TID()))
+		}
+		return
+	}
+
+	if t.pidEvents != p.origChannel || t.processManager != p.origPM {
+		err := fmt.Errorf("identity mutation: channel or process manager pointer mismatch")
+		p.stickyErr = errors.Join(p.stickyErr, err)
+		p.outcome = PIDProcessFailed
+	}
+
+	p.counts.Received++
+	p.counts.InFlight++
+	syncOverride := p.syncOrdinaryOverride
+	procFactory := p.processFactory
+	p.mu.Unlock()
+
+	var pr process.Process
+	if procFactory != nil {
+		pr = procFactory(pidTid.PID(), pidTid.TID())
+	} else {
+		pr = process.New(pidTid.PID(), pidTid.TID())
+	}
+
+	if syncOverride == nil && t.processManager == nil {
+		p.mu.Lock()
+		p.counts.InFlight--
+		p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("process manager is nil"))
+		p.outcome = PIDProcessFailed
+		p.mu.Unlock()
+		return
+	}
+
+	reported := false
+	report := func(branch pm.OrdinarySyncBranch, syncErr error) {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		if reported {
+			p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("duplicate report for receive"))
+			p.outcome = PIDProcessFailed
+			return
+		}
+		reported = true
+
+		if p.counts.InFlight == 0 {
+			p.counts.Overflow = true
+			p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("report without in-flight"))
+			p.outcome = PIDProcessFailed
+			return
+		}
+		p.counts.InFlight--
+
+		switch branch {
+		case pm.ExitWaiting:
+			p.counts.ExitWaiting++
+		case pm.PermissionIgnored:
+			p.counts.PermissionIgnored++
+		case pm.NoMappings:
+			p.counts.NoMappings++
+		case pm.NotExistExited:
+			p.counts.NotExistExited++
+		case pm.ESRCHExited:
+			p.counts.ESRCHExited++
+		case pm.OtherMappingErrorExited:
+			p.counts.OtherMappingErrorExited++
+		case pm.MappingsError:
+			p.counts.MappingsError++
+		case pm.PartialOrEmpty:
+			p.counts.PartialOrEmpty++
+		case pm.OrdinaryNil:
+			p.counts.OrdinaryNil++
+		case pm.Context:
+			p.counts.Context++
+		default:
+			p.counts.Overflow = true
+			p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("unknown ordinary sync branch: %v", branch))
+			p.outcome = PIDProcessFailed
+		}
+	}
+
+	if syncOverride != nil {
+		syncOverride(pr, report)
+	} else {
+		t.processManager.SynchronizeOrdinaryReported(pr, report)
+	}
+
+	p.mu.Lock()
+	if !reported {
+		if p.counts.InFlight > 0 {
+			p.counts.InFlight--
+		}
+		p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("receive returned without report"))
+		p.outcome = PIDProcessFailed
+	}
+	p.mu.Unlock()
+}
+
+func (t *Tracer) sealPIDProcess() error {
+	if t == nil || t.pidProcess == nil {
+		return nil
+	}
+	return t.pidProcess.seal(t)
+}
+
+func (p *pidProcess) checkParentFailed(scope *periodiccaller.OwnedScope) error {
+	if scope == nil {
+		return nil
+	}
+	if err := scope.ParentErr(); err != nil {
+		return err
+	}
+	if scope.IsExpired() { return fmt.Errorf("parent auxiliary deadline expired") }
+	if err := scope.Failure(); err != nil {
+		return fmt.Errorf("parent scope failure: %w", err)
+	}
+	obs, err := scope.Observation()
+	if err != nil { return fmt.Errorf("parent observation error: %w", err) }
+	if obs.HeldWork || obs.Counts.Failed > 0 {
+		return fmt.Errorf("parent auxiliary failed counts: %d held: %v", obs.Counts.Failed, obs.HeldWork)
+	}
+	if !scope.Joined() { return fmt.Errorf("parent auxiliary stop not successfully published") }
+	return nil
+}
+func (p *pidProcess) seal(t *Tracer) error {
+	p.mu.Lock()
+	if p.sealed {
+		err := p.stickyErr
+		p.mu.Unlock()
+		return err
+	}
+	expected, channel, manager, initialErr := p.expectedBinding, p.origChannel, p.origPM, p.stickyErr
+	p.mu.Unlock()
+	var actual libpf.AuxiliaryBinding
+	err := initialErr
+	if err == nil {
+		actual, _, err = t.readAuxiliaryStopFacts()
+	}
+	p.mu.Lock()
+	if p.sealed {
+		sealedErr := p.stickyErr
+		p.mu.Unlock()
+		return errors.Join(err, sealedErr)
+	}
+	err = errors.Join(p.stickyErr, err)
+	if err == nil {
+		err = t.commitAuxiliaryStop(func() error {
+			if channel == nil || manager == nil || p.origChannel != channel || p.origPM != manager || t.pidEvents != channel || t.processManager != manager || p.expectedBinding != expected {
+				return fmt.Errorf("pid process enrollment changed")
+			}
+			if err := libpf.ValidateAuxiliaryBinding(expected, actual); err != nil { return err }
+			p.sealFinalizeLocked(t)
+			if p.stickyErr != nil { return p.stickyErr }
+			if p.outcome == PIDProcessFailed { return fmt.Errorf("pid process accounting incomplete") }
+			return nil
+		})
+	}
+	if err != nil {
+		p.stickyErr = errors.Join(p.stickyErr, err)
+		p.outcome = PIDProcessFailed
+		p.sealFinalizeLocked(t)
+	} else {
+		p.outcome = PIDProcessObservedSealed
+	}
+	p.sealed = true
+	p.publishPIDProcessLocalLocked()
+	finalErr := p.stickyErr
+	p.mu.Unlock()
+	return finalErr
+}
+func (p *pidProcess) sealFinalizeLocked(t *Tracer) {
+	if t != nil && (t.pidEvents != p.origChannel || t.processManager != p.origPM) {
+		p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("pointer mismatch at seal"))
+		p.outcome = PIDProcessFailed
+	}
+
+	if p.counts.InFlight != 0 {
+		p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("in-flight count %d != 0 at seal", p.counts.InFlight))
+		p.outcome = PIDProcessFailed
+	}
+
+	if p.counts.Overflow {
+		p.outcome = PIDProcessFailed
+	}
+
+	terminals, err := libpf.SumAuxiliaryCounts(
+		p.counts.ExitWaiting,
+		p.counts.PermissionIgnored,
+		p.counts.NoMappings,
+		p.counts.NotExistExited,
+		p.counts.ESRCHExited,
+		p.counts.OtherMappingErrorExited,
+		p.counts.MappingsError,
+		p.counts.PartialOrEmpty,
+		p.counts.OrdinaryNil,
+		p.counts.Context,
+	)
+	if err != nil {
+		p.counts.Overflow = true
+		p.stickyErr = errors.Join(p.stickyErr, err)
+		p.outcome = PIDProcessFailed
+	}
+
+	total, err := libpf.SumAuxiliaryCounts(terminals, p.counts.InFlight)
+	if err != nil {
+		p.counts.Overflow = true
+		p.stickyErr = errors.Join(p.stickyErr, err)
+		p.outcome = PIDProcessFailed
+	}
+
+	if total != p.counts.Received {
+		p.stickyErr = errors.Join(p.stickyErr, fmt.Errorf("pid process conservation mismatch: received %d != sum of terminals %d + in-flight %d",
+			p.counts.Received, terminals, p.counts.InFlight))
+		p.outcome = PIDProcessFailed
+	}
+
+	if p.stickyErr != nil {
+		p.outcome = PIDProcessFailed
+	} else if p.outcome != PIDProcessFailed {
+		p.outcome = PIDProcessLocalConservedNonfinal
+	}
+}
+
+func (p *pidProcess) Observation() (PIDProcessObservation, error) {
+	p.mu.Lock()
+	sealed, scope := p.sealed, p.scope
+	obs := PIDProcessObservation{Binding: p.expectedBinding, Counts: p.counts, Outcome: p.outcome, Err: p.stickyErr}
+	p.mu.Unlock()
+	if !sealed && obs.Outcome != PIDProcessFailed {
+		obs.Outcome = PIDProcessNotSealed
+	}
+	if scope != nil {
+		if parentErr := scope.ParentErr(); parentErr != nil {
+			obs.Outcome = PIDProcessFailed
+			obs.Err = errors.Join(obs.Err, parentErr)
+		} else if sealed {
+			if parentErr := p.checkParentFailed(scope); parentErr != nil {
+				obs.Outcome = PIDProcessFailed
+				obs.Err = errors.Join(obs.Err, parentErr)
+			}
+		}
+	}
+	return obs, obs.Err
+}
+
+// PIDProcessObservation returns the tracer-local snapshot of PID process accounting.
+func (t *Tracer) PIDProcessObservation() (PIDProcessObservation, error) {
+	if t == nil || t.pidProcess == nil {
+		return PIDProcessObservation{Outcome: PIDProcessNotConfigured}, nil
+	}
+	return t.pidProcess.Observation()
+}

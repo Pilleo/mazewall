@@ -2,21 +2,38 @@
 // SPDX-License-Identifier: Apache-2.0
 package tracer
 
-import "sync/atomic"
+import (
+	"sync"
+	"sync/atomic"
+	"unsafe"
+
+	"github.com/cilium/ebpf/perf"
+	"go.opentelemetry.io/ebpf-profiler/support"
+)
 
 // observedCounter preserves the existing metric interval reset and keeps a
 // separate non-consuming cumulative observation owned by this reader.
-type observedCounter struct{ interval, total atomic.Uint64 }
+type observedCounter struct {
+	interval, total atomic.Uint64
+	overflow        atomic.Bool
+}
 
-func (c *observedCounter) Add(n uint64)         { c.interval.Add(n); c.total.Add(n) }
+func (c *observedCounter) Add(n uint64) {
+	c.interval.Add(n)
+	if c.total.Add(n) < n {
+		c.overflow.Store(true)
+	}
+}
 func (c *observedCounter) Swap(n uint64) uint64 { return c.interval.Swap(n) }
 
 type traceReaderCounters struct {
-	drain                   *definitionDrainControl
-	done                    chan struct{}
-	ready                   atomic.Bool
-	lost, noData, readError observedCounter
-	bufferBytesPerCPU       int
+	drain                                              *definitionDrainControl
+	done                                               chan struct{}
+	ready                                              atomic.Bool
+	lost, noData, readError                            observedCounter
+	definitionReceived, definitionHandedOff            observedCounter
+	definitionRejectedRecord, definitionHandoffAborted observedCounter
+	bufferBytesPerCPU                                  int
 }
 
 // TraceReaderObservation counts only records consumed by the trace perf reader.
@@ -32,4 +49,198 @@ func (t *Tracer) TraceReaderHealth() (TraceReaderObservation, bool) {
 		return TraceReaderObservation{}, false
 	}
 	return TraceReaderObservation{Lost: c.lost.total.Load(), NoData: c.noData.total.Load(), ReadError: c.readError.total.Load(), BufferBytesPerCPU: c.bufferBytesPerCPU}, true
+}
+
+type reportReaderFlushPhase uint8
+const (
+	reportFlushNotRequested reportReaderFlushPhase = iota
+	reportFlushInFlight
+	reportFlushSucceeded
+	reportFlushFailed
+)
+
+type reportReaderReturn uint8
+const (
+	reportReaderNotReturned reportReaderReturn = iota
+	reportReaderFlushed
+	reportReaderClosed
+	reportReaderCanceled
+	reportReaderDeadline
+	reportReaderReadError
+)
+
+type reportReaderRecord uint8
+const (
+	reportRecordValid reportReaderRecord = iota
+	reportRecordEmpty
+	reportRecordMalformed
+	reportRecordUnknown
+)
+
+type reportReaderStatus uint8
+const (
+	reportReaderHeld reportReaderStatus = iota
+	reportReaderPartial
+	reportReaderDrained
+)
+
+// reportReaderAccounting owns scalar observations, never the reader or callback.
+type reportReaderAccounting struct {
+	mu sync.Mutex
+	started, readInFlight, sawFlushed bool
+	flush reportReaderFlushPhase
+	returned reportReaderReturn
+	received, lossRecords, lostSamples uint64
+	valid, empty, malformed, unknown uint64
+	callbackInFlight, callbackReturned, callbackAborted uint64
+	overflow, invalid bool
+}
+
+type reportReaderControl struct {
+	mu sync.Mutex
+	reader *perf.Reader
+	accounting *reportReaderAccounting
+	startedOrRejected chan struct{}
+	bodyReturned chan struct{}
+	started, rejected bool
+}
+
+func (p *reportProducerSource) reserveReportReader() *reportReaderControl {
+	p.readerMu.Lock()
+	defer p.readerMu.Unlock()
+	if p.readerControl != nil { return nil }
+	c := &reportReaderControl{accounting: &p.readerAccounting, startedOrRejected: make(chan struct{}), bodyReturned: make(chan struct{})}
+	p.readerControl = c
+	return c
+}
+
+func (c *reportReaderControl) bind(reader *perf.Reader) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.reader = reader
+}
+
+func (c *reportReaderControl) rejectStart() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.started || c.rejected { return }
+	c.rejected = true
+	close(c.startedOrRejected)
+}
+
+func (c *reportReaderControl) loopStart() {
+	c.accounting.start()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.started = true
+	close(c.startedOrRejected)
+}
+
+func (c *reportReaderControl) loopReturn(reason reportReaderReturn) {
+	c.accounting.loopReturned(reason)
+	if c.accounting.readout().readInFlight { return }
+	close(c.bodyReturned)
+}
+
+func readReportRecord(a *reportReaderAccounting, read func(*perf.Record) error, record *perf.Record) error {
+	if a == nil { return read(record) }
+	a.beginRead()
+	err := read(record)
+	a.endRead()
+	return err
+}
+
+func (a *reportReaderAccounting) noteUnexpectedRead(err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err == perf.ErrFlushed && (a.flush == reportFlushInFlight || a.flush == reportFlushSucceeded) { return }
+	a.invalid = true
+}
+
+func invokeReportCallback(a *reportReaderAccounting, callback func([]byte), sample []byte) {
+	if a == nil { callback(sample); return }
+	a.beginCallback()
+	returned := false
+	defer func() {
+		if returned { a.returnCallback() } else { a.abortCallback() }
+	}()
+	callback(sample)
+	returned = true
+}
+
+func classifyReportEvent(sample []byte) reportReaderRecord {
+	if len(sample) == 0 { return reportRecordEmpty }
+	var event support.Event
+	size := int(unsafe.Sizeof(event))
+	if len(sample) < size { return reportRecordMalformed }
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(&event)), size), sample[:size])
+	switch event.Type {
+	case support.EventTypeGenericPID, support.EventTypeReloadKallsyms:
+		return reportRecordValid
+	default:
+		return reportRecordUnknown
+	}
+}
+
+func dispatchReportRecord(a *reportReaderAccounting, callback func([]byte), sample []byte) reportReaderRecord {
+	kind := classifyReportEvent(sample)
+	if a != nil { a.recordSample(kind) }
+	if kind == reportRecordValid || kind == reportRecordUnknown { invokeReportCallback(a, callback, sample) }
+	return kind
+}
+
+type reportReaderReadout struct {
+	status reportReaderStatus
+	started, readInFlight, sawFlushed bool
+	flush reportReaderFlushPhase
+	returned reportReaderReturn
+	received, lossRecords, lostSamples uint64
+	valid, empty, malformed, unknown uint64
+	callbackInFlight, callbackReturned, callbackAborted uint64
+	overflow, invalid bool
+}
+
+func (a *reportReaderAccounting) add(dst *uint64, n uint64) {
+	if ^uint64(0)-*dst < n { *dst = ^uint64(0); a.overflow = true; return }; *dst += n
+}
+
+func (a *reportReaderAccounting) start() {
+	a.mu.Lock(); defer a.mu.Unlock(); if a.started || a.returned != reportReaderNotReturned { a.invalid = true; return }; a.started = true
+}
+func (a *reportReaderAccounting) beginRead() {
+	a.mu.Lock(); defer a.mu.Unlock(); if !a.started || a.readInFlight || a.returned != reportReaderNotReturned { a.invalid = true; return }; a.readInFlight = true
+}
+func (a *reportReaderAccounting) endRead() {
+	a.mu.Lock(); defer a.mu.Unlock(); if !a.readInFlight { a.invalid = true; return }; a.readInFlight = false
+}
+func (a *reportReaderAccounting) recordSample(kind reportReaderRecord) {
+	a.mu.Lock(); defer a.mu.Unlock(); if !a.started || a.returned != reportReaderNotReturned { a.invalid = true; return }; a.add(&a.received, 1)
+	switch kind { case reportRecordValid: a.add(&a.valid, 1); case reportRecordEmpty: a.add(&a.empty, 1); case reportRecordMalformed: a.add(&a.malformed, 1); case reportRecordUnknown: a.add(&a.unknown, 1); default: a.invalid = true }
+}
+func (a *reportReaderAccounting) recordLoss(samples uint64) {
+	a.mu.Lock(); defer a.mu.Unlock(); if !a.started || a.returned != reportReaderNotReturned { a.invalid = true; return }; a.add(&a.lossRecords, 1); a.add(&a.lostSamples, samples)
+}
+func (a *reportReaderAccounting) beginCallback() {
+	a.mu.Lock(); defer a.mu.Unlock(); if !a.started || a.returned != reportReaderNotReturned { a.invalid = true; return }; a.add(&a.callbackInFlight, 1)
+}
+func (a *reportReaderAccounting) returnCallback() {
+	a.mu.Lock(); defer a.mu.Unlock(); if a.callbackInFlight == 0 { a.invalid = true; return }; a.callbackInFlight--; a.add(&a.callbackReturned, 1)
+}
+func (a *reportReaderAccounting) abortCallback() {
+	a.mu.Lock(); defer a.mu.Unlock(); if a.callbackInFlight == 0 { a.invalid = true; return }; a.callbackInFlight--; a.add(&a.callbackAborted, 1); a.invalid = true
+}
+func (a *reportReaderAccounting) requestFlush(effect func() error) bool {
+	if effect == nil { return false }; a.mu.Lock(); if a.flush != reportFlushNotRequested || !a.started || a.returned != reportReaderNotReturned { a.mu.Unlock(); return false }; a.flush = reportFlushInFlight; a.mu.Unlock()
+	err := effect(); a.mu.Lock(); if err != nil { a.flush = reportFlushFailed } else { a.flush = reportFlushSucceeded }; a.mu.Unlock(); return true
+}
+func (a *reportReaderAccounting) observeFlushed() {
+	a.mu.Lock(); defer a.mu.Unlock(); if !a.started || a.sawFlushed || a.returned != reportReaderNotReturned { a.invalid = true; return }; if a.flush == reportFlushNotRequested { a.invalid = true }; a.sawFlushed = true
+}
+func (a *reportReaderAccounting) loopReturned(reason reportReaderReturn) {
+	a.mu.Lock(); defer a.mu.Unlock(); if !a.started || a.returned != reportReaderNotReturned || reason < reportReaderFlushed || reason > reportReaderReadError { a.invalid = true; return }; a.returned = reason
+}
+func (a *reportReaderAccounting) readout() reportReaderReadout {
+	a.mu.Lock(); defer a.mu.Unlock(); status := reportReaderHeld
+	if a.returned != reportReaderNotReturned && !a.readInFlight && a.callbackInFlight == 0 && a.flush != reportFlushInFlight { status = reportReaderPartial; if a.returned == reportReaderFlushed && a.sawFlushed && a.flush == reportFlushSucceeded && !a.invalid && !a.overflow { status = reportReaderDrained } }
+	return reportReaderReadout{status: status, started: a.started, readInFlight: a.readInFlight, sawFlushed: a.sawFlushed, flush: a.flush, returned: a.returned, received: a.received, lossRecords: a.lossRecords, lostSamples: a.lostSamples, valid: a.valid, empty: a.empty, malformed: a.malformed, unknown: a.unknown, callbackInFlight: a.callbackInFlight, callbackReturned: a.callbackReturned, callbackAborted: a.callbackAborted, overflow: a.overflow, invalid: a.invalid}
 }

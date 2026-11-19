@@ -1,0 +1,12 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package libpf
+
+// LocalCopyState describes a retained local copy, not its completeness.
+type LocalCopyState uint8
+
+const (
+	LocalAbsent LocalCopyState = iota
+	LocalCopied
+	LocalPanic
+)

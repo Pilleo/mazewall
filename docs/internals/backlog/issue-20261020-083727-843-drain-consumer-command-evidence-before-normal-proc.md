@@ -48,5 +48,29 @@ Complete local optional build with the accompanying test-fixture correction
 `971053ab` passes271 tasks in4m30s. Hosted final-code acceptance is still pending;
 the original warm failure is not treated as a pass or bypassed with a retry.
 
+## Partial pump-acquisition follow-up — 2026-11-05
+
+[Recursive review F-03](../reviews/2026-11-05-state-complexity-review.md):
+`ConsumerProcessEvidence.kt:91` assigns `pumps` only after both asynchronous copy
+startups return. If stdout returns a live future and stderr startup throws, the
+stdout owner is absent from the final join ledger at `:121`; diagnostic reads and
+channel closure can race that pump. The shared process tester still owns/reaps the
+child and propagates startup failure. This is not a newly proven orphaned child
+or a false successful command, and does not undo the accepted normal-exit fixes.
+
+Record each returned future in the local owned ledger immediately, before
+starting another pump. No sealed command framework, new seam or public API is
+needed. Preserve original failure, bounded cleanup, suppressed drain evidence,
+child retirement and restored interruption.
+
+Use the existing `startPump` seam: first startup returns a barrier-held real
+reader/future, second throws a unique failure. Require cleanup to observe the
+first handle before channels close; release/join deterministically and retain the
+startup failure and any drain failure. Include first-fails/both-succeed and
+interrupted/failed partial join controls. Preserve exact-byte, delayed-reader,
+timeout and existing normal-completion checks. Do not exhaust common-pool threads.
+Run the existing cheap checks and required implementation completion gate; this
+review ran no pump failure reproduction or hosted qualification.
+
 ---
 <!-- id: issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc  file: issue-20261020-083727-843-drain-consumer-command-evidence-before-normal-proc.md -->

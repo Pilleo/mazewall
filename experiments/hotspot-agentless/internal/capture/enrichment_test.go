@@ -3,13 +3,123 @@ package capture
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
+	"io.mazewall/experiments/hotspot-agentless/internal/accounting"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
 )
+
+type terminalFailSink struct{ triggered bool }
+
+func (s *terminalFailSink) Write(_ context.Context, r model.Record) error {
+	if r.Kind == "enrichment" {
+		s.triggered = true
+		return errors.New("terminal delivery rejected")
+	}
+	return nil
+}
+
+func TestFailedTerminalCannotAdmitEnrichment(t *testing.T) {
+	sink := &terminalFailSink{}
+	lookup := lookupFunc(func(context.Context, model.StackRef) (model.StackEvidence, error) {
+		return oneFrame("pathA"), nil
+	})
+	e, err := NewEnricher(context.Background(), fixtureOptions(), lookup, sink,
+		bootClockFunc(func() (uint64, error) { return 100, nil }), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Submit(fixtureEvent("event-1", 7)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Finish(); err == nil {
+		t.Fatal("terminal failure swallowed")
+	}
+	if !sink.triggered {
+		t.Fatal("fault did not reach terminal writer")
+	}
+	counts, err := e.accounting()
+	if err == nil && accounting.Evaluate(counts).Complete {
+		t.Fatal("failed terminal admitted enrichment")
+	}
+}
+
+func TestFatalLookupPreservedWhenTerminalWriteFails(t *testing.T) {
+	sink := &terminalFailSink{}
+	fatalErr := fmt.Errorf("lookup denied: %w", syscall.EPERM)
+	lookup := lookupFunc(func(context.Context, model.StackRef) (model.StackEvidence, error) {
+		return model.StackEvidence{}, fatalErr
+	})
+	e, err := NewEnricher(context.Background(), fixtureOptions(), lookup, sink,
+		bootClockFunc(func() (uint64, error) { return 100, nil }), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Submit(fixtureEvent("event-1", 7)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := e.Finish(); !errors.Is(err, fatalErr) || !errors.Is(err, syscall.EPERM) {
+			t.Fatalf("Finish lost lookup error: %v", err)
+		}
+	}
+	if !sink.triggered {
+		t.Fatal("terminal write was not attempted")
+	}
+	if _, err := e.accounting(); err == nil {
+		t.Fatal("failed terminal made accounting available")
+	}
+}
+
+type recoveryFailSink struct {
+	*recordSink
+	triggered bool
+}
+
+func (s *recoveryFailSink) Write(ctx context.Context, r model.Record) error {
+	if r.Kind == "recovery" {
+		s.triggered = true
+		return errors.New("recovery delivery rejected")
+	}
+	return s.recordSink.Write(ctx, r)
+}
+
+func TestFatalRecoveryPreservedWhenRecoveryWriteFails(t *testing.T) {
+	sink := &recoveryFailSink{recordSink: &recordSink{}}
+	lookup := &recoveringLookup{sink: sink.recordSink}
+	fatalErr := fmt.Errorf("clock denied: %w", syscall.EPERM)
+	calls := 0
+	clock := bootClockFunc(func() (uint64, error) {
+		calls++
+		if calls == 3 {
+			return 0, fatalErr
+		}
+		return 100, nil
+	})
+	e, err := NewEnricher(context.Background(), fixtureOptions(), lookup, sink, clock, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Submit(fixtureEvent("event-1", 7)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := e.Finish(); !errors.Is(err, fatalErr) || !errors.Is(err, syscall.EPERM) {
+			t.Fatalf("Finish lost recovery error: %v", err)
+		}
+	}
+	if !sink.triggered {
+		t.Fatal("recovery write was not attempted")
+	}
+	if _, err := e.accounting(); err == nil {
+		t.Fatal("fatal recovery made accounting available")
+	}
+}
 
 type recordSink struct {
 	mu      sync.Mutex
@@ -154,6 +264,17 @@ func TestPendingByteLimitKeepsEventAndTerminalReason(t *testing.T) {
 	rows := sink.snapshot()
 	if len(rows) != 2 || rows[0].Kind != "event" || rows[1].Evidence.Reason != "pending_byte_limit" || rows[1].Evidence.Attribution != "skipped" {
 		t.Fatalf("lost refusal evidence: %+v", rows)
+	}
+	counts, err := e.accounting()
+	if err != nil {
+		t.Fatalf("accounting returned error: %v", err)
+	}
+	proof := accounting.Evaluate(counts)
+	if !proof.Complete {
+		t.Fatalf("expected complete proof, got: %+v (counts: %+v)", proof, counts)
+	}
+	if counts.Attempted != 1 || counts.Submitted != 1 || counts.Received != 1 || counts.Terminals != 1 {
+		t.Fatalf("unexpected counts: %+v", counts)
 	}
 }
 

@@ -1,6 +1,7 @@
 package capture
 
 import (
+	"encoding/json"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/datasource"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
 	"io.mazewall/experiments/hotspot-agentless/internal/model"
@@ -25,7 +26,22 @@ func definitionStopModel(s symbolizer.DefinitionStopObservation) *model.Definiti
 			semantics = "owned_definition_perf_drained_partial_loss_snapshot"
 		}
 	}
-	return &model.DefinitionStopObservation{ReaderStopped: s.ReaderStopped, ConsumerStopped: s.ConsumerStopped, BuffersDrained: s.BuffersDrained && s.ReaderStopped && s.ConsumerStopped, AuxiliaryStopped: s.AuxiliaryStopped, Semantics: semantics}
+	obs := &model.DefinitionStopObservation{
+		ReaderStopped:    s.ReaderStopped,
+		ConsumerStopped:  s.ConsumerStopped,
+		BuffersDrained:   s.BuffersDrained && s.ReaderStopped && s.ConsumerStopped,
+		AuxiliaryStopped: s.AuxiliaryStopped,
+		Semantics:        semantics,
+	}
+	if s.TraceDefinition != nil {
+		if raw, err := json.Marshal(s.TraceDefinition); err == nil {
+			if obs.Extensions == nil {
+				obs.Extensions = make(map[string]json.RawMessage)
+			}
+			obs.Extensions["trace_definition"] = raw
+		}
+	}
+	return obs
 }
 
 func reportedEventHealth(reader datasource.ReportedLossReader) model.LossObservation {

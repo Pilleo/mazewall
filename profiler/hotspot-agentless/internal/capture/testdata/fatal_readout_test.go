@@ -17,6 +17,11 @@ import (
 
 type sequenceReadFailure struct{ err error }
 
+// Opaque referents for the real projected admission declaration, not Gadget
+// instances/tracers. This pending-owner test never constructs native authority.
+type ebpfInstance struct{}
+type Tracer struct{}
+
 func (r *sequenceReadFailure) ReadAt([]byte, int64) (int, error) { return -1, r.err }
 
 type pendingOwnerObservation struct{ owner *eventStopOwner }
@@ -47,6 +52,9 @@ func TestRunExitObservedReaderAndPendingOwner(t *testing.T) {
 			}
 			backend := newStopBackendFixture()
 			owner := newEventStopOwner(backend)
+			if owner.admission != nil || owner.definitionRoot != nil {
+				t.Fatal("pending-owner fixture invented admission or native attachment")
+			}
 			readout, cancelReadout := context.WithCancel(context.Background())
 			defer cancelReadout()
 			done := make(chan error, 1)

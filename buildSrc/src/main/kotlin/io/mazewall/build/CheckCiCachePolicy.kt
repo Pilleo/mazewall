@@ -27,8 +27,8 @@ internal enum class CiCacheViolation(val explanation: String) {
     MUTATION_DIAGNOSTICS("Always upload the mutation resource receipt and all three PIT reports"),
     OPTIONAL_DIAGNOSTICS("Always retain optional command logs and copied-consumer test reports, including failures"),
     BUILD_LOGIC_VALIDATION("Independent read-only build logic must run with strict configuration cache, bounded resources and always-uploaded diagnostics"),
-    GO_VALIDATION("Path-gated Go tests and pinned vulnerability scanning must be required, bounded and fail closed for both modules"),
-    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic, Go and optional-integration success"),
+    GO_VALIDATION("Opt-in Go tests and pinned vulnerability scanning must stay flag-gated, bounded and fail closed for both modules"),
+    REQUIRED_CHECK_JOIN("The unchanged required check must always evaluate and require core, mutation, security, build-logic, optional-integration, confined-helper and enabled Go validation success"),
     PUBLISH_GRAPH("Publication must run only after both validations succeed on a default-branch push"),
     PACKAGE_WRITE_SCOPE("Only the publication job may have package-write permission"),
     PR_RUN_CONCURRENCY("Only superseded PR runs may cancel; push runs need separate run-ID groups"),
@@ -246,6 +246,7 @@ private fun hasGoValidation(workflow: String): Boolean {
     val expected = """
         go-validation:
             name: Agentless Go Validation
+            if: ${'$'}{{ vars.ENABLE_GO_VALIDATION == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation) }}
             runs-on: ubuntu-26.04
             timeout-minutes: 45
             permissions:
@@ -271,7 +272,7 @@ private fun hasGoValidation(workflow: String): Boolean {
                               - '.github/workflows/ci.yml'
                               - 'scripts/ci_resource_probe.py'
                 - name: Set up Go
-                  if: steps.go_changes.outputs.go == 'true'
+                  if: steps.go_changes.outputs.go == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation)
                   uses: actions/setup-go@v6
                   with:
                       go-version-file: profiler/hotspot-agentless/go.mod
@@ -279,10 +280,10 @@ private fun hasGoValidation(workflow: String): Boolean {
                           profiler/hotspot-agentless/go.sum
                           experiments/hotspot-agentless/go.sum
                 - name: Install Pinned Vulnerability Scanner
-                  if: steps.go_changes.outputs.go == 'true'
+                  if: steps.go_changes.outputs.go == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation)
                   run: go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
                 - name: Run Go Checks
-                  if: steps.go_changes.outputs.go == 'true'
+                  if: steps.go_changes.outputs.go == 'true' || (github.event_name == 'workflow_dispatch' && inputs.enable_go_validation)
                   run: |
                       set -o pipefail
                       mkdir -p build/reports/ci-resources
@@ -327,7 +328,7 @@ private fun hasRequiredCheckJoin(join: String): Boolean {
     val headers = workflowHeaders(join)
     val step = """
         - name: Require Core and Mutation Success
-          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success && test "${'$'}{{ needs.go-validation.result }}" = success && test "${'$'}{{ needs.optional-integrations.result }}" = success && test "${'$'}{{ needs.confined-helper-kernel.result }}" = success
+          run: test "${'$'}{{ needs.core-quality.result }}" = success && test "${'$'}{{ needs.mutation-tests.result }}" = success && test "${'$'}{{ needs.security-check.result }}" = success && test "${'$'}{{ needs.build-logic-validation.result }}" = success && (test "${'$'}{{ needs.go-validation.result }}" = success || (test "${'$'}{{ vars.ENABLE_GO_VALIDATION }}" != true && test "${'$'}{{ inputs.enable_go_validation }}" != true && test "${'$'}{{ needs.go-validation.result }}" = skipped)) && test "${'$'}{{ needs.optional-integrations.result }}" = success && test "${'$'}{{ needs.confined-helper-kernel.result }}" = success
     """.trimIndent()
     return headers.filter { it.startsWith("name:") } == listOf("name: Build, Test, Security Scan & Publish") &&
         headers.filter { it.startsWith("needs:") } == listOf("needs: [core-quality, mutation-tests, security-check, build-logic-validation, go-validation, optional-integrations, confined-helper-kernel]") &&

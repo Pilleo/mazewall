@@ -5,6 +5,8 @@ import java.util.concurrent.atomic.AtomicReference
 internal interface HotSpotCollectorCallbacks {
     fun record(row: HotSpotWireRecord)
 
+    fun wireReceipt(receipt: HotSpotWireReceipt)
+
     fun event(event: HotSpotSessionEvent)
 
     fun diagnostics(
@@ -33,6 +35,8 @@ internal class HotSpotSessionDriver(
     }
 
     override fun record(row: HotSpotWireRecord) = execute(interpreter.record(row))
+
+    override fun wireReceipt(receipt: HotSpotWireReceipt) = execute(interpreter.wireReceipt(receipt))
 
     override fun event(event: HotSpotSessionEvent) =
         execute(

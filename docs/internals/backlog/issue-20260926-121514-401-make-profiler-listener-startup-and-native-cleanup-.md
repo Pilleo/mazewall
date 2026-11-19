@@ -46,4 +46,13 @@ Static review on 2026-09-26; not yet runtime-reproduced:
 Partial-initialization gap beyond [deterministic listener lifecycle](resolved/issue-033-profilertracelistener-lacks-deterministic-lifecycle-autoclos.md). Read `../designs/core/notification-liveness-contract.md` and the FFM safety guidance. Coordinate with the evidence-retention issue because both modify `ProfilerTraceListener`; keep any new injection seams internal and declare additional target files before execution.
 
 ---
+## Repository-review revalidation — 2026-11-04
+
+[PN05-05](../reviews/2026-11-04-repository-review-findings.md#pn05-05) remains live;
+session-level fatal ownership was fixed, but listener startup/fatal cleanup still needs
+transactional arena ownership and independent cleanup attempts. Coordinate the existing narrow
+seams with new PN05-06 handshake-failure propagation. Assert original fatal/suppressed identity
+and no body readiness on failed startup; reader termination alone is insufficient.
+
+---
 <!-- id: issue-20260926-121514-401-make-profiler-listener-startup-and-native-cleanup-  file: issue-20260926-121514-401-make-profiler-listener-startup-and-native-cleanup-.md -->

@@ -134,4 +134,16 @@ remove shared caches, extend budgets, weaken gates or start a future-window
 watcher to close this checkpoint.
 
 ---
+## Repository-review expansion — 2026-11-04
+
+[HS-02](../reviews/2026-11-04-repository-review-findings.md#hs-02): the integrated required
+root race/scanner lane is implemented, but root go test ./... does not execute tests copied
+into replacement dependencies. The experiment's unselected manual target also omits label-bound
+and observed families. Add canonical host-safe overlay selection for every modified dependency
+package; a controlled authored-test failure must fail the actual CI workload. Record test names
+and skips. Include HS-01's real decoder-bound regression and current issue042/448 cases; new
+test source presence alone is not qualification. A tiny local-module canary reproduced command
+selection semantics, not execution of the current native graph.
+
+---
 <!-- id: issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab  file: issue-20261021-115502-293-require-path-gated-agentless-go-tests-and-vulnerab.md -->

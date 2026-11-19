@@ -1,0 +1,810 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package capture
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
+	"golang.org/x/sys/unix"
+)
+
+const compositionInertPython = `import sys, time
+print("ready", flush=True)
+while True:
+    line = sys.stdin.buffer.readline()
+    if line == b"":
+        while True:
+            time.sleep(3600)
+    if line == b"exit\n":
+        break
+    if line != b"8\n":
+        raise ValueError("unexpected command")
+    print("done", flush=True)
+`
+
+// Explicit host-only selection. This function has no capture Run/BPF call, and
+// its literal Python command cannot be selected through the native leaf path.
+func TestCompositionHostActor(t *testing.T) {
+	for _, mode := range []string{"one", "two", "wait_after_settled", "cleanup_close_error", "partial_owner", "failed_assertion", "fatal_before_pipe", "fatal_after_stdin_pair", "fatal_after_stdout_pair", "fatal_after_stderr_pair", "fatal_after_registered"} {
+		t.Run(mode, func(t *testing.T) {
+			if t.Name() != "TestCompositionHostActor/"+mode || flag.Lookup("test.run").Value.String() != "^TestCompositionHostActor$/^"+mode+"$" {
+				t.Fatal("one exact literal host actor selector required before pipes")
+			}
+			selected := "TestKernelCaptureDefinitionComposition/direct_drain"
+			if mode == "two" || mode == "wait_after_settled" {
+				selected = "TestKernelCaptureDefinitionComposition/joined"
+			}
+			f := newCompositionOwner(t, selected)
+			if mode == "fatal_before_pipe" {
+				t.Fatal("intentional pre-pipe constructor failure")
+			}
+			for i, name := range []string{"fatal_after_stdin_pair", "fatal_after_stdout_pair", "fatal_after_stderr_pair"} {
+				if mode == name {
+					for pair := 0; pair <= i; pair++ {
+						if err := f.child.acquirePipePair(pair * 2); err != nil {
+							t.Fatal(err)
+						}
+					}
+					t.Fatal("intentional failure after actual partial pipe acquisition", name)
+				}
+			}
+			var delayed chan error
+			if mode == "wait_after_settled" {
+				gate := make(chan struct{})
+				f.child.waitGate = gate
+				delayed = make(chan error, 1)
+				go func() {
+					defer close(gate)
+					d, err := compositionRemaining(f.child.C)
+					if err != nil {
+						delayed <- err
+						return
+					}
+					timer := time.NewTimer(d)
+					defer timer.Stop()
+					select {
+					case <-f.child.cells["SETTLED"].ready:
+						select {
+						case <-f.child.waitDone:
+							delayed <- errors.New("Wait completed before its inert gate")
+						default:
+							delayed <- nil
+						}
+					case <-timer.C:
+						delayed <- context.DeadlineExceeded
+					case <-f.child.failed:
+						delayed <- errors.New("control failed while Wait gate held")
+					case <-f.child.stop:
+						delayed <- errors.New("cleanup stopped before gated Wait")
+					}
+				}()
+			}
+			cmd := exec.Command("/usr/bin/python3.14", "-I", "-S", "-B", "-u", "-c", compositionInertPython)
+			cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
+			if err := f.child.launch(cmd); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "fatal_after_registered" {
+				t.Fatal("intentional post-registration constructor failure without Run")
+			}
+			for range f.child.bursts {
+				f.burst(t)
+			}
+			switch mode {
+			case "cleanup_close_error":
+				// A real os.File close failure, not a forged descriptor/errno.
+				if err := f.child.handles[1].file.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.child.handles[1].close(f.child.C); !errors.Is(err, os.ErrClosed) {
+					t.Fatal("missing original close failure", err)
+				}
+			case "partial_owner":
+				// Negative ownership-state control only: no native Run is invoked.
+				f.runAttempted = true
+				close(f.done)
+			case "failed_assertion":
+				t.Error("intentional host assertion failure; real cleanup must still release")
+			}
+			err := f.cleanup()
+			if mode == "cleanup_close_error" || mode == "partial_owner" {
+				if err == nil || f.child.terminal != "HOLD" {
+					t.Fatal("cleanup failure upgraded", err, f.child.terminal)
+				}
+				if f.cleanup() != err {
+					t.Fatal("cleanup was repeated")
+				}
+			} else {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if f.child.terminal != "RELEASE_REQUEST" {
+					t.Fatal("successful real ownership cleanup held")
+				}
+				select {
+				case <-f.child.waitSent:
+				default:
+					t.Fatal("normal cleanup returned without actual Wait/send")
+				}
+			}
+			if delayed != nil {
+				if err := <-delayed; err != nil {
+					t.Fatal(err)
+				}
+			}
+			f.child.mu.Lock()
+			terminal, source, waited := f.child.terminal, f.child.sourceMask, f.child.waitPacket
+			waitObserved := false
+			select {
+			case <-f.child.waitDone:
+				waitObserved = true
+			default:
+			}
+			sends := append([]compositionSendRecord(nil), f.child.sends...)
+			f.child.mu.Unlock()
+			t.Logf("host lifecycle terminal=%s source_local=%+v actual_wait_observed=%t actual_wait=%+v sends=%+v", terminal, source, waitObserved, waited, sends)
+		})
+	}
+}
+
+func TestCompositionProtocolCodec(t *testing.T) {
+	selected := "TestKernelCaptureDefinitionComposition/joined"
+	base := compositionPacket{V: 1, Seq: 1, Case: selected, Slot: 1}
+	packets := []compositionPacket{
+		{Op: "PREPARE", Bursts: 2}, {Op: "PIPES_OWNED", StartNS: 1, CleanupNS: 2},
+		{Op: "STARTED", PID: 1, Birth: ^uint64(0), Cgroup: 2, MountNS: 3},
+		{Op: "REGISTERED"}, {Op: "REGISTERED_ACK"}, {Op: "READY"},
+		{Op: "BURST", I: 1}, {Op: "BURST_ALLOWED", I: 1}, {Op: "DONE", I: 1},
+		{Op: "WRITTEN", I: 1, Result: "error", N: -1, Errno: int(unix.EAGAIN)},
+		{Op: "RELEASE_REQUEST"}, {Op: "HOLD", Reason: "native_cleanup"},
+		{Op: "RELEASE_SENT", Result: "full", N: 5},
+		{Op: "SOURCE_CLOSED", Acquired: 127, Closed: 127},
+		{Op: "WAITED", PID: 1, Result: "ok"}, {Op: "WAITED", PID: 1, Result: "exit", Code: 7},
+		{Op: "WAITED", PID: 1, Result: "signal", Code: -1, Signal: 15},
+		{Op: "WAITED", PID: 1, Result: "error", Code: -1, Errno: int(unix.ECHILD)},
+		{Op: "SETTLED"},
+	}
+	for _, p := range packets {
+		p.V = base.V
+		p.Seq = base.Seq
+		p.Case = base.Case
+		p.Slot = base.Slot
+		b, err := p.encode()
+		if err != nil {
+			t.Fatal(p.Op, err)
+		}
+		decoded, err := compositionDecode(b, selected, 1)
+		if err != nil {
+			t.Fatal(p.Op, err)
+		}
+		again, err := decoded.encode()
+		if err != nil || !bytes.Equal(b, again) {
+			t.Fatal("roundtrip", p.Op, err)
+		}
+	}
+	p := base
+	p.Op = "READY"
+	b, err := p.encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{
+		string(b) + "\n", " " + string(b), strings.Replace(string(b), `"v":1`, `"v":true`, 1),
+		strings.Replace(string(b), `"v":1`, `"v":1,"v":1`, 1),
+		strings.Replace(string(b), `"v":1`, `"v":1.0`, 1),
+		strings.Replace(string(b), `"v":1`, `"v":1e0`, 1),
+		strings.Replace(string(b), `"v":1`, `"v":null`, 1),
+		strings.Replace(string(b), `"v":1`, `"v":2`, 1),
+		strings.Replace(string(b), `"slot":1`, `"slot":-0`, 1),
+		strings.Replace(string(b), `"slot":1`, `"slot":1,"extra":0`, 1),
+		strings.Replace(string(b), `"slot":1`, `"slot":1,"n":[]`, 1),
+		strings.Replace(string(b), `"seq":1`, `"seq":2`, 1),
+		strings.Replace(string(b), `"seq":1`, `"seq":01`, 1),
+		strings.Replace(string(b), `"READY"`, `"UNKNOWN"`, 1),
+		strings.Replace(string(b), `"slot":1`, `"slot":2`, 1),
+		strings.Repeat("x", 4097), "", "[]",
+	} {
+		if _, err := compositionDecode([]byte(bad), selected, 1); err == nil {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+	for _, seq := range []int{0, 17} {
+		p.Seq = seq
+		if _, err := p.encode(); err == nil {
+			t.Fatal("budget", seq)
+		}
+	}
+	p.Seq = 16
+	if _, err := p.encode(); err != nil {
+		t.Fatal("last budget position", err)
+	}
+	for _, bad := range []compositionPacket{
+		{Op: "SOURCE_CLOSED", Acquired: 3, Closed: 3, Open: 1},
+		{Op: "SOURCE_CLOSED", Acquired: 3, Closed: 1},
+		{Op: "WRITTEN", I: 1, Result: "full", N: 1},
+		{Op: "WAITED", PID: 1, Result: "signal", Code: -1, Signal: 0},
+	} {
+		bad.V = 1
+		bad.Seq = 1
+		bad.Slot = 1
+		bad.Case = selected
+		if _, err := bad.encode(); err == nil {
+			t.Fatal("bad field accepted", bad)
+		}
+	}
+}
+
+// Real packet rights are acquired/rejected/closed by the production test owner
+// receiver; this smaller control tests the same ancillary parser's retention.
+func TestCompositionAncillaryHarvest(t *testing.T) {
+	now, err := compositionNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(pair[0])
+	defer unix.Close(pair[1])
+	if err = unix.SetsockoptInt(pair[1], unix.SOL_SOCKET, unix.SO_PASSCRED, 1); err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	if _, err = unix.SendmsgN(pair[0], []byte("invalid JSON"), unix.UnixRights(int(r.Fd()), int(w.Fd())), nil, unix.MSG_DONTWAIT|unix.MSG_NOSIGNAL); err != nil {
+		t.Fatal(err)
+	}
+	b := make([]byte, 4096)
+	oob := make([]byte, unix.CmsgSpace(unix.SizeofUcred)+unix.CmsgSpace(3*4))
+	_, on, flags, _, err := unix.Recvmsg(pair[1], b, oob, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fds, cred, parseErr := compositionAncillary(oob[:on])
+	// Adopt every actual delivery before inspecting parser/credential outcomes.
+	owned := make([]compositionFD, len(fds))
+	for i, fd := range fds {
+		owned[i] = compositionFD{fd: fd, acquired: true}
+	}
+	for i := range owned {
+		defer func(h *compositionFD) {
+			if err := h.close(now + int64(time.Second)); err != nil {
+				t.Error("actual delivered FD close", err)
+			}
+		}(&owned[i])
+	}
+	if parseErr != nil || flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 || cred == nil || cred.Pid != int32(os.Getpid()) || len(owned) != 2 {
+		t.Fatal("lost actual delivery", len(owned), cred, parseErr)
+	}
+	for _, h := range owned {
+		v, err := unix.FcntlInt(uintptr(h.fd), unix.F_GETFD, 0)
+		if err != nil || v&unix.FD_CLOEXEC == 0 {
+			t.Fatal("received CLOEXEC", err)
+		}
+	}
+}
+
+func TestCompositionOneShotSourceClose(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Close()
+	h := compositionFD{file: r, fd: int(r.Fd()), acquired: true}
+	if err = r.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now, err := compositionNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := h.close(now + int64(time.Second))
+	if !errors.Is(first, os.ErrClosed) || !h.attempted {
+		t.Fatal(first)
+	}
+	if h.close(now+int64(time.Second)) != first {
+		t.Fatal("close failure erased/retried")
+	}
+	cell := nativeCloseResult{state: nativeCloseOwned}
+	cell.record(first)
+	cell.record(nil)
+	if cell.state != nativeCloseFailed || cell.err != first {
+		t.Fatal("original Run failure erased")
+	}
+}
+
+func TestCompositionStateAndCleanup(t *testing.T) {
+	for _, mode := range []string{"unknown_partial", "source_close_error", "expired"} {
+		t.Run(mode, func(t *testing.T) {
+			now, err := compositionNow()
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := &compositionChild{T: now + int64(time.Second), C: now + int64(2*time.Second), fd: -1, failed: make(chan struct{}), fatal: make(chan struct{}), stop: make(chan struct{}), cells: make(map[string]*compositionCell)}
+			for _, key := range []string{"PIPES_OWNED", "REGISTERED", "READY", "BURST_ALLOWED/1", "DONE/1", "RELEASE_SENT", "SETTLED"} {
+				o.cells[key] = &compositionCell{ready: make(chan struct{})}
+			}
+			if err := o.deliver(compositionPacket{Op: "READY"}); err == nil {
+				t.Fatal("READY before registration")
+			}
+			o.prepared = true
+			o.sends = append(o.sends, compositionSendRecord{Op: "PREPARE"})
+			p := compositionPacket{Op: "PIPES_OWNED", StartNS: o.T, CleanupNS: o.C}
+			if err := o.deliver(p); err != nil {
+				t.Fatal(err)
+			}
+			if err := o.deliver(p); err == nil {
+				t.Fatal("duplicate accepted")
+			}
+			f := &compositionFixture{child: o, done: make(chan struct{})}
+			if mode == "unknown_partial" {
+				f.runAttempted = true
+				close(f.done)
+			}
+			if mode == "source_close_error" {
+				o.handles[0] = compositionFD{acquired: true, attempted: true, err: os.ErrClosed}
+			}
+			if mode == "expired" {
+				o.C = now - 1
+			}
+			first := f.cleanup()
+			if first == nil || o.terminal != "HOLD" {
+				t.Fatal("unproven ownership released", first, o.terminal)
+			}
+			if f.cleanup() != first {
+				t.Fatal("non-idempotent cleanup")
+			}
+		})
+	}
+}
+
+func TestCompositionBurstWriteEAGAIN(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	fd := int(w.Fd())
+	if err = unix.SetNonblock(fd, true); err != nil {
+		t.Fatal(err)
+	}
+	fill := make([]byte, 4096)
+	for {
+		_, err = unix.Write(fd, fill)
+		if errors.Is(err, unix.EAGAIN) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := compositionBurstWrite(fd, 1)
+	if !errors.Is(err, unix.EAGAIN) || p.Result != "error" || p.N != -1 || p.Errno != int(unix.EAGAIN) {
+		t.Fatal("full pipe burst", p, err)
+	}
+}
+
+func TestCompositionDeadlineAndStickyFault(t *testing.T) {
+	o := &compositionChild{failed: make(chan struct{}), fatal: make(chan struct{})}
+	o.fail(context.DeadlineExceeded)
+	if !o.workStopped || o.fault != nil {
+		t.Fatal("work deadline became native cleanup failure")
+	}
+	select {
+	case <-o.fatal:
+		t.Fatal("work deadline closed cleanup channel")
+	default:
+	}
+	failure := errors.New("actual later source fault")
+	o.failChannel(failure)
+	o.fail(context.DeadlineExceeded)
+	if o.fault != failure || o.channelErr != failure {
+		t.Fatal("later fatal fault erased by work deadline")
+	}
+	select {
+	case <-o.fatal:
+	default:
+		t.Fatal("owned cleanup wait not woken on fatal channel failure")
+	}
+}
+
+func TestCompositionPipeOwners(t *testing.T) {
+	now, err := compositionNow()
+	if err != nil {
+		t.Fatal(err)
+	}
+	o := &compositionChild{T: now + int64(time.Second), C: now + int64(2*time.Second)}
+	defer func() {
+		p := o.closeSources()
+		if p.Acquired != 63 || p.Closed != 63 || p.CloseError != 0 || p.Open != 0 {
+			t.Error("real pipe cleanup", p)
+		}
+	}()
+	if err = o.pipes(); err != nil {
+		t.Fatal(err)
+	}
+	if err = o.acquirePipePair(0); err == nil {
+		t.Fatal("duplicate pipe generation")
+	}
+	fd, err := unix.FcntlInt(uintptr(o.handles[1].fd), unix.F_DUPFD_CLOEXEC, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alias := compositionFD{fd: fd, acquired: true}
+	defer func() {
+		if err := alias.close(o.C); err != nil {
+			t.Error(err)
+		}
+	}()
+	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFL, 0)
+	if err != nil || flags&unix.O_NONBLOCK == 0 || flags&unix.O_ACCMODE != unix.O_WRONLY {
+		t.Fatal("alias lost parent OFD flags", flags, err)
+	}
+}
+
+func TestCompositionJoinedDiagnosticRunPublication(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	reads := 0
+	failure := errors.New("published Run failure")
+	readError := func() error {
+		reads++
+		return failure
+	}
+	if err := nativeHeldRunFailure(ctx, done, readError); err != nil || reads != 0 {
+		t.Fatal("live Run error was read", err, reads)
+	}
+	cancel()
+	if err := nativeHeldRunFailure(ctx, done, readError); !errors.Is(err, context.Canceled) || reads != 0 {
+		t.Fatal("cancellation read unpublished error", err, reads)
+	}
+	close(done)
+	if err := nativeHeldRunFailure(ctx, done, readError); !errors.Is(err, failure) || errors.Is(err, context.Canceled) || reads != 1 {
+		t.Fatal("published Run failure lost to cancellation", err, reads)
+	}
+	if err := nativeHeldRunFailure(ctx, done, func() error { return nil }); err == nil {
+		t.Fatal("unexpected Run completion became held-reporter success")
+	}
+	t.Run("held_preparation_diagnostic_names", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			want bool
+		}{
+			{"TestKernelCaptureDefinitionComposition/joined", true},
+			{"TestKernelCaptureDefinitionComposition/direct_drain", true},
+			{"TestKernelCaptureDefinitionComposition/held_tail_deadline", true},
+			{"TestKernelCaptureDefinitionComposition/held_tail_deadline/nested", false},
+			{"Other/held_tail_deadline", false},
+			{"TestKernelCaptureDefinitionComposition/held_tail_deadline_extra", false},
+			{"TestKernelCaptureDefinitionComposition/close_first", false},
+		} {
+			if got := nativeHeldPreparationFailureDiagnostics(tc.name); got != tc.want {
+				t.Errorf("diagnostic predicate for %q = %t, want %t", tc.name, got, tc.want)
+			}
+		}
+	})
+	t.Run("early_done_publication", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		reads := 0
+		failure := errors.New("early published failure")
+		readError := func() error {
+			reads++
+			return failure
+		}
+		cancel()
+		if err := nativeHeldEarlyRunFailure(ctx, done, readError); err != nil || reads != 0 {
+			t.Fatal("open done read unpublished error", err, reads)
+		}
+		close(done)
+		if err := nativeHeldEarlyRunFailure(ctx, done, readError); !errors.Is(err, failure) || reads != 1 {
+			t.Fatal("early done lost Run error", err, reads)
+		}
+		liveCtx, cancelLive := context.WithCancel(context.Background())
+		defer cancelLive()
+		if err := nativeHeldEarlyRunFailure(liveCtx, done, readError); !errors.Is(err, failure) || reads != 2 {
+			t.Fatal("done before cancellation lost Run error", err, reads)
+		}
+		if err := nativeHeldEarlyRunFailure(context.Background(), done, func() error { return nil }); err == nil {
+			t.Fatal("early clean Run completion became success")
+		}
+	})
+}
+
+func TestCompositionJoinedDiagnosticTextBound(t *testing.T) {
+	input := strings.Repeat("x", nativeJoinedDiagnosticTextLimit+1)
+	text, size, truncated := nativeJoinedDiagnosticText(input)
+	if len(text) != nativeJoinedDiagnosticTextLimit || size != len(input) || !truncated {
+		t.Fatal("diagnostic text not bounded", len(text), size, truncated)
+	}
+	text, size, truncated = nativeJoinedDiagnosticText("short")
+	if text != "short" || size != 5 || truncated {
+		t.Fatal("short diagnostic changed", text, size, truncated)
+	}
+}
+
+func TestCompositionJoinedDiagnosticOutput(t *testing.T) {
+	w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+	input := "{\"kind\":\"collector_ready\"}\n{\"kind\":\"event\"}\n{\"kind\":\"enrichment\"}\n{\"kind\":\"recovery\"}\n{\"kind\":\"session_summary\"}\n{\"kind\":\"unknown\"}\n"
+	if _, err := w.Write([]byte(input)); err != nil {
+		t.Fatal(err)
+	}
+	counts, available := w.diagnosticCounts()
+	if !available || counts.Ready != 1 || counts.Event != 1 || counts.Enrichment != 1 || counts.Recovery != 1 || counts.Summary != 1 || counts.Other != 1 || counts.Overflow {
+		t.Fatal("kind counts lost", counts, available)
+	}
+	select {
+	case <-w.ready:
+	default:
+		t.Fatal("ready notification changed")
+	}
+	w.mu.Lock()
+	_, available = w.diagnosticCounts()
+	w.mu.Unlock()
+	if available {
+		t.Fatal("diagnostics waited for busy output")
+	}
+	if _, err := w.Write([]byte("not-json\n")); err == nil {
+		t.Fatal("decode failure swallowed")
+	}
+	counts, _ = w.diagnosticCounts()
+	if counts.DecodeError != 1 {
+		t.Fatal("decode failure not retained", counts)
+	}
+	overflow := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+	overflow.counts.Event = ^uint64(0)
+	if _, err := overflow.Write([]byte("{\"kind\":\"event\"}\n")); err != nil {
+		t.Fatal(err)
+	}
+	counts, _ = overflow.diagnosticCounts()
+	if counts.Event != ^uint64(0) || !counts.Overflow {
+		t.Fatal("diagnostic counter wrapped", counts)
+	}
+}
+
+func TestCompositionDiagnosticMetadata(t *testing.T) {
+	emit := func(t *testing.T, w *compositionOutput, record wire.Record) {
+		t.Helper()
+		body, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = append(body, '\n')
+		for _, part := range [][]byte{body[:len(body)/2], body[len(body)/2:]} {
+			if n, err := w.Write(part); err != nil || n != len(part) {
+				t.Fatal("metadata changed writer result", n, len(part), err)
+			}
+		}
+	}
+	event := func(session, id string, correlation uint64) wire.Record {
+		return wire.Record{Kind: "event", SessionID: session, EventID: id, Event: &wire.Event{SessionID: session, EventID: id, PID: 101, TID: 102, ProcessStartTicks: 103, CorrelationID: correlation}}
+	}
+	evidence := func(session, id, reason string) wire.Record {
+		return wire.Record{Kind: "enrichment", SessionID: session, EventID: id, Evidence: &wire.StackEvidence{Attribution: "unavailable", Reason: reason}}
+	}
+	t.Run("association", func(t *testing.T) {
+		w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		const largeCorrelation uint64 = 1<<63 + 17
+		emit(t, w, event("session", "zero", 0))
+		emit(t, w, event("session", "nonzero", largeCorrelation))
+		emit(t, w, evidence("session", "nonzero", "deadline_exceeded"))
+		emit(t, w, evidence("session", "zero", "missing_reference"))
+		counts, available := w.diagnosticCounts()
+		if !available || counts.Event != 2 || counts.Enrichment != 2 || counts.ZeroReference != 1 || counts.NonzeroReference != 1 || counts.ReasonMissingReference != 1 || counts.ReasonOther != 1 || counts.MetadataUsed != 2 || counts.MetadataOverflow || counts.Overflow || len(w.pending) != 0 {
+			t.Fatal("metadata counts or chunk handling", counts, available)
+		}
+		first, second := counts.Metadata[0], counts.Metadata[1]
+		if first.SessionID != "session" || first.EventID != "zero" || first.PID != 101 || first.TID != 102 || first.Birth != 103 || first.CorrelationID != 0 || !first.EvidenceSeen || first.Reason != "missing_reference" || first.Attribution != "unavailable" || second.CorrelationID != largeCorrelation || !second.EvidenceSeen || second.Reason != "deadline_exceeded" {
+			t.Fatal("metadata did not associate by session/event", first, second)
+		}
+		emit(t, w, event("session", "zero", largeCorrelation))
+		emit(t, w, evidence("session", "zero", "new_provider_reason"))
+		mismatch := event("other", "zero", 1)
+		mismatch.SessionID = "session"
+		emit(t, w, mismatch)
+		emit(t, w, evidence("other", "zero", "missing_reference"))
+		emit(t, w, evidence("session", "absent", ""))
+		counts, _ = w.diagnosticCounts()
+		if counts.MetadataDuplicateEvent != 1 || counts.MetadataDuplicateEvidence != 1 || counts.MetadataUnassociatedEvent != 1 || counts.MetadataUnmatchedEnrichment != 2 || counts.ReasonMissingReference != 2 || counts.ReasonOther != 2 || counts.ReasonEmpty != 1 || counts.Metadata[0].CorrelationID != 0 || counts.Metadata[0].Reason != "missing_reference" || counts.MetadataUsed != 2 {
+			t.Fatal("duplicate/mismatched identities overwrote metadata", counts)
+		}
+		plain := &compositionOutput{ready: make(chan struct{})}
+		emit(t, plain, event("session", "zero", 0))
+		if plain.counts.Event != 0 || plain.counts.MetadataUsed != 0 || plain.counts.ZeroReference != 0 {
+			t.Fatal("metadata enabled outside selected diagnostic writer", plain.counts)
+		}
+	})
+	t.Run("bounds", func(t *testing.T) {
+		w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		for i := 0; i <= compositionMetadataSamples; i++ {
+			emit(t, w, event("session", fmt.Sprint(i), 0))
+		}
+		counts, _ := w.diagnosticCounts()
+		if counts.MetadataUsed != len(counts.Metadata) || !counts.MetadataOverflow || counts.ZeroReference != compositionMetadataSamples+1 || counts.Metadata[0].EventID != "0" || counts.Metadata[compositionMetadataSamples-1].EventID != fmt.Sprint(compositionMetadataSamples-1) {
+			t.Fatal("metadata sample bound changed", counts)
+		}
+		w.counts.ZeroReference = ^uint64(0)
+		w.counts.ReasonOther = ^uint64(0)
+		emit(t, w, event("session", "beyond-bound", 0))
+		emit(t, w, evidence("session", "0", "\n"+strings.Repeat("r", compositionMetadataTextLimit)))
+		counts, _ = w.diagnosticCounts()
+		if counts.ZeroReference != ^uint64(0) || counts.ReasonOther != ^uint64(0) || !counts.Overflow || !counts.Metadata[0].EvidenceSeen || !counts.Metadata[0].EvidenceTruncated || len(counts.Metadata[0].Reason) != compositionMetadataTextLimit || strings.Contains(fmt.Sprint(counts.Metadata[0]), "\n") {
+			t.Fatal("metadata text/counter bound failed", counts)
+		}
+		before := counts
+		emit(t, w, evidence("session", "1", "missing_reference"))
+		counts, _ = w.diagnosticCounts()
+		if before.Metadata[1].EvidenceSeen || !counts.Metadata[1].EvidenceSeen {
+			t.Fatal("metadata snapshot aliases mutable sample array", before, counts)
+		}
+		long := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		session := strings.Repeat("s", compositionMetadataTextLimit+1)
+		id := strings.Repeat("e", compositionMetadataTextLimit+1)
+		emit(t, long, event(session, id, 0))
+		emit(t, long, evidence(session, id, "missing_reference"))
+		emit(t, long, evidence(session[:compositionMetadataTextLimit], id[:compositionMetadataTextLimit], "missing_reference"))
+		counts, _ = long.diagnosticCounts()
+		if counts.MetadataUsed != 1 || !counts.Metadata[0].IdentityTruncated || len(counts.Metadata[0].SessionID) != compositionMetadataTextLimit || len(counts.Metadata[0].EventID) != compositionMetadataTextLimit || counts.Metadata[0].EvidenceSeen || counts.MetadataUnmatchedEnrichment != 2 {
+			t.Fatal("truncated identity was used for association", counts)
+		}
+		oversize := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		big := event("session", "large", 0)
+		big.Event.Filename = strings.Repeat("x", nativeJoinedDiagnosticTextLimit)
+		emit(t, oversize, big)
+		counts, _ = oversize.diagnosticCounts()
+		if counts.Event != 1 || counts.MetadataOversize != 1 || counts.MetadataUsed != 0 || counts.ZeroReference != 0 {
+			t.Fatal("oversize metadata changed ordinary write or invented reference", counts)
+		}
+	})
+	t.Run("projection_errors", func(t *testing.T) {
+		w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		for _, input := range []string{
+			"{\"kind\":\"event\",\"event\":{\"correlation_id\":\"wrong-type\"}}\n",
+			"{\"kind\":\"event\",\"event\":{}}\n",
+			"{\"kind\":\"enrichment\"}\n",
+		} {
+			if n, err := w.Write([]byte(input)); err != nil || n != len(input) {
+				t.Fatal("diagnostic projection changed kind-only acceptance", n, err)
+			}
+		}
+		counts, _ := w.diagnosticCounts()
+		if counts.Event != 2 || counts.Enrichment != 1 || counts.DecodeError != 0 || counts.MetadataDecodeError != 1 || counts.MissingReferenceField != 1 || counts.MetadataMissingEvidence != 1 || counts.ZeroReference != 0 || counts.MetadataUsed != 0 {
+			t.Fatal("metadata availability errors hidden", counts)
+		}
+		if n, err := w.Write([]byte("not-json\n")); err == nil || n != 0 {
+			t.Fatal("original JSON validation changed", n, err)
+		}
+		counts, _ = w.diagnosticCounts()
+		if counts.DecodeError != 1 {
+			t.Fatal("original decode failure not retained", counts)
+		}
+	})
+	t.Run("event_detail", func(t *testing.T) {
+		w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		const boot uint64 = 1<<63 + 23
+		epoch := uint64(1<<62 + 2)
+		readError := int32(-13)
+		stable := event("session", "stable", 7)
+		stable.Event.CaptureBootNS = boot
+		stable.Event.HotSpotIdentity = &wire.HotSpotIdentity{State: "stable", Profile: "fixture-profile", Epoch: &epoch}
+		failed := event("session", "failed", 0)
+		failed.Event.CaptureBootNS = boot + 1
+		failed.Event.HotSpotIdentity = &wire.HotSpotIdentity{State: "read_error", Profile: "fixture-profile", ReadError: &readError}
+		emit(t, w, stable)
+		emit(t, w, failed)
+		emit(t, w, evidence("session", "failed", "missing_reference"))
+		emit(t, w, evidence("session", "stable", "definition_unavailable"))
+		counts, available := w.diagnosticCounts()
+		first, second := counts.Metadata[0], counts.Metadata[1]
+		if !available || counts.MetadataUsed != 2 || counts.MetadataDetailDecodeError != 0 || !first.DetailAvailable || !first.CaptureBootNSPresent || first.CaptureBootNS != boot || first.Birth != 103 || first.TID != 102 || first.CorrelationID != 7 || !first.HotSpotIdentityPresent || !first.HotSpotStatePresent || first.HotSpotState != "stable" || !first.HotSpotProfilePresent || first.HotSpotProfile != "fixture-profile" || !first.HotSpotEpochPresent || first.HotSpotEpoch != epoch || first.HotSpotReadErrorPresent || first.HotSpotTextTruncated || first.Reason != "definition_unavailable" {
+			t.Fatal("event details lost precision, presence, process birth or association", counts)
+		}
+		if !second.DetailAvailable || second.CaptureBootNS != boot+1 || !second.HotSpotReadErrorPresent || second.HotSpotReadError != readError || second.HotSpotEpochPresent || second.HotSpotState != "read_error" || second.Reason != "missing_reference" {
+			t.Fatal("read-error details or reversed enrichment association changed", second)
+		}
+		stable.Event.CaptureBootNS = 1
+		stable.Event.HotSpotIdentity = nil
+		emit(t, w, stable)
+		counts.Metadata[0].HotSpotProfile = "caller-copy"
+		fresh, _ := w.diagnosticCounts()
+		if fresh.MetadataDuplicateEvent != 1 || fresh.Metadata[0].CaptureBootNS != boot || fresh.Metadata[0].HotSpotProfile != "fixture-profile" || fresh.Metadata[0].HotSpotEpoch != epoch {
+			t.Fatal("duplicate/caller copy overwrote first event detail", fresh)
+		}
+	})
+	t.Run("detail_presence", func(t *testing.T) {
+		w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		for i, fields := range []string{"", `,"capture_boot_ns":0,"hotspot_identity":{"state":"","profile":"","epoch":0,"read_error":0}`, `,"capture_boot_ns":null,"hotspot_identity":null`, `,"hotspot_identity":{}`} {
+			id := fmt.Sprint(i)
+			body := fmt.Sprintf("{\"kind\":\"event\",\"session_id\":\"session\",\"event_id\":%q,\"event\":{\"session_id\":\"session\",\"event_id\":%q,\"host_pid\":101,\"host_tid\":102,\"process_start_ticks\":103,\"correlation_id\":0%s}}\n", id, id, fields)
+			if n, err := w.Write([]byte(body)); err != nil || n != len(body) {
+				t.Fatal("detail presence changed ordinary write", n, err)
+			}
+		}
+		counts, _ := w.diagnosticCounts()
+		absent, zero, null, empty := counts.Metadata[0], counts.Metadata[1], counts.Metadata[2], counts.Metadata[3]
+		if counts.MetadataUsed != 4 || counts.ZeroReference != 4 || counts.MetadataDetailDecodeError != 0 || !absent.DetailAvailable || absent.CaptureBootNSPresent || absent.HotSpotIdentityPresent || !null.DetailAvailable || null.CaptureBootNSPresent || null.HotSpotIdentityPresent {
+			t.Fatal("missing/null detail invented zero observations", counts)
+		}
+		if !zero.DetailAvailable || !zero.CaptureBootNSPresent || zero.CaptureBootNS != 0 || !zero.HotSpotIdentityPresent || !zero.HotSpotStatePresent || zero.HotSpotState != "" || !zero.HotSpotProfilePresent || zero.HotSpotProfile != "" || !zero.HotSpotEpochPresent || zero.HotSpotEpoch != 0 || !zero.HotSpotReadErrorPresent || zero.HotSpotReadError != 0 || !empty.DetailAvailable || !empty.HotSpotIdentityPresent || empty.HotSpotStatePresent || empty.HotSpotProfilePresent || empty.HotSpotEpochPresent || empty.HotSpotReadErrorPresent {
+			t.Fatal("explicit zero/empty identity presence was erased", counts)
+		}
+	})
+	t.Run("detail_errors", func(t *testing.T) {
+		w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		writeBad := func(id, fields string) {
+			t.Helper()
+			body := fmt.Sprintf("{\"kind\":\"event\",\"session_id\":\"session\",\"event_id\":%q,\"event\":{\"session_id\":\"session\",\"event_id\":%q,\"host_pid\":101,\"host_tid\":102,\"process_start_ticks\":103,\"correlation_id\":0,%s}}\n", id, id, fields)
+			if n, err := w.Write([]byte(body)); err != nil || n != len(body) {
+				t.Fatal("optional detail changed kind-only acceptance", n, err)
+			}
+		}
+		for i, fields := range []string{`"capture_boot_ns":"bad"`, `"hotspot_identity":{"state":1}`, `"hotspot_identity":{"epoch":-1}`, `"hotspot_identity":{"read_error":2147483648}`, `"hotspot_identity":{"profile":[]}`} {
+			writeBad(fmt.Sprintf("bad-%d", i), fields)
+		}
+		emit(t, w, evidence("session", "bad-0", "missing_reference"))
+		counts, _ := w.diagnosticCounts()
+		if counts.MetadataUsed != 5 || counts.Event != 5 || counts.ZeroReference != 5 || counts.MetadataDetailDecodeError != 5 || counts.MetadataDecodeError != 0 || counts.DecodeError != 0 || !counts.Metadata[0].EvidenceSeen || counts.Metadata[0].Reason != "missing_reference" {
+			t.Fatal("malformed optional details erased existing association/counters", counts)
+		}
+		for _, m := range counts.Metadata[:counts.MetadataUsed] {
+			if m.DetailAvailable || m.CaptureBootNSPresent || m.HotSpotIdentityPresent {
+				t.Fatal("partial malformed detail reported available", m)
+			}
+		}
+		w.counts.MetadataDetailDecodeError = ^uint64(0)
+		writeBad("saturated", `"capture_boot_ns":-1`)
+		counts, _ = w.diagnosticCounts()
+		if counts.MetadataDetailDecodeError != ^uint64(0) || !counts.Overflow || counts.MetadataUsed != 6 || counts.ZeroReference != 6 {
+			t.Fatal("detail projection counter wrapped or changed old sample behavior", counts)
+		}
+	})
+	t.Run("detail_bounds", func(t *testing.T) {
+		w := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		for i := 0; i <= compositionMetadataSamples; i++ {
+			record := event("session", fmt.Sprint(i), 0)
+			record.Event.CaptureBootNS = uint64(i + 1)
+			record.Event.HotSpotIdentity = &wire.HotSpotIdentity{State: "\n" + strings.Repeat("s", compositionMetadataTextLimit), Profile: "\n" + strings.Repeat("p", compositionMetadataTextLimit)}
+			emit(t, w, record)
+		}
+		counts, _ := w.diagnosticCounts()
+		if counts.MetadataUsed != compositionMetadataSamples || !counts.MetadataOverflow || counts.ZeroReference != compositionMetadataSamples+1 || counts.MetadataDetailDecodeError != 0 {
+			t.Fatal("details changed fixed-row/overflow accounting", counts)
+		}
+		for _, m := range counts.Metadata[:counts.MetadataUsed] {
+			if !m.DetailAvailable || !m.HotSpotTextTruncated || !m.HotSpotStatePresent || !m.HotSpotProfilePresent || len(m.HotSpotState) != compositionMetadataTextLimit || len(m.HotSpotProfile) != compositionMetadataTextLimit || strings.Contains(fmt.Sprint(m), "\n") {
+				t.Fatal("detail strings unbounded/unescaped or unavailable", m)
+			}
+		}
+		rendered := fmt.Sprintf("%+v", counts)
+		text, size, truncated := nativeJoinedDiagnosticText(rendered)
+		if size != len(rendered) || len(text) > nativeJoinedDiagnosticTextLimit || truncated != (size > nativeJoinedDiagnosticTextLimit) {
+			t.Fatal("extended detail escaped the existing output-text limit", size, len(text), truncated)
+		}
+		oversize := &compositionOutput{ready: make(chan struct{}), diagnostic: true}
+		record := event("session", "oversize-detail", 0)
+		record.Event.HotSpotIdentity = &wire.HotSpotIdentity{State: "stable", Profile: strings.Repeat("p", nativeJoinedDiagnosticTextLimit)}
+		emit(t, oversize, record)
+		counts, _ = oversize.diagnosticCounts()
+		if counts.Event != 1 || counts.MetadataOversize != 1 || counts.MetadataUsed != 0 || counts.MetadataDetailDecodeError != 0 {
+			t.Fatal("detail projection bypassed existing input bound", counts)
+		}
+	})
+}

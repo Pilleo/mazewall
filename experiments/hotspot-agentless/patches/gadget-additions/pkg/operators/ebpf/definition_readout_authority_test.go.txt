@@ -1,0 +1,783 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+	"golang.org/x/sys/unix"
+)
+
+type definitionRootFixture struct {
+	link.Link
+	closeErr error
+	onClose  func()
+	closes   atomic.Uint32
+}
+
+func (r *definitionRootFixture) Close() error {
+	r.closes.Add(1)
+	if r.onClose != nil {
+		r.onClose()
+	}
+	return r.closeErr
+}
+
+// Keep real native Quiesce/Join; only ring flush/map teardown lack kernel handles.
+type definitionReadoutBackendFixture struct{ nativeEventStopBackend }
+
+// Private fake for stop routing; it holds no native resources.
+type eventStopContextFixture struct {
+	hold *eventReadoutHold
+	started chan struct{}
+	release <-chan struct{}
+	joinContext context.Context
+	afterContext context.Context
+	afterErr error
+	flushes atomic.Uint32
+}
+
+func (b *eventStopContextFixture) nativeReadoutHold() *eventReadoutHold { return b.hold }
+func (b *eventStopContextFixture) Quiesce() error {
+	if b.started != nil { close(b.started) }
+	if b.release != nil { <-b.release }
+	return nil
+}
+func (b *eventStopContextFixture) Flush() error { b.flushes.Add(1); return nil }
+func (b *eventStopContextFixture) Join(ctx context.Context) error {
+	b.joinContext = ctx
+	return b.hold.withAfterReadout(ctx, func(after context.Context) error {
+		b.afterContext = after
+		return b.afterErr
+	})
+}
+func (b *eventStopContextFixture) Sample() (uint64, error) { return 0, nil }
+func (b *eventStopContextFixture) Retire() error { return nil }
+
+func TestStopOwnedEventsUsesFirstBoundExecutionContext(t *testing.T) {
+	hold := newEventReadoutHold()
+	hold.phase = eventReadoutReady
+	first, cancelFirst := context.WithCancel(context.Background()); defer cancelFirst()
+	if hold.bindStopContext(first) != first { t.Fatal("first bind lost") }
+	backend := &eventStopContextFixture{hold: hold, afterErr: unix.EPERM}
+	i := &ebpfInstance{eventStopOptions: &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute)}}
+	i.eventFinalizer = newEventStopOwner(backend)
+	// First caller has bound and is paused; this second invocation wins once.
+	err := i.stopOwnedEvents()
+	if !errors.Is(err, unix.EPERM) || backend.joinContext != first || backend.afterContext != first { t.Fatal("execution or after-readout lost the first context") }
+	if first.Err() != nil || hold.bindStopContext(nil) != first { t.Fatal("second caller cancelled or replaced first context") }
+	again := i.stopOwnedEvents()
+	if again != err || !errors.Is(again, unix.EPERM) { t.Fatal("first receipt or error changed") }
+}
+
+func TestStopOwnedEventsFirstBudgetCannotBeRenewed(t *testing.T) {
+	hold := newEventReadoutHold()
+	first, cancelFirst := context.WithCancel(context.Background()); defer cancelFirst()
+	hold.bindStopContext(first)
+	started, release := make(chan struct{}), make(chan struct{})
+	backend := &eventStopContextFixture{hold: hold, started: started, release: release}
+	i := &ebpfInstance{eventStopOptions: &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute)}}
+	i.eventFinalizer = newEventStopOwner(backend)
+	done := make(chan error, 1)
+	go func() { done <- i.stopOwnedEvents() }()
+	<-started
+	cancelFirst()
+	close(release)
+	err := <-done
+	if !errors.Is(err, context.Canceled) || backend.flushes.Load() != 0 { t.Fatal("execution continued under a later caller budget") }
+	again := i.stopOwnedEvents()
+	if again != err || !errors.Is(again, context.Canceled) { t.Fatal("first failed receipt changed") }
+}
+
+func TestEventStopSeparateCallerWaitDoesNotCancelExecution(t *testing.T) {
+	hold := newEventReadoutHold(); hold.phase = eventReadoutReady
+	first, cancelFirst := context.WithCancel(context.Background()); defer cancelFirst()
+	hold.bindStopContext(first)
+	started, release := make(chan struct{}), make(chan struct{})
+	backend := &eventStopContextFixture{hold: hold, started: started, release: release}
+	owner := newEventStopOwner(backend)
+	wait, cancelWait := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := owner.stopWithExecution(wait, first); done <- err }()
+	<-started; cancelWait()
+	if err := <-done; !errors.Is(err, context.Canceled) || first.Err() != nil { t.Fatal("caller wait changed execution context") }
+	close(release)
+	<-owner.done
+	if backend.joinContext != first || backend.afterContext != first { t.Fatal("execution did not retain first context") }
+}
+
+func TestStopOwnedEventsDoesNotRenewExpiredFirstDeadline(t *testing.T) {
+	hold := newEventReadoutHold()
+	first, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second)); defer cancel()
+	hold.bindStopContext(first)
+	backend := &eventStopContextFixture{hold: hold}
+	i := &ebpfInstance{eventStopOptions: &operators.EventFinalizationOptions{HardDeadline: time.Now().Add(time.Minute)}}
+	i.eventFinalizer = newEventStopOwner(backend)
+	err := i.stopOwnedEvents()
+	if !errors.Is(err, context.DeadlineExceeded) || backend.flushes.Load() != 0 { t.Fatal("later stop renewed the expired first deadline") }
+	if again := i.stopOwnedEvents(); again != err { t.Fatal("expired first result was replaced") }
+}
+
+type definitionReadoutRetirementFixture struct {
+	definitionReadoutBackendFixture
+	retirements atomic.Uint32
+}
+
+func (b *definitionReadoutRetirementFixture) Retire() error {
+	b.retirements.Add(1)
+	return nil
+}
+
+func definitionReadoutJoin(t *testing.T, name string, done <-chan struct{}) bool {
+	t.Helper()
+	select {
+	case <-done: return true
+	case <-time.After(time.Second): t.Errorf("%s did not finish", name); return false
+	}
+}
+
+func TestDefinitionBlockedReadoutDeadlineAndSnapshot(t *testing.T) {
+	i, _ := definitionReadoutFixture()
+	i.collectionSpec = nil
+	b := &definitionReadoutRetirementFixture{definitionReadoutBackendFixture: definitionReadoutBackendFixture{nativeEventStopBackend{instance: i, hold: i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }).nativeReadoutHold()}}}
+	i.eventFinalizer.backend = b
+	entered, release := make(chan struct{}), make(chan struct{})
+	stopDone, secondDone, snapshotDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	var releaseOnce sync.Once
+	var stopStarted, secondStarted, snapshotStarted bool
+	type stopResult struct { observation operators.EventFinalizationObservation; err error }
+	var stop stopResult
+	var snap operators.EventFinalizationObservation
+	var secondErr error
+	var secondRan atomic.Bool
+	t.Cleanup(func() {
+		cancel()
+		releaseOnce.Do(func() { close(release) })
+		if secondStarted { definitionReadoutJoin(t, "second borrower", secondDone) }
+		if snapshotStarted { definitionReadoutJoin(t, "snapshot", snapshotDone) }
+		if stopStarted { definitionReadoutJoin(t, "stop", stopDone); definitionReadoutJoin(t, "owner", i.eventFinalizer.done) }
+	})
+	i.eventStopOptions.AfterReadout = func(context.Context) error {
+		return i.WithDefinitionReadout("session", 123, 456, func() error { close(entered); <-release; return nil })
+	}
+	stopStarted = true
+	go func() { defer close(stopDone); stop.observation, stop.err = definitionReadoutModelStop(i, ctx) }()
+	select { case <-entered: case <-time.After(time.Second): t.Error("readout action did not start"); return }
+	secondStarted = true
+	go func() { defer close(secondDone); secondErr = i.WithDefinitionReadout("session", 123, 456, func() error { secondRan.Store(true); return nil }) }()
+	select {
+	case <-secondDone:
+		if secondErr == nil || secondRan.Load() { t.Error("concurrent readout was admitted") }
+	case <-time.After(250 * time.Millisecond): t.Error("concurrent readout was not rejected promptly")
+	}
+	select { case <-ctx.Done(): case <-time.After(time.Second): t.Error("context deadline did not fire"); return }
+	snapshotStarted = true
+	go func() { defer close(snapshotDone); snap = i.eventFinalizer.snapshot() }()
+	stopSignal, snapshotSignal := stopDone, snapshotDone
+	deadline := time.NewTimer(250 * time.Millisecond)
+waitDeadline:
+	for stopSignal != nil || snapshotSignal != nil {
+		select {
+		case <-stopSignal: stopSignal = nil
+		case <-snapshotSignal: snapshotSignal = nil
+		case <-deadline.C: t.Error("deadline or snapshot blocked behind borrowed readout"); break waitDeadline
+		}
+	}
+	deadline.Stop()
+	if b.retirements.Load() != 0 { t.Error("retired resources while readout borrowed them") }
+	releaseOnce.Do(func() { close(release) })
+	secondJoined := definitionReadoutJoin(t, "second borrower", secondDone)
+	stopJoined := definitionReadoutJoin(t, "stop", stopDone)
+	snapshotJoined := definitionReadoutJoin(t, "snapshot", snapshotDone)
+	ownerJoined := definitionReadoutJoin(t, "owner", i.eventFinalizer.done)
+	if !secondJoined || !stopJoined || !snapshotJoined || !ownerJoined { return }
+	if secondErr == nil || secondRan.Load() { t.Error("concurrent readout was admitted") }
+	if !errors.Is(stop.err, context.DeadlineExceeded) || stop.observation.Phase != "failed_partial" || snap.Phase != "failed_partial" || stop.observation.ResourcesRetired || snap.ResourcesRetired || b.retirements.Load() != 0 {
+		t.Errorf("canceled borrowed readout reported final success: stop=%+v snapshot=%+v retirements=%d", stop, snap, b.retirements.Load())
+	}
+}
+
+func TestDefinitionReadoutCannotRetireWhileAsyncBorrowed(t *testing.T) {
+	i, _ := definitionReadoutFixture()
+	i.collectionSpec = nil
+	b := &definitionReadoutRetirementFixture{definitionReadoutBackendFixture: definitionReadoutBackendFixture{nativeEventStopBackend{instance: i, hold: i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }).nativeReadoutHold()}}}
+	i.eventFinalizer.backend = b
+	entered, release, actionDone, stopDone := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	var releaseOnce sync.Once
+	var actionStarted atomic.Bool
+	var stopStarted bool
+	var actionErr, stopErr error
+	var result operators.EventFinalizationObservation
+	t.Cleanup(func() {
+		cancel(); releaseOnce.Do(func() { close(release) })
+		if stopStarted { definitionReadoutJoin(t, "stop", stopDone); definitionReadoutJoin(t, "owner", i.eventFinalizer.done) }
+		if actionStarted.Load() { definitionReadoutJoin(t, "borrower", actionDone) }
+	})
+	i.eventStopOptions.AfterReadout = func(ctx context.Context) error {
+		actionStarted.Store(true)
+		go func() {
+			defer close(actionDone)
+			actionErr = i.WithDefinitionReadout("session", 123, 456, func() error { close(entered); <-release; return nil })
+		}()
+		select { case <-entered: return nil; case <-actionDone: return errors.New("readout not admitted"); case <-ctx.Done(): return ctx.Err() }
+	}
+	stopStarted = true
+	go func() { defer close(stopDone); result, stopErr = definitionReadoutModelStop(i, ctx) }()
+	if !definitionReadoutJoin(t, "stop", stopDone) { return }
+	if stopErr == nil || result.ResourcesRetired || b.retirements.Load() != 0 { t.Errorf("borrowed resources retired: observation=%+v err=%v retirements=%d", result, stopErr, b.retirements.Load()) }
+	releaseOnce.Do(func() { close(release) })
+	ownerJoined := definitionReadoutJoin(t, "owner", i.eventFinalizer.done)
+	if !ownerJoined { return }
+	if !actionStarted.Load() { t.Error("borrower was not started"); return }
+	if !definitionReadoutJoin(t, "borrower", actionDone) { return }
+	if actionErr != nil && !errors.Is(actionErr, ctx.Err()) { t.Errorf("borrower return: %v", actionErr) }
+	if b.retirements.Load() != 0 { t.Error("retired resources after failed join") }
+}
+
+func (b definitionReadoutBackendFixture) Flush() error {
+	for _, tracer := range b.instance.tracers {
+		tracer.eventDrain.flushing.Store(true)
+	}
+	return nil
+}
+func (b definitionReadoutBackendFixture) Sample() (uint64, error) {
+	return 0, nil
+}
+func (b definitionReadoutBackendFixture) Retire() error {
+	return nil
+}
+
+func definitionReadoutFixture() (*ebpfInstance, *definitionRootFixture) {
+	return definitionReadoutFixtureWithInitialDrain(nil)
+}
+
+func definitionReadoutFixtureWithInitialDrain(reader *eventDrainReader) (*ebpfInstance, *definitionRootFixture) {
+	return definitionReadoutFixtureWithClosersAndDrain(eventCloseFunctions{
+		ringReaderClose: func(*ringbuf.Reader) error { return nil },
+		perfReaderClose: func(*perf.Reader) error { return nil },
+		programClose: func(*ebpf.Program) error { return nil },
+		mapClose: func(*ebpf.Map) error { return nil },
+	}, reader)
+}
+
+func definitionReadoutFixtureWithClosers(closers eventCloseFunctions) (*ebpfInstance, *definitionRootFixture) {
+	return definitionReadoutFixtureWithClosersAndDrain(closers, nil)
+}
+
+func definitionReadoutFixtureWithClosersAndDrain(closers eventCloseFunctions, reader *eventDrainReader) (*ebpfInstance, *definitionRootFixture) {
+	hold, err := newEventReadoutHoldWithClosers(closers)
+	if err != nil { panic(err) }
+	i := eventFinalizationScopeFixture()
+	r := &definitionRootFixture{}
+	i.links = []link.Link{r}
+	i.eventStopOptions = &operators.EventFinalizationOptions{StrictFull: true, Accounting: &operators.SelectedAccountingTarget{Session: "session", PID: 123, Birth: 456}}
+	if reader == nil { reader = newEventDrainReader(); reader.finish(nil) }
+	i.tracers["openat"].eventDrain = reader
+	i.eventFinalizer = newEventStopOwner(definitionReadoutBackendFixture{nativeEventStopBackend{instance: i, hold: hold}})
+	i.eventFinalizer.admission, _ = admitEventFinalizationScope(i)
+	i.collection = &ebpf.Collection{Programs: map[string]*ebpf.Program{"capture_openat": {}}, Maps: make(map[string]*ebpf.Map)}
+	for name := range i.collectionSpec.Maps {
+		i.collection.Maps[name] = &ebpf.Map{}
+	}
+	i.tracers["openat"].lostSampleMap = i.collection.Maps["events_lost_samples"]
+	i.tracers["openat"].mapType = ebpf.RingBuf
+	i.tracers["openat"].ringbufReader = &ringbuf.Reader{}
+	// Package-private provenance fixture, not evidence of a real attachment/grace.
+	i.eventFinalizer.definitionRoot = &definitionReadoutRoot{link: r, programID: 7, admission: i.eventFinalizer.admission, collection: i.collection, program: i.collection.Programs["capture_openat"], maps: make(map[string]*ebpf.Map), reader: i.tracers["openat"].ringbufReader, drain: i.tracers["openat"].eventDrain}
+	for name, m := range i.collection.Maps {
+		i.eventFinalizer.definitionRoot.maps[name] = m
+	}
+	i.publishOwnedEventInitialization(nil)
+	return i, r
+}
+
+func definitionReadoutModelStop(i *ebpfInstance, ctx context.Context) (operators.EventFinalizationObservation, error) {
+	i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }).nativeReadoutHold().bindStopContext(ctx)
+	return i.eventFinalizer.stop(ctx)
+}
+
+func TestDefinitionRuntimeScopeAfterSpecRelease(t *testing.T) {
+	for _, kind := range []string{"supported", "missing_admission", "replaced_admission", "foreign_instance", "missing_collection", "replaced_collection", "replaced_program", "extra_program", "missing_map", "replaced_map", "extra_map", "replaced_counter", "replaced_tracer", "extra_tracer", "raw_writer", "iterator", "replaced_reader", "replaced_drain", "replaced_root"} {
+		t.Run(kind, func(t *testing.T) {
+			i, root := definitionReadoutFixture()
+			i.collectionSpec = nil // The real production Start lifecycle transition.
+			if _, err := admitEventFinalizationScope(i); err == nil {
+				t.Fatal("runtime handles minted a new admission after spec release")
+			}
+			switch kind {
+			case "missing_admission":
+				i.eventFinalizer.admission = nil
+			case "replaced_admission":
+				copy := *i.eventFinalizer.admission
+				i.eventFinalizer.admission = &copy
+			case "foreign_instance":
+				i.eventFinalizer.admission.instance = &ebpfInstance{}
+			case "missing_collection":
+				i.collection = nil
+			case "replaced_collection":
+				copy := *i.collection
+				i.collection = &copy
+			case "replaced_program":
+				i.collection.Programs["capture_openat"] = &ebpf.Program{}
+			case "extra_program":
+				i.collection.Programs["other"] = &ebpf.Program{}
+			case "missing_map":
+				delete(i.collection.Maps, "events")
+			case "replaced_map":
+				i.collection.Maps["events"] = &ebpf.Map{}
+			case "extra_map":
+				i.collection.Maps["other"] = &ebpf.Map{}
+			case "replaced_counter":
+				i.tracers["openat"].lostSampleMap = &ebpf.Map{}
+			case "replaced_tracer":
+				copy := *i.tracers["openat"]
+				i.tracers["openat"] = &copy
+			case "extra_tracer":
+				i.tracers["other"] = &Tracer{}
+			case "raw_writer":
+				i.rawDetachers = []func() error{func() error { return nil }}
+			case "iterator":
+				i.iterators = map[string]*Iterator{"other": {}}
+			case "replaced_reader":
+				i.tracers["openat"].ringbufReader = &ringbuf.Reader{}
+			case "replaced_drain":
+				i.tracers["openat"].eventDrain = newEventDrainReader()
+			case "replaced_root":
+				i.links = []link.Link{&definitionRootFixture{}}
+			}
+			hold := i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }).nativeReadoutHold()
+			hold.bindStopContext(context.Background())
+			err := (nativeEventStopBackend{instance: i, hold: hold}).Quiesce()
+			if kind == "supported" {
+				if err != nil || root.closes.Load() != 1 || !i.eventFinalizer.definitionRoot.retired {
+					t.Fatal("admitted runtime lost native retirement after spec release", err)
+				}
+			} else if err == nil || root.closes.Load() != 0 {
+				t.Fatal("changed runtime scope reached original-root close", kind, err, root.closes.Load())
+			}
+		})
+	}
+}
+
+func TestDefinitionReadoutRejectsRuntimeReplacementAfterRetirement(t *testing.T) {
+	i, root := definitionReadoutFixture()
+	i.collectionSpec = nil
+	actions := 0
+	i.eventStopOptions.AfterReadout = func(context.Context) error {
+		i.collection.Maps["events"] = &ebpf.Map{}
+		return i.WithDefinitionReadout("session", 123, 456, func() error { actions++; return nil })
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := definitionReadoutModelStop(i, ctx); err == nil || actions != 0 || root.closes.Load() != 1 {
+		t.Fatal("retirement alone admitted a changed original map", err, actions, root.closes.Load())
+	}
+}
+
+func TestDefinitionReadoutAuthorityOnlyInsideNativeJoin(t *testing.T) {
+	i, root := definitionReadoutFixture()
+	// Successful production Start frees the admitted spec before any Stop/readout.
+	i.collectionSpec = nil
+	actions := 0
+	action := func() error {
+		actions++
+		return nil
+	}
+	if err := i.WithDefinitionReadout("session", 123, 456, action); err == nil || actions != 0 {
+		t.Fatal("early readout minted authority", err, actions)
+	}
+	root.onClose = func() {
+		if err := i.WithDefinitionReadout("session", 123, 456, action); err == nil {
+			t.Error("root close opened readout before retirement")
+		}
+	}
+	i.eventStopOptions.AfterReadout = func(ctx context.Context) error {
+		if !i.eventFinalizer.mu.TryLock() {
+			return errors.New("callback invoked under event-owner mutex")
+		}
+		joined := i.eventFinalizer.observation.ReceiverJoined
+		i.eventFinalizer.mu.Unlock()
+		if joined {
+			return errors.New("public join snapshot published before callback returned")
+		}
+		for _, target := range []operators.SelectedAccountingTarget{
+			{Session: "other", PID: 123, Birth: 456},
+			{Session: "session", PID: 124, Birth: 456},
+			{Session: "session", PID: 123, Birth: 457},
+		} {
+			if err := i.WithDefinitionReadout(target.Session, target.PID, target.Birth, action); err == nil {
+				return errors.New("wrong target admitted in readout window")
+			}
+		}
+		return i.WithDefinitionReadout("session", 123, 456, action)
+	}
+	if err := i.eventStopOptions.AfterReadout(context.Background()); err == nil || actions != 0 {
+		t.Fatal("manually invoked callback authorized itself", err, actions)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	var done [2]chan struct{}
+	var stopErr [2]error
+	var launched int
+	for n := range done { done[n] = make(chan struct{}) }
+	t.Cleanup(func() {
+		cancel()
+		for n := 0; n < launched; n++ { definitionReadoutJoin(t, "stop caller", done[n]) }
+		if launched != 0 { definitionReadoutJoin(t, "stop owner", i.eventFinalizer.done) }
+	})
+	stop := func() error {
+		n := launched
+		launched++
+		go func() { defer close(done[n]); _, stopErr[n] = definitionReadoutModelStop(i, ctx) }()
+		select {
+		case <-done[n]:
+			if !definitionReadoutJoin(t, "stop owner", i.eventFinalizer.done) { return errors.New("stop owner did not finish") }
+			return stopErr[n]
+		case <-ctx.Done(): return ctx.Err()
+		}
+	}
+	if err := stop(); err != nil {
+		t.Fatal("normal native Join did not open bounded authority, or held callback mutex", err)
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.WithDefinitionReadout("session", 123, 456, action); err == nil || actions != 1 || root.closes.Load() != 1 {
+		t.Fatal("window survived exit or stop reran", err, actions, root.closes.Load())
+	}
+}
+
+func TestDefinitionReadoutAuthorityRefusesUnownedRoots(t *testing.T) {
+	for _, kind := range []string{"missing_root", "missing_program_identity", "replaced_root", "extra_alias", "wrong_profile", "close_eperm", "reader_eacces", "cancelled"} {
+		t.Run(kind, func(t *testing.T) {
+			i, root := definitionReadoutFixture()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			switch kind {
+			case "missing_root":
+				i.eventFinalizer.definitionRoot = nil
+			case "missing_program_identity":
+				i.eventFinalizer.definitionRoot.programID = 0
+			case "replaced_root":
+				i.links = []link.Link{&definitionRootFixture{}}
+			case "extra_alias":
+				i.links = append(i.links, root)
+			case "wrong_profile":
+				i.collectionSpec.Programs["capture_openat"].SectionName = "kprobe/__x64_sys_close"
+			case "close_eperm":
+				root.closeErr = unix.EPERM
+			case "reader_eacces":
+				i.tracers["openat"].eventDrain.err = unix.EACCES
+			case "cancelled":
+				cancel()
+			}
+			rootsBefore := append([]link.Link(nil), i.links...)
+			actions := 0
+			i.eventStopOptions.AfterReadout = func(context.Context) error {
+				return i.WithDefinitionReadout("session", 123, 456, func() error {
+					actions++
+					return nil
+				})
+			}
+			_, err := definitionReadoutModelStop(i, ctx)
+			if err == nil || actions != 0 {
+				t.Fatal("unowned or failed source admitted", kind, err, actions)
+			}
+			if kind == "close_eperm" && !errors.Is(err, unix.EPERM) {
+				t.Fatal("close errno lost", err)
+			}
+			if kind == "reader_eacces" && !errors.Is(err, unix.EACCES) {
+				t.Fatal("reader errno lost", err)
+			}
+			if kind != "close_eperm" && kind != "reader_eacces" && kind != "cancelled" {
+				for _, candidate := range rootsBefore {
+					if candidate.(*definitionRootFixture).closes.Load() != 0 {
+						t.Fatal("unsupported root was closed before ownership rejection", kind)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestDefinitionReadoutAuthorityWaitsForNativeReader(t *testing.T) {
+	reader := newEventDrainReader()
+	i, root := definitionReadoutFixtureWithInitialDrain(reader)
+	retired, stopDone, earlyDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	root.onClose = func() { close(retired) }
+	var actions atomic.Uint32
+	var finishOnce sync.Once
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	var stopStarted, earlyStarted bool
+	var stopErr, earlyErr error
+	t.Cleanup(func() {
+		cancel(); finishOnce.Do(func() { reader.finish(nil) })
+		if earlyStarted { definitionReadoutJoin(t, "early borrower", earlyDone) }
+		if stopStarted { definitionReadoutJoin(t, "reader stop", stopDone); definitionReadoutJoin(t, "reader owner", i.eventFinalizer.done) }
+	})
+	i.eventStopOptions.AfterReadout = func(context.Context) error {
+		return i.WithDefinitionReadout("session", 123, 456, func() error { actions.Add(1); return nil })
+	}
+	stopStarted = true
+	go func() { defer close(stopDone); _, stopErr = definitionReadoutModelStop(i, ctx) }()
+	select { case <-retired: case <-ctx.Done(): t.Error("root did not reach retirement", ctx.Err()); return }
+	earlyStarted = true
+	go func() { defer close(earlyDone); earlyErr = i.WithDefinitionReadout("session", 123, 456, func() error { actions.Add(1); return nil }) }()
+	if !definitionReadoutJoin(t, "early borrower", earlyDone) { return }
+	if earlyErr == nil || actions.Load() != 0 { t.Error("root retirement alone opened authority before native reader join", earlyErr) }
+	finishOnce.Do(func() { reader.finish(nil) })
+	stopJoined := definitionReadoutJoin(t, "reader stop", stopDone)
+	ownerJoined := definitionReadoutJoin(t, "reader owner", i.eventFinalizer.done)
+	if !stopJoined || !ownerJoined { return }
+	if stopErr != nil || actions.Load() != 1 { t.Error("joined reader failed to authorize exactly one callback action", stopErr, actions.Load()) }
+}
+
+func TestDefinitionReadoutAuthorityRechecksContextAndRevokesOnError(t *testing.T) {
+	i, _ := definitionReadoutFixture()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	i.eventStopOptions.AfterReadout = func(context.Context) error {
+		return i.WithDefinitionReadout("session", 123, 456, func() error {
+			cancel()
+			return nil
+		})
+	}
+	if _, err := definitionReadoutModelStop(i, ctx); !errors.Is(err, context.Canceled) {
+		t.Fatal("cancelled action persisted success", err)
+	}
+	if err := i.WithDefinitionReadout("session", 123, 456, func() error {
+		t.Error("closed window invoked action")
+		return nil
+	}); err == nil {
+		t.Fatal("failed callback window survived")
+	}
+}
+
+// This is a model of the actual borrower lifetime, not native attachment evidence.
+func TestDefinitionReadoutModelBorrowerOutlivesOuterJoin(t *testing.T) {
+	var effects atomic.Uint32
+	var effectMu sync.Mutex
+	seen := make(map[any]uint32)
+	record := func(resource any) { effectMu.Lock(); seen[resource]++; effectMu.Unlock(); effects.Add(1) }
+	closers := eventCloseFunctions{
+		ringReaderClose: func(r *ringbuf.Reader) error { record(r); return nil },
+		perfReaderClose: func(r *perf.Reader) error { record(r); return nil },
+		programClose: func(p *ebpf.Program) error { record(p); return nil },
+		mapClose: func(m *ebpf.Map) error { record(m); return unix.EACCES },
+	}
+	i, root := definitionReadoutFixtureWithClosers(closers)
+	i.collectionSpec = nil
+	h := i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }).nativeReadoutHold()
+	expected := make(map[any]bool)
+	expected[i.tracers["openat"].ringbufReader] = true
+	for _, p := range i.collection.Programs { expected[p] = true }
+	for _, m := range i.collection.Maps { expected[m] = true }
+	ctx, cancel := context.WithCancel(context.Background())
+	entered, release, borrowerDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	stopDone, receiverDone := make(chan struct{}), make(chan struct{})
+	closeRequestDone, cleanupCloseDone := make(chan struct{}), make(chan struct{})
+	var closeRequestErr, cleanupCloseErr error
+	var closeStarted bool
+	var releaseOnce sync.Once
+	var borrowerStarted atomic.Bool
+	var borrowerErr, stopErr, secondErr error
+	var secondRan atomic.Bool
+	var stopStarted, receiverStarted bool
+	wait := func(name string, done <-chan struct{}) {
+		select { case <-done: case <-time.After(2 * time.Second): t.Errorf("%s did not finish", name) }
+	}
+	t.Cleanup(func() {
+		cancel()
+		releaseOnce.Do(func() { close(release) })
+		if receiverStarted { wait("receiver", receiverDone) }
+		if stopStarted { wait("stop", stopDone) }
+		if borrowerStarted.Load() { wait("borrower", borrowerDone) }
+		if closeStarted { wait("close request", closeRequestDone) }
+		go func() { defer close(cleanupCloseDone); cleanupCloseErr = closeEventCollection(i) }()
+		select {
+		case <-cleanupCloseDone:
+			var pending *eventDisposalPending
+			if cleanupCloseErr != nil && !errors.As(cleanupCloseErr, &pending) && !errors.Is(cleanupCloseErr, unix.EACCES) { t.Errorf("cleanup close: %v", cleanupCloseErr) }
+		case <-time.After(2 * time.Second): t.Error("cleanup close request did not finish")
+		}
+		wait("disposal", h.closeDone)
+	})
+	i.wg.Add(1)
+	receiverStarted = true
+	go func() { defer close(receiverDone); defer i.wg.Done() }()
+	wait("receiver", receiverDone)
+	i.eventStopOptions.AfterReadout = func(context.Context) error {
+		borrowerStarted.Store(true)
+		go func() {
+			defer close(borrowerDone)
+			borrowerErr = i.WithDefinitionReadout("session", 123, 456, func() error {
+				close(entered)
+				<-release
+				return nil
+			})
+		}()
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second): return errors.New("borrower action did not enter")
+		}
+		secondErr = i.WithDefinitionReadout("session", 123, 456, func() error { secondRan.Store(true); return nil })
+		return nil
+	}
+	stopStarted = true
+	go func() { defer close(stopDone); _, stopErr = definitionReadoutModelStop(i, ctx) }()
+	select { case <-entered: case <-time.After(2 * time.Second): t.Fatal("borrower did not enter") }
+	select { case <-stopDone: case <-time.After(2 * time.Second): t.Fatal("outer join did not return") }
+	if stopErr == nil || secondErr == nil || secondRan.Load() { t.Errorf("outer join or competing borrower unexpectedly succeeded: %v / %v", stopErr, secondErr) }
+	h.stateMu.Lock()
+	phase, uses := h.phase, h.activeUses
+	h.stateMu.Unlock()
+	if phase != eventReadoutConsumed || uses != 1 { t.Errorf("outer return lost borrower: phase=%v uses=%d", phase, uses) }
+	closeStarted = true
+	go func() { defer close(closeRequestDone); closeRequestErr = closeEventCollection(i) }()
+	select { case <-closeRequestDone: case <-time.After(2 * time.Second): t.Fatal("close request did not return promptly") }
+	var pending *eventDisposalPending
+	if !errors.As(closeRequestErr, &pending) { t.Errorf("close was not pending: %v", closeRequestErr) }
+	if effects.Load() != 0 || root.closes.Load() != 1 { t.Errorf("physical effects while borrowed: %d root=%d", effects.Load(), root.closes.Load()) }
+	if err := i.WithDefinitionReadout("session", 123, 456, func() error { return nil }); err == nil { t.Error("expired window admitted another borrower") }
+	if _, err := (nativeEventStopBackend{instance: i, hold: h}).Sample(); err == nil { t.Error("sample admitted after seal") }
+	cancel()
+	select { case <-borrowerDone: t.Error("cancellation released blocked action"); default: }
+	releaseOnce.Do(func() { close(release) })
+	select { case <-borrowerDone: case <-time.After(2 * time.Second): t.Fatal("borrower did not return") }
+	if !errors.Is(borrowerErr, context.Canceled) { t.Errorf("borrower missed first context cancellation: %v", borrowerErr) }
+	select { case <-h.closeDone: case <-time.After(2 * time.Second): t.Fatal("disposal did not finish") }
+	h.stateMu.Lock()
+	remaining := h.activeUses
+	h.stateMu.Unlock()
+	i.eventFinalizer.mu.Lock()
+	leased := i.eventFinalizer.definitionLeased
+	i.eventFinalizer.mu.Unlock()
+	if remaining != 0 || leased { t.Errorf("borrower release incomplete: uses=%d leased=%v", remaining, leased) }
+	if !errors.Is(h.closeErr, unix.EACCES) { t.Errorf("close failure lost: %v", h.closeErr) }
+	if err := closeEventCollection(i); !errors.Is(err, unix.EACCES) { t.Errorf("repeated close lost original failure: %v", err) }
+	effectMu.Lock()
+	observed := make(map[any]uint32, len(seen))
+	for resource, count := range seen { observed[resource] = count }
+	effectMu.Unlock()
+	if len(observed) != len(expected) { t.Errorf("closed resource identities=%d want=%d", len(observed), len(expected)) }
+	for resource := range expected { if observed[resource] != 1 { t.Errorf("resource %T close count=%d", resource, observed[resource]) } }
+	if got, want := effects.Load(), uint32(len(expected)); got != want { t.Errorf("physical close count=%d want=%d", got, want) }
+	if _, err := i.eventFinalizer.result(); err == nil { t.Error("late failure became positive") }
+}
+
+func TestDefinitionReadoutModelRejectsUnavailableHold(t *testing.T) {
+	i, _ := definitionReadoutFixture()
+	i.eventFinalizer.backend = definitionReadoutBackendFixture{nativeEventStopBackend{instance: i}}
+	ran := false
+	err := i.WithDefinitionReadout("session", 123, 456, func() error { ran = true; return nil })
+	if err == nil || ran { t.Errorf("missing hold admitted action: %v", err) }
+}
+
+func TestDefinitionReadoutModelRejectsUnreadyAndSealedHold(t *testing.T) {
+	for _, mode := range []string{"unready", "failed", "sealed"} {
+		t.Run(mode, func(t *testing.T) {
+			i, _ := definitionReadoutFixture()
+			old := i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }).nativeReadoutHold()
+			h, err := newEventReadoutHoldWithClosers(old.closers)
+			if err != nil { t.Fatal(err) }
+			i.eventFinalizer.backend = definitionReadoutBackendFixture{nativeEventStopBackend{instance: i, hold: h}}
+			if mode == "failed" { i.publishOwnedEventInitialization(unix.EACCES) }
+			if mode == "sealed" { i.publishOwnedEventInitialization(nil); h.sealResourceUses() }
+			ran := false
+			err = h.withAfterReadout(context.Background(), func(context.Context) error { ran = true; return nil })
+			if err == nil || ran { t.Errorf("%s hold admitted callback: %v", mode, err) }
+		})
+	}
+}
+
+// Each worker is an actual borrower; the pointer mutation targets RuntimeScope only.
+func TestDefinitionReadoutModelUnwindsAndReleasesReservation(t *testing.T) {
+	i, _ := definitionReadoutFixture()
+	i.collectionSpec = nil
+	h := i.eventFinalizer.backend.(interface{ nativeReadoutHold() *eventReadoutHold }).nativeReadoutHold()
+	ctx, cancel := context.WithCancel(context.Background())
+	sentinel, panicToken := errors.New("model borrower error"), errors.New("model borrower panic")
+	type outcome struct { err error; panicValue any; uses uint32; leased bool; followErr error }
+	var results [3]outcome
+	var started [3]atomic.Bool
+	var calls [3]atomic.Uint32
+	var followCalls atomic.Uint32
+	var workerDone [3]chan struct{}
+	for n := range workerDone { workerDone[n] = make(chan struct{}) }
+	stopDone, closeRequestDone := make(chan struct{}), make(chan struct{})
+	var stopErr, closeErr error
+	var stopStarted, closeStarted bool
+	originalCounter := i.tracers["openat"].lostSampleMap
+	wait := func(name string, done <-chan struct{}) bool {
+		select { case <-done: return true; case <-time.After(2 * time.Second): t.Errorf("%s did not finish", name); return false }
+	}
+	requestClose := func() {
+		closeStarted = true
+		go func() { defer close(closeRequestDone); closeErr = closeEventCollection(i) }()
+	}
+	t.Cleanup(func() {
+		cancel()
+		ownerDone := !stopStarted
+		if stopStarted { wait("stop", stopDone); ownerDone = wait("owner", i.eventFinalizer.done) }
+		allDone := true
+		for n := range workerDone { if started[n].Load() && !wait("borrower", workerDone[n]) { allDone = false } }
+		if allDone && ownerDone { i.tracers["openat"].lostSampleMap = originalCounter }
+		if !closeStarted { requestClose() }
+		if wait("close request", closeRequestDone) {
+			var pending *eventDisposalPending
+			if closeErr != nil && !errors.As(closeErr, &pending) { t.Errorf("cleanup close request: %v", closeErr) }
+			if wait("physical disposal", h.closeDone) && h.closeErr != nil { t.Errorf("cleanup disposal: %v", h.closeErr) }
+		}
+	})
+	i.eventStopOptions.AfterReadout = func(context.Context) error {
+		for n := range workerDone {
+			if err := ctx.Err(); err != nil { return err }
+			if n == 2 { i.tracers["openat"].lostSampleMap = &ebpf.Map{} }
+			started[n].Store(true)
+			go func(n int) {
+				defer func() { results[n].panicValue = recover(); close(workerDone[n]) }()
+				results[n].err = i.WithDefinitionReadout("session", 123, 456, func() error {
+					calls[n].Add(1)
+					switch n { case 0: return sentinel; case 1: panic(panicToken); default: return nil }
+				})
+			}(n)
+			select { case <-workerDone[n]: case <-time.After(2 * time.Second): return errors.New("borrower did not unwind") }
+			if n == 2 { i.tracers["openat"].lostSampleMap = originalCounter }
+			h.stateMu.Lock(); results[n].uses = h.activeUses; h.stateMu.Unlock()
+			i.eventFinalizer.mu.Lock(); results[n].leased = i.eventFinalizer.definitionLeased; i.eventFinalizer.mu.Unlock()
+			results[n].followErr = i.WithDefinitionReadout("session", 123, 456, func() error { followCalls.Add(1); return nil })
+		}
+		return nil
+	}
+	stopStarted = true
+	go func() { defer close(stopDone); _, stopErr = definitionReadoutModelStop(i, ctx) }()
+	if !wait("stop", stopDone) { t.Fatal("outer stop timed out") }
+	if !wait("owner", i.eventFinalizer.done) { t.Fatal("owner did not finish") }
+	for n := range workerDone {
+		if started[n].Load() && !wait("borrower", workerDone[n]) { t.Fatal("borrower did not finish") }
+	}
+	requestClose()
+	if !wait("close request", closeRequestDone) { t.Fatal("close request timed out") }
+	if !wait("physical disposal", h.closeDone) { t.Fatal("disposal timed out") }
+	if stopErr != nil { t.Errorf("outer stop: %v", stopErr) }
+	if !errors.Is(results[0].err, sentinel) || calls[0].Load() != 1 { t.Errorf("error not preserved: %v", results[0].err) }
+	if results[1].panicValue != panicToken || calls[1].Load() != 1 { t.Errorf("panic not propagated: %v", results[1].panicValue) }
+	if results[2].err == nil || !strings.Contains(results[2].err.Error(), "original reader/counter changed") || calls[2].Load() != 0 { t.Errorf("RuntimeScope gate: %v actions=%d", results[2].err, calls[2].Load()) }
+	for n, result := range results {
+		if result.uses != 1 || result.leased || result.followErr != nil { t.Errorf("borrower %d not released: uses=%d leased=%v follow=%v", n, result.uses, result.leased, result.followErr) }
+	}
+	if followCalls.Load() != 3 { t.Errorf("live-window follow-up calls=%d", followCalls.Load()) }
+	if h.closeErr != nil { t.Errorf("physical disposal: %v", h.closeErr) }
+}

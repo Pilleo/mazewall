@@ -67,7 +67,19 @@ func (t *Tracer) DrainTraceReader(ctx context.Context) error {
 	}
 	return nil
 }
-func (t *Tracer) QuiesceDefinitionSources(ctx context.Context) error {
+func (t *Tracer) QuiesceDefinitionSources(ctx context.Context) (err error) {
+	if s := t.definitionSource; s != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.err != nil {
+			return s.err
+		}
+		defer func() {
+			if err != nil {
+				s.err = err
+			}
+		}()
+	}
 	c := t.traceReaderCounters.drain
 	if c == nil {
 		return fmt.Errorf("owned definition reader not started")

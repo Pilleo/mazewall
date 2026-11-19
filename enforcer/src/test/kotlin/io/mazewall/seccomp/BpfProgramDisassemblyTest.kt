@@ -1,28 +1,23 @@
 package io.mazewall.seccomp
 
-import io.mazewall.enforcer.api.*
-import io.mazewall.platform.fd.*
-import io.mazewall.platform.lifecycle.*
-import io.mazewall.platform.native.*
-import io.mazewall.platform.process.*
-import io.mazewall.platform.socket.*
-import io.mazewall.platform.syscall.*
-import org.junit.jupiter.api.Assertions.assertEquals
+import io.mazewall.platform.syscall.SeccompAction
 import org.junit.jupiter.api.Test
+import kotlin.test.assertEquals
 
 class BpfProgramDisassemblyTest {
     @Test
     fun `disassemble renders indexed classic BPF mnemonics`() {
-        val program = BpfProgram<BpfStatus.Unverified>(
+        val program = BpfProgram.unverified(
             listOf(
-                BpfInstruction.Ld(0x20, 4),
-                BpfInstruction.Jmp(0x15, 1, 2, 59),
-                BpfInstruction.Alu(0x54, 0xff),
-                BpfInstruction.Ret(0x06, 0x7fff0000),
-                BpfInstruction.Jmp(0x05, 0, 0, 3),
+                BpfInstruction.Ld(4),
+                BpfInstruction.Jmp(BpfInstruction.Comparison.EQUAL, 1, 2, 59),
+                BpfInstruction.Alu(0xff),
+                BpfInstruction.Ret(SeccompAction.ACT_ALLOW),
+                BpfInstruction.Ja(3),
+                BpfInstruction.Jmp(BpfInstruction.Comparison.GREATER_THAN, 0, 1, 42),
+                BpfInstruction.Jmp(BpfInstruction.Comparison.BITS_SET, 1, 0, 4),
             ),
         )
-
         assertEquals(
             """
             0000: ld [4]
@@ -30,19 +25,9 @@ class BpfProgramDisassemblyTest {
             0002: and #0xff
             0003: ret #0x7fff0000
             0004: ja +3
+            0005: jgt #42, +0, +1
+            0006: jset #4, +1, +0
             """.trimIndent(),
-            program.disassemble(),
-        )
-    }
-
-    @Test
-    fun `disassemble preserves unknown instructions as raw fields`() {
-        val program = BpfProgram<BpfStatus.Unverified>(
-            listOf(BpfInstruction.Jmp(0x35, 7, 9, 0x1234)),
-        )
-
-        assertEquals(
-            "0000: raw(code=0x35, jt=7, jf=9, k=0x1234)",
             program.disassemble(),
         )
     }

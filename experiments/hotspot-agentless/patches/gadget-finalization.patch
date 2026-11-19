@@ -1,9 +1,40 @@
 --- a/pkg/operators/ebpf/ebpf.go
 +++ b/pkg/operators/ebpf/ebpf.go
-@@ -169,8 +169,11 @@
+@@ -169,12 +169,47 @@
  	return newInstance, nil
  }
  
++type eventStartState uint8
++
++const (
++	eventStartIdle eventStartState = iota
++	eventStartStarting
++	eventStartOwnedClaimed
++)
++
++func (i *ebpfInstance) beginEventStart() error {
++	i.mu.Lock()
++	if i.eventStart != eventStartIdle {
++		i.mu.Unlock()
++		return fmt.Errorf("event instance start already claimed")
++	}
++	i.eventStart = eventStartStarting
++	i.mu.Unlock()
++	return nil
++}
++
++func (i *ebpfInstance) finishEventStart(ownedRequested bool) {
++	i.mu.Lock()
++	if i.eventStart == eventStartStarting {
++		if ownedRequested || i.eventFinalizer != nil {
++			i.eventStart = eventStartOwnedClaimed
++		} else {
++			i.eventStart = eventStartIdle
++		}
++	}
++	i.mu.Unlock()
++}
++
  type ebpfInstance struct {
 +	eventFinalizer *eventStopOwner
 +	eventStopOptions *operators.EventFinalizationOptions
@@ -12,10 +43,86 @@
  	bpfOperator *ebpfOperator
  
  	config *viper.Viper
+ 
++	eventStart eventStartState
+ 	program        []byte
+ 	logger         logger.Logger
+ 	collectionSpec *ebpf.CollectionSpec
+@@ -712,7 +747,12 @@
+ 	return nil
+ }
+ 
+-func (i *ebpfInstance) Start(gadgetCtx operators.GadgetContext) error {
++func (i *ebpfInstance) Start(gadgetCtx operators.GadgetContext) (startErr error) {
++	_, ownedRequested := gadgetCtx.GetVar(operators.EventFinalizationOptionsKey)
++	if err := i.beginEventStart(); err != nil {
++		return err
++	}
++	defer i.finishEventStart(ownedRequested)
+ 	i.logger.Debugf("starting ebpfInstance")
+ 
+ 	gadgets.FixBpfKtimeGetBootNs(i.collectionSpec.Programs)
+@@ -729,6 +769,11 @@
+ 		return fmt.Errorf("parsing parameter values: %w", err)
+ 	}
+ 
++	if err := i.prepareEventFinalization(gadgetCtx, paramMap); err != nil {
++		return err
++	}
++	defer func() { i.publishOwnedEventInitialization(startErr) }()
++
+ 	if paramMap[ParamTraceKernel].AsBool() {
+ 		err := i.tracePipe(gadgetCtx)
+ 		if err != nil {
+@@ -891,6 +936,9 @@
+ 		return fmt.Errorf("creating eBPF collection: %w", err)
+ 	}
+ 	i.collection = collection
++	if err := i.bindPreparedSelectedAccounting(); err != nil {
++		return errors.Join(err, closeEventCollection(i))
++	}
+ 
+ 	// Load the OTel entry programs into their type-matching prog-array maps.
+ 	// OTel symbolization uses BPF tail calls, which require the tail-called
+@@ -1013,6 +1061,13 @@
+ 		}
+ 
+ 		i.links = append(i.links, l)
++		if err := i.retainDefinitionRoot(i.collection.Programs[progName], l); err != nil {
++			closeErr := l.Close()
++			if closeErr == nil {
++				i.links = i.links[:len(i.links)-1]
++			}
++			return errors.Join(err, closeErr)
++		}
+ 
+ 		// We need to store iterators' links because we need them to run the programs
+ 		if p.Type == ebpf.Tracing && strings.HasPrefix(p.SectionName, iterPrefix) {
+@@ -1071,6 +1126,7 @@
+ }
+ 
+ func (i *ebpfInstance) Stop(gadgetCtx operators.GadgetContext) error {
++	if i.eventFinalizer != nil { return i.stopOwnedEvents() }
+ 	for _, t := range i.tracers {
+ 		t.close()
+ 	}
+@@ -1101,9 +1157,12 @@
+ }
+ 
+ func (i *ebpfInstance) Close(gadgetCtx operators.GadgetContext) error {
++	if i.eventFinalizer != nil {
++		if err := i.closeOwnedEvents(); err != nil { return err }
++	}
+ 	i.detachRawPrograms()
+ 
+-	if i.collection != nil {
++	if i.eventFinalizer == nil && i.collection != nil {
+ 		i.collection.Close()
+ 		i.collection = nil
+ 	}
 --- a/pkg/operators/ebpf/tracer.go
 +++ b/pkg/operators/ebpf/tracer.go
-@@ -34,8 +34,9 @@
- 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
+@@ -35,6 +35,7 @@
  )
  
  type Tracer struct {
@@ -23,10 +130,7 @@
  	mapName    string
  	structName string
  
- 	ds              datasource.DataSource
---- a/pkg/operators/ebpf/tracer.go
-+++ b/pkg/operators/ebpf/tracer.go
-@@ -124,8 +124,11 @@
+@@ -123,8 +124,11 @@
  	return nil
  }
  
@@ -39,7 +143,7 @@
  
  	var readCb func() (data []byte, lost uint64, err error)
  
-@@ -139,7 +142,7 @@
+@@ -138,7 +142,7 @@
  		var rec ringbuf.Record
  		lostSamples := uint64(0)
  
@@ -48,7 +152,7 @@
  			readLostSamples := func() {
  				ticker := time.NewTicker(time.Second)
  				defer ticker.Stop()
-@@ -203,6 +206,10 @@
+@@ -202,6 +206,10 @@
  	for {
  		sample, lost, err := readCb()
  		if err != nil {
@@ -59,7 +163,7 @@
  			if errors.Is(err, os.ErrClosed) {
  				return err
  			}
-@@ -214,7 +221,9 @@
+@@ -213,7 +221,9 @@
  			gadgetCtx.Logger().Warnf("reading event: lost %d samples", lost)
  		}
  
@@ -69,7 +173,7 @@
  			gadgetCtx.Logger().Warnf("error processing event: %v", err)
  			continue
  		}
-@@ -328,6 +337,7 @@
+@@ -327,6 +337,7 @@
  		}
  	}
  
@@ -77,40 +181,15 @@
  	i.wg.Add(1)
  	go tracer.receiveEvents(gadgetCtx, &i.wg)
  
---- a/pkg/operators/ebpf/ebpf.go
-+++ b/pkg/operators/ebpf/ebpf.go
-@@ -731,6 +731,10 @@
- 		return fmt.Errorf("parsing parameter values: %w", err)
- 	}
- 
-+	if err := i.prepareEventFinalization(gadgetCtx, paramMap); err != nil {
-+		return err
-+	}
-+
- 	if paramMap[ParamTraceKernel].AsBool() {
- 		err := i.tracePipe(gadgetCtx)
- 		if err != nil {
-@@ -895 +899,4 @@
--	i.collection = collection
-+	i.collection = collection
-+	if err := i.bindPreparedSelectedAccounting(); err != nil {
-+		return errors.Join(err, closeEventCollection(i))
-+	}
-@@ -1073,6 +1080,7 @@
- }
- 
- func (i *ebpfInstance) Stop(gadgetCtx operators.GadgetContext) error {
-+	if i.eventFinalizer != nil { return i.stopOwnedEvents() }
- 	for _, t := range i.tracers {
- 		t.close()
- 	}
-@@ -1103,6 +1108,9 @@
- }
- 
- func (i *ebpfInstance) Close(gadgetCtx operators.GadgetContext) error {
-+	if i.eventFinalizer != nil {
-+		if err := i.closeOwnedEvents(); err != nil { return err }
-+	}
- 	i.detachRawPrograms()
- 
- 	if i.collection != nil {
+--- a/pkg/operators/ebpf/attach.go
++++ b/pkg/operators/ebpf/attach.go
+@@ -65,6 +65,9 @@
+ 		switch {
+ 		case strings.HasPrefix(p.SectionName, kprobePrefix):
+ 			i.logger.Debugf("Attaching kprobe %q to %q", p.Name, attachTo)
++			if i.definitionReadoutConfigured() && attachTo != "__x64_sys_openat" {
++				return nil, fmt.Errorf("definition root attach target changed")
++			}
+ 			return link.Kprobe(attachTo, prog, nil)
+ 		case strings.HasPrefix(p.SectionName, kretprobePrefix):
+ 			i.logger.Debugf("Attaching kretprobe %q to %q", p.Name, attachTo)

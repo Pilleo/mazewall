@@ -1,0 +1,636 @@
+--- a/kallsyms/kallsyms.go
++++ b/kallsyms/kallsyms.go
+@@ -9,9 +9,9 @@
+ 	"bufio"
+ 	"bytes"
+ 	"context"
+-	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+ 	"errors"
+ 	"fmt"
++	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+ 	"io"
+ 	"os"
+ 	"path"
+@@ -40,7 +40,12 @@
+ const pointerBits = int(unsafe.Sizeof(libpf.Address(0)) * 8)
+ 
+ // sysModule is the sysfs path for module metadata
+-const sysModule = "/sys/module"
++var (
++	sysModule       = "/sys/module"
++	openKallsyms    = func() (io.ReadCloser, error) { return os.Open("/proc/kallsyms") }
++	reloadAfter     = time.After
++	kobjectReceiver = func(c *kobject.Client) (*kobject.Event, error) { return c.Receive() }
++)
+ 
+ var ErrSymbolPermissions = errors.New("unable to read kallsyms addresses - check capabilities")
+ 
+@@ -93,6 +98,8 @@
+ 
+ 	reloadModules chan libpf.Void
+ 	reloadSymbols chan libpf.Void
++
++	scope *periodiccaller.OwnedScope
+ }
+ 
+ // NewSymbolizer creates and returns a new kallsyms symbolizer and loads
+@@ -476,7 +483,7 @@
+ // loadKallsyms will reload kernel symbols. This function can run concurrently with
+ // module and symbol lookups. The reload result is visible atomically after success.
+ func (s *Symbolizer) loadKallsyms() error {
+-	file, err := os.Open("/proc/kallsyms")
++	file, err := openKallsyms()
+ 	if err != nil {
+ 		return fmt.Errorf("unable to open kallsyms: %v", err)
+ 	}
+@@ -554,6 +561,10 @@
+ 
+ // reloadWorker is the goroutine handling the reloads of the kallsyms.
+ func (s *Symbolizer) reloadWorker(ctx context.Context, kobjectClient *kobject.Client) {
++	scope := periodiccaller.OwnedScopeFrom(ctx)
++	var activeModulesOp *periodiccaller.OwnedOperation
++	var activeSymbolsOp *periodiccaller.OwnedOperation
++
+ 	noTimeout := make(<-chan time.Time)
+ 	nextKallsymsReload := noTimeout
+ 	nextModulesReload := noTimeout
+@@ -563,36 +574,69 @@
+ 			// Just trigger reloading of modules with small delay to batch
+ 			// potentially multiple module loads.
+ 			if nextModulesReload == noTimeout {
+-				nextModulesReload = time.After(100 * time.Millisecond)
++				activeModulesOp, _ = scope.AdmitKind(libpf.AuxiliarySourceModuleExec)
++				nextModulesReload = reloadAfter(100 * time.Millisecond)
+ 			}
+ 		case <-nextModulesReload:
+-			if reloadSymbols, err := s.loadModules(); err == nil {
++			reloadSymbols, err := s.loadModules()
++			op := activeModulesOp
++			activeModulesOp = nil
++			if err == nil {
++				if op != nil {
++					_ = op.Complete()
++				}
+ 				log.Debugf("Kernel modules metadata reloaded, new symbols: %v", reloadSymbols)
+ 				nextModulesReload = noTimeout
+ 				if reloadSymbols && nextKallsymsReload == noTimeout {
+-					nextKallsymsReload = time.After(time.Minute)
++					activeSymbolsOp, _ = scope.AdmitKind(libpf.AuxiliarySourceSymbolExec)
++					nextKallsymsReload = reloadAfter(time.Minute)
+ 				}
+ 			} else {
++				if op != nil {
++					_ = op.Fail(err)
++				}
+ 				log.Warnf("Failed to reload kernel modules metadata: %v", err)
+-				nextModulesReload = time.After(10 * time.Second)
++				activeModulesOp, _ = scope.AdmitKind(libpf.AuxiliarySourceModuleExec)
++				nextModulesReload = reloadAfter(10 * time.Second)
+ 			}
+ 		case <-s.reloadSymbols:
+ 			// Just trigger reloading of symbols with small delay to batch
+ 			// potentially multiple module loads.
+ 			if nextKallsymsReload == noTimeout {
+-				nextKallsymsReload = time.After(100 * time.Millisecond)
++				activeSymbolsOp, _ = scope.AdmitKind(libpf.AuxiliarySourceSymbolExec)
++				nextKallsymsReload = reloadAfter(100 * time.Millisecond)
+ 			}
+ 		case <-nextKallsymsReload:
+-			if err := s.loadKallsyms(); err == nil {
++			err := s.loadKallsyms()
++			op := activeSymbolsOp
++			activeSymbolsOp = nil
++			if err == nil {
++				if op != nil {
++					_ = op.Complete()
++				}
+ 				log.Debugf("Kernel symbols reloaded")
+ 				nextKallsymsReload = noTimeout
+ 			} else {
++				if op != nil {
++					_ = op.Fail(err)
++				}
+ 				log.Warnf("Failed to reload kernel symbols: %v", err)
+-				nextKallsymsReload = time.After(time.Minute)
++				activeSymbolsOp, _ = scope.AdmitKind(libpf.AuxiliarySourceSymbolExec)
++				nextKallsymsReload = reloadAfter(time.Minute)
+ 			}
+ 		case <-ctx.Done():
++			if activeModulesOp != nil {
++				_ = activeModulesOp.Abort()
++				activeModulesOp = nil
++			}
++			if activeSymbolsOp != nil {
++				_ = activeSymbolsOp.Abort()
++				activeSymbolsOp = nil
++			}
+ 			// Terminate also the kobject poller thread
+-			if periodiccaller.OwnedScopeFrom(ctx) == nil { _ = kobjectClient.Close() }
++			if periodiccaller.OwnedScopeFrom(ctx) == nil {
++				_ = kobjectClient.Close()
++			}
+ 			return
+ 		}
+ 	}
+@@ -600,19 +644,28 @@
+ 
+ // pollKobjectClient listens for kernel kobject events to reload kallsyms when needed.
+ func (s *Symbolizer) pollKobjectClient(ctx context.Context, kobjectClient *kobject.Client) {
++	scope := periodiccaller.OwnedScopeFrom(ctx)
+ 	for {
+-		event, err := kobjectClient.Receive()
++		event, err := kobjectReceiver(kobjectClient)
+ 		if err != nil {
+-			periodiccaller.ReportOwnedReadError(ctx,"auxiliary kobject read",err)
++			periodiccaller.ReportOwnedReadError(ctx, "auxiliary kobject read", err)
+ 			return
+ 		}
++		op9, _ := scope.AdmitKind(libpf.AuxiliarySourceKobjectReceive)
+ 		if event.Subsystem == "module" {
+ 			log.Debugf("Kernel modules changed")
++			_ = op9.Complete()
+ 			// Notify worker thread without blocking
+ 			select {
+ 			case s.reloadModules <- libpf.Void{}:
++				op10, _ := scope.AdmitKind(libpf.AuxiliarySourceModuleQueued)
++				_ = op10.Complete()
+ 			default:
++				op11, _ := scope.AdmitKind(libpf.AuxiliarySourceModuleCoalesced)
++				_ = op11.Complete()
+ 			}
++		} else {
++			_ = op9.Skip()
+ 		}
+ 	}
+ }
+@@ -624,10 +677,11 @@
+ 		return fmt.Errorf("failed to create kobject netlink socket: %w", err)
+ 	}
+ 	if scope := periodiccaller.OwnedScopeFrom(ctx); scope != nil {
+-		if err := scope.AddFinalizer(periodiccaller.OwnedCloser("auxiliary kobject close",kobjectClient.Close)); err != nil {
+-			return errors.Join(err,kobjectClient.Close())
++		s.scope = scope
++		if err := scope.AddFinalizer(periodiccaller.OwnedCloser("auxiliary kobject close", kobjectClient.Close)); err != nil {
++			return errors.Join(err, kobjectClient.Close())
+ 		}
+-		if err:=scope.AddCloser(periodiccaller.OwnedCloser("auxiliary kobject wake",func()error{return kobjectClient.SetDeadline(time.Now())}));err!=nil {
++		if err := scope.AddCloser(periodiccaller.OwnedCloser("auxiliary kobject wake", func() error { return kobjectClient.SetDeadline(time.Now()) })); err != nil {
+ 			return err
+ 		}
+ 	}
+@@ -641,7 +695,11 @@
+ func (s *Symbolizer) Reload() {
+ 	select {
+ 	case s.reloadSymbols <- libpf.Void{}:
++		op, _ := s.scope.AdmitKind(libpf.AuxiliarySourceSymbolQueued)
++		_ = op.Complete()
+ 	default:
++		op, _ := s.scope.AdmitKind(libpf.AuxiliarySourceSymbolCoalesced)
++		_ = op.Complete()
+ 	}
+ }
+ 
+--- a/kallsyms/kallsyms_test.go
++++ b/kallsyms/kallsyms_test.go
+@@ -4,11 +4,17 @@
+ package kallsyms
+ 
+ import (
++	"context"
+ 	"io"
++	"os"
+ 	"strings"
++	"sync"
+ 	"testing"
++	"time"
+ 
++	"github.com/mdlayher/kobject"
+ 	"go.opentelemetry.io/ebpf-profiler/libpf"
++	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+ 
+ 	"github.com/stretchr/testify/assert"
+ 	"github.com/stretchr/testify/require"
+@@ -137,3 +143,379 @@
+ 	}
+ 
+ }
++
++type testLifetime struct {
++	session    string
++	tgid       uint32
++	birth      uint64
++	generation uint64
++	err        error
++}
++
++func (l *testLifetime) Session() string    { return l.session }
++func (l *testLifetime) HostTGID() uint32   { return l.tgid }
++func (l *testLifetime) Birth() uint64      { return l.birth }
++func (l *testLifetime) Generation() uint64 { return l.generation }
++func (l *testLifetime) Validate() error    { return l.err }
++
++func newTestScope(parent context.Context) *periodiccaller.OwnedScope {
++	scope := periodiccaller.NewOwnedScope(parent, nil)
++	_ = scope.BindLifetime(&testLifetime{session: "sess-1", tgid: 100, birth: 1000, generation: 1})
++	return scope
++}
++
++func TestReload_DirectScopeConservation(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	scope := newTestScope(ctx)
++	s := &Symbolizer{
++		reloadModules: make(chan libpf.Void, 1),
++		reloadSymbols: make(chan libpf.Void, 1),
++		scope:         scope,
++	}
++
++	s.Reload()
++	s.Reload()
++
++	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
++	defer stopCancel()
++	require.NoError(t, scope.Stop(stopCtx))
++
++	obs12, err := scope.KindObservation(libpf.AuxiliarySourceSymbolQueued)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(1), obs12.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs12.Counts.Completed)
++	assert.Equal(t, uint64(0), obs12.Counts.InFlight)
++
++	obs13, err := scope.KindObservation(libpf.AuxiliarySourceSymbolCoalesced)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(1), obs13.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs13.Counts.Completed)
++	assert.Equal(t, uint64(0), obs13.Counts.InFlight)
++
++	obs14, err := scope.KindObservation(libpf.AuxiliarySourceModuleExec)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(0), obs14.Counts.Admitted)
++
++	obs15, err := scope.KindObservation(libpf.AuxiliarySourceSymbolExec)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(0), obs15.Counts.Admitted)
++}
++
++func TestPollKobjectClient_ReceiverAndFilter(t *testing.T) {
++	origReceiver := kobjectReceiver
++	defer func() { kobjectReceiver = origReceiver }()
++
++	events := []struct {
++		ev  *kobject.Event
++		err error
++	}{
++		{ev: &kobject.Event{Subsystem: "net", Sequence: 1}},
++		{ev: &kobject.Event{Subsystem: "module", Sequence: 2}},
++		{ev: &kobject.Event{Subsystem: "module", Sequence: 20}},
++		{err: os.ErrDeadlineExceeded},
++	}
++	idx := 0
++	kobjectReceiver = func(c *kobject.Client) (*kobject.Event, error) {
++		if idx >= len(events) {
++			return nil, io.EOF
++		}
++		item := events[idx]
++		idx++
++		return item.ev, item.err
++	}
++
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	scope := newTestScope(ctx)
++	s := &Symbolizer{
++		reloadModules: make(chan libpf.Void, 1),
++		reloadSymbols: make(chan libpf.Void, 1),
++		scope:         scope,
++	}
++
++	s.pollKobjectClient(scope.Context(), nil)
++
++	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
++	defer stopCancel()
++	_ = scope.Stop(stopCtx)
++
++	obs9, err := scope.KindObservation(libpf.AuxiliarySourceKobjectReceive)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(3), obs9.Counts.Admitted)
++	assert.Equal(t, uint64(2), obs9.Counts.Completed)
++	assert.Equal(t, uint64(1), obs9.Counts.Skipped)
++	assert.Equal(t, uint64(0), obs9.Counts.InFlight)
++
++	obs10, err := scope.KindObservation(libpf.AuxiliarySourceModuleQueued)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(1), obs10.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs10.Counts.Completed)
++
++	obs11, err := scope.KindObservation(libpf.AuxiliarySourceModuleCoalesced)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(1), obs11.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs11.Counts.Completed)
++}
++
++func TestReloadWorker_CancelBeforeReadyAborts(t *testing.T) {
++	origAfter := reloadAfter
++	defer func() { reloadAfter = origAfter }()
++
++	armCh := make(chan struct{}, 1)
++	never := make(chan time.Time)
++	var mu sync.Mutex
++	var recordedDurations []time.Duration
++	reloadAfter = func(d time.Duration) <-chan time.Time {
++		mu.Lock()
++		recordedDurations = append(recordedDurations, d)
++		mu.Unlock()
++		select {
++		case armCh <- struct{}{}:
++		default:
++		}
++		return never
++	}
++
++	parentCtx, parentCancel := context.WithCancel(context.Background())
++	defer parentCancel()
++	scope := newTestScope(parentCtx)
++
++	workerCtx, workerCancel := context.WithCancel(scope.Context())
++
++	s := &Symbolizer{
++		reloadModules: make(chan libpf.Void, 1),
++		reloadSymbols: make(chan libpf.Void, 1),
++		scope:         scope,
++	}
++	s.reloadModules <- libpf.Void{}
++
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		s.reloadWorker(workerCtx, nil)
++	}()
++
++	<-armCh
++	assert.Equal(t, 0, len(s.reloadModules))
++	workerCancel()
++	<-done
++
++	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
++	defer stopCancel()
++	_ = scope.Stop(stopCtx)
++
++	mu.Lock()
++	durations := append([]time.Duration(nil), recordedDurations...)
++	mu.Unlock()
++	require.Len(t, durations, 1)
++	assert.Equal(t, 100*time.Millisecond, durations[0])
++
++	obs14, err := scope.KindObservation(libpf.AuxiliarySourceModuleExec)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(1), obs14.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs14.Counts.Aborted)
++	assert.Equal(t, uint64(0), obs14.Counts.Completed)
++	assert.Equal(t, uint64(0), obs14.Counts.Failed)
++}
++
++func TestReloadWorker_LoadModulesFailureRetry(t *testing.T) {
++	origAfter := reloadAfter
++	origSysModule := sysModule
++	defer func() {
++		reloadAfter = origAfter
++		sysModule = origSysModule
++	}()
++
++	sysModule = "/nonexistent/test/sys/module"
++	armCount := 0
++	retryCh := make(chan struct{}, 1)
++	immediate := make(chan time.Time, 1)
++	immediate <- time.Now()
++	never := make(chan time.Time)
++
++	var mu sync.Mutex
++	var recordedDurations []time.Duration
++	reloadAfter = func(d time.Duration) <-chan time.Time {
++		mu.Lock()
++		recordedDurations = append(recordedDurations, d)
++		armCount++
++		c := armCount
++		mu.Unlock()
++		if c == 1 {
++			return immediate
++		}
++		select {
++		case retryCh <- struct{}{}:
++		default:
++		}
++		return never
++	}
++
++	parentCtx, parentCancel := context.WithCancel(context.Background())
++	defer parentCancel()
++	scope := newTestScope(parentCtx)
++
++	workerCtx, workerCancel := context.WithCancel(scope.Context())
++
++	s := &Symbolizer{
++		reloadModules: make(chan libpf.Void, 1),
++		reloadSymbols: make(chan libpf.Void, 1),
++		scope:         scope,
++	}
++	s.reloadModules <- libpf.Void{}
++
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		s.reloadWorker(workerCtx, nil)
++	}()
++
++	<-retryCh
++	workerCancel()
++	<-done
++
++	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
++	defer stopCancel()
++	_ = scope.Stop(stopCtx)
++
++	mu.Lock()
++	durations := append([]time.Duration(nil), recordedDurations...)
++	mu.Unlock()
++
++	require.Len(t, durations, 2)
++	assert.Equal(t, 100*time.Millisecond, durations[0])
++	assert.Equal(t, 10*time.Second, durations[1])
++
++	obs10, err := scope.KindObservation(libpf.AuxiliarySourceModuleQueued)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(0), obs10.Counts.Admitted)
++
++	obs14, err := scope.KindObservation(libpf.AuxiliarySourceModuleExec)
++	require.Error(t, err)
++	assert.Equal(t, uint64(2), obs14.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs14.Counts.Failed)
++	assert.Equal(t, uint64(1), obs14.Counts.Aborted)
++	assert.Equal(t, uint64(0), obs14.Counts.Completed)
++}
++
++func TestReloadWorker_LoadModuleMetadataArmsSymbolExec(t *testing.T) {
++	origAfter := reloadAfter
++	origSysModule := sysModule
++	origLoadMeta := loadModuleMetadata
++	defer func() {
++		reloadAfter = origAfter
++		sysModule = origSysModule
++		loadModuleMetadata = origLoadMeta
++	}()
++
++	tmpDir := t.TempDir()
++	require.NoError(t, os.Mkdir(tmpDir+"/testmod", 0o755))
++	sysModule = tmpDir
++
++	loadModuleMetadata = func(m *Module, name string, oldMtime int64) bool {
++		return true
++	}
++
++	armCount := 0
++	symbolArmedCh := make(chan struct{}, 1)
++	immediate := make(chan time.Time, 1)
++	immediate <- time.Now()
++	never := make(chan time.Time)
++
++	var mu sync.Mutex
++	var recordedDurations []time.Duration
++	reloadAfter = func(d time.Duration) <-chan time.Time {
++		mu.Lock()
++		recordedDurations = append(recordedDurations, d)
++		armCount++
++		c := armCount
++		mu.Unlock()
++		if c == 1 {
++			return immediate
++		}
++		select {
++		case symbolArmedCh <- struct{}{}:
++		default:
++		}
++		return never
++	}
++
++	parentCtx, parentCancel := context.WithCancel(context.Background())
++	defer parentCancel()
++	scope := newTestScope(parentCtx)
++
++	workerCtx, workerCancel := context.WithCancel(scope.Context())
++
++	s := &Symbolizer{
++		reloadModules: make(chan libpf.Void, 1),
++		reloadSymbols: make(chan libpf.Void, 1),
++		scope:         scope,
++	}
++	s.reloadModules <- libpf.Void{}
++
++	done := make(chan struct{})
++	go func() {
++		defer close(done)
++		s.reloadWorker(workerCtx, nil)
++	}()
++
++	<-symbolArmedCh
++	workerCancel()
++	<-done
++
++	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
++	defer stopCancel()
++	_ = scope.Stop(stopCtx)
++
++	mu.Lock()
++	durations := append([]time.Duration(nil), recordedDurations...)
++	mu.Unlock()
++
++	require.Len(t, durations, 2)
++	assert.Equal(t, 100*time.Millisecond, durations[0])
++	assert.Equal(t, time.Minute, durations[1])
++
++	obs14, err := scope.KindObservation(libpf.AuxiliarySourceModuleExec)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(1), obs14.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs14.Counts.Completed)
++
++	obs15, err := scope.KindObservation(libpf.AuxiliarySourceSymbolExec)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(1), obs15.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs15.Counts.Aborted)
++
++	obs12, err := scope.KindObservation(libpf.AuxiliarySourceSymbolQueued)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(0), obs12.Counts.Admitted)
++}
++
++func TestReload_EnqueueWithoutWorkerResidual(t *testing.T) {
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	scope := newTestScope(ctx)
++
++	s := &Symbolizer{
++		reloadModules: make(chan libpf.Void, 1),
++		reloadSymbols: make(chan libpf.Void, 1),
++		scope:         scope,
++	}
++
++	s.reloadModules <- libpf.Void{}
++	assert.Equal(t, 1, len(s.reloadModules))
++
++	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
++	defer stopCancel()
++	require.NoError(t, scope.Stop(stopCtx))
++
++	assert.Equal(t, 1, len(s.reloadModules))
++
++	obs14, err := scope.KindObservation(libpf.AuxiliarySourceModuleExec)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(0), obs14.Counts.Admitted)
++
++	obs15, err := scope.KindObservation(libpf.AuxiliarySourceSymbolExec)
++	require.NoError(t, err)
++	assert.Equal(t, uint64(0), obs15.Counts.Admitted)
++}
+--- a/tracer/events.go
++++ b/tracer/events.go
+@@ -96,6 +96,8 @@
+ 	}
+ }
+ 
++var reloadKernelSymbols = func(t *Tracer) { t.kernelSymbolizer.Reload() }
++
+ // triggerReportEvent is a trigger function for the eBPF map report_events. It is
+ // called for every event that is received in user space from this map. The underlying
+ // C structure in the received data is transformed to a Go structure and the event
+@@ -106,7 +108,9 @@
+ 	case support.EventTypeGenericPID:
+ 		t.handleGenericPID()
+ 	case support.EventTypeReloadKallsyms:
+-		t.kernelSymbolizer.Reload()
++		op, _ := t.auxiliaryScope.AdmitKind(libpf.AuxiliarySourceReportReloadRecord)
++		reloadKernelSymbols(t)
++		_ = op.Complete()
+ 		t.enableEvent(support.EventTypeReloadKallsyms)
+ 	}
+ }
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -1034,6 +1034,10 @@
+ 	return frames, nil
+ }
+ 
++var deleteInhibitEvent = func(m *cebpf.Map, key *uint32) error {
++	return m.Delete(unsafe.Pointer(key))
++}
++
+ // enableEvent removes the entry of given eventType from the inhibitEvents map
+ // so that the eBPF code will send the event again.
+ func (t *Tracer) enableEvent(eventType int) {
+@@ -1041,7 +1045,7 @@
+ 
+ 	// The map entry might not exist, so just ignore the potential error.
+ 	et := uint32(eventType)
+-	_ = inhibitEventsMap.Delete(unsafe.Pointer(&et))
++	_ = deleteInhibitEvent(inhibitEventsMap, &et)
+ }
+ 
+ // monitorPIDEventsMapSingle iterates over the eBPF map pid_events, collects PIDs

@@ -23,4 +23,12 @@ The HTML deck1135-1227 presents eBPF/DWARF/ROP and dynamic kernel identity-map e
 **Acceptance:** Every current-feature claim points to an executable scenario or exact qualified receipt. Current Seccomp/Landlock/USER_NOTIF and explicit context are not described as implemented eBPF/DWARF/ROP/tenant-memory isolation. Local links resolve; deck works with network disabled and keyboard navigation at presentation resolution. Root and demo indexes include all five demos and actual JDK25 demo setup. Current recipe and historical acceptance provenance are visually distinct.
 
 ---
+## Repository-review revalidation — 2026-11-04
+
+[KD-02](../reviews/2026-11-04-repository-review-findings.md#kd-02): label deterministic
+mock tool calls as synthetic boundary inputs rather than a model/prompt-injection experiment.
+Keep presentation statements tied to actual executable controls and qualified outcomes; the
+review supplies no model-robustness or production-readiness result.
+
+---
 <!-- id: issue-20261013-005318-944-align-presentation-deck-and-demo-guidance-with-cur  file: issue-20261013-005318-944-align-presentation-deck-and-demo-guidance-with-cur.md -->

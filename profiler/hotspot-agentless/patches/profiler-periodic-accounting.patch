@@ -1,0 +1,351 @@
+--- a/processmanager/manager.go
++++ b/processmanager/manager.go
+@@ -138,49 +138,66 @@
+ 	return err
+ }
+ 
+-// collectInterpreterMetrics starts a goroutine that periodically fetches and reports interpreter
+-// metrics.
+-func collectInterpreterMetrics(ctx context.Context, pm *ProcessManager,
+-	monitorInterval time.Duration,
+-) {
+-	periodiccaller.Start(ctx, monitorInterval, func() {
+-		pm.mu.RLock()
+-		defer pm.mu.RUnlock()
++func collectInterpreterMetricsOnce(ctx context.Context, pm *ProcessManager) {
++	scope := periodiccaller.OwnedScopeFrom(ctx)
++	op, _ := scope.AdmitKind(libpf.AuxiliarySourceInterpreterMetrics)
+ 
+-		summary := make(map[metrics.MetricID]metrics.MetricValue)
++	pm.mu.RLock()
++	summary := make(map[metrics.MetricID]metrics.MetricValue)
++	var interpErr error
+ 
+-		for pid := range pm.interpreters {
+-			for addr, ii := range pm.interpreters[pid] {
+-				if err := updateMetricSummary(ii, summary); err != nil {
+-					log.Errorf("Failed to get/reset metrics for PID %d at 0x%x: %v",
+-						pid, addr, err)
+-				}
++	for pid := range pm.interpreters {
++		for addr, ii := range pm.interpreters[pid] {
++			if err := updateMetricSummary(ii, summary); err != nil {
++				interpErr = errors.Join(interpErr, err)
++				log.Errorf("Failed to get/reset metrics for PID %d at 0x%x: %v",
++					pid, addr, err)
+ 			}
+ 		}
++	}
++
++	summary[metrics.IDHashmapPidPageToMappingInfo] = metrics.MetricValue(pm.pidPageToMappingInfoSize)
+ 
+-		summary[metrics.IDHashmapPidPageToMappingInfo] = metrics.MetricValue(pm.pidPageToMappingInfoSize)
++	summary[metrics.IDELFInfoCacheHit] = metrics.MetricValue(pm.elfInfoCacheHit.Swap(0))
++	summary[metrics.IDELFInfoCacheMiss] = metrics.MetricValue(pm.elfInfoCacheMiss.Swap(0))
+ 
+-		summary[metrics.IDELFInfoCacheHit] = metrics.MetricValue(pm.elfInfoCacheHit.Swap(0))
+-		summary[metrics.IDELFInfoCacheMiss] = metrics.MetricValue(pm.elfInfoCacheMiss.Swap(0))
++	summary[metrics.IDTraceCacheHit] = metrics.MetricValue(pm.frameCacheHit.Swap(0))
++	summary[metrics.IDTraceCacheMiss] = metrics.MetricValue(pm.frameCacheMiss.Swap(0))
+ 
+-		summary[metrics.IDTraceCacheHit] = metrics.MetricValue(pm.frameCacheHit.Swap(0))
+-		summary[metrics.IDTraceCacheMiss] = metrics.MetricValue(pm.frameCacheMiss.Swap(0))
++	summary[metrics.IDErrProcNotExist] = metrics.MetricValue(pm.mappingStats.errProcNotExist.Swap(0))
++	summary[metrics.IDErrProcESRCH] = metrics.MetricValue(pm.mappingStats.errProcESRCH.Swap(0))
++	summary[metrics.IDErrProcPerm] = metrics.MetricValue(pm.mappingStats.errProcPerm.Swap(0))
++	summary[metrics.IDNumProcAttempts] = metrics.MetricValue(pm.mappingStats.numProcAttempts.Swap(0))
++	summary[metrics.IDMaxProcParseUsec] = metrics.MetricValue(pm.mappingStats.maxProcParseUsec.Swap(0))
++	summary[metrics.IDTotalProcParseUsec] = metrics.MetricValue(pm.mappingStats.totalProcParseUsec.Swap(0))
++	summary[metrics.IDErrProcParse] = metrics.MetricValue(pm.mappingStats.numProcParseErrors.Swap(0))
+ 
+-		summary[metrics.IDErrProcNotExist] = metrics.MetricValue(pm.mappingStats.errProcNotExist.Swap(0))
+-		summary[metrics.IDErrProcESRCH] = metrics.MetricValue(pm.mappingStats.errProcESRCH.Swap(0))
+-		summary[metrics.IDErrProcPerm] = metrics.MetricValue(pm.mappingStats.errProcPerm.Swap(0))
+-		summary[metrics.IDNumProcAttempts] = metrics.MetricValue(pm.mappingStats.numProcAttempts.Swap(0))
+-		summary[metrics.IDMaxProcParseUsec] = metrics.MetricValue(pm.mappingStats.maxProcParseUsec.Swap(0))
+-		summary[metrics.IDTotalProcParseUsec] = metrics.MetricValue(pm.mappingStats.totalProcParseUsec.Swap(0))
+-		summary[metrics.IDErrProcParse] = metrics.MetricValue(pm.mappingStats.numProcParseErrors.Swap(0))
++	mapsMetrics := pm.ebpf.CollectMetrics()
++	for _, metric := range mapsMetrics {
++		summary[metric.ID] = metric.Value
++	}
++
++	pm.eim.UpdateMetricSummary(summary)
++	pm.mu.RUnlock()
+ 
+-		mapsMetrics := pm.ebpf.CollectMetrics()
+-		for _, metric := range mapsMetrics {
+-			summary[metric.ID] = metric.Value
++	pm.metricsAddSlice(metricSummaryToSlice(summary))
++
++	if op != nil {
++		if termErr := errors.Join(interpErr, ctx.Err()); termErr != nil {
++			_ = op.Fail(termErr)
++		} else {
++			_ = op.Complete()
+ 		}
++	}
++}
+ 
+-		pm.eim.UpdateMetricSummary(summary)
+-		pm.metricsAddSlice(metricSummaryToSlice(summary))
++// collectInterpreterMetrics starts a goroutine that periodically fetches and reports interpreter
++// metrics.
++func collectInterpreterMetrics(ctx context.Context, pm *ProcessManager,
++	monitorInterval time.Duration,
++) {
++	periodiccaller.Start(ctx, monitorInterval, func() {
++		collectInterpreterMetricsOnce(ctx, pm)
+ 	})
+ }
+ 
+@@ -397,7 +414,12 @@
+ 	meta.APMServiceName = pm.maybeNotifyAPMAgent(bpfTrace, trace.Hash, 1)
+ 
+ 	if err := pm.traceReporter.ReportTraceEvent(trace, meta); err != nil {
+-		if pm.epochFatal != nil { pm.epochFatal(err) }
++		if pm.epochFatal != nil {
++			pm.epochFatal(err)
++		}
+ 		log.Errorf("Failed to report trace event: %v", err)
++		admitted.classifyReporter(err)
++	} else {
++		admitted.classifyReporter(nil)
+ 	}
+ }
+--- a/processmanager/processinfo.go
++++ b/processmanager/processinfo.go
+@@ -59,6 +59,7 @@
+ 			// It seems that in some rare cases this check can fail with
+ 			// a permission error. Fallback to a procfs check.
+ 		default:
++			// NOTE(l2c-no-host-seam): non-ESRCH error fallback to procfs requires live system process signals, unexercised on host.
+ 			return true, err
+ 		}
+ 	}
+@@ -723,7 +724,7 @@
+ // exitKTime is stored for later processing in ProcessedUntil, when traces up to this time have been
+ // processed. There can be a race condition if we can not clean up the references for this process
+ // fast enough and this particular pid is reused again by the system.
+-func (pm *ProcessManager) processPIDExit(pid libpf.PID) {
++func (pm *ProcessManager) processPIDExit(pid libpf.PID) error {
+ 	exitKTime := times.GetKTime()
+ 	log.Debugf("- PID: %v", pid)
+ 
+@@ -740,7 +741,7 @@
+ 	info, pidExists := pm.pidToProcessInfo[pid]
+ 	if !pidExists {
+ 		log.Debugf("Skip process exit handling for unknown PID %d", pid)
+-		return
++		return nil
+ 	}
+ 
+ 	// processPIDExit may be called multiple times in short succession
+@@ -749,7 +750,7 @@
+ 		pm.exitEvents[pid] = exitKTime
+ 	} else {
+ 		log.Debugf("Skip duplicate process exit handling for PID %d", pid)
+-		return
++		return nil
+ 	}
+ 
+ 	// Delete all entries we have for this particular PID from pid_page_to_mapping_info.
+@@ -756,6 +757,6 @@
+ 	deleted, err2 := pm.ebpf.DeletePidPageMappingInfo(pid, []lpm.Prefix{dummyPrefix})
+ 	if err2 != nil {
+-		err = errors.Join(err, fmt.Errorf("failed to delete dummy prefix for PID %d: %v",
++		err = errors.Join(err, fmt.Errorf("failed to delete dummy prefix for PID %d: %w",
+ 			pid, err2))
+ 	}
+ 	pm.pidPageToMappingInfoSize -= uint64(deleted)
+@@ -764,6 +765,7 @@
+ 		pm.processRemovedMapping(pid, &info.mappings[idx])
+ 	}
+ 	pm.processRemovedInterpreters(pid, libpf.Set[util.OnDiskFileIdentifier]{})
++	return err
+ }
+ 
+ // SynchronizeProcess triggers ProcessManager to update its internal information
+@@ -908,7 +910,7 @@
+ 		}
+ 		// Clean up, and notify eBPF.
+ 		log.Debugf("removing pid due to mappings read error: %v", err)
+-		pm.processPIDExit(pid)
++		_ = pm.processPIDExit(pid)
+ 		if report != nil && mode == ordinarySynchronization {
+ 			report(branch, nil)
+ 		}
+@@ -948,24 +950,41 @@
+ 
+ // CleanupPIDs executes a periodic synchronization of pidToProcessInfo table with system processes.
+ // NOTE: Exported only for tracer.
+-func (pm *ProcessManager) CleanupPIDs() {
++// CleanupPIDsReported executes periodic PID cleanup and reports any scan/exit error.
++func (pm *ProcessManager) CleanupPIDsReported(report func(error)) {
+ 	deadPids := make([]libpf.PID, 0, 16)
++	var scanErr error
+ 
+ 	pm.mu.RLock()
+ 	for pid := range pm.pidToProcessInfo {
+-		if live, _ := isPIDLive(pid); !live {
++		live, err := isPIDLive(pid)
++		if err != nil {
++			scanErr = errors.Join(scanErr, err)
++		}
++		if !live {
+ 			deadPids = append(deadPids, pid)
+ 		}
+ 	}
+ 	pm.mu.RUnlock()
+ 
+ 	for _, pid := range deadPids {
+-		pm.processPIDExit(pid)
++		if err := pm.processPIDExit(pid); err != nil {
++			scanErr = errors.Join(scanErr, err)
++		}
+ 	}
+ 
+ 	if len(deadPids) > 0 {
+ 		log.Debugf("Cleaned up %d dead PIDs", len(deadPids))
+ 	}
++	if report != nil {
++		report(scanErr)
++	}
++}
++
++// CleanupPIDs executes a periodic synchronization of pidToProcessInfo table with system processes.
++// NOTE: Exported only for tracer.
++func (pm *ProcessManager) CleanupPIDs() {
++	pm.CleanupPIDsReported(nil)
+ }
+ 
+ // MetaForPID returns the process metadata for given PID.
+--- a/tracer/events.go
++++ b/tracer/events.go
+@@ -52,7 +52,7 @@
+ 		case pidTid := <-t.pidEvents:
+ 			t.observePIDProcess(pidTid)
+ 		case <-pidCleanupTicker.C:
+-			t.processManager.CleanupPIDs()
++			t.observePIDCleanup(ctx)
+ 		case <-ctx.Done():
+ 			return
+ 		}
+@@ -61,6 +61,32 @@
+ 
+ // handleGenericPID triggers immediate processing of eBPF-reported PIDs.
+ // WARNING: Not executed as a goroutine: needs to stay lightweight, and nonblocking.
++func (t *Tracer) observePIDCleanup(ctx context.Context) {
++	if t == nil {
++		return
++	}
++	if t.auxiliaryScope == nil {
++		if t.processManager != nil {
++			t.processManager.CleanupPIDs()
++		}
++		return
++	}
++	op, _ := t.auxiliaryScope.AdmitKind(libpf.AuxiliarySourcePIDCleanup)
++	var cleanupErr error
++	if t.processManager != nil {
++		t.processManager.CleanupPIDsReported(func(err error) {
++			cleanupErr = err
++		})
++	}
++	if op != nil {
++		if termErr := errors.Join(cleanupErr, ctx.Err()); termErr != nil {
++			_ = op.Fail(termErr)
++		} else {
++			_ = op.Complete()
++		}
++	}
++}
++
+ func (t *Tracer) handleGenericPID() {
+ 	// Non-blocking trigger sending. If the attempt would block
+ 	// some other goroutine is already sending this notification.
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -325,6 +325,7 @@
+ 		return nil, fmt.Errorf("failed to create processManager: %w", err)
+ 	}
+ 
++	configureProcessManagerTraceDefinitionBinding(processManager, definitionSource)
+ 	processManager.ConfigureHotSpotFatal(cfg.OnHotSpotFatal)
+ 	if cfg.HotSpotEpochTarget.PID != 0 {
+ 		if err := processManager.ConfigureHotSpotEpochTarget(cfg.HotSpotEpochTarget, cfg.OnHotSpotFatal); err != nil {
+@@ -1092,6 +1093,14 @@
+ 	translateIDs []metrics.MetricID,
+ 	previousMetricValue []metrics.MetricValue,
+ ) []metrics.Metric {
++	return t.eBPFMetricsCollectorReported(translateIDs, previousMetricValue, nil)
++}
++
++func (t *Tracer) eBPFMetricsCollectorReported(
++	translateIDs []metrics.MetricID,
++	previousMetricValue []metrics.MetricValue,
++	reportErr func(error),
++) []metrics.Metric {
+ 	metricsMap := t.ebpfMaps["metrics"]
+ 	metricsUpdates := make([]metrics.Metric, 0, len(translateIDs))
+ 
+@@ -1106,8 +1115,12 @@
+ 		}
+ 
+ 		eID := uint32(ebpfID)
++		// NOTE(l2c-no-host-seam): concrete *cebpf.Map Lookup requires kernel eBPF map FD, unexercised on host.
+ 		if err := metricsMap.Lookup(unsafe.Pointer(&eID), &perCPUValues); err != nil {
+ 			log.Errorf("Failed trying to lookup per CPU element: %v", err)
++			if reportErr != nil {
++				reportErr(err)
++			}
+ 			continue
+ 		}
+ 		value := metrics.MetricValue(0)
+@@ -1284,14 +1297,43 @@
+ 	previousMetricValue := make([]metrics.MetricValue, len(translateIDs))
+ 
+ 	periodiccaller.Start(ctx, t.intervals.MonitorInterval(), func() {
+-		metrics.AddSlice(eventMetricCollector())
+-		metrics.AddSlice(traceEventMetricCollector())
+-		metrics.AddSlice(t.eBPFMetricsCollector(translateIDs, previousMetricValue))
++		t.collectMapMonitorsOnce(ctx, eventMetricCollector, traceEventMetricCollector, translateIDs, previousMetricValue)
+ 	})
+ 
+ 	return nil
+ }
+ 
++func configureProcessManagerTraceDefinitionBinding(pm *pm.ProcessManager, s *traceDefinitionSource) {
++	if pm == nil || s == nil {
++		return
++	}
++	pm.ConfigureTraceDefinitionBinding(s.binding)
++}
++
++func (t *Tracer) collectMapMonitorsOnce(
++	ctx context.Context,
++	eventMetricCollector func() []metrics.Metric,
++	traceEventMetricCollector func() []metrics.Metric,
++	translateIDs []metrics.MetricID,
++	previousMetricValue []metrics.MetricValue,
++) {
++	metrics.AddSlice(eventMetricCollector())
++	metrics.AddSlice(traceEventMetricCollector())
++	op, _ := t.auxiliaryScope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
++	var lookupErr error
++	res := t.eBPFMetricsCollectorReported(translateIDs, previousMetricValue, func(err error) {
++		lookupErr = errors.Join(lookupErr, err)
++	})
++	metrics.AddSlice(res)
++	if op != nil {
++		if termErr := errors.Join(lookupErr, ctx.Err()); termErr != nil {
++			_ = op.Fail(termErr)
++		} else {
++			_ = op.Complete()
++		}
++	}
++}
++
+ func (t *Tracer) attachToKallsymsUpdates() error {
+ 	prog, ok := t.ebpfProgs["kprobe__kallsyms"]
+ 	if !ok {

@@ -182,7 +182,7 @@ class InstallSelfVerifierTest {
 
         // Identical instructions cannot attest the current installation.
         InstallSelfVerifier.verify(program, arch)
-        InstallSelfVerifier.verify(BpfProgram(program.instructions), arch)
+        InstallSelfVerifier.verify(BpfStaticVerifier.verify(BpfProgram.unverified(program.instructions)), arch)
 
         assertTrue(probeCount > afterFirst)
     }

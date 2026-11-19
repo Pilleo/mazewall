@@ -129,6 +129,13 @@ tasks.register<JavaExec>("spotbugsReportTest") {
     classpath = verification.runtimeClasspath
     mainClass.set("io.mazewall.build.SpotBugsReportTest")
 }
+tasks.register<JavaExec>("spotbugsAuxClasspathTest") {
+    dependsOn(tasks.named(verification.classesTaskName))
+    classpath = verification.runtimeClasspath
+    mainClass.set("io.mazewall.build.SpotBugsAuxClasspathFunctionalTest")
+    args(layout.projectDirectory.dir("..").asFile.absolutePath)
+    jvmArgumentProviders.add(TestKitJvmArguments(gradle.gradleUserHomeDir))
+}
 tasks.register<JavaExec>("spotbugsSourcePatchTest") {
     dependsOn(tasks.named(verification.classesTaskName))
     classpath = verification.runtimeClasspath

@@ -1,0 +1,239 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"runtime"
+	"testing"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/perf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"golang.org/x/sys/unix"
+)
+
+type reportPrepareFixture struct {
+	maps [6]reportProducerMapFacts
+	config reportProducerConfig
+	rows []reportProducerCounts
+	cpus int
+	infoErr, updateErr, readErr, rowsErr error
+	reads, writes, infos, cpuCalls int
+}
+
+func newReportPrepareFixture() (*Config, *reportPrepareFixture) {
+	f := &reportPrepareFixture{cpus: 2, rows: make([]reportProducerCounts, 2)}
+	f.maps = [6]reportProducerMapFacts{
+		{Type: uint32(cebpf.PerCPUArray), ID: 1, KeySize: 4, ValueSize: 832, MaxEntries: 1},
+		{Type: uint32(cebpf.Array), ID: 2, KeySize: 4, ValueSize: 32, MaxEntries: 1},
+		{Type: uint32(cebpf.PerfEventArray), ID: 3, KeySize: 4, ValueSize: 4, MaxEntries: 2},
+		{Type: uint32(cebpf.Hash), ID: 4, KeySize: 8, ValueSize: 1, MaxEntries: 65536},
+		{Type: uint32(cebpf.LRUHash), ID: 5, KeySize: 4, ValueSize: 8, MaxEntries: 65536},
+		{Type: uint32(cebpf.Hash), ID: 6, KeySize: 4, ValueSize: 1, MaxEntries: 2},
+	}
+	return &Config{TraceDefinitionLifetime: &testLifetime{session: "original", hostTGID: 12, birth: 34}}, f
+}
+
+func (f *reportPrepareFixture) ops() reportPrepareOps {
+	return reportPrepareOps{
+		possibleCPU: func() (int, error) { f.cpuCalls++; return f.cpus, nil },
+		info: func(i int) (reportProducerMapFacts, error) { f.infos++; return f.maps[i], f.infoErr },
+		readConfig: func() (reportProducerConfig, error) { f.reads++; return f.config, f.readErr },
+		readCounts: func(int) ([]reportProducerCounts, error) { return f.rows, f.rowsErr },
+		writeConfig: func(c reportProducerConfig) error { f.writes++; if f.updateErr != nil { return f.updateErr }; f.config = c; return nil },
+	}
+}
+
+func TestReportPrepareCapturesOriginalBeforeReadback(t *testing.T) {
+	cfg, f := newReportPrepareFixture()
+	source, err := prepareReportProducerWith(context.Background(), cfg, f.ops())
+	if err != nil || source == nil || source.phase != reportProducerPrepared || f.writes != 1 || f.reads != 2 {
+		t.Fatal("preparation", source, err, f.writes, f.reads)
+	}
+	if source.expected.Config != (reportProducerConfig{Schema: 2, Enabled: 1, PID: 12, Birth: 34, Generation: 1}) || source.expected.Maps != f.maps {
+		t.Fatal("unexpected original binding", source.expected)
+	}
+	f.maps[0].ID = 99
+	f.config.Generation = 99
+	if source.expected.Maps[0].ID != 1 || source.expected.Config.Generation != 1 { t.Fatal("original binding changed with later sample") }
+}
+
+func TestReportPrepareRejectsInvalidOrFailedEffects(t *testing.T) {
+	for _, name := range []string{"missing-map", "duplicate-map", "wrong-shape", "wrong-config-shape", "perf-capacity", "old-schema", "old-generation", "wrong-target", "rows", "nonzero", "cpu", "info", "read-config", "read-rows", "update", "readback"} {
+		t.Run(name, func(t *testing.T) {
+			cfg, f := newReportPrepareFixture()
+			switch name {
+			case "missing-map": f.maps[5].ID = 0
+			case "duplicate-map": f.maps[5].ID = f.maps[4].ID
+			case "wrong-shape": f.maps[0].ValueSize = 800
+			case "wrong-config-shape": f.maps[1].ValueSize = 24
+			case "perf-capacity": f.maps[2].MaxEntries = 1
+			case "old-schema": f.config.Schema = 1
+			case "old-generation": f.config.Generation = 1
+			case "wrong-target": cfg.HotSpotObservedPID = 99
+			case "rows": f.rows = f.rows[:1]
+			case "nonzero": f.rows[0].Errors = 1
+			case "cpu": f.cpus = 0
+			case "info": f.infoErr = unix.EPERM
+			case "read-config": f.readErr = unix.EACCES
+			case "read-rows": f.rowsErr = unix.EPERM
+			case "update": f.updateErr = unix.EACCES
+			}
+			ops := f.ops()
+			if name == "readback" { ops.writeConfig = func(c reportProducerConfig) error { f.writes++; f.config = c; f.config.Generation++; return nil } }
+			if _, err := prepareReportProducerWith(context.Background(), cfg, ops); err == nil { t.Fatal("accepted", name) } else if (name == "info" || name == "read-rows") && !errors.Is(err, unix.EPERM) { t.Fatal(err) } else if (name == "update" || name == "read-config") && !errors.Is(err, unix.EACCES) { t.Fatal(err) }
+			if name != "update" && name != "readback" && f.writes != 0 { t.Fatal("wrote invalid configuration", name) }
+		})
+	}
+}
+
+func TestReportPrepareDoesNotEscapeBlockedQuery(t *testing.T) {
+	cfg, f := newReportPrepareFixture()
+	ops := f.ops()
+	entered, release := make(chan struct{}), make(chan struct{})
+	ops.info = func(i int) (reportProducerMapFacts, error) { if i == 0 { close(entered); <-release }; return f.maps[i], nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { _, err := prepareReportProducerWith(ctx, cfg, ops); result <- err }()
+	<-entered
+	cancel()
+	select { case <-result: t.Fatal("preparation returned before query"); default: }
+	close(release)
+	if err := <-result; !errors.Is(err, context.Canceled) || f.writes != 0 { t.Fatal("cancelled preparation", err, f.writes) }
+}
+
+type reportOpenDeadlineContext struct {
+	deadline time.Time
+	done chan struct{}
+	deadlineCalls int
+}
+
+func (c *reportOpenDeadlineContext) Deadline() (time.Time, bool) { c.deadlineCalls++; return c.deadline, true }
+func (c *reportOpenDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c *reportOpenDeadlineContext) Err() error { return nil }
+func (c *reportOpenDeadlineContext) Value(any) any { return nil }
+
+func TestReportPrepareOpenDonePastDeadlineDoesNotQuery(t *testing.T) {
+	cfg, f := newReportPrepareFixture()
+	ctx := &reportOpenDeadlineContext{deadline: time.Unix(1, 0), done: make(chan struct{})}
+	if _, err := prepareReportProducerWith(ctx, cfg, f.ops()); !errors.Is(err, context.DeadlineExceeded) || f.cpuCalls != 0 || f.infos != 0 || f.writes != 0 || ctx.deadlineCalls != 1 {
+		t.Fatal("past original deadline admitted effects", err, f.cpuCalls, f.infos, f.writes, ctx.deadlineCalls)
+	}
+}
+
+func TestReportPrepareLateQueryReturnPreservesOwnershipAndError(t *testing.T) {
+	for _, cause := range []error{nil, unix.EPERM, unix.EACCES} {
+		t.Run(fmt.Sprint(cause), func(t *testing.T) {
+			cfg, f := newReportPrepareFixture()
+			ctx := &reportOpenDeadlineContext{deadline: time.Now().Add(100 * time.Millisecond), done: make(chan struct{})}
+			ops := f.ops()
+			entered, release := make(chan struct{}), make(chan struct{})
+			ops.info = func(i int) (reportProducerMapFacts, error) { close(entered); <-release; return f.maps[i], cause }
+			result := make(chan error, 1)
+			go func() { _, err := prepareReportProducerWith(ctx, cfg, ops); result <- err }()
+			select { case <-entered: case err := <-result: t.Fatal("query did not start", err) }
+			for time.Now().Before(ctx.deadline) { runtime.Gosched() }
+			select { case <-result: t.Fatal("preparation escaped in-flight query"); default: }
+			close(release)
+			err := <-result
+			if cause == nil { cause = context.DeadlineExceeded }
+			if !errors.Is(err, cause) || f.writes != 0 || ctx.deadlineCalls != 1 { t.Fatal("late query", err, f.writes, ctx.deadlineCalls) }
+		})
+	}
+}
+
+func TestReportPrepareExpiredAndLegacyDoNotQuery(t *testing.T) {
+	cfg, f := newReportPrepareFixture()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := prepareReportProducerWith(ctx, cfg, f.ops()); !errors.Is(err, context.Canceled) || f.infos != 0 || f.cpuCalls != 0 { t.Fatal("cancelled query", err, f.infos) }
+	expired, stop := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer stop()
+	if _, err := prepareReportProducerWith(expired, cfg, f.ops()); !errors.Is(err, context.DeadlineExceeded) || f.infos != 0 || f.cpuCalls != 0 { t.Fatal("expired query", err, f.infos) }
+	missing, err := prepareReportProducerWith(context.Background(), &Config{}, f.ops())
+	if err != nil || missing.phase != reportProducerMissing || f.infos != 0 || f.cpuCalls != 0 || f.writes != 0 { t.Fatal("legacy queried", missing, err) }
+}
+
+// Reader-only fixtures have no original maps/config/window and cannot finalize.
+func definitionReaderFixture() *Tracer {
+	return &Tracer{definitionSource: &traceDefinitionSource{binding: definitionBindingFixture()}}
+}
+
+func TestDefinitionReaderRejectsUnknownAttributionAndStaleRead(t *testing.T) {
+	for _, size := range []int{0, 3, 4, 743} {
+		tr := definitionReaderFixture()
+		raw := epochTracePacket(0)[:size]
+		if target, err := tr.observeTraceDefinitionRecord(&perf.Record{CPU: 0, RawSample: raw}, nil); err == nil || target || tr.traceDefinitionReaderObservation().Received != 0 || tr.definitionSource.err == nil {
+			t.Fatal("short header attributed", size, target, err)
+		}
+	}
+	tr := definitionReaderFixture()
+	stale := perf.Record{CPU: 0, RawSample: epochTracePacket(0)}
+	if target, err := tr.observeTraceDefinitionRecord(&stale, unix.EIO); target || !errors.Is(err, unix.EIO) || tr.traceDefinitionReaderObservation().Received != 0 {
+		t.Fatal("read error reused preceding record", target, err)
+	}
+	for _, cpu := range []int{-1, 1} {
+		tr := definitionReaderFixture()
+		if _, err := tr.observeTraceDefinitionRecord(&perf.Record{CPU: cpu, RawSample: epochTracePacket(0)}, nil); err == nil {
+			t.Fatal("unowned CPU admitted", cpu)
+		}
+	}
+}
+
+func TestDefinitionReaderTerminalsAndForeignRecords(t *testing.T) {
+	tr := definitionReaderFixture()
+	record := perf.Record{CPU: 0, RawSample: append(epochTracePacket(0), 0, 0, 0, 0)}
+	target, err := tr.observeTraceDefinitionRecord(&record, nil)
+	if err != nil || !target {
+		t.Fatal("full target header/padding refused", target, err)
+	}
+	out := make(chan *libpf.EbpfTrace, 1)
+	if !tr.sendTraceDefinition(context.Background(), out, &libpf.EbpfTrace{}, target) {
+		t.Fatal("handoff refused")
+	}
+	<-out
+	binary.NativeEndian.PutUint32(record.RawSample[:4], 999)
+	if target, err := tr.observeTraceDefinitionRecord(&record, nil); target || err != nil {
+		t.Fatal("valid foreign header changed handling", target, err)
+	}
+	if target, err := tr.observeTraceDefinitionRecord(&perf.Record{CPU: 0, LostSamples: 999}, nil); target || err != nil {
+		t.Fatal("LOST became a target record", target, err)
+	}
+	reader := tr.traceDefinitionReaderObservation()
+	if reader.Received != 1 || reader.HandedOff != 1 || reader.RejectedRecord != 0 || reader.HandoffAborted != 0 {
+		t.Fatal("wrong terminals", reader)
+	}
+	tr = definitionReaderFixture()
+	target, err = tr.observeTraceDefinitionRecord(&perf.Record{CPU: 0, RawSample: epochTracePacket(0)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if tr.sendTraceDefinition(ctx, make(chan *libpf.EbpfTrace), &libpf.EbpfTrace{}, target) {
+		t.Fatal("canceled handoff succeeded")
+	}
+	reader = tr.traceDefinitionReaderObservation()
+	if reader.Received != 1 || reader.HandoffAborted != 1 || reader.HandedOff != 0 || !errors.Is(tr.definitionSource.err, context.Canceled) {
+		t.Fatal("canceled handoff lacked one terminal", reader, tr.definitionSource.err)
+	}
+	tr = definitionReaderFixture()
+	raw := epochTracePacket(0)
+	binary.NativeEndian.PutUint32(raw[708:712], ^uint32(0))
+	if target, err := tr.observeTraceDefinitionRecord(&perf.Record{CPU: 0, RawSample: raw}, nil); !target || !errors.Is(err, errOriginUnexpected) {
+		t.Fatal("unsupported origin lost attribution/cause", target, err)
+	}
+	reader = tr.traceDefinitionReaderObservation()
+	if reader.Received != 1 || reader.RejectedRecord != 1 {
+		t.Fatal("invalid target header lacked terminal", reader)
+	}
+	if target, err := (&Tracer{}).observeTraceDefinitionRecord(&perf.Record{}, unix.EIO); target || err != nil {
+		t.Fatal("legacy optional absence changed", target, err)
+	}
+}

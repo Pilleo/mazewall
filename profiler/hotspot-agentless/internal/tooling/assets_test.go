@@ -237,6 +237,32 @@ func TestNativePolicyRejectsOtherVerifiedProvenance(t *testing.T) {
 	}
 }
 
+func TestAssetsRejectPreBootstrapPreparation(t *testing.T) {
+	for _, oldPatch := range []string{
+		"dfff04b46286bc9a7385d9ad945362403434a2253543c7fb8cfebbe414d748cd",
+		"c39ce3f723e2a707fadf154e55c6fb39ba532f3280022bf09cb350bafdabf4f4",
+		"22f66bf56bb3b9a00c47186a53bff07ab932ca48dff8b3900666348685ff5035",
+		"96d1ce7879a42727bc008fb8eeadf9e38f7e575733814505bf02d6269ebc7d02",
+	} {
+		t.Run(oldPatch[:8], func(t *testing.T) {
+			f := newAssetFixture(t)
+			f.pack(t)
+			path := filepath.Join(f.bundle, "manifest.json")
+			manifest, err := jsonFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manifest["patch_sha256"] = oldPatch
+			if err := writeJSON(path, manifest); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := verifyAssets(f.bundle); err == nil {
+				t.Fatal("pre-bootstrap preparation was admitted as current")
+			}
+		})
+	}
+}
+
 func TestNativeExecuteAccessRetainsPermissionCause(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root execute access differs from unprivileged ownership")

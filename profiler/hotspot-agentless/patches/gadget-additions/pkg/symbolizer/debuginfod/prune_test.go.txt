@@ -1,0 +1,54 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package debuginfod
+
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+)
+
+func TestDebuginfodPruneOldObjects_Accounting(t *testing.T) {
+	book := periodiccaller.NewKindBook()
+	d := &debuginfodResolverInstance{
+		options:                 symbolizer.SymbolizerOptions{KindBook: book},
+		symbolTablesFromBuildID: make(map[string]*symbolizer.SymbolTable),
+		missingBuildIDs:         make(map[string]bool),
+	}
+
+	now := time.Now()
+	ttl := time.Minute
+
+	oldBuildID := "old-build-id"
+	d.symbolTablesFromBuildID[oldBuildID] = &symbolizer.SymbolTable{
+		Timestamp: now.Add(-2 * ttl),
+		Symbols:   []*symbolizer.Symbol{{Name: "old_dbg"}},
+	}
+
+	freshBuildID := "fresh-build-id"
+	d.symbolTablesFromBuildID[freshBuildID] = &symbolizer.SymbolTable{
+		Timestamp: now,
+		Symbols:   []*symbolizer.Symbol{{Name: "fresh_dbg"}},
+	}
+
+	d.PruneOldObjects(now, ttl)
+
+	assert.Len(t, d.symbolTablesFromBuildID, 1)
+	assert.Contains(t, d.symbolTablesFromBuildID, freshBuildID)
+	assert.NotContains(t, d.symbolTablesFromBuildID, oldBuildID)
+
+	book.Freeze(false, libpf.AuxiliaryBinding{}, nil)
+	obs, err := book.Observation(libpf.AuxiliarySourcePruneScanDebuginfod)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auxiliary kind identity unknown")
+	assert.Equal(t, uint64(1), obs.Counts.Admitted)
+	assert.Equal(t, uint64(1), obs.Counts.Completed)
+	assert.Equal(t, uint64(0), obs.Counts.InFlight)
+	assert.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+}

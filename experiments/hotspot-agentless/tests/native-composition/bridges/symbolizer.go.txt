@@ -1,0 +1,7 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package symbolizer
+
+func NativeCompositionResolvers(s *Symbolizer) []ResolverInstance {
+	return append([]ResolverInstance(nil), s.resolvers...)
+}

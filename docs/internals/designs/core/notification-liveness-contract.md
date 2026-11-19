@@ -193,10 +193,19 @@ that opted-in worker artifact. Worker descriptor loading uses its defining class
 collections and DTO nesting are generation errors. Native layouts, wire method IDs,
 frame bytes and SCM_RIGHTS ordering remain unchanged.
 
-CLI/agent summaries require authenticated denials and positive controls. Inferred
-permission text is inconclusive. CLI `all` does not implicitly profile; `profile`
-repeats the exact filesystem read under the compiled policy and rejects incomplete
-evidence. Owned fixture cleanup preserves external paths and fatal error identity.
+Authenticated-denial claims in CLI/agent summaries require authenticated evidence
+and positive controls; inferred permission text cannot establish policy attribution.
+CLI safe-mode process/socket scenarios instead declare controlled permission-refusal
+expectations. They verify the exact unrestricted operation before restrictions,
+benign work on the same prepared worker, and the expected operation's permission
+failure; the process scenario also requires its private marker to remain absent.
+These results retain `INFERRED_PERMISSION_FAILURE` and the underlying cause without
+claiming authenticated denial. Setup, unrelated I/O, timeout, interruption and
+cleanup failures cannot satisfy a refusal expectation. Generic classification,
+agent expectations and CLI profile-mode authenticated-denial requirements remain
+strict. CLI `all` does not implicitly profile; `profile` repeats the exact filesystem
+read under the compiled policy and rejects incomplete evidence. Owned fixture
+cleanup preserves external paths and fatal error identity.
 The default web artifact excludes executable deserialization fixtures; the explicit
 isolated fixture artifact/profile is documented separately. Compose shares one named
 profile volume (profiling read/write, enforcement read-only), with `0.0.0.0` inside

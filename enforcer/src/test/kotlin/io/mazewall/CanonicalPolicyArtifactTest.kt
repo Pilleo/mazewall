@@ -1,7 +1,10 @@
 package io.mazewall.enforcer.api
 
+import io.mazewall.enforcer.internal.seccomp.BpfFilter
+import io.mazewall.platform.syscall.Arch
 import io.mazewall.platform.syscall.SeccompAction
 import io.mazewall.platform.syscall.Syscall
+import io.mazewall.seccomp.BpfSimulator
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -41,6 +44,10 @@ class CanonicalPolicyArtifactTest {
         val decoded = assertIs<CanonicalPolicyArtifact.Process>(CanonicalPolicyArtifact.fromJson(artifact.toJson()))
         assertEquals(SeccompAction.ACT_TRACE(17), decoded.policy.syscallActions[Syscall.CONNECT])
         assertFalse(decoded.policy.definition.enforceLandlock)
+        for (arch in listOf(Arch.AMD64, Arch.AARCH64)) {
+            val program = BpfFilter.build(arch, decoded.policy.definition)
+            assertEquals(0x7ff00011, BpfSimulator.simulate(program.instructions, arch.connect, arch))
+        }
     }
 
     @Test

@@ -1,5 +1,5 @@
 ---
-title: "Implement automated tombstoning and stale memory pruning via Codanna AST verification"
+title: "Implement automated tombstoning and stale memory pruning"
 severity: "MEDIUM"
 status: "open"
 priority: low
@@ -21,9 +21,10 @@ paperclip_issue_id: "1bfc0377-5c27-47df-91b5-8a3177cc7e5a"
 paperclip_identifier: "MAZ-1488"
 ---
 
-# 🟡 [Severity: MEDIUM]: Implement automated tombstoning and stale memory pruning via Codanna AST verification
+# 🟡 [Severity: MEDIUM]: Implement automated tombstoning and stale memory pruning
 
 **Context:**
+Codanna has been removed from this repository. Do not restore it to implement this issue.
 The original Python target and commands below are historical. The operator-approved
 2026-10-14 cleanup retired this bespoke helper; its bytes remain available at
 `96789e51`. Any future automatic memory-deletion capability needs a fresh scope
@@ -32,6 +33,7 @@ under the existing agent memory/control-plane tools, rather than restoring that 
 As a codebase evolves through refactorings, classes and methods get renamed, moved, or deleted entirely. Negative memories and past bug records in `agentmemory` that reference deleted symbols become obsolete noise, cluttering the token budget and confusing autonomous agents with ghost invariants. By leveraging Codanna's fast AST symbol index, an automated audit script can verify the existence and caller counts of all symbols referenced in memory, pruning or tombstoning records whose target symbols no longer exist in the code tree.
 
 **Needed:**
+The numbered steps below are historical and must not be implemented; they depend on the removed Codanna index.
 1. Update `scripts/audit_negative_memory.py` to extract symbol identifiers from all indexed negative memory records.
 2. For each extracted symbol, query `codanna retrieve symbol <symbol_name>`.
 3. If Codanna reports the symbol is missing or has 0 callers after a refactor, mark the memory entry as tombstoned in `.codanna/negative_memory_tombstones.json`.

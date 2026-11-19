@@ -5,11 +5,239 @@ package periodiccaller
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 )
+
+type testLifetime struct {
+	session string
+	tgid    uint32
+	birth   uint64
+	err     error
+}
+
+type fixedReadoutBudgetContext struct {
+	context.Context
+	deadline time.Time
+	done chan struct{}
+	err func() error
+}
+
+func (c *fixedReadoutBudgetContext) Deadline() (time.Time, bool) {
+	return c.deadline, !c.deadline.IsZero()
+}
+func (c *fixedReadoutBudgetContext) Done() <-chan struct{} { return c.done }
+func (c *fixedReadoutBudgetContext) Err() error {
+	if c.err != nil { return c.err() }
+	return nil
+}
+
+func TestStopReadoutAbsoluteDeadlineWithOpenDone(t *testing.T) {
+	for _, parentExpired := range []bool{false, true} {
+		t.Run(fmtReadoutBudgetCase(parentExpired), func(t *testing.T) {
+			expired := &fixedReadoutBudgetContext{Context: context.Background(), deadline: time.Now().Add(-time.Hour), done: make(chan struct{})}
+			var parent, first context.Context = context.Background(), expired
+			if parentExpired { parent, first = expired, context.Background() }
+			s := NewOwnedScope(parent, nil)
+			cleanupScopeRootTest(t, s)
+			if err := s.BindLifetime(&countedStopLifetime{session: "absolute-budget"}); err != nil { t.Fatal(err) }
+			if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+			called := false
+			if err := s.AddFinalizer(func() error {
+				return s.WithStopReadoutStep(func() error { called = true; return nil })
+			}); err != nil { t.Fatal(err) }
+			s.beginStop(first)
+			if err := s.Stop(context.Background()); !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("lost absolute deadline: %v", err) }
+			if called || readoutDone(expired.done) || s.haveReadout || s.stopReadout != stopReadoutConsumed {
+				t.Fatal("expired original budget admitted or renewed readout")
+			}
+			if err := s.WithStopReadoutStep(func() error { called = true; return nil }); err == nil || called {
+				t.Fatal("later caller revived consumed readout")
+			}
+		})
+	}
+}
+
+func fmtReadoutBudgetCase(parent bool) string {
+	if parent { return "parent" }
+	return "first"
+}
+
+func TestReadoutCauseClosureDuringSampling(t *testing.T) {
+	done := make(chan struct{})
+	ctx := &fixedReadoutBudgetContext{Context: context.Background(), done: done}
+	s := &OwnedScope{firstStopReadoutCtx: ctx, firstStopReadoutDone: done, parentCtx: context.Background()}
+	calls := 0
+	ctx.err = func() error {
+		if !s.mu.TryLock() { t.Fatal("context Err called under scope lock") }
+		s.mu.Unlock()
+		calls++
+		if calls == 1 { close(done); return nil }
+		return context.DeadlineExceeded
+	}
+	firstErr, parentErr := s.lockReadoutCauses()
+	err := s.readoutBudgetErrorLocked(firstErr, parentErr)
+	s.mu.Unlock()
+	if calls != 2 || !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		t.Fatalf("closed channel lost its actual error: calls=%d err=%v", calls, err)
+	}
+}
+
+func TestCommitStopReadoutRechecksReturnedCallback(t *testing.T) {
+	for _, parentEnds := range []bool{false, true} {
+		t.Run(fmtReadoutBudgetCase(parentEnds), func(t *testing.T) {
+			ctx := &fixedReadoutBudgetContext{Context: context.Background(), deadline: time.Now().Add(time.Hour), done: make(chan struct{})}
+			var ended atomic.Bool
+			ctx.err = func() error {
+				if ended.Load() { return context.DeadlineExceeded }
+				return nil
+			}
+			var parent, first context.Context = context.Background(), ctx
+			if parentEnds { parent, first = ctx, context.Background() }
+			scope := NewOwnedScope(parent, nil)
+			cleanupScopeRootTest(t, scope)
+			if err := scope.BindLifetime(&countedStopLifetime{session: "commit-budget"}); err != nil { t.Fatal(err) }
+			if !scope.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+			var commitErr error
+			copied := 0
+			if err := scope.AddFinalizer(func() error {
+				return scope.WithStopReadoutStep(func() error {
+					commitErr = scope.CommitStopReadout(func() error {
+						copied++
+						ended.Store(true)
+						close(ctx.done)
+						return nil
+					})
+					return commitErr
+				})
+			}); err != nil { t.Fatal(err) }
+			scope.beginStop(first)
+			stopErr := scope.Stop(context.Background())
+			if copied != 1 || !errors.Is(commitErr, context.DeadlineExceeded) || !errors.Is(stopErr, context.DeadlineExceeded) || scope.stopReadout != stopReadoutConsumed {
+				t.Fatalf("returned callback escaped its budget: copies=%d commit=%v stop=%v", copied, commitErr, stopErr)
+			}
+		})
+	}
+}
+
+func TestReadoutBudgetEndedUsesOriginalAbsoluteDeadline(t *testing.T) {
+	now := time.Unix(100, 0)
+	for _, parent := range []bool{false, true} {
+		s := &OwnedScope{firstStopReadoutDone: make(chan struct{}), originalParentDone: make(chan struct{})}
+		if parent {
+			s.originalParentDeadline, s.hasOriginalParentDeadline = now, true
+		} else {
+			s.firstStopReadoutDeadline, s.hasFirstStopReadoutDeadline = now, true
+		}
+		if s.readoutBudgetEndedLocked(now.Add(-time.Nanosecond)) || !s.readoutBudgetEndedLocked(now) || !s.readoutBudgetEndedLocked(now.Add(time.Hour)) {
+			t.Fatal("original absolute deadline was not enforced at commit boundary")
+		}
+	}
+}
+
+type reservationObservedContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *reservationObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
+}
+
+func TestStopReadoutReservationFoundation(t *testing.T) {
+	for _, mode := range []string{"normal", "expired", "parent"} {
+		t.Run(mode, func(t *testing.T) {
+			parent, cancelParent := context.WithCancel(context.Background())
+			s := NewOwnedScope(parent, nil)
+			started, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			first, cancelFirst := context.WithCancel(context.Background())
+			laterBase, cancelLater := context.WithCancel(context.Background())
+			later := &reservationObservedContext{Context: laterBase, entered: make(chan struct{})}
+			firstDone, laterDone := make(chan struct{}), make(chan struct{})
+			firstSpawned, laterSpawned := false, false
+			wait := func(ch <-chan struct{}) bool {
+				select {
+				case <-ch:
+					return true
+				case <-time.After(2 * time.Second):
+					return false
+				}
+			}
+			t.Cleanup(func() {
+				cancelFirst()
+				cancelLater()
+				cancelParent()
+				releaseOnce.Do(func() { close(release) })
+				if firstSpawned && !wait(firstDone) {
+					t.Error("first Stop did not exit")
+				}
+				if laterSpawned && !wait(laterDone) {
+					t.Error("later Stop did not exit")
+				}
+				if !wait(s.done) {
+					t.Error("scope did not finish")
+				}
+			})
+			if err := s.AddCloser(func() error { close(started); <-release; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "parent" {
+				cancelParent()
+			} else {
+				if mode == "expired" {
+					cancelFirst()
+				}
+				firstSpawned = true
+				go func() { defer close(firstDone); _ = s.Stop(first) }()
+			}
+			startedOK := wait(started)
+			s.mu.Lock()
+			captured, state := s.firstStopReadoutCtx, s.stopReadout
+			s.mu.Unlock()
+			laterSpawned = true
+			go func() { defer close(laterDone); _ = s.Stop(later) }()
+			enteredOK := wait(later.entered)
+			cancelLater()
+			laterOK := wait(laterDone)
+			s.mu.Lock()
+			capturedAfter, stateAfter := s.firstStopReadoutCtx, s.stopReadout
+			s.mu.Unlock()
+			releaseOnce.Do(func() { close(release) })
+			firstOK := !firstSpawned || wait(firstDone)
+			doneOK := wait(s.done)
+			wantCtx, wantState := first, stopReadoutReserved
+			if mode == "expired" {
+				wantState = stopReadoutConsumed
+			}
+			if mode == "parent" {
+				wantCtx, wantState = s.parentSignal, stopReadoutConsumed
+			}
+			if !startedOK || !enteredOK || !laterOK || !firstOK || !doneOK {
+				t.Error("timed out waiting for stop")
+			}
+			if captured != wantCtx || capturedAfter != wantCtx || state != wantState || stateAfter != stopReadoutConsumed {
+				t.Errorf("reservation: first=%v after=%v state=%v afterState=%v", captured == wantCtx, capturedAfter == wantCtx, state, stateAfter)
+			}
+		})
+	}
+}
+
+func (l *testLifetime) Session() string  { return l.session }
+func (l *testLifetime) HostTGID() uint32 { return l.tgid }
+func (l *testLifetime) Birth() uint64    { return l.birth }
+func (l *testLifetime) Validate() error  { return l.err }
 
 func TestOwnedAuxiliaryJoinRetainsHeldCallbackAndIndependentLifetime(t *testing.T) {
 	definitionCtx, definitionCancel := context.WithCancel(context.Background())
@@ -32,12 +260,30 @@ func TestOwnedAuxiliaryJoinRetainsHeldCallbackAndIndependentLifetime(t *testing.
 		t.Fatal("sealed admission reopened")
 	}
 	close(release)
+	<-finished
+
+	// Late stop must still retain original deadline/cancellation error
 	ctx, stop := context.WithTimeout(context.Background(), time.Second)
 	defer stop()
-	if err := s.Stop(ctx); err != nil || !s.Joined() {
-		t.Fatal("released owner not joined", err)
+	err := s.Stop(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("late stop upgraded error: got %v, expected Canceled", err)
 	}
-	<-finished
+	if s.Joined() {
+		t.Fatal("canceled owner reported clean join")
+	}
+
+	// Reobservation must also retain the cancellation failure and HeldWork
+	obs, obsErr := s.Observation()
+	if !errors.Is(obsErr, context.Canceled) {
+		t.Fatalf("observation did not retain cancellation error: %v", obsErr)
+	}
+	if obs.Outcome == libpf.AuxiliaryFinal {
+		t.Fatal("outcome upgraded to AuxiliaryFinal after background join caught up")
+	}
+	if !obs.HeldWork {
+		t.Fatal("HeldWork should remain true after timeout")
+	}
 }
 
 func TestOwnedAuxiliaryStopPreservesCloserNativeCauses(t *testing.T) {
@@ -82,8 +328,8 @@ func TestOwnedPeriodicCancellationJoinsAndRejectsManualAdmission(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("callback not started")
 	}
-	if err := s.Stop(ctx); err != nil {
-		t.Fatal(err)
+	if err := s.Stop(ctx); err == nil || !strings.Contains(err.Error(), "auxiliary readout unavailable") {
+		t.Fatalf("expected auxiliary readout unavailable on Stop, got: %v", err)
 	}
 	trigger <- true
 	select {
@@ -105,8 +351,10 @@ func TestOwnedAuxiliaryParentCancellationWakesBlockingReader(t *testing.T) {
 	cancel()
 	ctx, stop := context.WithTimeout(context.Background(), time.Second)
 	defer stop()
-	if err := s.Stop(ctx); err != nil {
-		t.Fatal("parent cancellation failed to wake/join", err)
+	if err := s.Stop(ctx); err == nil || !strings.Contains(err.Error(), "auxiliary readout unavailable") {
+		t.Fatalf("expected auxiliary readout unavailable on Stop, got: %v", err)
+	} else if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected parent cancellation to be preserved as Canceled: %v", err)
 	}
 }
 
@@ -131,12 +379,1786 @@ func TestOwnedAuxiliaryFinalizerRunsOnlyAfterWorkerJoin(t *testing.T) {
 	close(release)
 	ctx, stop := context.WithTimeout(context.Background(), time.Second)
 	defer stop()
-	if err := s.Stop(ctx); err != nil {
-		t.Fatal(err)
+	err := s.Stop(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected persistent cancellation error, got %v", err)
 	}
 	select {
 	case <-retired:
 	default:
 		t.Fatal("joined resource was not retired")
+	}
+}
+
+func TestAuxiliaryReceiptOverflowAndDuplicateTerminalReject(t *testing.T) {
+	lifetime := &testLifetime{session: "aux-test-session", tgid: 12345, birth: 99999}
+
+	// Case 1: Duplicate terminal rejection
+	{
+		s := NewOwnedScope(context.Background(), nil)
+		if err := s.BindLifetime(lifetime); err == nil {
+			t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+		}
+		op, err := s.AdmitCallback()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := op.Complete(); err != nil {
+			t.Fatal(err)
+		}
+		// Second complete call on same operation must reject
+		dupErr := op.Complete()
+		if dupErr == nil {
+			t.Fatal("duplicate terminal completion was not rejected")
+		}
+		if !strings.Contains(dupErr.Error(), "duplicate terminal") {
+			t.Fatalf("unexpected duplicate terminal error message: %v", dupErr)
+		}
+		// Verify scope error is set to duplicate terminal error
+		if s.result() == nil || !strings.Contains(s.result().Error(), "duplicate terminal") {
+			t.Fatalf("scope error missing duplicate terminal failure: %v", s.result())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = s.Stop(ctx)
+		obs, obsErr := s.Observation()
+		if obsErr == nil {
+			t.Fatal("observation succeeded despite duplicate terminal error")
+		}
+		if obs.Counts.Completed != 1 {
+			t.Fatalf("duplicate terminal balanced counter twice: got %d, expected 1", obs.Counts.Completed)
+		}
+		if obs.Counts.InFlight != 0 {
+			t.Fatalf("in-flight count underflowed or corrupted: %d", obs.Counts.InFlight)
+		}
+	}
+
+	// Case 2: Counter overflow rejection on admission
+	{
+		s := NewOwnedScope(context.Background(), nil)
+		if err := s.BindLifetime(lifetime); err == nil {
+			t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+		}
+		s.counts.Admitted = math.MaxUint64
+		op, err := s.AdmitCallback()
+		if err == nil || op != nil {
+			t.Fatal("admission at MaxUint64 did not return overflow error")
+		}
+		if !strings.Contains(err.Error(), "overflow") {
+			t.Fatalf("unexpected admission error: %v", err)
+		}
+		if s.result() == nil || !strings.Contains(s.result().Error(), "overflow") {
+			t.Fatalf("trigger overflow error not sticky: %v", s.result())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = s.Stop(ctx)
+		obs, obsErr := s.Observation()
+		if obsErr == nil {
+			t.Fatal("observation succeeded despite counter overflow")
+		}
+		if !obs.Counts.Overflow {
+			t.Fatal("observation did not record sticky overflow flag")
+		}
+		if !strings.Contains(obsErr.Error(), "overflow") {
+			t.Fatalf("unexpected observation error on overflow: %v", obsErr)
+		}
+	}
+
+	// Case 3: Counter overflow rejection on terminal completion
+	{
+		s := NewOwnedScope(context.Background(), nil)
+		if err := s.BindLifetime(lifetime); err == nil {
+			t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+		}
+		op, err := s.AdmitCallback()
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.counts.Completed = math.MaxUint64
+		compErr := op.Complete()
+		if compErr == nil {
+			t.Fatal("completion at MaxUint64 did not return overflow error")
+		}
+		if !strings.Contains(compErr.Error(), "overflow") {
+			t.Fatalf("unexpected completion error: %v", compErr)
+		}
+		if !s.counts.Overflow {
+			t.Fatal("sticky overflow flag not set on terminal completion overflow")
+		}
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		defer stopCancel()
+		_ = s.Stop(stopCtx)
+	}
+}
+
+type mutableLifetime struct {
+	sync.Mutex
+	session string
+	tgid    uint32
+	birth   uint64
+}
+
+func (m *mutableLifetime) Session() string {
+	m.Lock()
+	defer m.Unlock()
+	return m.session
+}
+
+func (m *mutableLifetime) HostTGID() uint32 {
+	m.Lock()
+	defer m.Unlock()
+	return m.tgid
+}
+
+func (m *mutableLifetime) Birth() uint64 {
+	m.Lock()
+	defer m.Unlock()
+	return m.birth
+}
+
+func (m *mutableLifetime) Validate() error {
+	return nil
+}
+
+func TestAuxiliaryOwnerAndLifetimeMismatch(t *testing.T) {
+	// 1. Missing lifetime error
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(ctx, nil)
+		_, err := s.AuxiliaryBinding()
+		if err == nil || !strings.Contains(err.Error(), "missing lifetime") {
+			t.Fatalf("expected missing lifetime error, got: %v", err)
+		}
+		cancel()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		_ = s.Stop(stopCtx)
+		stopCancel()
+	}
+
+	// 2. Valid lifetime binding
+	{
+		lifetime := &testLifetime{session: "sess-val", tgid: 4321, birth: 88888}
+		ctx, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(ctx, nil)
+		if err := s.BindLifetime(lifetime); err == nil {
+			t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+		}
+		s.mu.Lock()
+		s.lifetime = lifetime
+		s.expectedBinding = libpf.AuxiliaryBinding{
+			Source:     libpf.AuxiliarySourcePeriodicCaller,
+			Session:    "sess-val",
+			HostTGID:   4321,
+			Birth:      88888,
+			Generation: s.generation,
+		}
+		s.mu.Unlock()
+		binding, err := s.AuxiliaryBinding()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if binding.Source != libpf.AuxiliarySourcePeriodicCaller || binding.Session != "sess-val" || binding.HostTGID != 4321 || binding.Birth != 88888 || binding.Generation == 0 {
+			t.Fatalf("unexpected binding: %+v", binding)
+		}
+
+		// 3. Binding validation mismatch
+		mismatched := binding
+		mismatched.HostTGID = 9999
+		if err := libpf.ValidateAuxiliaryBinding(binding, mismatched); err == nil {
+			t.Fatal("expected binding mismatch error")
+		}
+
+		mismatchedSession := binding
+		mismatchedSession.Session = "other-sess"
+		if err := libpf.ValidateAuxiliaryBinding(binding, mismatchedSession); err == nil {
+			t.Fatal("expected session mismatch error")
+		}
+		cancel()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		_ = s.Stop(stopCtx)
+		stopCancel()
+	}
+
+	// 4. Mutable lifetime stub mutated after bind fails production scope observation
+	{
+		mut := &mutableLifetime{session: "mut-sess", tgid: 6543, birth: 112233}
+		s := NewOwnedScope(context.Background(), nil)
+		if err := s.BindLifetime(mut); err == nil {
+			t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+		}
+		// Mutate actual fields after bind attempt
+		mut.Lock()
+		mut.birth = 999999
+		mut.Unlock()
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		stopErr := s.Stop(ctx)
+		if stopErr == nil || !strings.Contains(stopErr.Error(), "auxiliary readout unavailable") {
+			t.Fatalf("expected auxiliary readout unavailable on Stop, got: %v", stopErr)
+		}
+		_, obsErr := s.Observation()
+		if obsErr == nil || !strings.Contains(obsErr.Error(), "auxiliary readout unavailable") {
+			t.Fatalf("expected auxiliary readout unavailable on Observation, got: %v", obsErr)
+		}
+	}
+}
+
+func stopOwned(t *testing.T, s *OwnedScope) (libpf.AuxiliaryObservation, error) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	stopErr := s.Stop(ctx)
+	obs, obsErr := s.Observation()
+	if stopErr != nil {
+		return obs, stopErr
+	}
+	return obs, obsErr
+}
+
+func TestAuxiliarySharedPeriodicCallbacksDoNotAggregate(t *testing.T) {
+	lifetime := &testLifetime{session: "shared-sess", tgid: 4242, birth: 424242}
+	s := NewOwnedScope(context.Background(), nil)
+	if err := s.BindLifetime(lifetime); err == nil {
+		t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+	}
+	ran := make(chan string, 8)
+	note := func(kind string) {
+		select {
+		case ran <- kind:
+		default:
+		}
+	}
+	stopStart := Start(s.Context(), 5*time.Millisecond, func() { note("start") })
+	defer stopStart()
+	trigger := make(chan bool, 1)
+	stopManual := StartWithManualTrigger(s.Context(), time.Hour, trigger, func(bool) bool {
+		note("manual")
+		return true
+	})
+	defer stopManual()
+	stopJitter := StartWithJitter(s.Context(), 5*time.Millisecond, 0, func() { note("jitter") })
+	defer stopJitter()
+	trigger <- true
+
+	seen := map[string]bool{}
+	deadline := time.After(2 * time.Second)
+	for len(seen) < 3 {
+		select {
+		case kind := <-ran:
+			seen[kind] = true
+		case <-deadline:
+			t.Fatalf("callbacks did not run: %v", seen)
+		}
+	}
+
+	obs, err := stopOwned(t, s)
+	if err == nil || !strings.Contains(err.Error(), "auxiliary readout unavailable") {
+		t.Fatalf("expected auxiliary readout unavailable on Stop, got: %v", err)
+	}
+	if obs.Counts.Admitted != 0 || obs.Counts.Completed != 0 || obs.Counts.Failed != 0 || obs.Counts.Aborted != 0 || obs.Counts.InFlight != 0 {
+		t.Fatalf("unselected callback kinds aggregated: %+v", obs.Counts)
+	}
+	if obs.Outcome == libpf.AuxiliaryFinal || obs.Outcome != libpf.AuxiliaryNotExercised {
+		t.Fatalf("uninstrumented periodic callbacks claimed coverage: %v", obs.Outcome)
+	}
+}
+
+func TestAuxiliaryExplicitOperationTerminalClassification(t *testing.T) {
+	bind := func(t *testing.T, name string) *OwnedScope {
+		t.Helper()
+		s := NewOwnedScope(context.Background(), nil)
+		if err := s.BindLifetime(&testLifetime{session: name, tgid: 77, birth: 88}); err == nil {
+			t.Fatal("expected unvalidated BindLifetime to fail under conservative enrollment")
+		}
+		return s
+	}
+	t.Run("normal", func(t *testing.T) {
+		s := bind(t, "normal-op")
+		if !s.ExecuteCallback(func() {}) {
+			t.Fatal("normal callback rejected")
+		}
+		obs, err := stopOwned(t, s)
+		if err == nil || !strings.Contains(err.Error(), "auxiliary readout unavailable") || obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 || obs.Outcome == libpf.AuxiliaryFinal {
+			t.Fatalf("normal classification obs=%+v err=%v", obs, err)
+		}
+	})
+	t.Run("error", func(t *testing.T) {
+		s := bind(t, "error-op")
+		op, err := s.AdmitCallback()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cause := errors.New("callback failed")
+		if err := op.Fail(cause); err != nil {
+			t.Fatal(err)
+		}
+		obs, err := stopOwned(t, s)
+		if !errors.Is(err, cause) || obs.Counts.Failed != 1 || obs.Counts.Completed != 0 || obs.Outcome == libpf.AuxiliaryFinal {
+			t.Fatalf("error classification obs=%+v err=%v", obs, err)
+		}
+	})
+	t.Run("false", func(t *testing.T) {
+		s := bind(t, "false-op")
+		if s.ExecuteCallbackFunc(false, func(bool) bool { return false }) {
+			t.Fatal("false callback reported success")
+		}
+		obs, err := stopOwned(t, s)
+		if err == nil || obs.Counts.Completed != 0 || obs.Counts.Aborted != 1 || obs.Counts.Failed != 0 || obs.Outcome == libpf.AuxiliaryFinal {
+			t.Fatalf("false clean receipt obs=%+v err=%v", obs, err)
+		}
+	})
+	t.Run("cancel", func(t *testing.T) {
+		parent, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(parent, nil)
+		if err := s.BindLifetime(&testLifetime{session: "cancel-op", tgid: 77, birth: 88}); err != nil {
+			t.Fatal(err)
+		}
+		if s.ExecuteCallbackFunc(true, func(bool) bool {
+			cancel()
+			return false
+		}) {
+			t.Fatal("canceled callback reported success")
+		}
+		obs, err := stopOwned(t, s)
+		if !errors.Is(err, context.Canceled) || obs.Counts.Failed != 1 || obs.Counts.Completed != 0 || obs.Counts.Aborted != 0 || obs.Outcome == libpf.AuxiliaryFinal {
+			t.Fatalf("cancel classification obs=%+v err=%v", obs, err)
+		}
+	})
+}
+
+func TestAuxiliarySnapshotAfterFinalizer(t *testing.T) {
+	lifetime := &mockFailingReleaseRetainerLifetime{}
+	s := NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Stop(ctx); errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("scope cleanup timed out: %v", err)
+		}
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			t.Errorf("scope worker did not finish: %v", ctx.Err())
+		}
+	})
+	if err := s.BindLifetime(lifetime); err != nil {
+		t.Fatal(err)
+	}
+
+	finalizerRan := false
+	frozenDuringFinalizer := false
+	if err := s.AddFinalizer(func() error {
+		frozenDuringFinalizer = s.IsSnapshotted()
+		finalizerRan = true
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Admit 1 real callback to make it exercised
+	if !s.ExecuteCallback(func() {}) {
+		t.Fatal("callback execution failed")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := s.Stop(ctx)
+	select {
+	case <-s.done:
+	case <-ctx.Done():
+		t.Errorf("scope worker did not finish: %v", ctx.Err())
+		return
+	}
+	if !finalizerRan || frozenDuringFinalizer || !s.IsSnapshotted() {
+		t.Error("snapshot was not frozen after the finalizer")
+	}
+	obs, observationErr := s.Observation()
+	if err != nil || observationErr != nil || obs.Outcome != libpf.AuxiliaryFinal {
+		t.Errorf("expected model final snapshot, got %#v, Stop %v, observation %v", obs, err, observationErr)
+	}
+}
+
+func TestAuxiliaryStabilityAfterError(t *testing.T) {
+	lifetime := &testLifetime{session: "error-sess", tgid: 7777, birth: 33333}
+	s := NewOwnedScope(context.Background(), nil)
+	if err := s.BindLifetime(lifetime); err != nil {
+		t.Fatal(err)
+	}
+
+	customErr := errors.New("simulated auxiliary failure")
+	s.Fail(customErr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	stopErr := s.Stop(ctx)
+	if !errors.Is(stopErr, customErr) {
+		t.Fatalf("stop did not retain error: %v", stopErr)
+	}
+
+	for range 3 {
+		obs, err := s.Observation()
+		if !errors.Is(err, customErr) {
+			t.Fatalf("observation upgraded or lost error: %v", err)
+		}
+		if obs.Outcome != libpf.AuxiliaryNotExercised {
+			t.Fatalf("unexpected outcome after failure: %v", obs.Outcome)
+		}
+	}
+}
+
+type blockingLifetime struct {
+	session string
+	tgid    uint32
+	birth   uint64
+	entered chan struct{}
+	block   chan struct{}
+}
+
+func (b *blockingLifetime) Session() string  { return b.session }
+func (b *blockingLifetime) HostTGID() uint32 { return b.tgid }
+func (b *blockingLifetime) Birth() uint64    { return b.birth }
+func (b *blockingLifetime) Validate() error {
+	if b.entered != nil {
+		select {
+		case b.entered <- struct{}{}:
+		default:
+		}
+		<-b.block
+	}
+	return nil
+}
+
+func TestAuxiliaryValidateOutsideLockDoesNotStallOperations(t *testing.T) {
+	blockValidate := make(chan struct{})
+	validateEntered := make(chan struct{}, 1)
+	blockingLt := &blockingLifetime{
+		session: "block-sess",
+		tgid:    8888,
+		birth:   9999,
+		entered: validateEntered,
+		block:   blockValidate,
+	}
+
+	s := NewOwnedScope(context.Background(), nil)
+	normalLt := &testLifetime{session: "block-sess", tgid: 8888, birth: 9999}
+	if err := s.BindLifetime(normalLt); err != nil {
+		t.Fatal(err)
+	}
+
+	// Swap lifetime pointer to blockingLt to exercise freeze validation
+	s.lifetime = blockingLt
+
+	bgDone := make(chan struct{})
+	go func() {
+		defer close(bgDone)
+		s.freezeSnapshot()
+	}()
+
+	select {
+	case <-validateEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("validate was not entered")
+	}
+
+	// While Validate is blocked outside s.mu, verify other operations do not stall
+	failDone := make(chan struct{})
+	go func() {
+		s.Fail(errors.New("prompt failure"))
+		close(failDone)
+	}()
+
+	select {
+	case <-failDone:
+		// Promptly succeeded without waiting on Validate
+	case <-time.After(time.Second):
+		t.Fatal("s.Fail stalled while Validate was executing")
+	}
+
+	close(blockValidate)
+	<-bgDone
+}
+
+func TestAuxiliaryDeadlineErrorPersistence(t *testing.T) {
+	lifetime := &testLifetime{session: "deadline-sess", tgid: 1111, birth: 2222}
+	s := NewOwnedScope(context.Background(), nil)
+	if err := s.BindLifetime(lifetime); err != nil {
+		t.Fatal(err)
+	}
+	workerBlock := make(chan struct{})
+	workerEntered := make(chan struct{})
+	s.Go(func() {
+		close(workerEntered)
+		<-workerBlock
+	})
+	<-workerEntered
+
+	deadlineCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	err := s.Stop(deadlineCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded, got: %v", err)
+	}
+	if s.Joined() {
+		t.Fatal("Joined() true while worker blocked")
+	}
+	obs1, err1 := s.Observation()
+	if !errors.Is(err1, context.DeadlineExceeded) {
+		t.Fatalf("observation did not retain DeadlineExceeded: %v", err1)
+	}
+	if obs1.Outcome == libpf.AuxiliaryFinal {
+		t.Fatal("outcome upgraded to AuxiliaryFinal on deadline")
+	}
+	if !obs1.HeldWork {
+		t.Fatal("HeldWork should be true on deadline")
+	}
+
+	// Release worker and let background join catch up
+	close(workerBlock)
+	select {
+	case <-s.done:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not physically join")
+	}
+
+	// Reobserve: must STILL return DeadlineExceeded, NEVER clean final
+	obs2, err2 := s.Observation()
+	if !errors.Is(err2, context.DeadlineExceeded) {
+		t.Fatalf("reobservation upgraded or lost error: %v", err2)
+	}
+	if obs2.Outcome == libpf.AuxiliaryFinal {
+		t.Fatal("outcome upgraded to AuxiliaryFinal after background join caught up")
+	}
+
+	// Repeat Stop: must STILL return DeadlineExceeded
+	freshCtx, freshCancel := context.WithTimeout(context.Background(), time.Second)
+	defer freshCancel()
+	err3 := s.Stop(freshCtx)
+	if !errors.Is(err3, context.DeadlineExceeded) {
+		t.Fatalf("repeated Stop lost deadline error: %v", err3)
+	}
+}
+
+func TestOwnedScope_FailureAccessor(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewOwnedScope(ctx, nil)
+
+	if err := s.Failure(); err != nil {
+		t.Fatalf("expected nil initial failure, got: %v", err)
+	}
+
+	testErr := errors.New("sentinel auxiliary failure")
+	s.Fail(testErr)
+
+	if err := s.Failure(); !errors.Is(err, testErr) {
+		t.Fatalf("expected %v, got %v", testErr, err)
+	}
+}
+
+func TestKindLedger_PositiveAdmissionAndReconciliation(t *testing.T) {
+	parent := context.Background()
+	scope := NewOwnedScope(parent, nil)
+	lt := &testLifetime{session: "sess-1", tgid: 100, birth: 12345}
+	if err := scope.BindLifetime(lt); err != nil {
+		t.Fatalf("bind lifetime failed: %v", err)
+	}
+
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatalf("admit kind failed: %v", err)
+	}
+	if op == nil {
+		t.Fatal("expected non-nil operation")
+	}
+
+	if err := op.Complete(); err != nil {
+		t.Fatalf("complete failed: %v", err)
+	}
+
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+	if err := scope.Stop(stopCtx); err != nil {
+		t.Fatalf("stop failed: %v", err)
+	}
+
+	obs, err := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatalf("kind observation failed: %v", err)
+	}
+
+	if obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 || obs.Counts.InFlight != 0 {
+		t.Fatalf("unexpected counts: %+v", obs.Counts)
+	}
+	if err := libpf.ReconcileKindLedger(obs.Counts); err != nil {
+		t.Fatalf("reconcile kind ledger failed: %v", err)
+	}
+	if obs.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("expected SourceLocalNonfinal, got %v", obs.Outcome)
+	}
+	if obs.Binding.Source != libpf.AuxiliarySourcePeriodicMetrics || obs.Binding.Session != "sess-1" {
+		t.Fatalf("unexpected binding: %+v", obs.Binding)
+	}
+
+	// Empty / unstarted kinds must be AuxiliaryNotExercised
+	unstarted, err := scope.KindObservation(libpf.AuxiliarySourcePIDCleanup)
+	if err != nil {
+		t.Fatalf("unstarted observation returned error: %v", err)
+	}
+	if unstarted.Outcome != libpf.AuxiliaryNotExercised || unstarted.Counts.Admitted != 0 {
+		t.Fatalf("expected AuxiliaryNotExercised, got outcome=%v counts=%+v", unstarted.Outcome, unstarted.Counts)
+	}
+}
+
+func TestKindLedger_DuplicateTerminalRejection(t *testing.T) {
+	parent := context.Background()
+	var fatalErr error
+	scope := NewOwnedScope(parent, func(err error) { fatalErr = err })
+	lt := &testLifetime{session: "sess-1", tgid: 100, birth: 12345}
+	_ = scope.BindLifetime(lt)
+
+	op, err := scope.AdmitKind(libpf.AuxiliarySourceInterpreterMetrics)
+	if err != nil {
+		t.Fatalf("admit kind failed: %v", err)
+	}
+
+	if err := op.Complete(); err != nil {
+		t.Fatalf("first complete failed: %v", err)
+	}
+
+	dupErr := op.Complete()
+	if dupErr == nil {
+		t.Fatal("expected error on duplicate complete, got nil")
+	}
+	if fatalErr != nil {
+		t.Fatalf("kind duplicate must not call onError, got %v", fatalErr)
+	}
+	if scope.Failure() != nil {
+		t.Fatalf("kind duplicate must not join scope error, got %v", scope.Failure())
+	}
+	if scope.ctx.Err() != nil {
+		t.Fatal("kind duplicate must not cancel the scope")
+	}
+
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+	if err := scope.Stop(stopCtx); err != nil {
+		t.Fatalf("kind duplicate must not fail stop: %v", err)
+	}
+	obs, obsErr := scope.KindObservation(libpf.AuxiliarySourceInterpreterMetrics)
+	if obsErr == nil || !errors.Is(obsErr, dupErr) {
+		t.Fatalf("expected sticky duplicate cause, got %v", obsErr)
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 || obs.Counts.Failed != 0 || !obs.Counts.Overflow {
+		t.Fatalf("duplicate changed counters: %+v", obs.Counts)
+	}
+	if obs.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("exercised kind outcome %v, want SourceLocalNonfinal", obs.Outcome)
+	}
+}
+
+func TestKindLedger_UnderflowAndOverflow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	scope := NewOwnedScope(ctx, nil)
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		defer stopCancel()
+		_ = scope.Stop(stopCtx)
+	}()
+
+	// Direct underflow check on recordKindTerminal
+	if err := scope.recordKindTerminal(libpf.AuxiliarySourcePeriodicMetrics, terminalComplete, nil); err == nil {
+		t.Fatal("expected underflow error on kind terminal with InFlight=0")
+	}
+
+	// Overflow on AdmitKind
+	scope.mu.Lock()
+	scope.kinds.mu.Lock()
+	kl := scope.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics]
+	kl.Admitted = math.MaxUint64
+	scope.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics] = kl
+	scope.kinds.mu.Unlock()
+	scope.mu.Unlock()
+
+	if _, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics); err == nil {
+		t.Fatal("expected overflow error on AdmitKind at MaxUint64")
+	}
+
+	// Overflow on terminal completion
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	scope2 := NewOwnedScope(ctx2, nil)
+	defer func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		defer stopCancel()
+		_ = scope2.Stop(stopCtx)
+	}()
+
+	op, err := scope2.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatalf("admit kind failed: %v", err)
+	}
+	scope2.mu.Lock()
+	scope2.kinds.mu.Lock()
+	kl2 := scope2.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics]
+	kl2.Completed = math.MaxUint64
+	scope2.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics] = kl2
+	scope2.kinds.mu.Unlock()
+	scope2.mu.Unlock()
+
+	if err := op.Complete(); err == nil {
+		t.Fatal("expected overflow error on Complete at MaxUint64")
+	}
+	scope2.mu.Lock()
+	scope2.kinds.mu.Lock()
+	after := scope2.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics]
+	scope2.kinds.mu.Unlock()
+	scope2.mu.Unlock()
+	if after.InFlight != 1 || after.Completed != math.MaxUint64 || !after.Overflow {
+		t.Fatalf("overflow decremented in-flight or wrapped completed: %+v", after)
+	}
+}
+
+func TestKindLedger_MissingIdentityUNKNOWN(t *testing.T) {
+	parent := context.Background()
+	scope := NewOwnedScope(parent, nil)
+	// Missing session or hostTGID
+	lt := &testLifetime{session: "", tgid: 0, birth: 0}
+	_ = scope.BindLifetime(lt)
+
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePIDCleanup)
+	if err != nil {
+		t.Fatalf("admit kind failed: %v", err)
+	}
+	_ = op.Complete()
+
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+	_ = scope.Stop(stopCtx)
+
+	obs, err := scope.KindObservation(libpf.AuxiliarySourcePIDCleanup)
+	if obs.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("admitted kind must stay SourceLocalNonfinal, got %v", obs.Outcome)
+	}
+	if obs.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("expected empty UNKNOWN identity binding, got %+v", obs.Binding)
+	}
+	if err == nil {
+		t.Fatal("missing identity must surface an explicit error")
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 {
+		t.Fatalf("missing identity must not drop the invocation: %+v", obs.Counts)
+	}
+}
+
+func TestKindLedger_HeldOrCanceledNotFinal(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	scope := NewOwnedScope(parent, nil)
+	lt := &testLifetime{session: "sess-1", tgid: 100, birth: 12345}
+	_ = scope.BindLifetime(lt)
+
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatalf("admit kind failed: %v", err)
+	}
+
+	// Cancel parent while operation is still in flight
+	cancelParent()
+
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Millisecond*50)
+	defer cancelStop()
+	_ = scope.Stop(stopCtx)
+
+	obs, err := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if obs.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("held kind must stay SourceLocalNonfinal, got %v", obs.Outcome)
+	}
+	if !obs.HeldWork {
+		t.Fatal("expected HeldWork to be true")
+	}
+	if err == nil {
+		t.Fatal("held or deadline work must surface an error")
+	}
+	if obs.Counts.InFlight != 1 || obs.Counts.Completed != 0 || obs.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("held snapshot counts/binding: %+v binding=%+v", obs.Counts, obs.Binding)
+	}
+
+	// Late completion cannot mutate the frozen copy.
+	_ = op.Complete()
+	obs2, err2 := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if obs2.Counts != obs.Counts || obs2.Outcome != obs.Outcome || obs2.HeldWork != obs.HeldWork || obs2.Binding != obs.Binding {
+		t.Fatalf("late completion mutated frozen observation: before=%+v after=%+v", obs, obs2)
+	}
+	if err2 == nil || err2.Error() != err.Error() {
+		t.Fatalf("late completion changed frozen error: %v -> %v", err, err2)
+	}
+
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+	defer cleanupCancel()
+	_ = scope.Stop(cleanupCtx)
+}
+
+func TestKindLedger_NilScopeNoOp(t *testing.T) {
+	var scope *OwnedScope
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if op != nil || err != nil {
+		t.Fatalf("expected nil, nil on nil scope AdmitKind, got op=%v err=%v", op, err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatalf("expected nil on nil op Complete, got %v", err)
+	}
+	if err := op.Fail(errors.New("err")); err != nil {
+		t.Fatalf("expected nil on nil op Fail, got %v", err)
+	}
+	if err := op.Abort(); err != nil {
+		t.Fatalf("expected nil on nil op Abort, got %v", err)
+	}
+	if err := op.Skip(); err != nil {
+		t.Fatalf("expected nil on nil op Skip, got %v", err)
+	}
+	if err := op.Incomplete(errors.New("inc")); err != nil {
+		t.Fatalf("expected nil on nil op Incomplete, got %v", err)
+	}
+}
+
+func TestKindLedger_StartDoesNotAutoAdmit(t *testing.T) {
+	parent := context.Background()
+	scope := NewOwnedScope(parent, nil)
+	lt := &testLifetime{session: "sess-1", tgid: 100, birth: 12345}
+	_ = scope.BindLifetime(lt)
+
+	stopFunc := Start(scope.Context(), time.Millisecond*10, func() {
+		// Callback body runs without AdmitKind
+	})
+	time.Sleep(time.Millisecond * 30)
+	stopFunc()
+
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+	_ = scope.Stop(stopCtx)
+
+	for _, k := range []libpf.AuxiliarySource{
+		libpf.AuxiliarySourcePeriodicMetrics,
+		libpf.AuxiliarySourcePIDCleanup,
+		libpf.AuxiliarySourceInterpreterMetrics,
+	} {
+		obs, _ := scope.KindObservation(k)
+		if obs.Counts.Admitted != 0 {
+			t.Fatalf("Start auto-admitted kind %v: %+v", k, obs.Counts)
+		}
+	}
+}
+
+func TestKindLedger_RejectedAdmitDoesNotInventCounters(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	scope := NewOwnedScope(parent, nil)
+	cancel()
+
+	scope.mu.Lock()
+	scope.kinds.mu.Lock()
+	kl := scope.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics]
+	kl.Failed = math.MaxUint64
+	scope.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics] = kl
+	scope.kinds.mu.Unlock()
+	scope.mu.Unlock()
+
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if op != nil || err == nil {
+		t.Fatalf("expected rejected admit, op=%v err=%v", op, err)
+	}
+	scope.mu.Lock()
+	scope.kinds.mu.Lock()
+	after := scope.kinds.ledgers[libpf.AuxiliarySourcePeriodicMetrics]
+	scope.kinds.mu.Unlock()
+	scope.mu.Unlock()
+	if after.Admitted != 0 || after.Failed != math.MaxUint64 || after.InFlight != 0 {
+		t.Fatalf("rejected admit mutated counters: %+v", after)
+	}
+
+	stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+	defer stopCancel()
+	_ = scope.Stop(stopCtx)
+	obs, obsErr := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if obs.Outcome != libpf.AuxiliaryNotExercised || obs.Counts.Admitted != 0 || obs.Counts.Failed != math.MaxUint64 {
+		t.Fatalf("unadmitted reject invented a terminal: outcome=%v counts=%+v", obs.Outcome, obs.Counts)
+	}
+	if obsErr == nil || !errors.Is(obsErr, err) {
+		t.Fatalf("expected sticky reject cause, got %v", obsErr)
+	}
+}
+
+func TestKindLedger_ChangedIdentityFailsObservation(t *testing.T) {
+	parent := context.Background()
+	scope := NewOwnedScope(parent, nil)
+	lt := &testLifetime{session: "sess-1", tgid: 100, birth: 12345}
+	if err := scope.BindLifetime(lt); err != nil {
+		t.Fatal(err)
+	}
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	lt.session = "sess-changed"
+
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+	_ = scope.Stop(stopCtx)
+
+	obs, obsErr := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if obsErr == nil {
+		t.Fatal("changed identity must fail kind observation")
+	}
+	if obs.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("exercised kind outcome %v", obs.Outcome)
+	}
+	if obs.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("changed identity must not publish a binding: %+v", obs.Binding)
+	}
+	if obs.Counts.Completed != 1 || obs.Counts.Failed != 0 {
+		t.Fatalf("identity mismatch fabricated a failed invocation: %+v", obs.Counts)
+	}
+}
+
+func TestKindLedger_SourceSeparation(t *testing.T) {
+	parent := context.Background()
+	scope := NewOwnedScope(parent, nil)
+	lt := &testLifetime{session: "sess-1", tgid: 100, birth: 12345}
+	if err := scope.BindLifetime(lt); err != nil {
+		t.Fatal(err)
+	}
+	metricsOp, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanupOp, err := scope.AdmitKind(libpf.AuxiliarySourcePIDCleanup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := metricsOp.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	cause := errors.New("cleanup failed")
+	if err := cleanupOp.Fail(cause); err != nil {
+		t.Fatal(err)
+	}
+
+	stopCtx, cancel := context.WithTimeout(parent, time.Second)
+	defer cancel()
+	if err := scope.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	metrics, err := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup, cleanupErr := scope.KindObservation(libpf.AuxiliarySourcePIDCleanup)
+	if !errors.Is(cleanupErr, cause) {
+		t.Fatalf("cleanup cause lost: %v", cleanupErr)
+	}
+	if metrics.Counts.Completed != 1 || metrics.Counts.Failed != 0 || metrics.Binding.Source != libpf.AuxiliarySourcePeriodicMetrics {
+		t.Fatalf("metrics ledger mixed with cleanup: %+v binding=%+v", metrics.Counts, metrics.Binding)
+	}
+	if cleanup.Counts.Failed != 1 || cleanup.Counts.Completed != 0 || cleanup.Binding.Source != libpf.AuxiliarySourcePIDCleanup {
+		t.Fatalf("cleanup ledger mixed with metrics: %+v binding=%+v", cleanup.Counts, cleanup.Binding)
+	}
+	if metrics.Outcome != libpf.SourceLocalNonfinal || cleanup.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("outcomes metrics=%v cleanup=%v", metrics.Outcome, cleanup.Outcome)
+	}
+	idle, err := scope.KindObservation(libpf.AuxiliarySourceInterpreterMetrics)
+	if err != nil || idle.Outcome != libpf.AuxiliaryNotExercised || idle.Counts.Admitted != 0 {
+		t.Fatalf("unstarted kind was exercised: err=%v obs=%+v", err, idle)
+	}
+}
+
+type queryCountingLifetime struct {
+	sessionCalls, tgidCalls, birthCalls, validateCalls atomic.Uint32
+}
+
+func (q *queryCountingLifetime) Session() string {
+	q.sessionCalls.Add(1)
+	return "s"
+}
+func (q *queryCountingLifetime) HostTGID() uint32 {
+	q.tgidCalls.Add(1)
+	return 1
+}
+func (q *queryCountingLifetime) Birth() uint64 {
+	q.birthCalls.Add(1)
+	return 1
+}
+func (q *queryCountingLifetime) Validate() error {
+	q.validateCalls.Add(1)
+	return nil
+}
+
+func TestOwnedScopeMissingRetainerInitialZeroQueries(t *testing.T) {
+	lifetime := &queryCountingLifetime{}
+	s := NewOwnedScope(context.Background(), nil)
+	err := s.BindLifetime(lifetime)
+	if err == nil {
+		t.Fatal("unretained lifetime unexpectedly admitted")
+	}
+	if q := lifetime.validateCalls.Load(); q != 0 {
+		t.Fatalf("expected 0 Validate calls, got %d", q)
+	}
+	if q := lifetime.sessionCalls.Load(); q != 0 {
+		t.Fatalf("expected 0 Session calls, got %d", q)
+	}
+	if q := lifetime.tgidCalls.Load(); q != 0 {
+		t.Fatalf("expected 0 HostTGID calls, got %d", q)
+	}
+	if q := lifetime.birthCalls.Load(); q != 0 {
+		t.Fatalf("expected 0 Birth calls, got %d", q)
+	}
+}
+
+type mockSpyRetainerLifetime struct {
+	sessionCalls, tgidCalls, birthCalls, validateCalls atomic.Uint32
+	onValidate, onSession, onHostTGID, onBirth         func()
+}
+
+func (q *mockSpyRetainerLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	return q, func() error { return nil }, nil
+}
+func (q *mockSpyRetainerLifetime) Session() string {
+	q.sessionCalls.Add(1)
+	if q.onSession != nil {
+		q.onSession()
+	}
+	return "s"
+}
+func (q *mockSpyRetainerLifetime) HostTGID() uint32 {
+	q.tgidCalls.Add(1)
+	if q.onHostTGID != nil {
+		q.onHostTGID()
+	}
+	return 1
+}
+func (q *mockSpyRetainerLifetime) Birth() uint64 {
+	q.birthCalls.Add(1)
+	if q.onBirth != nil {
+		q.onBirth()
+	}
+	return 1
+}
+func (q *mockSpyRetainerLifetime) Validate() error {
+	q.validateCalls.Add(1)
+	if q.onValidate != nil {
+		q.onValidate()
+	}
+	return nil
+}
+
+func TestOwnedScopeLateExpiryZeroNextCallbacks(t *testing.T) {
+	// Case 1: Validate triggers cancellation -> zero Session/HostTGID/Birth calls
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(ctx, nil)
+		spy := &mockSpyRetainerLifetime{
+			onValidate: func() { cancel() },
+		}
+		if err := s.BindLifetime(spy); err == nil {
+			t.Fatal("expected BindLifetime failure on late cancellation during Validate")
+		}
+		if spy.validateCalls.Load() != 1 {
+			t.Fatalf("expected 1 Validate call, got %d", spy.validateCalls.Load())
+		}
+		if spy.sessionCalls.Load() != 0 || spy.tgidCalls.Load() != 0 || spy.birthCalls.Load() != 0 {
+			t.Fatalf("late Validate cancellation leaked subsequent queries: sess=%d tgid=%d birth=%d",
+				spy.sessionCalls.Load(), spy.tgidCalls.Load(), spy.birthCalls.Load())
+		}
+		if _, err := s.AuxiliaryBinding(); err == nil {
+			t.Fatal("binding published after late cancellation")
+		}
+	}
+
+	// Case 2: Session triggers cancellation -> zero HostTGID/Birth calls
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(ctx, nil)
+		spy := &mockSpyRetainerLifetime{
+			onSession: func() { cancel() },
+		}
+		if err := s.BindLifetime(spy); err == nil {
+			t.Fatal("expected BindLifetime failure on late cancellation during Session")
+		}
+		if spy.sessionCalls.Load() != 1 {
+			t.Fatalf("expected 1 Session call, got %d", spy.sessionCalls.Load())
+		}
+		if spy.tgidCalls.Load() != 0 || spy.birthCalls.Load() != 0 {
+			t.Fatalf("late Session cancellation leaked subsequent queries: tgid=%d birth=%d",
+				spy.tgidCalls.Load(), spy.birthCalls.Load())
+		}
+		if _, err := s.AuxiliaryBinding(); err == nil {
+			t.Fatal("binding published after late cancellation")
+		}
+	}
+
+	// Case 3: HostTGID triggers cancellation -> zero Birth calls
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(ctx, nil)
+		spy := &mockSpyRetainerLifetime{
+			onHostTGID: func() { cancel() },
+		}
+		if err := s.BindLifetime(spy); err == nil {
+			t.Fatal("expected BindLifetime failure on late cancellation during HostTGID")
+		}
+		if spy.tgidCalls.Load() != 1 {
+			t.Fatalf("expected 1 HostTGID call, got %d", spy.tgidCalls.Load())
+		}
+		if spy.birthCalls.Load() != 0 {
+			t.Fatalf("late HostTGID cancellation leaked Birth query: birth=%d", spy.birthCalls.Load())
+		}
+		if _, err := s.AuxiliaryBinding(); err == nil {
+			t.Fatal("binding published after late cancellation")
+		}
+	}
+
+	// Case 4: Birth triggers cancellation -> zero publication
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(ctx, nil)
+		spy := &mockSpyRetainerLifetime{
+			onBirth: func() { cancel() },
+		}
+		if err := s.BindLifetime(spy); err == nil {
+			t.Fatal("expected BindLifetime failure on late cancellation during Birth")
+		}
+		if spy.birthCalls.Load() != 1 {
+			t.Fatalf("expected 1 Birth call, got %d", spy.birthCalls.Load())
+		}
+		if _, err := s.AuxiliaryBinding(); err == nil {
+			t.Fatal("binding published after late cancellation during Birth")
+		}
+	}
+}
+
+type mockFailingReleaseRetainerLifetime struct {
+	releaseErr   error
+	validateErr  error
+	onValidate   func()
+	releaseCalls atomic.Int32
+}
+
+func (m *mockFailingReleaseRetainerLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	return m, func() error {
+		m.releaseCalls.Add(1)
+		return m.releaseErr
+	}, nil
+}
+func (m *mockFailingReleaseRetainerLifetime) Session() string  { return "s" }
+func (m *mockFailingReleaseRetainerLifetime) HostTGID() uint32 { return 100 }
+func (m *mockFailingReleaseRetainerLifetime) Birth() uint64    { return 200 }
+func (m *mockFailingReleaseRetainerLifetime) Validate() error {
+	if m.onValidate != nil {
+		m.onValidate()
+	}
+	return m.validateErr
+}
+
+type countedStopLifetime struct {
+	session string
+	validateCalls, sessionCalls, tgidCalls, birthCalls, releases atomic.Int32
+	onStopStep func(string)
+}
+
+func (m *countedStopLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	return m, func() error { m.releases.Add(1); return nil }, nil
+}
+func (m *countedStopLifetime) stopStep(name string, count int32) {
+	if count == 2 && m.onStopStep != nil { m.onStopStep(name) }
+}
+func (m *countedStopLifetime) Validate() error { m.stopStep("validate", m.validateCalls.Add(1)); return nil }
+func (m *countedStopLifetime) Session() string { m.stopStep("session", m.sessionCalls.Add(1)); return m.session }
+func (m *countedStopLifetime) HostTGID() uint32 {
+	m.stopStep("tgid", m.tgidCalls.Add(1))
+	return 100
+}
+func (m *countedStopLifetime) Birth() uint64 { m.stopStep("birth", m.birthCalls.Add(1)); return 200 }
+
+func cleanupScopeRootTest(t *testing.T, s *OwnedScope) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Stop(ctx); err != nil { t.Logf("scope cleanup result: %v", err) }
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			t.Error("scope worker did not finish")
+		}
+	})
+}
+
+func TestStopReadoutBindingTrackedCopy(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	cleanupScopeRootTest(t, s)
+	m := &countedStopLifetime{session: "root-copy"}
+	if err := s.BindLifetime(m); err != nil { t.Fatal(err) }
+	expected, err := s.AuxiliaryBinding()
+	if err != nil { t.Fatal(err) }
+	_, beforeErr := s.StopReadoutBinding()
+	if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+	var first, second libpf.AuxiliaryBinding
+	var stepErr, outsideErr, ordinaryErr error
+	if err := s.AddFinalizer(func() error {
+		stepErr = s.WithStopReadoutStep(func() error {
+			var err error
+			first, err = s.StopReadoutBinding()
+			if err != nil { return err }
+			changed := first
+			changed.Session = "mutated"
+			if changed.Session == first.Session { return errors.New("copy did not change") }
+			second, err = s.StopReadoutBinding()
+			return err
+		})
+		_, outsideErr = s.StopReadoutBinding()
+		_, ordinaryErr = s.AuxiliaryBinding()
+		return stepErr
+	}); err != nil { t.Fatal(err) }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stopErr := s.Stop(ctx)
+	select { case <-s.done: case <-ctx.Done(): t.Error("scope worker did not finish"); return }
+	_, afterErr := s.StopReadoutBinding()
+	_, afterOrdinaryErr := s.AuxiliaryBinding()
+	s.mu.Lock()
+	generation := s.generation
+	s.mu.Unlock()
+	if beforeErr == nil || outsideErr == nil || afterErr == nil || ordinaryErr == nil || afterOrdinaryErr == nil || stepErr != nil || stopErr != nil || first != expected || second != expected || second.Generation != generation {
+		t.Errorf("unexpected copied root: before=%v step=%v outside=%v after=%v stop=%v first=%#v second=%#v expected=%#v", beforeErr, stepErr, outsideErr, afterErr, stopErr, first, second, expected)
+	}
+	if m.validateCalls.Load() != 2 || m.sessionCalls.Load() != 2 || m.tgidCalls.Load() != 2 || m.birthCalls.Load() != 2 || m.releases.Load() != 1 {
+		t.Error("root projection queried lifetime or repeated release")
+	}
+}
+
+func TestStopReadoutBindingExpiredStep(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	cleanupScopeRootTest(t, s)
+	m := &countedStopLifetime{session: "root-expired"}
+	if err := s.BindLifetime(m); err != nil { t.Fatal(err) }
+	if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var readErr error
+	if err := s.AddFinalizer(func() error {
+		return s.WithStopReadoutStep(func() error {
+			<-ctx.Done()
+			_, readErr = s.StopReadoutBinding()
+			return nil
+		})
+	}); err != nil { t.Fatal(err) }
+	stopErr := s.Stop(ctx)
+	select { case <-s.done: case <-time.After(2*time.Second): t.Error("scope worker did not finish"); return }
+	if stopErr == nil || readErr == nil || m.validateCalls.Load() != 2 || m.sessionCalls.Load() != 2 || m.tgidCalls.Load() != 2 || m.birthCalls.Load() != 2 || m.releases.Load() != 1 {
+		t.Errorf("expired root: stop=%v read=%v", stopErr, readErr)
+	}
+}
+
+func TestCommitStopReadoutDoesNotNotifyUnderLedgerLock(t *testing.T) {
+	var ledger sync.Mutex
+	var hooks atomic.Int32
+	s := NewOwnedScope(context.Background(), func(error) { ledger.Lock(); hooks.Add(1); ledger.Unlock() })
+	locked := make(chan struct{})
+	var unlockOnce sync.Once
+	unblock := func() { select { case <-locked: unlockOnce.Do(ledger.Unlock); default: } }
+	t.Cleanup(func() {
+		unblock()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := s.Stop(ctx)
+		cancel()
+		unblock()
+		if errors.Is(err, context.DeadlineExceeded) { t.Errorf("scope cleanup timed out: %v", err) }
+		select { case <-s.done: case <-time.After(2*time.Second): t.Error("scope worker did not finish") }
+	})
+	m := &countedStopLifetime{session: "hook-free"}
+	if err := s.BindLifetime(m); err != nil { t.Fatal(err) }
+	if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+	var commitErr, stickyErr, nextErr error
+	var hooksBeforeUnlock int32
+	var nextCalled bool
+	if err := s.AddFinalizer(func() error {
+		ledger.Lock()
+		close(locked)
+		defer unblock()
+		commitErr = s.CommitStopReadout(func() error { return syscall.EACCES })
+		hooksBeforeUnlock = hooks.Load()
+		unblock()
+		stickyErr = s.Failure()
+		nextErr = s.WithStopReadoutStep(func() error { nextCalled = true; return nil })
+		return commitErr
+	}); err != nil { t.Fatal(err) }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	stopErr := s.Stop(ctx)
+	unblock()
+	select { case <-s.done: case <-time.After(2*time.Second): t.Error("scope worker did not finish"); return }
+	obs, obsErr := s.Observation()
+	if !errors.Is(stopErr, syscall.EACCES) || !errors.Is(commitErr, syscall.EACCES) || !errors.Is(stickyErr, syscall.EACCES) || !errors.Is(obsErr, syscall.EACCES) || hooksBeforeUnlock != 0 || hooks.Load() == 0 || nextErr == nil || nextCalled || obs.Outcome == libpf.AuxiliaryFinal {
+		t.Errorf("commit notification: stop=%v commit=%v sticky=%v next=%v hooksBefore=%d hooks=%d observation=%#v %v", stopErr, commitErr, stickyErr, nextErr, hooksBeforeUnlock, hooks.Load(), obs, obsErr)
+	}
+}
+
+func TestOwnedScopeLateParentFailureCopies(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	s := NewOwnedScope(parent, nil)
+	t.Cleanup(func() {
+		cancelParent()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Stop(ctx); errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("cleanup timed out: %v", err)
+		}
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			t.Error("scope worker did not finish")
+		}
+	})
+	lifetime := &countedStopLifetime{session: "parent-copy"}
+	if err := s.BindLifetime(lifetime); err != nil { t.Fatal(err) }
+	if !s.ExecuteCallback(func() {}) { t.Fatal("scope callback rejected") }
+	kind := libpf.AuxiliarySourceInterpreterMetrics
+	op, err := s.AdmitKind(kind)
+	if err != nil || op == nil { t.Fatalf("kind admission: %v", err) }
+	if err := op.Complete(); err != nil { t.Fatal(err) }
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 2*time.Second)
+	stopErr := s.Stop(stopCtx)
+	select {
+	case <-s.done:
+	case <-stopCtx.Done():
+		cancelStop()
+		t.Error("scope worker did not finish")
+		return
+	}
+	cancelStop()
+	s.mu.Lock()
+	rawScope := s.snapshot
+	s.mu.Unlock()
+	rawKind, rawKindErr := s.kinds.Observation(kind)
+	normalScope, normalScopeErr := s.Observation()
+	normalKind, normalKindErr := s.KindObservation(kind)
+	if stopErr != nil || rawKindErr != nil || normalScopeErr != nil || normalKindErr != nil || rawScope.Outcome != libpf.AuxiliaryFinal || rawKind.Outcome != libpf.AuxiliaryFinal || normalScope.Outcome != libpf.AuxiliaryFinal || normalKind.Outcome != libpf.AuxiliaryFinal || s.parentSignal.Err() == nil {
+		t.Errorf("normal stop unexpectedly failed: stop=%v scope=%v kind=%v", stopErr, normalScopeErr, normalKindErr)
+	}
+	cancelParent()
+	scopeCopy, scopeErr := s.Observation()
+	kindCopy, kindErr := s.KindObservation(kind)
+	parentErr := s.ParentErr()
+	if !errors.Is(scopeErr, context.Canceled) || !errors.Is(kindErr, context.Canceled) || !errors.Is(kindCopy.Err, context.Canceled) || !errors.Is(parentErr, context.Canceled) || scopeCopy.Outcome == libpf.AuxiliaryFinal || kindCopy.Outcome == libpf.AuxiliaryFinal {
+		t.Errorf("late parent not overlaid: scope=%#v %v kind=%#v %v parent=%v", scopeCopy, scopeErr, kindCopy, kindErr, parentErr)
+	}
+	if !reflect.DeepEqual(scopeCopy.Counts, rawScope.Counts) || scopeCopy.HeldWork != rawScope.HeldWork || !reflect.DeepEqual(kindCopy.Counts, rawKind.Counts) || kindCopy.HeldWork != rawKind.HeldWork || scopeCopy.Binding != (libpf.AuxiliaryBinding{}) || kindCopy.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Error("overlay changed counts or retained a binding")
+	}
+	scopeCopy.Counts.Completed = 99
+	kindCopy.Counts.Completed = 99
+	s.mu.Lock()
+	afterScope := s.snapshot
+	s.mu.Unlock()
+	afterKind, afterKindErr := s.kinds.Observation(kind)
+	if !reflect.DeepEqual(afterScope, rawScope) || !reflect.DeepEqual(afterKind, rawKind) || afterKindErr != nil {
+		t.Error("sealed observations changed after parent overlay")
+	}
+	if lifetime.validateCalls.Load() != 2 || lifetime.sessionCalls.Load() != 2 || lifetime.tgidCalls.Load() != 2 || lifetime.birthCalls.Load() != 2 || lifetime.releases.Load() != 1 {
+		t.Error("observation queried lifetime or repeated release")
+	}
+}
+
+func TestOwnedScopeFreshStopIdentity(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		name := "matching"
+		if changed { name = "changed" }
+		t.Run(name, func(t *testing.T) {
+			s := NewOwnedScope(context.Background(), nil)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := s.Stop(ctx); errors.Is(err, context.DeadlineExceeded) { t.Errorf("cleanup: %v", err) }
+				select { case <-s.done: case <-ctx.Done(): t.Error("scope did not finish") }
+			})
+			m := &countedStopLifetime{session: "first"}
+			if err := s.BindLifetime(m); err != nil { t.Fatal(err) }
+			if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+			if changed { m.session = "changed" }
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			err := s.Stop(ctx)
+			select { case <-s.done: case <-ctx.Done(): t.Error("scope did not finish"); return }
+			obs, obsErr := s.Observation()
+			if m.validateCalls.Load() != 2 || m.sessionCalls.Load() != 2 || m.tgidCalls.Load() != 2 || m.birthCalls.Load() != 2 || m.releases.Load() != 1 {
+				t.Error("fresh identity callbacks or release count incorrect")
+			}
+			if changed {
+				if err == nil || obsErr == nil || obs.Outcome == libpf.AuxiliaryFinal { t.Errorf("changed identity accepted: %#v %v %v", obs, err, obsErr) }
+			} else if err != nil || obsErr != nil || obs.Outcome != libpf.AuxiliaryFinal {
+				t.Errorf("matching model identity not final: %#v %v %v", obs, err, obsErr)
+			}
+		})
+	}
+}
+
+func TestOwnedScopeBlockedStopIdentity(t *testing.T) {
+	steps := []string{"validate", "session", "tgid", "birth"}
+	for blockedIndex, blocked := range steps {
+		t.Run(blocked, func(t *testing.T) {
+			s := NewOwnedScope(context.Background(), nil)
+			entered, unblock, stopDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var unblockOnce sync.Once
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			var stopErr error
+			spawned := false
+			wait := func(ch <-chan struct{}) bool { select { case <-ch: return true; case <-time.After(2*time.Second): return false } }
+			t.Cleanup(func() {
+				unblockOnce.Do(func() { close(unblock) })
+				cancel()
+				if !spawned {
+					cleanup, done := context.WithTimeout(context.Background(), 2*time.Second)
+					if err := s.Stop(cleanup); err != nil { t.Logf("cleanup Stop: %v", err) }
+					done()
+				}
+				if spawned && !wait(stopDone) { t.Error("Stop did not exit") }
+				if !wait(s.done) { t.Error("scope worker did not exit") }
+			})
+			m := &countedStopLifetime{session: "first"}
+			if err := s.BindLifetime(m); err != nil { t.Fatal(err) }
+			if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+			m.onStopStep = func(name string) { if name == blocked { close(entered); <-unblock } }
+			spawned = true
+			go func() { defer close(stopDone); stopErr = s.Stop(ctx) }()
+			enteredOK, stopOK := wait(entered), wait(stopDone)
+			held := m.releases.Load() == 0
+			earlyObs, earlyErr := s.Observation()
+			unblockOnce.Do(func() { close(unblock) })
+			doneOK := wait(s.done)
+			if !enteredOK || !stopOK || !doneOK { t.Error("timed out waiting for owned work") }
+			if !stopOK || !doneOK { return }
+			laterCtx, laterCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			laterErr := s.Stop(laterCtx)
+			laterCancel()
+			obs, obsErr := s.Observation()
+			counts := []int32{m.validateCalls.Load(), m.sessionCalls.Load(), m.tgidCalls.Load(), m.birthCalls.Load()}
+			for i, count := range counts {
+				want := int32(1)
+				if i <= blockedIndex { want++ }
+				if count != want { t.Errorf("%s calls = %d, want %d", steps[i], count, want) }
+			}
+			if !errors.Is(stopErr, context.DeadlineExceeded) || !errors.Is(laterErr, context.DeadlineExceeded) || !errors.Is(earlyErr, context.DeadlineExceeded) || earlyObs.Outcome == libpf.AuxiliaryFinal || !reflect.DeepEqual(earlyObs, obs) || !held || m.releases.Load() != 1 || obsErr == nil || obs.Outcome == libpf.AuxiliaryFinal {
+				t.Errorf("unexpected blocked readout: stop=%v later=%v held=%v releases=%d observation=%#v %v", stopErr, laterErr, held, m.releases.Load(), obs, obsErr)
+			}
+		})
+	}
+}
+
+func TestOwnedScopeParentFailureBeforeFreeze(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	s := NewOwnedScope(parent, nil)
+	entered, unblock, stopDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var unblockOnce sync.Once
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), 5*time.Second)
+	var stopErr, firstErr, nextErr error
+	var nextCalled bool
+	spawned := false
+	wait := func(ch <-chan struct{}) bool { select { case <-ch: return true; case <-time.After(2*time.Second): return false } }
+	t.Cleanup(func() {
+		unblockOnce.Do(func() { close(unblock) })
+		cancelParent()
+		cancelStop()
+		if !spawned {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if err := s.Stop(ctx); err != nil { t.Logf("cleanup Stop: %v", err) }
+			cancel()
+		}
+		if spawned && !wait(stopDone) { t.Error("Stop did not exit") }
+		if !wait(s.done) { t.Error("scope worker did not exit") }
+	})
+	m := &countedStopLifetime{session: "parent-before-freeze"}
+	if err := s.BindLifetime(m); err != nil { t.Fatal(err) }
+	if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+	if err := s.AddFinalizer(func() error {
+		firstErr = s.WithStopReadoutStep(func() error { close(entered); <-unblock; return nil })
+		nextErr = s.WithStopReadoutStep(func() error { nextCalled = true; return nil })
+		return nil
+	}); err != nil { t.Fatal(err) }
+	spawned = true
+	go func() { defer close(stopDone); stopErr = s.Stop(stopCtx) }()
+	enteredOK := wait(entered)
+	watchOK := wait(s.watchDone)
+	cancelParent()
+	unblockOnce.Do(func() { close(unblock) })
+	stopOK, doneOK := wait(stopDone), wait(s.done)
+	if !enteredOK || !watchOK || !stopOK || !doneOK { t.Error("timed out waiting for owned work") }
+	if !stopOK || !doneOK { return }
+	obs, obsErr := s.Observation()
+	if !errors.Is(stopErr, context.Canceled) || !errors.Is(obsErr, context.Canceled) || firstErr == nil || nextErr == nil || nextCalled || obs.Outcome == libpf.AuxiliaryFinal || m.releases.Load() != 1 {
+		t.Errorf("unexpected parent failure: stop=%v first=%v next=%v observation=%#v %v", stopErr, firstErr, nextErr, obs, obsErr)
+	}
+}
+
+func TestOwnedScopeExpiredFirstStopCannotRenew(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Stop(ctx); errors.Is(err, context.DeadlineExceeded) { t.Errorf("cleanup Stop: %v", err) }
+		select { case <-s.done: case <-ctx.Done(): t.Error("scope worker did not exit") }
+	})
+	m := &countedStopLifetime{session: "expired-first"}
+	if err := s.BindLifetime(m); err != nil { t.Fatal(err) }
+	if !s.ExecuteCallback(func() {}) { t.Fatal("callback rejected") }
+	expired, cancelExpired := context.WithCancel(context.Background())
+	cancelExpired()
+	firstErr := s.Stop(expired)
+	later, cancelLater := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelLater()
+	laterErr := s.Stop(later)
+	select { case <-s.done: case <-later.Done(): t.Error("scope worker did not exit"); return }
+	obs, obsErr := s.Observation()
+	if firstErr == nil || laterErr == nil || obsErr == nil || obs.Outcome == libpf.AuxiliaryFinal || m.validateCalls.Load() != 1 || m.sessionCalls.Load() != 1 || m.tgidCalls.Load() != 1 || m.birthCalls.Load() != 1 || m.releases.Load() != 1 {
+		t.Errorf("expired first Stop renewed readout: first=%v later=%v observation=%#v %v", firstErr, laterErr, obs, obsErr)
+	}
+}
+
+func TestOwnedScopeTrackedStepFailure(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	s := NewOwnedScope(parent, nil)
+	t.Cleanup(func() {
+		cancelParent()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Stop(ctx); errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("scope cleanup timed out: %v", err)
+		}
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			t.Errorf("scope worker did not finish: %v", ctx.Err())
+		}
+	})
+	lifetime := &mockFailingReleaseRetainerLifetime{}
+	if err := s.BindLifetime(lifetime); err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("step failure")
+	var normalErr, commitErr, followupErr, failedErr, nextErr error
+	var workCanceled, parentValid, commitCalled, followupCalled, nextCalled bool
+	if err := s.AddFinalizer(func() error {
+		normalErr = s.WithStopReadoutStep(func() error {
+			workCanceled = s.Context().Err() != nil
+			parentValid = parent.Err() == nil
+			commitErr = s.CommitStopReadout(func() error { commitCalled = true; return nil })
+			return commitErr
+		})
+		followupErr = s.WithStopReadoutStep(func() error { followupCalled = true; return nil })
+		failedErr = s.WithStopReadoutStep(func() error { return failure })
+		nextErr = s.WithStopReadoutStep(func() error { nextCalled = true; return nil })
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stopErr := s.Stop(ctx)
+	select {
+	case <-s.done:
+	case <-ctx.Done():
+		t.Errorf("scope worker did not finish: %v", ctx.Err())
+		return
+	}
+	if normalErr != nil || commitErr != nil || followupErr != nil || !commitCalled || !followupCalled || !workCanceled || !parentValid || !errors.Is(failedErr, failure) || nextErr == nil || nextCalled || !errors.Is(stopErr, failure) {
+		t.Errorf("unexpected step results: normal=%v commit=%v followup=%v failed=%v next=%v stop=%v", normalErr, commitErr, followupErr, failedErr, nextErr, stopErr)
+	}
+}
+
+func TestOwnedScopeTrackedStepOutlivesFinalizer(t *testing.T) {
+	s := NewOwnedScope(context.Background(), nil)
+	lifetime := &mockFailingReleaseRetainerLifetime{}
+	entered, unblock := make(chan struct{}), make(chan struct{})
+	workerStarted, workerDone := make(chan struct{}), make(chan struct{})
+	finalizerDone, stopDone := make(chan struct{}), make(chan struct{})
+	var unblockOnce sync.Once
+	stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Second)
+	var stopErr, stepErr error
+	stopSpawned := false
+	wait := func(ch <-chan struct{}) bool {
+		select {
+		case <-ch:
+			return true
+		case <-time.After(2 * time.Second):
+			return false
+		}
+	}
+	t.Cleanup(func() {
+		unblockOnce.Do(func() { close(unblock) })
+		cancelStop()
+		if !stopSpawned {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if err := s.Stop(ctx); err != nil {
+				t.Logf("cleanup Stop: %v", err)
+			}
+			cancel()
+		}
+		if stopSpawned && !wait(stopDone) { t.Error("Stop did not exit") }
+		select {
+		case <-workerStarted:
+			if !wait(workerDone) { t.Error("step worker did not exit") }
+		default:
+		}
+		if !wait(s.done) { t.Error("scope worker did not finish") }
+	})
+	if err := s.BindLifetime(lifetime); err != nil { t.Fatal(err) }
+	if err := s.AddFinalizer(func() error {
+		defer close(finalizerDone)
+		close(workerStarted)
+		go func() {
+			defer close(workerDone)
+			stepErr = s.WithStopReadoutStep(func() error { close(entered); <-unblock; return nil })
+		}()
+		select {
+		case <-entered:
+			return nil
+		case <-time.After(2 * time.Second):
+			return errors.New("step did not enter")
+		}
+	}); err != nil { t.Fatal(err) }
+	stopSpawned = true
+	go func() { defer close(stopDone); stopErr = s.Stop(stopCtx) }()
+	enteredOK := wait(entered)
+	finalizerOK := wait(finalizerDone)
+	stopOK := wait(stopDone)
+	heldBeforeUnblock := lifetime.releaseCalls.Load() == 0
+	select {
+	case <-s.done:
+		heldBeforeUnblock = false
+	default:
+	}
+	unblockOnce.Do(func() { close(unblock) })
+	workerOK := wait(workerDone)
+	doneOK := wait(s.done)
+	if !enteredOK || !finalizerOK || !stopOK || !workerOK || !doneOK { t.Error("timed out waiting for owned work") }
+	if !stopOK || !workerOK || !doneOK { return }
+	if !errors.Is(stopErr, context.DeadlineExceeded) || !heldBeforeUnblock || stepErr == nil || lifetime.releaseCalls.Load() != 1 {
+		t.Errorf("unexpected blocked-step result: stop=%v held=%v step=%v releases=%d", stopErr, heldBeforeUnblock, stepErr, lifetime.releaseCalls.Load())
+	}
+}
+
+func TestOwnedScopeFinalizersBeforeLifetimeRelease(t *testing.T) {
+	finalizerErr := errors.New("finalizer failed")
+	releaseErr := errors.New("release failed")
+	s := NewOwnedScope(context.Background(), nil)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.Stop(ctx); errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("scope cleanup timed out: %v", err)
+		}
+		select {
+		case <-s.done:
+		case <-ctx.Done():
+			t.Errorf("scope worker did not finish: %v", ctx.Err())
+		}
+	})
+	lifetime := &mockFailingReleaseRetainerLifetime{releaseErr: releaseErr}
+	if err := s.BindLifetime(lifetime); err != nil {
+		t.Fatal(err)
+	}
+	if !s.ExecuteCallback(func() {}) {
+		t.Fatal("callback rejected")
+	}
+	var firstHeld, secondHeld, firstUnfrozen, secondUnfrozen, secondRan bool
+	if err := s.AddFinalizer(func() error {
+		firstHeld = lifetime.releaseCalls.Load() == 0
+		firstUnfrozen = !s.IsSnapshotted()
+		return finalizerErr
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddFinalizer(func() error {
+		secondRan = true
+		secondHeld = lifetime.releaseCalls.Load() == 0
+		secondUnfrozen = !s.IsSnapshotted()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := s.Stop(ctx)
+	select {
+	case <-s.done:
+	case <-ctx.Done():
+		t.Errorf("scope worker did not finish: %v", ctx.Err())
+		return
+	}
+	if !firstHeld || !secondHeld || !firstUnfrozen || !secondUnfrozen || !secondRan {
+		t.Error("finalizers did not both run before release and snapshot")
+	}
+	if lifetime.releaseCalls.Load() != 1 {
+		t.Errorf("release calls = %d, want 1", lifetime.releaseCalls.Load())
+	}
+	if !errors.Is(err, finalizerErr) || !errors.Is(err, releaseErr) {
+		t.Errorf("Stop error missing cleanup causes: %v", err)
+	}
+	observation, observationErr := s.Observation()
+	if observation.Counts.Admitted != 1 || observation.Counts.Completed != 1 || observation.Counts.InFlight != 0 || observation.Counts.Failed != 0 || observation.Counts.Aborted != 0 {
+		t.Errorf("unexpected exercised counts: %#v", observation.Counts)
+	}
+	if observation.Outcome == libpf.AuxiliaryFinal || !errors.Is(observationErr, finalizerErr) || !errors.Is(observationErr, releaseErr) {
+		t.Errorf("unexpected observation %#v, error %v", observation, observationErr)
+	}
+}
+
+func TestOwnedScopeBindLifetimeRollbackJoinsReleaseError(t *testing.T) {
+	errSimulatedRelease := errors.New("simulated release failure")
+	errSimulatedValidation := errors.New("simulated validation failure")
+
+	// Case 1: Validation failure + failing release
+	{
+		ctx := context.Background()
+		s := NewOwnedScope(ctx, nil)
+		mock := &mockFailingReleaseRetainerLifetime{
+			releaseErr:  errSimulatedRelease,
+			validateErr: errSimulatedValidation,
+		}
+		err := s.BindLifetime(mock)
+		if err == nil {
+			t.Fatal("expected BindLifetime to fail")
+		}
+		if !errors.Is(err, errSimulatedValidation) {
+			t.Fatalf("expected primary validation error, got: %v", err)
+		}
+		if !errors.Is(err, errSimulatedRelease) {
+			t.Fatalf("expected joined release error, got: %v", err)
+		}
+		if mock.releaseCalls.Load() != 1 {
+			t.Fatalf("expected exactly 1 release call, got %d", mock.releaseCalls.Load())
+		}
+	}
+
+	// Case 2: Cancellation during callback + failing release
+	{
+		ctx, cancel := context.WithCancel(context.Background())
+		s := NewOwnedScope(ctx, nil)
+		mock := &mockFailingReleaseRetainerLifetime{
+			releaseErr: errSimulatedRelease,
+			onValidate: func() { cancel() },
+		}
+		err := s.BindLifetime(mock)
+		if err == nil {
+			t.Fatal("expected BindLifetime to fail on cancel")
+		}
+		if !errors.Is(err, errSimulatedRelease) {
+			t.Fatalf("expected joined release error on cancel rollback, got: %v", err)
+		}
+		if mock.releaseCalls.Load() != 1 {
+			t.Fatalf("expected exactly 1 release call, got %d", mock.releaseCalls.Load())
+		}
 	}
 }

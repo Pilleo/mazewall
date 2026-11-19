@@ -6,43 +6,512 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
+	"time"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 )
 
 type ownedScopeKey struct{}
 
+var ownedScopeGeneration atomic.Uint64
+
+func nextOwnedScopeGeneration() (uint64, error) {
+	for {
+		prev := ownedScopeGeneration.Load()
+		if prev == math.MaxUint64 {
+			return 0, fmt.Errorf("auxiliary scope generation exhausted")
+		}
+		if ownedScopeGeneration.CompareAndSwap(prev, prev+1) {
+			return prev + 1, nil
+		}
+	}
+}
+
+type terminalKind uint8
+
+const (
+	terminalComplete   terminalKind = 1
+	terminalFail       terminalKind = 2
+	terminalAbort      terminalKind = 3
+	terminalSkip       terminalKind = 4
+	terminalIncomplete terminalKind = 5
+)
+
+// OwnedOperation tracks a single admitted operation or callback.
+type OwnedOperation struct {
+	scope      *OwnedScope
+	kind       libpf.AuxiliarySource
+	kindOp     *KindOp
+	mu         sync.Mutex
+	terminated bool
+}
+
 // OwnedScope tracks auxiliary callbacks without owning definition/enrichment work.
 // Enrollment is sealed before cancellation; close/wake operations and callbacks
 // must both complete before Stop succeeds. A timeout cannot authorize retirement.
+type stopReadoutReservation uint8
+
+const (
+	stopReadoutUnreserved stopReadoutReservation = iota
+	stopReadoutReserved
+	stopReadoutEntered
+	stopReadoutConsumed
+)
+
 type OwnedScope struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	mu         sync.Mutex
+	parentCtx           context.Context
+	parentSignal        context.Context
+	releaseParentSignal context.CancelFunc
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	mu                  sync.Mutex
+	parentErr           error
+	firstStopReadoutCtx context.Context
+	firstStopReadoutDeadline time.Time
+	hasFirstStopReadoutDeadline bool
+	firstStopReadoutDone <-chan struct{}
+	firstStopInitialErr error
+	originalParentDeadline time.Time
+	hasOriginalParentDeadline bool
+	originalParentDone <-chan struct{}
+	originalParentInitialErr error
+	stopReadout         stopReadoutReservation
+	stopStepWG          sync.WaitGroup
+	stopStepHeld        bool
+	stopStepActive      bool
 	sealed     bool
+	stopped    bool
 	closers    []func() error
 	finalizers []func() error
+	releaseLifetime func() error
 	err        error
 	wg         sync.WaitGroup
 	onError    func(error)
 	once       sync.Once
 	done       chan struct{}
 	watchDone  chan struct{}
+
+	generation      uint64
+	lifetime        libpf.TraceDefinitionLifetime
+	expectedBinding libpf.AuxiliaryBinding
+	readoutBinding  libpf.AuxiliaryBinding
+	haveReadout     bool
+	counts          libpf.AuxiliaryCounts
+	kinds           *KindBook
+	snapshot        libpf.AuxiliaryObservation
+	localSnapshot   scopeLocalCache
+	snapshotted     bool
+	retired         bool
+	bindingErr      error
+	deadlineErr     error
+	deadlineExpired bool
 }
 
 func NewOwnedScope(parent context.Context, onError func(error)) *OwnedScope {
-	ctx, cancel := context.WithCancel(parent)
-	s := &OwnedScope{cancel: cancel, onError: onError, done: make(chan struct{}), watchDone: make(chan struct{})}
-	s.ctx = context.WithValue(ctx, ownedScopeKey{}, s)
-	go func() { defer close(s.watchDone); <-ctx.Done(); s.beginStop() }()
+	if parent == nil {
+		parent = context.Background()
+	}
+	parentDeadline, hasParentDeadline := parent.Deadline()
+	parentDone, parentInitialErr := parent.Done(), parent.Err()
+	parentSignal, releaseParentSignal := context.WithCancel(parent)
+	workCtx, cancelWork := context.WithCancel(parentSignal)
+	gen, err := nextOwnedScopeGeneration()
+	s := &OwnedScope{
+		parentCtx:           parent,
+		originalParentDeadline: parentDeadline,
+		hasOriginalParentDeadline: hasParentDeadline,
+		originalParentDone: parentDone,
+		originalParentInitialErr: parentInitialErr,
+		parentSignal:        parentSignal,
+		releaseParentSignal: releaseParentSignal,
+		cancel:              cancelWork,
+		onError:             onError,
+		done:                make(chan struct{}),
+		watchDone:           make(chan struct{}),
+		generation:          gen,
+		err:                 err,
+		kinds:               NewKindBook(),
+	}
+	s.ctx = context.WithValue(workCtx, ownedScopeKey{}, s)
+	go func() {
+		defer close(s.watchDone)
+		<-workCtx.Done()
+		pErr := parentSignal.Err()
+		if pErr != nil {
+			s.mu.Lock()
+			s.stopReadout = stopReadoutConsumed
+			if s.parentErr == nil {
+				s.parentErr = pErr
+				s.err = errors.Join(s.err, pErr)
+			}
+			s.mu.Unlock()
+		}
+		s.beginStop(parentSignal)
+	}()
 	return s
 }
+
 func (s *OwnedScope) Context() context.Context { return s.ctx }
+
 func OwnedScopeFrom(ctx context.Context) *OwnedScope {
 	s, _ := ctx.Value(ownedScopeKey{}).(*OwnedScope)
 	return s
 }
+
+func (s *OwnedScope) BindLifetime(lifetime libpf.TraceDefinitionLifetime) (bindErr error) {
+	if s == nil {
+		return fmt.Errorf("auxiliary scope unavailable")
+	}
+	if lifetime == nil {
+		return errors.New("auxiliary lifetime unavailable")
+	}
+
+	s.mu.Lock()
+	if s.sealed || s.retired || s.stopped || s.ctx.Err() != nil || s.deadlineExpired {
+		s.mu.Unlock()
+		return fmt.Errorf("auxiliary enrollment stopped")
+	}
+	if s.lifetime != nil {
+		if s.lifetime == lifetime {
+			s.mu.Unlock()
+			return nil
+		}
+		s.mu.Unlock()
+		return fmt.Errorf("auxiliary lifetime already bound")
+	}
+	if s.generation == 0 {
+		s.mu.Unlock()
+		return fmt.Errorf("auxiliary generation unavailable")
+	}
+	gen := s.generation
+	s.mu.Unlock()
+
+	retainer, ok := lifetime.(libpf.TraceDefinitionRetainer)
+	if !ok {
+		// Preserve initial UNRETAINED Bind rejection controls with zero Validate/getters
+		return errors.New("auxiliary enrollment lacks retained validated identity")
+	}
+
+	heldLifetime, release, err := retainer.RetainDefinitionLifetime()
+	if err != nil {
+		return fmt.Errorf("retain auxiliary lifetime: %w", err)
+	}
+
+	var committed bool
+	defer func() {
+		if !committed && release != nil {
+			rel := release
+			release = nil
+			if relErr := rel(); relErr != nil {
+				bindErr = errors.Join(bindErr, relErr)
+			}
+		}
+	}()
+
+	checkAdmit := func() error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.sealed || s.retired || s.stopped || s.ctx.Err() != nil || s.deadlineExpired {
+			return fmt.Errorf("auxiliary enrollment stopped during validation")
+		}
+		return nil
+	}
+
+	if err := checkAdmit(); err != nil {
+		return err
+	}
+	if err := heldLifetime.Validate(); err != nil {
+		return fmt.Errorf("validate auxiliary lifetime: %w", err)
+	}
+
+	if err := checkAdmit(); err != nil {
+		return err
+	}
+	session := heldLifetime.Session()
+	if session == "" {
+		return fmt.Errorf("auxiliary lifetime session incomplete")
+	}
+
+	if err := checkAdmit(); err != nil {
+		return err
+	}
+	tgid := heldLifetime.HostTGID()
+	if tgid == 0 {
+		return fmt.Errorf("auxiliary lifetime host TGID incomplete")
+	}
+
+	if err := checkAdmit(); err != nil {
+		return err
+	}
+	birth := heldLifetime.Birth()
+	if birth == 0 {
+		return fmt.Errorf("auxiliary lifetime birth incomplete")
+	}
+
+	if err := checkAdmit(); err != nil {
+		return err
+	}
+
+	actual := libpf.AuxiliaryBinding{
+		Source:     libpf.AuxiliarySourcePeriodicCaller,
+		Session:    session,
+		HostTGID:   tgid,
+		Birth:      birth,
+		Generation: gen,
+	}
+	if err := libpf.ValidateAuxiliaryBinding(actual, actual); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sealed || s.retired || s.stopped || s.ctx.Err() != nil || s.deadlineExpired {
+		return fmt.Errorf("auxiliary enrollment stopped during validation")
+	}
+	if s.lifetime != nil {
+		if s.lifetime == heldLifetime || s.lifetime == lifetime {
+			return nil
+		}
+		return fmt.Errorf("auxiliary lifetime already bound")
+	}
+
+	s.releaseLifetime = release
+	committed = true
+	s.lifetime = heldLifetime
+	s.expectedBinding = actual
+	s.bindingErr = nil
+	return nil
+}
+
+func (s *OwnedScope) AuxiliaryBinding() (libpf.AuxiliaryBinding, error) {
+	if s == nil {
+		return libpf.AuxiliaryBinding{}, fmt.Errorf("auxiliary scope unavailable")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.retired || s.sealed || s.stopped || s.deadlineExpired || s.ctx.Err() != nil {
+		return libpf.AuxiliaryBinding{}, fmt.Errorf("auxiliary scope retired or stopped")
+	}
+	if s.lifetime == nil || s.bindingErr != nil {
+		return libpf.AuxiliaryBinding{}, fmt.Errorf("auxiliary identity unavailable: no validated binding")
+	}
+	if err := libpf.ValidateAuxiliaryBinding(s.expectedBinding, s.expectedBinding); err != nil {
+		return libpf.AuxiliaryBinding{}, fmt.Errorf("auxiliary identity invalid: %w", err)
+	}
+	return s.expectedBinding, nil
+}
+func (s *OwnedScope) AdmitOperation() (*OwnedOperation, error) {
+	return s.AdmitCallback()
+}
+
+func (s *OwnedScope) AdmitKind(kind libpf.AuxiliarySource) (*OwnedOperation, error) {
+	if s == nil {
+		return nil, nil
+	}
+	if !isAllowedAuxiliarySource(kind) {
+		return nil, fmt.Errorf("auxiliary source %v not allowed", kind)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sealed || s.ctx.Err() != nil {
+		err := fmt.Errorf("auxiliary admission rejected: scope stopped")
+		s.kinds.noteSticky(kind, err)
+		return nil, err
+	}
+	expected, haveExpected := kindExpectedFromLocked(s, kind)
+	kop, err := s.kinds.Admit(kind, expected, haveExpected)
+	if err != nil || kop == nil {
+		return nil, err
+	}
+	s.wg.Add(1)
+	kop.release = s.wg.Done
+	return &OwnedOperation{scope: s, kind: kind, kindOp: kop}, nil
+}
+
+func kindExpectedFromLocked(s *OwnedScope, kind libpf.AuxiliarySource) (libpf.AuxiliaryBinding, bool) {
+	b := s.expectedBinding
+	if b.Session == "" || b.HostTGID == 0 || b.Birth == 0 || b.Generation == 0 {
+		return libpf.AuxiliaryBinding{}, false
+	}
+	return libpf.AuxiliaryBinding{
+		Source:     kind,
+		Session:    b.Session,
+		HostTGID:   b.HostTGID,
+		Birth:      b.Birth,
+		Generation: b.Generation,
+	}, true
+}
+
+func (s *OwnedScope) AdmitCallback() (*OwnedOperation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sealed || s.ctx.Err() != nil {
+		return nil, fmt.Errorf("auxiliary admission rejected: scope stopped")
+	}
+	if s.counts.Admitted == math.MaxUint64 || s.counts.InFlight == math.MaxUint64 {
+		s.counts.Overflow = true
+		s.err = errors.Join(s.err, fmt.Errorf("auxiliary counter overflow"))
+		return nil, fmt.Errorf("auxiliary counter overflow")
+	}
+	s.counts.Admitted++
+	s.counts.InFlight++
+	s.wg.Add(1)
+	return &OwnedOperation{scope: s}, nil
+}
+
+func (op *OwnedOperation) Complete() error {
+	if op == nil {
+		return nil
+	}
+	if op.kind != 0 {
+		return op.kindOp.Complete()
+	}
+	op.mu.Lock()
+	defer op.mu.Unlock()
+	if op.terminated {
+		return op.rejectDuplicate("complete")
+	}
+	op.terminated = true
+	defer op.scope.wg.Done()
+	return op.scope.recordTerminal(terminalComplete, nil)
+}
+
+func (op *OwnedOperation) Fail(err error) error {
+	if op == nil {
+		return nil
+	}
+	if op.kind != 0 {
+		return op.kindOp.Fail(err)
+	}
+	op.mu.Lock()
+	defer op.mu.Unlock()
+	if op.terminated {
+		return op.rejectDuplicate("fail")
+	}
+	op.terminated = true
+	defer op.scope.wg.Done()
+	return op.scope.recordTerminal(terminalFail, err)
+}
+
+func (op *OwnedOperation) Abort() error {
+	if op == nil {
+		return nil
+	}
+	if op.kind != 0 {
+		return op.kindOp.Abort()
+	}
+	op.mu.Lock()
+	defer op.mu.Unlock()
+	if op.terminated {
+		return op.rejectDuplicate("abort")
+	}
+	op.terminated = true
+	defer op.scope.wg.Done()
+	return op.scope.recordTerminal(terminalAbort, nil)
+}
+
+func (op *OwnedOperation) Skip() error {
+	if op == nil {
+		return nil
+	}
+	if op.kind != 0 {
+		return op.kindOp.Skip()
+	}
+	op.mu.Lock()
+	defer op.mu.Unlock()
+	if op.terminated {
+		return op.rejectDuplicate("skip")
+	}
+	op.terminated = true
+	defer op.scope.wg.Done()
+	return op.scope.recordKindTerminal(op.kind, terminalSkip, nil)
+}
+
+func (op *OwnedOperation) Incomplete(err error) error {
+	if op == nil {
+		return nil
+	}
+	if op.kind != 0 {
+		return op.kindOp.Incomplete(err)
+	}
+	op.mu.Lock()
+	defer op.mu.Unlock()
+	if op.terminated {
+		return op.rejectDuplicate("incomplete")
+	}
+	op.terminated = true
+	defer op.scope.wg.Done()
+	return op.scope.recordKindTerminal(op.kind, terminalIncomplete, err)
+}
+
+func (op *OwnedOperation) rejectDuplicate(action string) error {
+	return op.scope.recordDuplicateTerminal(action)
+}
+
+func (s *OwnedScope) recordDuplicateTerminal(action string) error {
+	err := fmt.Errorf("auxiliary duplicate terminal rejected on %s", action)
+	s.mu.Lock()
+	s.err = errors.Join(s.err, err)
+	s.mu.Unlock()
+	s.cancel()
+	if s.onError != nil {
+		s.onError(err)
+	}
+	return err
+}
+
+func (s *OwnedScope) recordKindTerminal(kind libpf.AuxiliarySource, term terminalKind, cause error) error {
+	return s.kinds.recordTerminal(kind, term, cause)
+}
+
+func (s *OwnedScope) recordTerminal(kind terminalKind, cause error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.counts.InFlight == 0 {
+		err := fmt.Errorf("auxiliary terminal underflow")
+		s.err = errors.Join(s.err, err)
+		return err
+	}
+	s.counts.InFlight--
+	switch kind {
+	case terminalComplete:
+		if s.counts.Completed == math.MaxUint64 {
+			s.counts.Overflow = true
+			s.err = errors.Join(s.err, fmt.Errorf("auxiliary counter overflow"))
+			return fmt.Errorf("auxiliary counter overflow")
+		}
+		s.counts.Completed++
+	case terminalFail:
+		if s.counts.Failed == math.MaxUint64 {
+			s.counts.Overflow = true
+			s.err = errors.Join(s.err, fmt.Errorf("auxiliary counter overflow"))
+			return fmt.Errorf("auxiliary counter overflow")
+		}
+		s.counts.Failed++
+		if cause != nil {
+			s.err = errors.Join(s.err, cause)
+		}
+	case terminalAbort:
+		if s.counts.Aborted == math.MaxUint64 {
+			s.counts.Overflow = true
+			s.err = errors.Join(s.err, fmt.Errorf("auxiliary counter overflow"))
+			return fmt.Errorf("auxiliary counter overflow")
+		}
+		s.counts.Aborted++
+		if cause == nil {
+			cause = fmt.Errorf("auxiliary operation aborted")
+		}
+		s.err = errors.Join(s.err, cause)
+	}
+	return nil
+}
+
 func (s *OwnedScope) Go(fn func()) bool {
 	s.mu.Lock()
 	if s.sealed || s.ctx.Err() != nil {
@@ -51,10 +520,64 @@ func (s *OwnedScope) Go(fn func()) bool {
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
+
 	go func() {
 		defer s.wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				s.Fail(fmt.Errorf("auxiliary worker panic: %v", r))
+				panic(r)
+			}
+		}()
 		fn()
 	}()
+	return true
+}
+
+func (s *OwnedScope) ExecuteCallback(callback func()) bool {
+	op, err := s.AdmitCallback()
+	if err != nil {
+		return false
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			_ = op.Fail(fmt.Errorf("auxiliary callback panic: %v", r))
+			panic(r)
+		}
+	}()
+	callback()
+	return s.finishAdmitted(op, true)
+}
+
+func (s *OwnedScope) ExecuteCallbackFunc(manual bool, callback CallbackFunc) bool {
+	op, err := s.AdmitCallback()
+	if err != nil {
+		return false
+	}
+	var ret bool
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				_ = op.Fail(fmt.Errorf("auxiliary callback panic: %v", r))
+				panic(r)
+			}
+		}()
+		ret = callback(manual)
+	}()
+	return s.finishAdmitted(op, ret)
+}
+
+// finishAdmitted records the callback's actual terminal. False or cancellation is not success.
+func (s *OwnedScope) finishAdmitted(op *OwnedOperation, ok bool) bool {
+	if cause := s.ctx.Err(); cause != nil {
+		_ = op.Fail(cause)
+		return false
+	}
+	if !ok {
+		_ = op.Abort()
+		return false
+	}
+	_ = op.Complete()
 	return true
 }
 
@@ -70,6 +593,7 @@ func GoOwned(ctx context.Context, fn func()) bool {
 	go fn()
 	return true
 }
+
 func (s *OwnedScope) AddCloser(close func() error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -98,6 +622,14 @@ func (s *OwnedScope) AddFinalizer(close func() error) error {
 	s.finalizers = append(s.finalizers, close)
 	return nil
 }
+
+// Failure returns the sticky error recorded on the scope, if any.
+func (s *OwnedScope) Failure() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.err
+}
+
 func (s *OwnedScope) Fail(err error) {
 	if err == nil {
 		return
@@ -110,6 +642,7 @@ func (s *OwnedScope) Fail(err error) {
 		s.onError(err)
 	}
 }
+
 func ReportOwnedError(ctx context.Context, err error) bool {
 	if s := OwnedScopeFrom(ctx); s != nil {
 		s.Fail(err)
@@ -130,14 +663,349 @@ func ReportOwnedReadError(ctx context.Context, name string, err error) {
 		ReportOwnedError(ctx, fmt.Errorf("%s: %w", name, err))
 	}
 }
-func (s *OwnedScope) beginStop() {
-	s.once.Do(func() {
+
+func (s *OwnedScope) freezeSnapshot() {
+	firstErr, parentErr := s.lockReadoutCauses()
+	defer s.mu.Unlock()
+	if s.snapshotted {
+		return
+	}
+	budgetErr := s.readoutBudgetErrorLocked(firstErr, parentErr)
+	expired := s.deadlineExpired || s.retired || budgetErr != nil
+	if s.bindingErr == nil && (!s.haveReadout || s.firstStopReadoutCtx == nil || s.parentSignal == nil || budgetErr != nil) {
+		s.bindingErr = errors.New("auxiliary readout unavailable at freeze")
+	}
+	s.err = errors.Join(s.err, s.bindingErr)
+	s.freezeSnapshotLocked(expired, s.readoutBinding, s.err)
+	s.publishScopeLocalLocked()
+}
+func (s *OwnedScope) freezeSnapshotLocked(expired bool, actual libpf.AuxiliaryBinding, identityErr error) {
+	if s.snapshotted {
+		return
+	}
+	s.snapshotted = true
+
+	counts := s.counts
+	heldWork := counts.InFlight > 0 || expired
+	if heldWork && s.err == nil {
+		s.err = fmt.Errorf("auxiliary work held at retirement barrier")
+	}
+
+	if err := libpf.ReconcileAuxiliaryCounts(counts); err != nil && s.err == nil {
+		s.err = err
+	}
+	outcome := libpf.AuxiliaryNotExercised
+	if counts.Admitted > 0 && counts.Failed == 0 && counts.Aborted == 0 && !expired && s.err == nil && s.bindingErr == nil {
+		outcome = libpf.AuxiliaryFinal
+	}
+
+	var binding libpf.AuxiliaryBinding
+	if !expired && s.bindingErr == nil && s.err == nil {
+		binding = actual
+	}
+
+	s.snapshot = libpf.AuxiliaryObservation{
+		Binding:  binding,
+		Counts:   counts,
+		Outcome:  outcome,
+		HeldWork: heldWork,
+	}
+	s.kinds.Freeze(expired, actual, errors.Join(identityErr, s.err))
+}
+
+func (s *OwnedScope) IsSnapshotted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snapshotted
+}
+
+func (s *OwnedScope) KindObservation(source libpf.AuxiliarySource) (libpf.KindObservation, error) {
+	if s == nil {
+		return libpf.KindObservation{}, fmt.Errorf("nil owned scope")
+	}
+	s.mu.Lock()
+	if s.retired && !s.snapshotted {
+		s.mu.Unlock()
+		return libpf.KindObservation{}, fmt.Errorf("auxiliary sampling after resources retired")
+	}
+	if !s.snapshotted {
+		s.mu.Unlock()
+		return libpf.KindObservation{}, fmt.Errorf("auxiliary snapshot not yet frozen")
+	}
+	book, parent, parentErr := s.kinds, s.parentCtx, s.parentErr
+	var deadlineErr error
+	if s.deadlineExpired {
+		deadlineErr = s.deadlineErr
+	}
+	s.mu.Unlock()
+	obs, err := book.Observation(source)
+	if !isAllowedAuxiliarySource(source) {
+		return obs, err
+	}
+	if failure := currentParentFailure(parent, parentErr, deadlineErr); failure != nil {
+		if obs.Counts.Admitted > 0 {
+			obs.Outcome = libpf.SourceLocalNonfinal
+		}
+		obs.Binding = libpf.AuxiliaryBinding{}
+		obs.Err = errors.Join(obs.Err, failure)
+		return obs, errors.Join(err, failure)
+	}
+	return obs, err
+}
+
+func (s *OwnedScope) Observation() (libpf.AuxiliaryObservation, error) {
+	s.mu.Lock()
+	if s.retired && !s.snapshotted {
+		s.mu.Unlock()
+		return libpf.AuxiliaryObservation{}, fmt.Errorf("auxiliary sampling after resources retired")
+	}
+	if !s.snapshotted {
+		obs, err := s.snapshot, s.err
+		s.mu.Unlock()
+		if err != nil {
+			return obs, err
+		}
+		return libpf.AuxiliaryObservation{}, fmt.Errorf("auxiliary snapshot not yet frozen")
+	}
+	obs, err, bindingErr := s.snapshot, s.err, s.bindingErr
+	parent, parentErr := s.parentCtx, s.parentErr
+	var deadlineErr error
+	if s.deadlineExpired {
+		deadlineErr = s.deadlineErr
+	}
+	s.mu.Unlock()
+	if failure := currentParentFailure(parent, parentErr, deadlineErr); failure != nil {
+		if obs.Counts.Admitted > 0 {
+			obs.Outcome = libpf.SourceLocalNonfinal
+		}
+		obs.Binding = libpf.AuxiliaryBinding{}
+		return obs, errors.Join(err, bindingErr, failure)
+	}
+	return obs, errors.Join(err, bindingErr)
+}
+
+// lockReadoutCauses returns with mu held, without calling context methods under it.
+func (s *OwnedScope) lockReadoutCauses() (error, error) {
+	for {
 		s.mu.Lock()
+		first, parent := s.firstStopReadoutCtx, s.parentCtx
+		firstDone, parentDone := s.firstStopReadoutDone, s.originalParentDone
+		s.mu.Unlock()
+		firstClosed, parentClosed := readoutDone(firstDone), readoutDone(parentDone)
+		firstErr := readoutContextError(first, firstClosed)
+		parentErr := readoutContextError(parent, parentClosed)
+		s.mu.Lock()
+		if firstDone != s.firstStopReadoutDone || parentDone != s.originalParentDone ||
+			(!firstClosed && readoutDone(firstDone)) || (!parentClosed && readoutDone(parentDone)) {
+			s.mu.Unlock()
+			continue
+		}
+		return firstErr, parentErr
+	}
+}
+
+func readoutContextError(ctx context.Context, closed bool) error {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil { return err }
+	}
+	if closed { return context.Canceled }
+	return nil
+}
+
+func readoutDone(done <-chan struct{}) bool {
+	select { case <-done: return true; default: return false }
+}
+
+// readoutBudgetErrorLocked uses only captured values and channel state.
+func (s *OwnedScope) readoutBudgetErrorLocked(firstErr, parentErr error) error {
+	if firstErr == nil { firstErr = s.firstStopInitialErr }
+	if parentErr == nil { parentErr = s.originalParentInitialErr }
+	now := time.Now()
+	if firstErr == nil && s.hasFirstStopReadoutDeadline && !now.Before(s.firstStopReadoutDeadline) { firstErr = context.DeadlineExceeded }
+	if parentErr == nil && s.hasOriginalParentDeadline && !now.Before(s.originalParentDeadline) { parentErr = context.DeadlineExceeded }
+	if firstErr != nil && s.deadlineErr == nil {
+		s.deadlineErr = firstErr
+		s.deadlineExpired = true
+		s.err = errors.Join(s.err, firstErr)
+	}
+	if parentErr != nil && s.parentErr == nil {
+		s.parentErr = parentErr
+		s.err = errors.Join(s.err, parentErr)
+	}
+	if firstErr != nil || parentErr != nil {
+		s.stopReadout = stopReadoutConsumed
+		return errors.Join(firstErr, parentErr)
+	}
+	return nil
+}
+
+func (s *OwnedScope) stopStepErrorLocked(firstErr, parentErr error) error {
+	if err := s.readoutBudgetErrorLocked(firstErr, parentErr); err != nil { return err }
+	if s.stopReadout != stopReadoutEntered || !s.stopStepHeld || s.lifetime == nil ||
+		s.firstStopReadoutCtx == nil || s.parentSignal == nil || s.deadlineExpired ||
+		s.snapshotted || s.retired || s.bindingErr != nil || s.err != nil {
+		return errors.Join(errors.New("auxiliary stop readout unavailable"), s.bindingErr, s.err)
+	}
+	return nil
+}
+
+// WithStopReadoutStep tracks the supplied callback until its actual return.
+func (s *OwnedScope) WithStopReadoutStep(callback func() error) (err error) {
+	if s == nil || callback == nil {
+		return errors.New("auxiliary stop readout callback unavailable")
+	}
+	firstErr, parentErr := s.lockReadoutCauses()
+	wasEntered := s.stopReadout == stopReadoutEntered
+	if err = s.stopStepErrorLocked(firstErr, parentErr); err != nil {
+		failed := wasEntered
+		if s.stopReadout == stopReadoutEntered {
+			s.stopReadout = stopReadoutConsumed
+		}
+		s.mu.Unlock()
+		if failed {
+			s.Fail(err)
+		}
+		return err
+	}
+	if s.stopStepActive {
+		s.mu.Unlock()
+		return errors.New("auxiliary stop readout already active")
+	}
+	s.stopStepActive = true
+	s.stopStepWG.Add(1)
+	s.mu.Unlock()
+	completed := false
+	defer func() {
+		defer s.stopStepWG.Done()
+		if !completed {
+			err = errors.Join(err, errors.New("auxiliary stop readout callback unwound"))
+		}
+		firstErr, parentErr := s.lockReadoutCauses()
+		err = errors.Join(err, s.stopStepErrorLocked(firstErr, parentErr))
+		s.stopStepActive = false
+		if err != nil {
+			s.stopReadout = stopReadoutConsumed
+		}
+		s.mu.Unlock()
+		if err != nil {
+			s.Fail(err)
+		}
+	}()
+	err = callback()
+	completed = true
+	return err
+}
+
+// StopReadoutBinding copies the measured binding within an active tracked step.
+func (s *OwnedScope) StopReadoutBinding() (libpf.AuxiliaryBinding, error) {
+	if s == nil {
+		return libpf.AuxiliaryBinding{}, errors.New("auxiliary stop readout unavailable")
+	}
+	firstErr, parentErr := s.lockReadoutCauses()
+	defer s.mu.Unlock()
+	if err := s.stopStepErrorLocked(firstErr, parentErr); err != nil {
+		return libpf.AuxiliaryBinding{}, err
+	}
+	if !s.stopStepActive || !s.haveReadout {
+		return libpf.AuxiliaryBinding{}, errors.New("auxiliary stop readout binding unavailable")
+	}
+	return s.readoutBinding, nil
+}
+
+// CommitStopReadout runs only pure validation and copies under the scope lock;
+// callbacks here must not invoke native code, hooks, or other external effects.
+func (s *OwnedScope) CommitStopReadout(commit func() error) error {
+	if s == nil {
+		return errors.New("auxiliary stop readout commit unavailable")
+	}
+	firstErr, parentErr := s.lockReadoutCauses()
+	wasEntered := s.stopReadout == stopReadoutEntered
+	err := s.stopStepErrorLocked(firstErr, parentErr)
+	if err == nil && commit == nil {
+		err = errors.New("auxiliary stop readout commit unavailable")
+	}
+	if err == nil {
+		err = commit()
+	}
+	if s.readoutBudgetEndedLocked(time.Now()) {
+		// Consume before unlocking to sample a newly closed context's actual error.
+		s.stopReadout = stopReadoutConsumed
+		s.mu.Unlock()
+		firstErr, parentErr = s.lockReadoutCauses()
+		err = errors.Join(err, s.readoutBudgetErrorLocked(firstErr, parentErr))
+	}
+	failed := err != nil && wasEntered
+	if failed {
+		s.stopReadout = stopReadoutConsumed
+		s.err = errors.Join(s.err, err)
+	}
+	s.mu.Unlock()
+	return err
+}
+
+func (s *OwnedScope) readoutBudgetEndedLocked(now time.Time) bool {
+	return readoutDone(s.firstStopReadoutDone) || readoutDone(s.originalParentDone) ||
+		(s.hasFirstStopReadoutDeadline && !now.Before(s.firstStopReadoutDeadline)) ||
+		(s.hasOriginalParentDeadline && !now.Before(s.originalParentDeadline))
+}
+
+func (s *OwnedScope) readStopBinding() error {
+	s.mu.Lock()
+	lifetime, expected, generation := s.lifetime, s.expectedBinding, s.generation
+	s.mu.Unlock()
+	if err := s.WithStopReadoutStep(func() error { return lifetime.Validate() }); err != nil {
+		return err
+	}
+	var session string
+	if err := s.WithStopReadoutStep(func() error { session = lifetime.Session(); return nil }); err != nil {
+		return err
+	}
+	var tgid uint32
+	if err := s.WithStopReadoutStep(func() error { tgid = lifetime.HostTGID(); return nil }); err != nil {
+		return err
+	}
+	var birth uint64
+	if err := s.WithStopReadoutStep(func() error { birth = lifetime.Birth(); return nil }); err != nil {
+		return err
+	}
+	actual := libpf.AuxiliaryBinding{Source: libpf.AuxiliarySourcePeriodicCaller, Session: session, HostTGID: tgid, Birth: birth, Generation: generation}
+	err := s.CommitStopReadout(func() error {
+		if err := libpf.ValidateAuxiliaryBinding(expected, actual); err != nil {
+			return err
+		}
+		s.readoutBinding = actual
+		s.haveReadout = true
+		return nil
+	})
+	if err != nil {
+		s.Fail(err)
+	}
+	return err
+}
+
+func (s *OwnedScope) beginStop(ctx context.Context) {
+	s.once.Do(func() {
+		deadline, hasDeadline := ctx.Deadline()
+		done, firstErr := ctx.Done(), ctx.Err()
+		parentErr := s.parentCtx.Err()
+		s.mu.Lock()
+		s.firstStopReadoutCtx = ctx
+		s.firstStopReadoutDeadline, s.hasFirstStopReadoutDeadline = deadline, hasDeadline
+		s.firstStopReadoutDone, s.firstStopInitialErr = done, firstErr
+		budgetErr := s.readoutBudgetErrorLocked(firstErr, parentErr)
+		if s.stopReadout != stopReadoutConsumed && budgetErr == nil {
+			s.stopReadout = stopReadoutReserved
+		} else {
+			s.stopReadout = stopReadoutConsumed
+		}
 		s.sealed = true
+		s.stopped = true
 		closers := s.closers
 		s.closers = nil
 		finalizers := s.finalizers
 		s.finalizers = nil
+		releaseLifetime := s.releaseLifetime
+		s.releaseLifetime = nil
 		s.mu.Unlock()
 		s.cancel()
 		go func() {
@@ -148,18 +1016,80 @@ func (s *OwnedScope) beginStop() {
 				}
 			}
 			s.wg.Wait()
+			<-s.watchDone
+			if s.parentSignal != nil {
+				pErr := s.parentSignal.Err()
+				if pErr != nil {
+					s.mu.Lock()
+					if s.parentErr == nil {
+						s.parentErr = pErr
+						s.err = errors.Join(s.err, pErr)
+					}
+					s.mu.Unlock()
+				}
+			}
+			firstErr, parentErr := s.lockReadoutCauses()
+			budgetErr := s.readoutBudgetErrorLocked(firstErr, parentErr)
+			if s.stopReadout == stopReadoutReserved && s.firstStopReadoutCtx != nil && budgetErr == nil &&
+				!s.deadlineExpired && !s.snapshotted && !s.retired && s.bindingErr == nil && s.err == nil &&
+				s.lifetime != nil && releaseLifetime != nil {
+				s.stopReadout = stopReadoutEntered
+				s.stopStepHeld = true
+			} else {
+				s.stopReadout = stopReadoutConsumed
+			}
+			s.mu.Unlock()
+			if err := s.readStopBinding(); err != nil {
+				s.mu.Lock()
+				if s.bindingErr == nil {
+					s.bindingErr = err
+				}
+				s.mu.Unlock()
+			}
 			for _, close := range finalizers {
 				if err := close(); err != nil {
 					s.Fail(err)
 				}
 			}
-			<-s.watchDone
+			s.mu.Lock()
+			s.stopReadout = stopReadoutConsumed
+			s.mu.Unlock()
+			s.stopStepWG.Wait()
+			s.mu.Lock()
+			s.stopStepHeld = false
+			s.mu.Unlock()
+			if releaseLifetime != nil {
+				if err := releaseLifetime(); err != nil {
+					s.Fail(err)
+				}
+			}
+			if s.parentSignal != nil {
+				pErrLate := s.parentSignal.Err()
+				if pErrLate != nil {
+					s.mu.Lock()
+					if s.parentErr == nil {
+						s.parentErr = pErrLate
+					}
+					s.err = errors.Join(s.err, pErrLate)
+					s.mu.Unlock()
+				}
+			}
+			s.freezeSnapshot()
+			if s.releaseParentSignal != nil {
+				s.releaseParentSignal()
+			}
+			s.mu.Lock()
+			s.stopReadout = stopReadoutConsumed
+			s.retired = true
+			s.mu.Unlock()
 		}()
 	})
 }
+
 func (s *OwnedScope) result() error { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
+
 func (s *OwnedScope) Stop(ctx context.Context) error {
-	s.beginStop()
+	s.beginStop(ctx)
 	select {
 	case <-s.done:
 		return s.result()
@@ -169,9 +1099,65 @@ func (s *OwnedScope) Stop(ctx context.Context) error {
 	case <-s.done:
 		return s.result()
 	case <-ctx.Done():
-		return errors.Join(s.result(), ctx.Err())
+		cErr := ctx.Err()
+		s.mu.Lock()
+		s.stopReadout = stopReadoutConsumed
+		if s.deadlineErr == nil {
+			s.deadlineErr = cErr
+			s.err = errors.Join(s.err, cErr)
+			s.deadlineExpired = true
+			if !s.snapshotted {
+				s.bindingErr = fmt.Errorf("auxiliary deadline expired before freeze: %w", cErr)
+				s.freezeSnapshotLocked(true, libpf.AuxiliaryBinding{}, s.deadlineErr)
+				s.publishScopeLocalLocked()
+			}
+		}
+		resErr := s.err
+		s.mu.Unlock()
+		return resErr
 	}
 }
+
+func currentParentFailure(parent context.Context, parentErr, deadlineErr error) error {
+	var current error
+	if parent != nil {
+		current = parent.Err()
+	}
+	return errors.Join(parentErr, deadlineErr, current)
+}
+
+func (s *OwnedScope) ParentErr() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	parent, parentErr := s.parentCtx, s.parentErr
+	var deadlineErr error
+	if s.deadlineExpired {
+		deadlineErr = s.deadlineErr
+	}
+	s.mu.Unlock()
+	return currentParentFailure(parent, parentErr, deadlineErr)
+}
+
+func (s *OwnedScope) IsExpired() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deadlineExpired
+}
+
+func (s *OwnedScope) IsRetired() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.retired
+}
+
 func (s *OwnedScope) Joined() bool {
 	select {
 	case <-s.done:

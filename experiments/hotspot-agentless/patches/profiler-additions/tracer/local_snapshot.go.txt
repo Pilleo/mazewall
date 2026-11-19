@@ -1,0 +1,412 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"sync/atomic"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+// PIDMailboxLocalSnapshot is a raw seal projection, not a final receipt.
+type PIDMailboxLocalSnapshot struct {
+	State libpf.LocalCopyState
+	ExpectedBinding PIDMailboxBinding
+	Counts PIDMailboxCounts
+	Outcome PIDMailboxOutcome
+	ScanIncomplete bool
+	UnpolledResidualUnknown bool
+	ErrorPresent bool
+	InfoReturned bool
+	InfoError bool
+	InfoID, InfoType, InfoKeySize, InfoValueSize, InfoMaxEntries uint32
+	LifetimeReturned bool
+	LifetimeSession string
+	LifetimeTGID uint32
+	LifetimeBirth uint64
+}
+
+type mailboxSealReadout struct {
+	infoReturned, infoError bool
+	infoID, infoType, infoKeySize, infoValueSize, infoMaxEntries uint32
+	lifetimeReturned bool
+	lifetimeSession string
+	lifetimeTGID uint32
+	lifetimeBirth uint64
+}
+
+type mailboxLocalCache struct {
+	ready atomic.Bool
+	value PIDMailboxLocalSnapshot
+}
+
+// publishMailboxLocalLocked copies only values already held or returned by seal.
+func (m *pidMailbox) publishMailboxLocalLocked(r mailboxSealReadout) {
+	if m.localSnapshot.ready.Load() {
+		return
+	}
+	m.localSnapshot.value = PIDMailboxLocalSnapshot{
+		State: libpf.LocalCopied, ExpectedBinding: m.expectedBinding, Counts: m.counts,
+		Outcome: m.outcome, ScanIncomplete: m.scanIncomplete,
+		UnpolledResidualUnknown: m.unpolledResidualUnknown, ErrorPresent: m.stickyErr != nil,
+		InfoReturned: r.infoReturned, InfoError: r.infoError, InfoID: r.infoID,
+		InfoType: r.infoType, InfoKeySize: r.infoKeySize, InfoValueSize: r.infoValueSize,
+		InfoMaxEntries: r.infoMaxEntries, LifetimeReturned: r.lifetimeReturned,
+		LifetimeSession: r.lifetimeSession, LifetimeTGID: r.lifetimeTGID, LifetimeBirth: r.lifetimeBirth,
+	}
+	m.localSnapshot.ready.Store(true)
+}
+
+// CachedPIDMailboxLocal reads only the retained cache, not mailbox resources.
+func (t *Tracer) CachedPIDMailboxLocal() (PIDMailboxLocalSnapshot, bool) {
+	if t == nil || t.pidMailbox == nil || !t.pidMailbox.localSnapshot.ready.Load() {
+		return PIDMailboxLocalSnapshot{}, false
+	}
+	return t.pidMailbox.localSnapshot.value, true
+}
+
+// PIDProcessLocalSnapshot is a raw seal projection, not a final receipt.
+// Binding is the process owner's expected binding, not newly acquired identity.
+type PIDProcessLocalSnapshot struct {
+	State libpf.LocalCopyState
+	Binding libpf.AuxiliaryBinding
+	Counts PIDProcessCounts
+	Outcome PIDProcessOutcome
+	ErrorPresent bool
+}
+
+type pidProcessLocalCache struct {
+	ready atomic.Bool
+	value PIDProcessLocalSnapshot
+}
+
+// publishPIDProcessLocalLocked copies finalization values under p.mu.
+func (p *pidProcess) publishPIDProcessLocalLocked() {
+	if p.localSnapshot.ready.Load() {
+		return
+	}
+	p.localSnapshot.value = PIDProcessLocalSnapshot{
+		State: libpf.LocalCopied, Binding: p.expectedBinding, Counts: p.counts,
+		Outcome: p.outcome, ErrorPresent: p.stickyErr != nil,
+	}
+	p.localSnapshot.ready.Store(true)
+}
+
+// CachedPIDProcessLocal reads only the retained cache, not process resources.
+func (t *Tracer) CachedPIDProcessLocal() (PIDProcessLocalSnapshot, bool) {
+	if t == nil || t.pidProcess == nil || !t.pidProcess.localSnapshot.ready.Load() {
+		return PIDProcessLocalSnapshot{}, false
+	}
+	return t.pidProcess.localSnapshot.value, true
+}
+
+// auxiliaryLocalSnapshot is the private detached tracer projection.
+type auxiliaryLocalSnapshot struct {
+	Scope            periodiccaller.ScopeLocalSnapshot
+	ScopePresent     bool
+	Kinds            periodiccaller.KindsLocalSnapshot
+	KindsPresent     bool
+	Mailbox          PIDMailboxLocalSnapshot
+	MailboxPresent   bool
+	Process          PIDProcessLocalSnapshot
+	ProcessPresent   bool
+	Kobject          KobjectWitnessObservation
+	KobjectPresent   bool
+	StopErrorPresent bool
+	EligibleJoin     bool
+}
+
+// KobjectWitnessDisposition describes the detached witness outcome, not a certificate.
+type KobjectWitnessDisposition uint8
+
+const (
+	KobjectWitnessMissing KobjectWitnessDisposition = iota
+	KobjectWitnessRejected
+	KobjectWitnessObserved
+)
+
+// KobjectWitnessObservation contains detached facts and no ownership handles.
+type KobjectWitnessObservation struct {
+	disposition KobjectWitnessDisposition
+	facts kobjectWitnessReadout
+	err error
+}
+
+func (o KobjectWitnessObservation) Disposition() KobjectWitnessDisposition { return o.disposition }
+func (o KobjectWitnessObservation) Err() error { return o.err }
+
+func rejectKobjectWitnessObservation(facts kobjectWitnessReadout, cause error) KobjectWitnessObservation {
+	if cause == nil { cause = errors.New("missing kobject rejection cause") }
+	return KobjectWitnessObservation{disposition: KobjectWitnessRejected, facts: facts, err: cause}
+}
+
+// DefinitionAuxiliaryDisposition describes the authority of a frozen observation.
+type DefinitionAuxiliaryDisposition uint8
+
+const (
+	DefinitionAuxiliaryMissing DefinitionAuxiliaryDisposition = iota
+	DefinitionAuxiliaryFrozenNonfinal
+	DefinitionAuxiliaryFrozenFinal
+)
+
+// DefinitionAuxiliaryReason identifies why an observation is not final.
+type DefinitionAuxiliaryReason uint8
+
+const (
+	DefinitionAuxiliaryReasonMissingFacts DefinitionAuxiliaryReason = iota
+	DefinitionAuxiliaryReasonStopFailure
+	DefinitionAuxiliaryReasonInvalidBindingOrCounters
+	DefinitionAuxiliaryReasonUnqualifiedSourceClosure
+)
+
+// DefinitionAuxiliaryObservation contains detached native observations, not handles.
+type DefinitionAuxiliaryObservation struct {
+	snapshot    auxiliaryLocalSnapshot
+	disposition DefinitionAuxiliaryDisposition
+	reason      DefinitionAuxiliaryReason
+}
+
+func (o DefinitionAuxiliaryObservation) Disposition() DefinitionAuxiliaryDisposition {
+	return o.disposition
+}
+
+func (o DefinitionAuxiliaryObservation) Reason() DefinitionAuxiliaryReason { return o.reason }
+
+func (o DefinitionAuxiliaryObservation) Binding() libpf.AuxiliaryBinding {
+	if !o.snapshot.ScopePresent {
+		return libpf.AuxiliaryBinding{}
+	}
+	return o.snapshot.Scope.Observation.Binding
+}
+
+func (o DefinitionAuxiliaryObservation) Scope() (periodiccaller.ScopeLocalSnapshot, bool) {
+	return o.snapshot.Scope, o.snapshot.ScopePresent
+}
+
+func (o DefinitionAuxiliaryObservation) Kinds() (periodiccaller.KindsLocalSnapshot, bool) {
+	return o.snapshot.Kinds, o.snapshot.KindsPresent
+}
+
+func (o DefinitionAuxiliaryObservation) Mailbox() (PIDMailboxLocalSnapshot, bool) {
+	return o.snapshot.Mailbox, o.snapshot.MailboxPresent
+}
+
+func (o DefinitionAuxiliaryObservation) Process() (PIDProcessLocalSnapshot, bool) {
+	return o.snapshot.Process, o.snapshot.ProcessPresent
+}
+
+func (o DefinitionAuxiliaryObservation) Kobject() (KobjectWitnessObservation, bool) {
+	return o.snapshot.Kobject, o.snapshot.KobjectPresent
+}
+
+type nativePublicationState uint8
+
+const (
+	nativeOpen nativePublicationState = iota
+	nativeClaimed
+	nativeTerminal
+)
+
+type auxiliaryLocalCache struct {
+	once  sync.Once
+	ready atomic.Bool
+	value auxiliaryLocalSnapshot
+	kobjectMu sync.Mutex
+	kobject KobjectWitnessObservation
+	kobjectPresent bool
+
+	nativeMu          sync.Mutex
+	nativeStarted     bool
+	nativeDone        chan struct{}
+	nativeState       nativePublicationState
+	nativeFirstCtx    context.Context
+	nativeFirstDone   <-chan struct{}
+	nativeParentCtx   context.Context
+	nativeParentDone  <-chan struct{}
+	nativeObservation DefinitionAuxiliaryObservation
+	nativeErr         error
+	diagnosticClaim   *tracerDiagnosticClaim
+	diagnosticBytes   []byte
+	diagnosticReady   chan struct{}
+	diagnosticCollecting bool
+}
+
+func (c *auxiliaryLocalCache) recordKobjectRejection(facts kobjectWitnessReadout, cause error) bool {
+	c.kobjectMu.Lock(); defer c.kobjectMu.Unlock()
+	if c.ready.Load() || c.kobjectPresent { return false }
+	c.kobject = rejectKobjectWitnessObservation(facts, cause)
+	c.kobjectPresent = true
+	return true
+}
+
+// claimNativeResult linearizes the result against the two shared signals.
+func (c *auxiliaryLocalCache) claimNativeResult(completed bool) (bool, bool, bool) {
+	c.nativeMu.Lock()
+	defer c.nativeMu.Unlock()
+	if c.nativeState != nativeOpen { return false, false, false }
+	var firstClosed, parentClosed bool
+	select { case <-c.nativeFirstDone: firstClosed = true; default: }
+	select { case <-c.nativeParentDone: parentClosed = true; default: }
+	if !completed && !firstClosed && !parentClosed { return false, false, false }
+	c.nativeState = nativeClaimed
+	return true, firstClosed, parentClosed
+}
+
+// commitNativeResult publishes the sole claimant's detached result, not owner completion.
+func (c *auxiliaryLocalCache) commitNativeResult(o DefinitionAuxiliaryObservation, err error) {
+	c.nativeMu.Lock()
+	c.nativeObservation = o
+	c.nativeErr = err
+	c.nativeState = nativeTerminal
+	close(c.nativeDone)
+	c.nativeMu.Unlock()
+}
+
+func (c *auxiliaryLocalCache) nativeResult() (DefinitionAuxiliaryObservation, error) {
+	c.nativeMu.Lock()
+	defer c.nativeMu.Unlock()
+	return c.nativeObservation, c.nativeErr
+}
+
+// freezeDefinitionAuxiliary copies only the already-published aggregate.
+func (t *Tracer) freezeDefinitionAuxiliary(stopErr error) DefinitionAuxiliaryObservation {
+	o := DefinitionAuxiliaryObservation{}
+	if t != nil && t.auxiliaryLocal.ready.Load() {
+		o.snapshot = t.auxiliaryLocal.value
+		o.disposition = DefinitionAuxiliaryFrozenNonfinal
+	}
+	s := o.snapshot
+	if stopErr != nil || (o.disposition != DefinitionAuxiliaryMissing && (s.StopErrorPresent || !s.EligibleJoin)) ||
+		(s.ScopePresent && s.Scope.ErrorPresent) || (s.MailboxPresent && s.Mailbox.ErrorPresent) || (s.ProcessPresent && s.Process.ErrorPresent) {
+		o.reason = DefinitionAuxiliaryReasonStopFailure
+		return o
+	}
+	for _, row := range s.Kinds.Kinds {
+		if s.KindsPresent && row.Present && row.ErrorPresent {
+			o.reason = DefinitionAuxiliaryReasonStopFailure
+			return o
+		}
+	}
+	if !s.ScopePresent || !s.KindsPresent || !s.MailboxPresent || !s.ProcessPresent ||
+		s.Scope.State == libpf.LocalAbsent || s.Kinds.State == libpf.LocalAbsent ||
+		s.Mailbox.State == libpf.LocalAbsent || s.Process.State == libpf.LocalAbsent ||
+		!s.Mailbox.InfoReturned || !s.Mailbox.LifetimeReturned {
+		return o
+	}
+	if s.Scope.State != libpf.LocalCopied || s.Kinds.State != libpf.LocalCopied ||
+		s.Mailbox.State != libpf.LocalCopied || s.Process.State != libpf.LocalCopied {
+		o.reason = DefinitionAuxiliaryReasonInvalidBindingOrCounters
+		return o
+	}
+	for _, row := range s.Kinds.Kinds {
+		if !row.Present { return o }
+	}
+	if !validDefinitionAuxiliaryLocal(s) {
+		o.reason = DefinitionAuxiliaryReasonInvalidBindingOrCounters
+		return o
+	}
+	o.reason = DefinitionAuxiliaryReasonUnqualifiedSourceClosure
+	return o
+}
+
+// validDefinitionAuxiliaryLocal checks detached local facts, not source closure.
+func validDefinitionAuxiliaryLocal(s auxiliaryLocalSnapshot) bool {
+	scope := s.Scope.Observation
+	root := scope.Binding
+	c := scope.Counts
+	if root.Source != libpf.AuxiliarySourcePeriodicCaller || libpf.ValidateAuxiliaryBinding(root, root) != nil ||
+		libpf.ReconcileAuxiliaryCounts(c) != nil || scope.HeldWork || c.InFlight != 0 || c.Failed != 0 || c.Aborted != 0 ||
+		!validLocalOutcome(scope.Outcome, c.Admitted) {
+		return false
+	}
+	for i, row := range s.Kinds.Kinds {
+		counts := row.Counts
+		if row.Source != libpf.AuxiliarySource(i+2) || row.HeldWork || libpf.ReconcileKindLedger(counts) != nil ||
+			counts.InFlight != 0 || counts.Failed != 0 || counts.Aborted != 0 || counts.Incomplete != 0 ||
+			!validLocalOutcome(row.Outcome, counts.Admitted) {
+			return false
+		}
+		expected := root
+		expected.Source = row.Source
+		if (counts.Admitted != 0 || row.Binding != (libpf.AuxiliaryBinding{})) && libpf.ValidateAuxiliaryBinding(expected, row.Binding) != nil {
+			return false
+		}
+	}
+	m := s.Mailbox
+	b := m.ExpectedBinding
+	if m.Outcome != PIDMailboxObservedSealed || m.InfoError || m.ScanIncomplete ||
+		b.Session != root.Session || b.HostTGID != root.HostTGID || b.Birth != root.Birth || b.Generation != root.Generation ||
+		b.MapID == 0 || m.InfoID != b.MapID || m.InfoType != uint32(cebpf.Hash) || m.InfoKeySize != 8 || m.InfoValueSize != 1 || m.InfoMaxEntries == 0 ||
+		m.LifetimeSession != b.Session || m.LifetimeTGID != b.HostTGID || m.LifetimeBirth != b.Birth {
+		return false
+	}
+	mc := m.Counts
+	terminals, err := libpf.SumAuxiliaryCounts(mc.Queued, mc.DeletionFailed, mc.Aborted, mc.HeldResidual)
+	if err != nil || mc.Overflow || terminals != mc.Admitted || mc.DeletionFailed != 0 || mc.Aborted != 0 || mc.HeldResidual != 0 || mc.Unpartitioned != 0 {
+		return false
+	}
+	partitions, err := libpf.SumAuxiliaryCounts(mc.TargetAdmitted, mc.ForeignAdmitted, mc.Unpartitioned)
+	if err != nil || partitions != mc.Admitted { return false }
+	p := s.Process
+	pc := p.Counts
+	if p.Outcome != PIDProcessObservedSealed || p.Binding != root || pc.Overflow || pc.InFlight != 0 || pc.Context != 0 {
+		return false
+	}
+	total, err := libpf.SumAuxiliaryCounts(pc.ExitWaiting, pc.PermissionIgnored, pc.NoMappings, pc.NotExistExited,
+		pc.ESRCHExited, pc.OtherMappingErrorExited, pc.MappingsError, pc.PartialOrEmpty, pc.OrdinaryNil, pc.Context, pc.InFlight)
+	return err == nil && total == pc.Received
+}
+
+func validLocalOutcome(outcome libpf.AuxiliaryOutcome, admitted uint64) bool {
+	switch outcome {
+	case libpf.AuxiliaryFinal:
+		return admitted != 0
+	case libpf.AuxiliaryNotExercised:
+		return admitted == 0
+	default:
+		return false
+	}
+}
+
+func (t *Tracer) publishAuxiliaryLocal(stopErr error) {
+	if t == nil {
+		return
+	}
+	if t.auxiliaryScope != nil {
+		stopErr = errors.Join(stopErr, t.auxiliaryScope.ParentErr())
+	}
+	t.auxiliaryLocal.once.Do(func() {
+		snap := auxiliaryLocalSnapshot{
+			StopErrorPresent: stopErr != nil,
+			EligibleJoin:     stopErr == nil,
+		}
+		if t.auxiliaryScope != nil {
+			if sc, ok := t.auxiliaryScope.CachedScopeLocal(); ok && sc.State == libpf.LocalCopied {
+				snap.Scope = sc
+				snap.ScopePresent = true
+			}
+			if kinds, ok := t.auxiliaryScope.CachedKindsLocal(); ok && kinds.State == libpf.LocalCopied {
+				snap.Kinds = kinds
+				snap.KindsPresent = true
+			}
+		}
+		if mb, ok := t.CachedPIDMailboxLocal(); ok {
+			snap.Mailbox = mb
+			snap.MailboxPresent = true
+		}
+		if proc, ok := t.CachedPIDProcessLocal(); ok {
+			snap.Process = proc
+			snap.ProcessPresent = true
+		}
+		t.auxiliaryLocal.kobjectMu.Lock()
+		snap.Kobject, snap.KobjectPresent = t.auxiliaryLocal.kobject, t.auxiliaryLocal.kobjectPresent
+		t.auxiliaryLocal.value = snap
+		t.auxiliaryLocal.ready.Store(true)
+		t.auxiliaryLocal.kobjectMu.Unlock()
+	})
+}

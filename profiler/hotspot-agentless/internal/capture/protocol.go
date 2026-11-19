@@ -101,22 +101,26 @@ func runProduction(ctx context.Context, cfg Config, writer io.Writer) error {
 	}
 	err = Run(ctx, cfg, writer)
 	if err != nil {
-		if errors.Is(err, errReadoutPending) {
-			return err
-		}
-		record, clockErr := lifecycleRecord("collector_error", cfg.sessionID, uint32(cfg.PID), 0)
-		if clockErr != nil {
-			return errors.Join(err, clockErr)
-		}
-		record.Lifecycle.Message = err.Error()
-		record.Lifecycle.JVMBuildID, record.Lifecycle.JVMSHA256 = "", ""
-		var errno syscall.Errno
-		if errors.As(err, &errno) {
-			record.Lifecycle.Errno = int(errno)
-		}
-		return errors.Join(err, sink.Write(context.Background(), record))
+		return writeProductionFailure(sink, cfg, err)
 	}
 	return nil
+}
+
+func writeProductionFailure(sink model.Sink, cfg Config, err error) error {
+	if errors.Is(err, errReadoutPending) {
+		return err
+	}
+	record, clockErr := lifecycleRecord("collector_error", cfg.sessionID, uint32(cfg.PID), 0)
+	if clockErr != nil {
+		return errors.Join(err, clockErr)
+	}
+	record.Lifecycle.Message = err.Error()
+	record.Lifecycle.JVMBuildID, record.Lifecycle.JVMSHA256 = "", ""
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		record.Lifecycle.Errno = int(errno)
+	}
+	return errors.Join(err, sink.Write(context.Background(), record))
 }
 
 // Stdin is an explicitly borrowed parent-lifetime pipe. Its owner keeps it open

@@ -1,0 +1,55 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symtab
+
+import (
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+)
+
+func TestSymtabPruneOldObjects_Accounting(t *testing.T) {
+	book := periodiccaller.NewKindBook()
+	s := &symtabResolverInstance{
+		options:      symbolizer.SymbolizerOptions{KindBook: book},
+		symbolTables: make(map[symbolizer.SymbolTableKey]*symbolizer.SymbolTable),
+	}
+
+	now := time.Now()
+	ttl := time.Minute
+
+	oldKey := symbolizer.SymbolTableKey{Ino: 1}
+	s.symbolTables[oldKey] = &symbolizer.SymbolTable{
+		Timestamp: now.Add(-2 * ttl),
+		Symbols:   []*symbolizer.Symbol{{Name: "old_fn"}},
+	}
+	s.symbolCountTotal += 1
+
+	freshKey := symbolizer.SymbolTableKey{Ino: 2}
+	s.symbolTables[freshKey] = &symbolizer.SymbolTable{
+		Timestamp: now,
+		Symbols:   []*symbolizer.Symbol{{Name: "fresh_fn"}},
+	}
+	s.symbolCountTotal += 1
+
+	s.PruneOldObjects(now, ttl)
+
+	assert.Len(t, s.symbolTables, 1)
+	assert.Contains(t, s.symbolTables, freshKey)
+	assert.NotContains(t, s.symbolTables, oldKey)
+
+	book.Freeze(false, libpf.AuxiliaryBinding{}, nil)
+	obs, err := book.Observation(libpf.AuxiliarySourcePruneScanSymtab)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auxiliary kind identity unknown")
+	assert.Equal(t, uint64(1), obs.Counts.Admitted)
+	assert.Equal(t, uint64(1), obs.Counts.Completed)
+	assert.Equal(t, uint64(0), obs.Counts.InFlight)
+	assert.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+}

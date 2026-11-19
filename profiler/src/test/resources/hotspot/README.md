@@ -1,5 +1,9 @@
 # HotSpot replay fixture provenance
 
+`observed-consumer.jsonl` is synthetic current-provider contract data, not native
+execution evidence. Its three provider `patch_sha256` values follow the current
+accepted provider pin; its payloads and independent `jvm_build_id` are not repinned.
+
 `measured-event-projection.jsonl` copies the event and provider metadata from
 `experiments/hotspot-agentless/build/benchmark.ab5812c8/full-0/events.jsonl`,
 occurrence `e600a9611e1c4b50a2929989785c1399:8:61`, measured token0/route0.

@@ -2,9 +2,9 @@
 # Manual edits can break the build and are not advised.
 # This file is expected to be part of source control.
 # To regenerate this file, run: ./gradlew :demos:cli-demo:dependencies --write-locks
-org.jetbrains.kotlin:kotlin-stdlib:2.4.20-Beta1=testRuntimeClasspath
-org.jetbrains.kotlin:kotlin-test-junit5:2.4.20-Beta1=testRuntimeClasspath
-org.jetbrains.kotlin:kotlin-test:2.4.20-Beta1=testRuntimeClasspath
+org.jetbrains.kotlin:kotlin-stdlib:2.4.21=testRuntimeClasspath
+org.jetbrains.kotlin:kotlin-test-junit5:2.4.21=testRuntimeClasspath
+org.jetbrains.kotlin:kotlin-test:2.4.21=testRuntimeClasspath
 org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.10.2=testRuntimeClasspath
 org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2=testRuntimeClasspath
 org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2=testRuntimeClasspath

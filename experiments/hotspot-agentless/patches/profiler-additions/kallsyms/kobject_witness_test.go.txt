@@ -1,0 +1,1476 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package kallsyms
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/mdlayher/kobject"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+type pollTestLifetime struct{}
+
+func (*pollTestLifetime) RetainDefinitionLifetime() (libpf.TraceDefinitionLifetime, func() error, error) {
+	return &pollTestLifetime{}, func() error { return nil }, nil
+}
+func (*pollTestLifetime) Validate() error { return nil }
+func (*pollTestLifetime) Session() string { return "poll-test" }
+func (*pollTestLifetime) HostTGID() uint32 { return 100 }
+func (*pollTestLifetime) Birth() uint64 { return 200 }
+
+type pollTestRecord struct {
+	event *kobject.Event
+	err   error
+}
+
+type pollTestReceiver struct {
+	records []pollTestRecord
+	acks    []error
+	onReceive func()
+	onAck   func(error)
+	ackErr  error
+}
+
+func (r *pollTestReceiver) Receive() (*kobject.Event, error) {
+	if len(r.records) == 0 {
+		return nil, io.EOF
+	}
+	record := r.records[0]
+	r.records = r.records[1:]
+	if r.onReceive != nil {
+		r.onReceive()
+	}
+	return record.event, record.err
+}
+
+func (r *pollTestReceiver) Acknowledge(err error) error {
+	r.acks = append(r.acks, err)
+	if r.onAck != nil {
+		r.onAck(err)
+	}
+	return r.ackErr
+}
+
+func newPollTestScope(t *testing.T) *periodiccaller.OwnedScope {
+	t.Helper()
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	if err := scope.BindLifetime(&pollTestLifetime{}); err != nil {
+		t.Fatal(err)
+	}
+	return scope
+}
+
+func stopPollTestScope(t *testing.T, scope *periodiccaller.OwnedScope) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = scope.Stop(ctx)
+}
+
+func TestOwnedPollDispatchAndAcknowledge(t *testing.T) {
+	scope := newPollTestScope(t)
+	s := &Symbolizer{reloadModules: make(chan libpf.Void, 1)}
+	control := &ownedMonitorControl{}
+	r := &pollTestReceiver{records: []pollTestRecord{
+		{event: &kobject.Event{Subsystem: "module", Action: kobject.Action("change")}},
+		{event: &kobject.Event{Subsystem: "module", Action: kobject.Action("remove")}},
+		{event: &kobject.Event{Subsystem: "other"}},
+	}}
+	r.onAck = func(err error) {
+		if err != nil || len(s.reloadModules) != 1 {
+			t.Errorf("ack before dispatch: err=%v queued=%d", err, len(s.reloadModules))
+		}
+		if !control.mu.TryLock() {
+			t.Error("control lock held across ACK")
+		} else {
+			control.mu.Unlock()
+		}
+	}
+	outcome, err := s.pollOwnedKobject(scope.Context(), r, control)
+	if err != nil || outcome != ownedPollDrained || len(r.acks) != 3 {
+		t.Fatalf("poll outcome=%v error=%v acks=%v", outcome, err, r.acks)
+	}
+	stopPollTestScope(t, scope)
+	for _, want := range []struct {
+		kind libpf.AuxiliarySource
+		admitted, completed, skipped uint64
+	}{
+		{libpf.AuxiliarySourceKobjectReceive, 3, 2, 1},
+		{libpf.AuxiliarySourceModuleQueued, 1, 1, 0},
+		{libpf.AuxiliarySourceModuleCoalesced, 1, 1, 0},
+	} {
+		obs, err := scope.KindObservation(want.kind)
+		if err != nil || obs.Counts.Admitted != want.admitted || obs.Counts.Completed != want.completed || obs.Counts.Skipped != want.skipped || obs.Counts.InFlight != 0 {
+			t.Errorf("kind %v: counts=%+v error=%v", want.kind, obs.Counts, err)
+		}
+	}
+}
+
+func TestOwnedPollReceiveErrorsNeverAcknowledge(t *testing.T) {
+	for _, readErr := range []error{fmt.Errorf("wrapped: %w", io.EOF), errors.Join(io.EOF, syscall.EPERM)} {
+		scope := newPollTestScope(t)
+		r := &pollTestReceiver{records: []pollTestRecord{{err: readErr}}}
+		outcome, err := (&Symbolizer{}).pollOwnedKobject(scope.Context(), r, &ownedMonitorControl{})
+		if outcome != ownedPollFailed || !errors.Is(err, readErr) || len(r.acks) != 0 {
+			t.Errorf("receive: outcome=%v error=%v acks=%v", outcome, err, r.acks)
+		}
+		stopPollTestScope(t, scope)
+	}
+}
+
+func TestOwnedPollAckFailureStopsFurtherReceives(t *testing.T) {
+	scope := newPollTestScope(t)
+	s := &Symbolizer{reloadModules: make(chan libpf.Void, 1)}
+	r := &pollTestReceiver{ackErr: syscall.EPERM, records: []pollTestRecord{
+		{event: &kobject.Event{Subsystem: "module"}},
+		{event: &kobject.Event{Subsystem: "module"}},
+	}}
+	outcome, err := s.pollOwnedKobject(scope.Context(), r, &ownedMonitorControl{})
+	if outcome != ownedPollFailed || !errors.Is(err, syscall.EPERM) || len(r.acks) != 1 || len(r.records) != 1 {
+		t.Fatalf("ack failure: outcome=%v error=%v acks=%v remaining=%d", outcome, err, r.acks, len(r.records))
+	}
+	stopPollTestScope(t, scope)
+}
+
+func TestOwnedDispatchAdmissionFailureAcknowledged(t *testing.T) {
+	scope := newPollTestScope(t)
+	ctx := context.WithoutCancel(scope.Context())
+	stopPollTestScope(t, scope)
+	r := &pollTestReceiver{}
+	err := (&Symbolizer{reloadModules: make(chan libpf.Void, 1)}).dispatchOwnedKobject(
+		ctx, scope, r, &ownedMonitorControl{}, &kobject.Event{Subsystem: "module"})
+	if err == nil || len(r.acks) != 1 || r.acks[0] == nil {
+		t.Fatalf("admission error=%v acks=%v", err, r.acks)
+	}
+}
+
+func TestOwnedPollAckEOFIsFailure(t *testing.T) {
+	scope := newPollTestScope(t)
+	r := &pollTestReceiver{ackErr: io.EOF, records: []pollTestRecord{{event: &kobject.Event{Subsystem: "other"}}}}
+	outcome, err := (&Symbolizer{}).pollOwnedKobject(scope.Context(), r, &ownedMonitorControl{})
+	if outcome != ownedPollFailed || !errors.Is(err, io.EOF) || len(r.acks) != 1 {
+		t.Fatalf("ACK EOF: outcome=%v error=%v acks=%v", outcome, err, r.acks)
+	}
+	stopPollTestScope(t, scope)
+}
+
+func TestOwnedPollRejectsDeliveredNilAndCanceledScope(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		scope := newPollTestScope(t)
+		ctx := scope.Context()
+		r := &pollTestReceiver{records: []pollTestRecord{{event: nil}}}
+		if canceled {
+			r.onReceive = func() { stopPollTestScope(t, scope) }
+		}
+		outcome, err := (&Symbolizer{}).pollOwnedKobject(ctx, r, &ownedMonitorControl{})
+		if outcome != ownedPollFailed || err == nil || len(r.acks) != 1 || r.acks[0] == nil {
+			t.Errorf("canceled=%v outcome=%v error=%v acks=%v", canceled, outcome, err, r.acks)
+		}
+		if !canceled {
+			stopPollTestScope(t, scope)
+		}
+	}
+}
+
+type blockingPollReceiver struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingPollReceiver) Receive() (*kobject.Event, error) {
+	close(r.entered)
+	<-r.release
+	return nil, io.EOF
+}
+func (*blockingPollReceiver) Acknowledge(error) error { panic("unexpected ACK") }
+
+func TestOwnedPollReturnsOnlyAfterReceiveReturns(t *testing.T) {
+	scope := newPollTestScope(t)
+	r := &blockingPollReceiver{entered: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan ownedPollOutcome, 1)
+	go func() {
+		outcome, _ := (&Symbolizer{}).pollOwnedKobject(scope.Context(), r, &ownedMonitorControl{})
+		done <- outcome
+	}()
+	<-r.entered
+	select {
+	case <-done:
+		t.Fatal("poll returned while Receive was blocked")
+	default:
+	}
+	close(r.release)
+	if outcome := <-done; outcome != ownedPollDrained {
+		t.Fatalf("outcome=%v", outcome)
+	}
+	stopPollTestScope(t, scope)
+}
+
+const workerFixture = "0000000000001000 T _stext\n0000000000001010 T kernel_symbol\n0000000000001100 T _etext\n0000000000002010 T module_symbol [fixture]\n"
+
+func workerTestFixture(t *testing.T) (*Symbolizer, chan time.Duration) {
+	t.Helper()
+	oldDir, oldOpen, oldMetadata, oldAfter := sysModule, openKallsyms, loadModuleMetadata, reloadAfter
+	sysModule = t.TempDir()
+	if err := os.Mkdir(filepath.Join(sysModule, "fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	openKallsyms = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(workerFixture)), nil }
+	loadModuleMetadata = func(m *Module, name string, _ int64) bool {
+		if name == Kernel {
+			m.start, m.end = 0x1000, 0x1100
+			return true
+		}
+		if name == "fixture" {
+			m.start, m.end, m.mtime = 0x2000, 0x2100, 1
+			return true
+		}
+		return false
+	}
+	timers := make(chan time.Duration, 10)
+	reloadAfter = func(d time.Duration) <-chan time.Time {
+		timers <- d
+		return make(chan time.Time)
+	}
+	t.Cleanup(func() { sysModule, openKallsyms, loadModuleMetadata, reloadAfter = oldDir, oldOpen, oldMetadata, oldAfter })
+	s, err := NewSymbolizer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Leave a real parser-produced kernel cache, but no existing fixture module.
+	mods := s.modules.Load().([]Module)
+	for _, m := range mods {
+		if m.Name() == Kernel {
+			s.modules.Store([]Module{m})
+			return s, timers
+		}
+	}
+	t.Fatal("fixture did not produce kernel symbols")
+	return nil, nil
+}
+
+func workerTestControl() *ownedMonitorControl {
+	return &ownedMonitorControl{pollDone: make(chan struct{}), workerDone: make(chan struct{}), flushWake: make(chan struct{}, 1)}
+}
+
+func workerTestPoll(scope *periodiccaller.OwnedScope, s *Symbolizer, c *ownedMonitorControl, r OwnedKobjectReceiver) bool {
+	return scope.Go(func() {
+		outcome, err := s.pollOwnedKobject(scope.Context(), r, c)
+		c.mu.Lock()
+		c.pollOutcome, c.pollErr = outcome, err
+		c.mu.Unlock()
+		close(c.pollDone)
+	})
+}
+
+type workerTestGuard struct {
+	scope *periodiccaller.OwnedScope
+	control *ownedMonitorControl
+	workerStarted, pollStarted bool
+	releases []func()
+	once sync.Once
+}
+
+func newWorkerTestGuard(t *testing.T, scope *periodiccaller.OwnedScope, control *ownedMonitorControl) *workerTestGuard {
+	t.Helper()
+	g := &workerTestGuard{scope: scope, control: control}
+	// Registered after fixture restoration, so actual workers retire first.
+	t.Cleanup(g.close)
+	return g
+}
+
+func (g *workerTestGuard) close() {
+	g.once.Do(func() {
+		for _, release := range g.releases { release() }
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = g.scope.Stop(ctx)
+		if g.workerStarted { <-g.control.workerDone }
+		if g.pollStarted { <-g.control.pollDone }
+	})
+}
+
+type workerTestDeadline struct {
+	context.Context
+	mu sync.Mutex
+	done chan struct{}
+	deadline time.Time
+}
+
+func (d *workerTestDeadline) Deadline() (time.Time, bool) {
+	d.mu.Lock(); defer d.mu.Unlock()
+	return d.deadline, !d.deadline.IsZero()
+}
+func (d *workerTestDeadline) Done() <-chan struct{} { return d.done }
+func (d *workerTestDeadline) Err() error {
+	select { case <-d.done: return context.DeadlineExceeded; default: return nil }
+}
+func (d *workerTestDeadline) expire() {
+	d.mu.Lock(); d.deadline = time.Now().Add(-time.Nanosecond); d.mu.Unlock()
+	close(d.done)
+}
+
+func workerTestClaim(c *ownedMonitorControl, ctx context.Context) {
+	c.mu.Lock()
+	c.ingress = ownedFrozen
+	c.flush = &ownedFlushClaim{ctx: ctx}
+	c.mu.Unlock()
+	c.flushWake <- struct{}{}
+}
+
+func TestOwnedWorkerFlushExecutesHeldBatchesAndCascade(t *testing.T) {
+	s, timers := workerTestFixture(t)
+	scope := newPollTestScope(t)
+	c := workerTestControl()
+	g := newWorkerTestGuard(t, scope, c)
+	g.workerStarted = scope.Go(func() { s.reloadWorker(scope.Context(), nil, c) })
+	if !g.workerStarted {
+		t.Fatal("worker registration failed")
+	}
+	r := &pollTestReceiver{records: []pollTestRecord{{event: &kobject.Event{Subsystem: "module"}}}}
+	g.pollStarted = workerTestPoll(scope, s, c, r)
+	if !g.pollStarted { t.Fatal("poller registration failed") }
+	<-c.pollDone
+	s.reloadSymbols <- libpf.Void{}
+	for i := 0; i < 2; i++ {
+		if got := <-timers; got != 100*time.Millisecond {
+			t.Fatalf("normal delay=%v", got)
+		}
+	}
+	workerTestClaim(c, context.Background())
+	<-c.workerDone
+	if c.workerErr != nil {
+		t.Fatalf("worker error: %v", c.workerErr)
+	}
+	found := false
+	for _, m := range s.modules.Load().([]Module) {
+		if m.Name() == "fixture" && !m.stub && len(m.symbols) != 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("real module symbol cache was not refreshed")
+	}
+	stopPollTestScope(t, scope)
+	for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceModuleExec, libpf.AuxiliarySourceSymbolExec} {
+		obs, err := scope.KindObservation(kind)
+		if err != nil || obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 || obs.Counts.InFlight != 0 {
+			t.Errorf("kind=%v counts=%+v err=%v", kind, obs.Counts, err)
+		}
+	}
+	obs, err := scope.KindObservation(libpf.AuxiliarySourceSymbolQueued)
+	if err != nil || obs.Counts.Admitted != 0 {
+		t.Fatalf("cascade fabricated symbol queue: %+v %v", obs.Counts, err)
+	}
+}
+
+func TestOwnedWorkerEmptyCohortWaitsForPoller(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+	s, _ := workerTestFixture(t)
+	scope := newPollTestScope(t)
+	c := workerTestControl()
+	g := newWorkerTestGuard(t, scope, c)
+	defer g.close()
+	r := &blockingPollReceiver{entered: make(chan struct{}), release: make(chan struct{})}
+	var release sync.Once
+	g.releases = append(g.releases, func() { release.Do(func() { close(r.release) }) })
+	g.workerStarted = scope.Go(func() { s.reloadWorker(scope.Context(), nil, c) })
+	if !g.workerStarted {
+		t.Fatal("worker registration failed")
+	}
+	g.pollStarted = workerTestPoll(scope, s, c, r)
+	if !g.pollStarted { t.Fatal("poller registration failed") }
+	<-r.entered
+	workerTestClaim(c, context.Background())
+	synctest.Wait()
+	select {
+	case <-c.workerDone:
+		t.Fatal("worker returned before actual poller")
+	default:
+	}
+	release.Do(func() { close(r.release) })
+	<-c.workerDone
+	if c.workerErr != nil {
+		t.Fatalf("empty cohort: %v", c.workerErr)
+	}
+	stopPollTestScope(t, scope)
+	for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceModuleExec, libpf.AuxiliarySourceSymbolExec} {
+		obs, err := scope.KindObservation(kind)
+		if err != nil || obs.Counts.Admitted != 0 {
+			t.Errorf("empty cohort kind=%v counts=%+v err=%v", kind, obs.Counts, err)
+		}
+	}
+	})
+}
+
+func TestOwnedWorkerRetainsRealIOAfterClaimDeadline(t *testing.T) {
+	s, timers := workerTestFixture(t)
+	scope := newPollTestScope(t)
+	c := workerTestControl()
+	g := newWorkerTestGuard(t, scope, c)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	g.releases = append(g.releases, func() { releaseOnce.Do(func() { close(release) }) })
+	previousMetadata := loadModuleMetadata
+	loadModuleMetadata = func(m *Module, name string, old int64) bool {
+		if name == "fixture" {
+			close(entered)
+			<-release
+		}
+		return previousMetadata(m, name, old)
+	}
+	opens := 0
+	openKallsyms = func() (io.ReadCloser, error) {
+		opens++
+		return io.NopCloser(strings.NewReader(workerFixture)), nil
+	}
+	g.workerStarted = scope.Go(func() { s.reloadWorker(scope.Context(), nil, c) })
+	if !g.workerStarted {
+		t.Fatal("worker registration failed")
+	}
+	g.pollStarted = workerTestPoll(scope, s, c, &pollTestReceiver{records: []pollTestRecord{{event: &kobject.Event{Subsystem: "module"}}}})
+	if !g.pollStarted { t.Fatal("poller registration failed") }
+	<-c.pollDone
+	<-timers
+	ctx := &workerTestDeadline{Context: context.Background(), done: make(chan struct{})}
+	workerTestClaim(c, ctx)
+	<-entered
+	ctx.expire()
+	select {
+	case <-c.workerDone:
+		t.Fatal("worker returned before actual metadata call")
+	default:
+	}
+	releaseOnce.Do(func() { close(release) })
+	<-c.workerDone
+	if !errors.Is(c.workerErr, context.DeadlineExceeded) || opens != 0 {
+		t.Fatalf("worker=%v symbol opens=%d", c.workerErr, opens)
+	}
+	stopPollTestScope(t, scope)
+}
+
+func TestOwnedWorkerRetainsDirectoryOpenError(t *testing.T) {
+	s, timers := workerTestFixture(t)
+	sysModule = filepath.Join(sysModule, "missing")
+	scope := newPollTestScope(t)
+	c := workerTestControl()
+	g := newWorkerTestGuard(t, scope, c)
+	g.workerStarted = scope.Go(func() { s.reloadWorker(scope.Context(), nil, c) })
+	if !g.workerStarted {
+		t.Fatal("worker registration failed")
+	}
+	g.pollStarted = workerTestPoll(scope, s, c, &pollTestReceiver{records: []pollTestRecord{{event: &kobject.Event{Subsystem: "module"}}}})
+	if !g.pollStarted { t.Fatal("poller registration failed") }
+	<-c.pollDone
+	<-timers
+	workerTestClaim(c, context.Background())
+	<-c.workerDone
+	if !errors.Is(c.workerErr, os.ErrNotExist) {
+		t.Fatalf("directory cause lost: %v", c.workerErr)
+	}
+	stopPollTestScope(t, scope)
+}
+
+type workerRetryTimer struct { delay time.Duration; fire chan time.Time }
+type workerRetryReceiver struct { records chan pollTestRecord; acks chan error }
+func (r *workerRetryReceiver) Receive() (*kobject.Event, error) {
+	record, ok := <-r.records
+	if !ok { return nil, io.EOF }
+	return record.event, record.err
+}
+func (r *workerRetryReceiver) Acknowledge(err error) error { r.acks <- err; return nil }
+type workerRetryReader struct { io.Reader; closed chan struct{} }
+func (r *workerRetryReader) Close() error { close(r.closed); return nil }
+
+func TestOwnedWorkerNormalFailuresRetryButFlushRejects(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, _ := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		c := workerTestControl()
+		g := newWorkerTestGuard(t, scope, c)
+		defer g.close()
+		r := &workerRetryReceiver{records: make(chan pollTestRecord), acks: make(chan error, 2)}
+		var release sync.Once
+		g.releases = append(g.releases, func() { release.Do(func() { close(r.records) }) })
+		timers := make(chan workerRetryTimer, 8)
+		reloadAfter = func(d time.Duration) <-chan time.Time {
+			fire := make(chan time.Time, 1); timers <- workerRetryTimer{d, fire}; return fire
+		}
+		goodDir := sysModule
+		sysModule = filepath.Join(goodDir, "missing")
+		closed := make(chan struct{})
+		opens := 0
+		openKallsyms = func() (io.ReadCloser, error) {
+			opens++
+			if opens == 1 { return nil, syscall.EPERM }
+			return &workerRetryReader{Reader: strings.NewReader(workerFixture), closed: closed}, nil
+		}
+		g.workerStarted = scope.Go(func() { s.reloadWorker(scope.Context(), nil, c) })
+		if !g.workerStarted { t.Fatal("worker registration failed") }
+		g.pollStarted = workerTestPoll(scope, s, c, r)
+		if !g.pollStarted { t.Fatal("poller registration failed") }
+		r.records <- pollTestRecord{event: &kobject.Event{Subsystem: "module"}}
+		if err := <-r.acks; err != nil { t.Fatal(err) }
+		initial := <-timers
+		if initial.delay != 100*time.Millisecond { t.Fatalf("initial delay %v", initial.delay) }
+		initial.fire <- time.Time{}
+		moduleRetry := <-timers
+		if moduleRetry.delay != 10*time.Second { t.Fatalf("module retry %v", moduleRetry.delay) }
+		r.records <- pollTestRecord{event: &kobject.Event{Subsystem: "other"}}
+		if err := <-r.acks; err != nil { t.Fatalf("poll stopped after load failure: %v", err) }
+		sysModule = goodDir
+		moduleRetry.fire <- time.Time{}
+		cascade := <-timers
+		if cascade.delay != time.Minute { t.Fatalf("cascade %v", cascade.delay) }
+		cascade.fire <- time.Time{}
+		symbolRetry := <-timers
+		if symbolRetry.delay != time.Minute { t.Fatalf("symbol retry %v", symbolRetry.delay) }
+		symbolRetry.fire <- time.Time{}
+		<-closed
+		synctest.Wait()
+		found := false
+		for _, mod := range s.modules.Load().([]Module) {
+			if mod.Name() == "fixture" && !mod.stub && len(mod.symbols) > 0 { found = true }
+		}
+		if !found { t.Fatal("successful retries did not update the real cache") }
+		release.Do(func() { close(r.records) })
+		<-c.pollDone
+		workerTestClaim(c, context.Background())
+		<-c.workerDone
+		if !errors.Is(c.workerErr, os.ErrNotExist) || !errors.Is(c.workerErr, syscall.EPERM) {
+			t.Fatalf("flush lost prior load failures: %v", c.workerErr)
+		}
+		stopPollTestScope(t, scope)
+		for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceModuleExec, libpf.AuxiliarySourceSymbolExec} {
+			obs, _ := scope.KindObservation(kind)
+			if obs.Counts.Admitted != 2 || obs.Counts.Failed != 1 || obs.Counts.Completed != 1 || obs.Counts.InFlight != 0 {
+				t.Errorf("kind=%v counts=%+v", kind, obs.Counts)
+			}
+		}
+	})
+}
+
+type activationSlice []int
+func (activationSlice) Receive() (*kobject.Event, error) { return nil, io.EOF }
+func (activationSlice) Acknowledge(error) error { return nil }
+
+func TestOwnedActivationRejectsInvalidEnvelope(t *testing.T) {
+	r := &pollTestReceiver{}
+	var typedNil *pollTestReceiver
+	mu := &sync.Mutex{}
+	errSlot := new(error)
+	activate, reject := make(chan struct{}), make(chan struct{})
+	envelope := struct {
+		Mu *sync.Mutex
+		Activate <-chan struct{}
+		Reject <-chan struct{}
+		Err *error
+	}{mu, activate, reject, errSlot}
+	valid := context.WithValue(context.Background(), r, envelope)
+	wrong := context.WithValue(context.Background(), r, struct{ Mu *sync.Mutex }{mu})
+	mixed := context.WithValue(context.Background(), r, struct {
+		Mu *sync.Mutex
+		Activate <-chan struct{}
+		Reject <-chan struct{}
+		Err *error
+	}{mu, activate, activate, errSlot})
+	for _, tc := range []struct { ctx context.Context; receiver OwnedKobjectReceiver }{
+		{nil, r}, {context.Background(), nil}, {context.Background(), typedNil},
+		{context.Background(), activationSlice{1}}, {context.Background(), r},
+		{wrong, r}, {mixed, r}, {valid, &pollTestReceiver{}},
+	} {
+		if _, err := parseOwnedMonitorActivation(tc.ctx, tc.receiver); err == nil {
+			t.Errorf("accepted invalid context/receiver: %#v", tc.receiver)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		e := envelope
+		switch i { case 0: e.Mu = nil; case 1: e.Activate = nil; case 2: e.Reject = nil; case 3: e.Err = nil }
+		if _, err := parseOwnedMonitorActivation(context.WithValue(context.Background(), r, e), r); err == nil {
+			t.Errorf("accepted nil envelope field %d", i)
+		}
+	}
+	close(activate)
+	if _, err := parseOwnedMonitorActivation(valid, r); err == nil {
+		t.Error("accepted activation before idle readiness")
+	}
+	close(reject)
+	e := envelope
+	e.Activate = make(chan struct{})
+	if _, err := parseOwnedMonitorActivation(context.WithValue(context.Background(), r, e), r); err == nil {
+		t.Error("accepted already rejected envelope")
+	}
+}
+
+func TestOwnedActivationWaitsForWitnessClaim(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := &pollTestReceiver{}
+		var mu sync.Mutex
+		var claimErr error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(context.Background(), r, struct {
+			Mu *sync.Mutex
+			Activate <-chan struct{}
+			Reject <-chan struct{}
+			Err *error
+		}{&mu, activate, reject, &claimErr})
+		handoff, err := parseOwnedMonitorActivation(ctx, r)
+		if err != nil { t.Fatal(err) }
+		scopeCtx, cancelScope := context.WithCancel(context.Background())
+		defer cancelScope()
+		result := make(chan error, 1)
+		go func() { result <- handoff.waitActivation(scopeCtx) }()
+		synctest.Wait()
+		select { case err := <-result: t.Fatalf("returned before claim: %v", err); default: }
+		if !mu.TryLock() { t.Fatal("claim mutex held while waiting") }
+		close(activate)
+		mu.Unlock()
+		startup, cancelStartup := context.WithCancel(context.Background())
+		cancelStartup()
+		if startup.Err() == nil { t.Fatal("startup context did not cancel") }
+		if err := <-result; err != nil || scopeCtx.Err() != nil { t.Fatalf("activation=%v scope=%v", err, scopeCtx.Err()) }
+	})
+}
+
+func TestOwnedActivationPreservesRejectionAndCancellation(t *testing.T) {
+	for _, mode := range []string{"reject", "publish", "cancel", "both"} {
+		r := &pollTestReceiver{}
+		var mu sync.Mutex
+		var claimErr error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(context.Background(), r, struct {
+			Mu *sync.Mutex
+			Activate <-chan struct{}
+			Reject <-chan struct{}
+			Err *error
+		}{&mu, activate, reject, &claimErr})
+		handoff, err := parseOwnedMonitorActivation(ctx, r)
+		if err != nil { t.Fatal(err) }
+		scopeCtx, cancel := context.WithCancel(context.Background())
+		switch mode {
+		case "reject": mu.Lock(); claimErr = syscall.EPERM; close(reject); mu.Unlock()
+		case "publish": if err := handoff.publishFailure(syscall.EPERM); err != nil { t.Fatal(err) }; close(activate)
+		case "cancel": cancel()
+		case "both": mu.Lock(); close(activate); close(reject); mu.Unlock()
+		}
+		err = handoff.waitActivation(scopeCtx)
+		cancel()
+		if err == nil || ((mode == "reject" || mode == "publish") && !errors.Is(err, syscall.EPERM)) || (mode == "cancel" && !errors.Is(err, context.Canceled)) {
+			t.Errorf("%s: %v", mode, err)
+		}
+	}
+}
+
+func reservationFixture(t *testing.T) (context.Context, *periodiccaller.OwnedScope, *ownedMonitorActivation, *ownedMonitorControl, chan struct{}, chan struct{}) {
+	t.Helper()
+	scope := newPollTestScope(t)
+	r := &pollTestReceiver{}
+	var mu sync.Mutex
+	var claimErr error
+	activate, reject := make(chan struct{}), make(chan struct{})
+	ctx := context.WithValue(scope.Context(), r, struct {
+		Mu *sync.Mutex
+		Activate <-chan struct{}
+		Reject <-chan struct{}
+		Err *error
+	}{&mu, activate, reject, &claimErr})
+	h, err := parseOwnedMonitorActivation(ctx, r)
+	if err != nil { t.Fatal(err) }
+	return ctx, scope, h, &ownedMonitorControl{}, activate, reject
+}
+
+func TestPreactivationReloadReservationCountsCohort(t *testing.T) {
+	ctx, scope, h, c, _, _ := reservationFixture(t)
+	defer stopPollTestScope(t, scope)
+	s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+	if err := reservePreactivationReload(ctx, h, c); err != nil { t.Fatal(err) }
+	if c.pendingCalls != 1 || c.inFlight != 1 { t.Fatalf("first call: pending=%d inFlight=%d", c.pendingCalls, c.inFlight) }
+	const n = 64
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); errs <- reservePreactivationReload(ctx, h, c) }()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs { if err != nil { t.Fatal(err) } }
+	if c.pendingCalls != n+1 || c.inFlight != 1 || len(s.reloadSymbols) != 0 {
+		t.Fatalf("cohort: pending=%d inFlight=%d tokens=%d", c.pendingCalls, c.inFlight, len(s.reloadSymbols))
+	}
+	stopPollTestScope(t, scope)
+	for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceSymbolQueued, libpf.AuxiliarySourceSymbolCoalesced, libpf.AuxiliarySourceSymbolExec} {
+		obs, err := scope.KindObservation(kind)
+		if err != nil || obs.Counts.Admitted != 0 { t.Errorf("unexpected kind=%v counts=%+v error=%v", kind, obs.Counts, err) }
+	}
+}
+
+func TestPreactivationReloadRejectsWithoutInventingIntents(t *testing.T) {
+	for _, mode := range []string{"pending-overflow", "flight-overflow", "missing-reservation", "invalid-phase", "abandoned", "frozen", "both", "reject", "canceled", "shared-error"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, scope, h, c, activate, reject := reservationFixture(t)
+			defer stopPollTestScope(t, scope)
+			c.cause = syscall.EPERM
+			switch mode {
+			case "pending-overflow": c.pendingCalls, c.inFlight = ^uint64(0), 1
+			case "flight-overflow": c.inFlight = ^uint64(0)
+			case "missing-reservation": c.pendingCalls = 1
+			case "invalid-phase": c.intentPhase = ownedIntentPhase(255)
+			case "abandoned": c.intentPhase = ownedIntentAbandonedUnknown
+			case "frozen": c.ingress = ownedFrozen
+			case "both": h.Mu.Lock(); close(activate); close(reject); h.Mu.Unlock()
+			case "reject": h.Mu.Lock(); close(reject); h.Mu.Unlock()
+			case "canceled": canceled, cancel := context.WithCancel(ctx); cancel(); ctx = canceled
+			case "shared-error": h.Mu.Lock(); *h.Err = syscall.EPERM; h.Mu.Unlock()
+			}
+			pending, flight := c.pendingCalls, c.inFlight
+			err := reservePreactivationReload(ctx, h, c)
+			if err == nil || c.pendingCalls != pending || c.inFlight != flight || c.ingress != ownedFailed || !errors.Is(c.cause, syscall.EPERM) {
+				t.Fatalf("%s: error=%v pending=%d inFlight=%d cause=%v ingress=%v", mode, err, c.pendingCalls, c.inFlight, c.cause, c.ingress)
+			}
+			h.Mu.Lock()
+			shared := *h.Err
+			h.Mu.Unlock()
+			if shared == nil || !errors.Is(shared, err) { t.Fatalf("shared failure=%v returned=%v", shared, err) }
+			if mode == "canceled" && !errors.Is(err, context.Canceled) { t.Fatalf("lost cancellation: %v", err) }
+		})
+	}
+}
+
+func TestPreactivationReloadSeedBoundary(t *testing.T) {
+	ctx, scope, h, c, activate, _ := reservationFixture(t)
+	defer stopPollTestScope(t, scope)
+	h.Mu.Lock(); close(activate); h.Mu.Unlock()
+	if err := reservePreactivationReload(ctx, h, c); err != nil || c.pendingCalls != 1 || c.inFlight != 1 {
+		t.Fatalf("activated collecting: error=%v pending=%d inFlight=%d", err, c.pendingCalls, c.inFlight)
+	}
+	for _, phase := range []ownedIntentPhase{ownedIntentTransferring, ownedIntentSettled} {
+		c.intentPhase = phase
+		err := reservePreactivationReload(ctx, h, c)
+		if !errors.Is(err, errOwnedIntentLive) || c.pendingCalls != 1 || c.inFlight != 1 || c.ingress != ownedAccepting || c.cause != nil {
+			t.Fatalf("live boundary %v: error=%v pending=%d inFlight=%d cause=%v", phase, err, c.pendingCalls, c.inFlight, c.cause)
+		}
+		h.Mu.Lock(); shared := *h.Err; h.Mu.Unlock()
+		if shared != nil { t.Fatalf("live boundary poisoned claim: %v", shared) }
+	}
+}
+
+func TestPreactivationReloadFailuresStayInTheirEnvelope(t *testing.T) {
+	ctx1, scope1, h1, c1, _, reject1 := reservationFixture(t)
+	ctx2, scope2, h2, c2, _, _ := reservationFixture(t)
+	defer stopPollTestScope(t, scope1)
+	defer stopPollTestScope(t, scope2)
+	h1.Mu.Lock(); close(reject1); h1.Mu.Unlock()
+	if err := reservePreactivationReload(ctx1, h1, c1); err == nil { t.Fatal("rejection accepted") }
+	if err := reservePreactivationReload(ctx2, h2, c2); err != nil { t.Fatal(err) }
+	h2.Mu.Lock(); shared := *h2.Err; h2.Mu.Unlock()
+	if shared != nil || c2.pendingCalls != 1 || c2.inFlight != 1 { t.Fatalf("other envelope poisoned: %v", shared) }
+}
+
+func TestOwnedReloadReplayActualDecisions(t *testing.T) {
+	for _, n := range []int{0, 1, 4} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			ctx, scope, h, c, activate, _ := reservationFixture(t)
+			defer stopPollTestScope(t, scope)
+			s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+			for i := 0; i < n; i++ { if err := reservePreactivationReload(ctx, h, c); err != nil { t.Fatal(err) } }
+			h.Mu.Lock(); close(activate); h.Mu.Unlock()
+			if err := h.waitActivation(ctx); err != nil { t.Fatal(err) }
+			if err := s.replayOwnedReloads(ctx, c, h); err != nil { t.Fatal(err) }
+			queued, coalesced := uint64(0), uint64(0)
+			if n > 0 { queued, coalesced = 1, uint64(n-1) }
+			if c.intentPhase != ownedIntentSettled || c.pendingCalls != uint64(n) || c.inFlight != 0 || c.queuedTerminals != queued || c.coalescedTerminals != coalesced || len(s.reloadSymbols) != int(queued) {
+				t.Fatalf("replay n=%d: phase=%v pending=%d inFlight=%d queued=%d coalesced=%d tokens=%d", n, c.intentPhase, c.pendingCalls, c.inFlight, c.queuedTerminals, c.coalescedTerminals, len(s.reloadSymbols))
+			}
+			if err := s.replayOwnedReloads(ctx, c, h); err == nil || len(s.reloadSymbols) != int(queued) { t.Fatal("second replay accepted or reseeded") }
+			stopPollTestScope(t, scope)
+			for _, want := range []struct{ kind libpf.AuxiliarySource; count uint64 }{
+				{libpf.AuxiliarySourceSymbolQueued, queued}, {libpf.AuxiliarySourceSymbolCoalesced, coalesced}, {libpf.AuxiliarySourceSymbolExec, 0},
+			} {
+				obs, err := scope.KindObservation(want.kind)
+				if err != nil || obs.Counts.Admitted != want.count || obs.Counts.Completed != want.count || obs.Counts.InFlight != 0 { t.Errorf("kind=%v counts=%+v error=%v", want.kind, obs.Counts, err) }
+			}
+		})
+	}
+}
+
+func TestOwnedReloadReplayRejectsOccupiedSeed(t *testing.T) {
+	ctx, scope, h, c, activate, _ := reservationFixture(t)
+	defer stopPollTestScope(t, scope)
+	s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+	if err := reservePreactivationReload(ctx, h, c); err != nil { t.Fatal(err) }
+	s.reloadSymbols <- libpf.Void{}
+	h.Mu.Lock(); close(activate); h.Mu.Unlock()
+	err := s.replayOwnedReloads(ctx, c, h)
+	if err == nil || c.intentPhase != ownedIntentAbandonedUnknown || c.pendingCalls != 1 || c.inFlight != 0 || c.queuedTerminals != 0 || c.coalescedTerminals != 0 || len(s.reloadSymbols) != 1 || !errors.Is(c.cause, err) {
+		t.Fatalf("occupied: error=%v phase=%v pending=%d inFlight=%d queued=%d coalesced=%d", err, c.intentPhase, c.pendingCalls, c.inFlight, c.queuedTerminals, c.coalescedTerminals)
+	}
+}
+
+func TestOwnedReloadReplayCoalescesLiveProducer(t *testing.T) {
+	ctx, scope, h, c, activate, _ := reservationFixture(t)
+	defer stopPollTestScope(t, scope)
+	s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+	if err := reservePreactivationReload(ctx, h, c); err != nil { t.Fatal(err) }
+	h.Mu.Lock(); close(activate); h.Mu.Unlock()
+	if err := s.replayOwnedReloads(ctx, c, h); err != nil { t.Fatal(err) }
+	if err := reservePreactivationReload(ctx, h, c); !errors.Is(err, errOwnedIntentLive) { t.Fatalf("expected live route: %v", err) }
+	c.mu.Lock()
+	queued := false
+	select { case s.reloadSymbols <- libpf.Void{}: queued = true; default: }
+	c.mu.Unlock()
+	if queued { t.Fatal("live request overtook seeded token") }
+	op, err := scope.AdmitKind(libpf.AuxiliarySourceSymbolCoalesced)
+	if err != nil { t.Fatal(err) }
+	if err := op.Complete(); err != nil { t.Fatal(err) }
+	stopPollTestScope(t, scope)
+	obs, err := scope.KindObservation(libpf.AuxiliarySourceSymbolCoalesced)
+	if err != nil || obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 { t.Fatalf("actual coalesced terminal: %+v %v", obs.Counts, err) }
+}
+
+func TestOwnedReloadReplayRacesReservationsAtSeed(t *testing.T) {
+	ctx, scope, h, c, activate, _ := reservationFixture(t)
+	defer stopPollTestScope(t, scope)
+	s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+	h.Mu.Lock(); close(activate); h.Mu.Unlock()
+	const n = 32
+	start := make(chan struct{})
+	results := make(chan error, n)
+	replayed := make(chan error, 1)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; results <- reservePreactivationReload(ctx, h, c) }()
+	}
+	go func() { <-start; replayed <- s.replayOwnedReloads(ctx, c, h) }()
+	close(start)
+	wg.Wait(); close(results)
+	if err := <-replayed; err != nil { t.Fatal(err) }
+	var accepted uint64
+	for err := range results {
+		if err == nil { accepted++ } else if !errors.Is(err, errOwnedIntentLive) { t.Fatal(err) }
+	}
+	wantQueued := uint64(0)
+	if accepted != 0 { wantQueued = 1 }
+	if c.pendingCalls != accepted || c.queuedTerminals != wantQueued || c.coalescedTerminals != accepted-wantQueued || c.inFlight != 0 || c.intentPhase != ownedIntentSettled {
+		t.Fatalf("seed race: accepted=%d pending=%d queued=%d coalesced=%d inFlight=%d phase=%v", accepted, c.pendingCalls, c.queuedTerminals, c.coalescedTerminals, c.inFlight, c.intentPhase)
+	}
+}
+
+func TestOwnedReloadReplayPreservesPreAdmissionFailure(t *testing.T) {
+	for _, mode := range []string{"scope-canceled", "shared-error"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, scope, h, c, activate, _ := reservationFixture(t)
+			defer stopPollTestScope(t, scope)
+			s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+			if err := reservePreactivationReload(ctx, h, c); err != nil { t.Fatal(err) }
+			h.Mu.Lock(); close(activate); if mode == "shared-error" { *h.Err = syscall.EPERM }; h.Mu.Unlock()
+			want := error(syscall.EPERM)
+			if mode == "scope-canceled" { canceled, cancel := context.WithCancel(ctx); cancel(); ctx = canceled; want = context.Canceled }
+			err := s.replayOwnedReloads(ctx, c, h)
+			if !errors.Is(err, want) || c.intentPhase != ownedIntentAbandonedUnknown || c.pendingCalls != 1 || c.inFlight != 0 || c.queuedTerminals != 0 || c.coalescedTerminals != 0 || len(s.reloadSymbols) != 0 {
+				t.Fatalf("mode=%s error=%v pending=%d inFlight=%d queued=%d coalesced=%d", mode, err, c.pendingCalls, c.inFlight, c.queuedTerminals, c.coalescedTerminals)
+			}
+		})
+	}
+}
+
+type replayStepContext struct {
+	context.Context
+	mu sync.Mutex
+	calls int
+	entered, release chan struct{}
+}
+func (c *replayStepContext) Err() error {
+	c.mu.Lock(); c.calls++; block := c.calls == 4; c.mu.Unlock()
+	if block { close(c.entered); <-c.release }
+	return c.Context.Err()
+}
+
+func TestOwnedReloadReplayIngressBoundaries(t *testing.T) {
+	for _, frozen := range []bool{false, true} {
+		t.Run(fmt.Sprint(frozen), func(t *testing.T) {
+			ctx, scope, h, c, activate, _ := reservationFixture(t)
+			defer stopPollTestScope(t, scope)
+			s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+			if err := reservePreactivationReload(ctx, h, c); err != nil { t.Fatal(err) }
+			h.Mu.Lock(); close(activate); h.Mu.Unlock()
+			if frozen { c.ingress = ownedFrozen } else { c.ingress = ownedIngress(255); c.cause = syscall.EPERM }
+			err := s.replayOwnedReloads(ctx, c, h)
+			if frozen {
+				if err != nil || c.intentPhase != ownedIntentSettled || c.queuedTerminals != 1 || len(s.reloadSymbols) != 1 { t.Fatalf("frozen cohort: %v", err) }
+			} else if !errors.Is(err, syscall.EPERM) || c.intentPhase != ownedIntentAbandonedUnknown || c.queuedTerminals != 0 || len(s.reloadSymbols) != 0 {
+				t.Fatalf("invalid ingress: error=%v phase=%v queued=%d tokens=%d", err, c.intentPhase, c.queuedTerminals, len(s.reloadSymbols))
+			}
+		})
+	}
+}
+
+func TestOwnedReloadReplayRejectsIngressAfterFirstTerminal(t *testing.T) {
+	ctx, scope, h, c, activate, _ := reservationFixture(t)
+	defer stopPollTestScope(t, scope)
+	s := &Symbolizer{reloadSymbols: make(chan libpf.Void, 1)}
+	for i := 0; i < 2; i++ { if err := reservePreactivationReload(ctx, h, c); err != nil { t.Fatal(err) } }
+	h.Mu.Lock(); close(activate); h.Mu.Unlock()
+	step := &replayStepContext{Context: ctx, entered: make(chan struct{}), release: make(chan struct{})}
+	var release sync.Once
+	var replayWG sync.WaitGroup
+	replayWG.Add(1)
+	defer func() { release.Do(func() { close(step.release) }); replayWG.Wait() }()
+	done := make(chan error, 1)
+	go func() { defer replayWG.Done(); done <- s.replayOwnedReloads(step, c, h) }()
+	select { case <-step.entered: case err := <-done: t.Fatalf("returned before second decision: %v", err) }
+	c.mu.Lock(); c.ingress = ownedIngress(255); c.mu.Unlock()
+	release.Do(func() { close(step.release) })
+	err := <-done
+	if err == nil || c.intentPhase != ownedIntentAbandonedUnknown || c.pendingCalls != 2 || c.inFlight != 0 || c.queuedTerminals != 1 || c.coalescedTerminals != 0 || len(s.reloadSymbols) != 1 {
+		t.Fatalf("late invalid ingress: error=%v phase=%v queued=%d coalesced=%d inFlight=%d", err, c.intentPhase, c.queuedTerminals, c.coalescedTerminals, c.inFlight)
+	}
+}
+
+type startTestReceiver struct { entered, release chan struct{} }
+func (r *startTestReceiver) Receive() (*kobject.Event, error) { close(r.entered); <-r.release; return nil, io.EOF }
+func (*startTestReceiver) Acknowledge(error) error { panic("unexpected ACK") }
+
+func TestOwnedStartWaitsForActivationAndReplaysIntents(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, timers := workerTestFixture(t)
+		previousOpen := openKallsyms
+		loads := 0
+		openKallsyms = func() (io.ReadCloser, error) { loads++; return previousOpen() }
+		scope := newPollTestScope(t)
+		r := &startTestReceiver{entered: make(chan struct{}), release: make(chan struct{})}
+		var claimMu sync.Mutex
+		var claimErr error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct {
+			Mu *sync.Mutex
+			Activate <-chan struct{}
+			Reject <-chan struct{}
+			Err *error
+		}{&claimMu, activate, reject, &claimErr})
+		startup, cancelStartup := context.WithCancel(context.Background())
+		defer cancelStartup()
+		var release sync.Once
+		var cleanupOnce sync.Once
+		var c *ownedMonitorControl
+		cleanup := func() { cleanupOnce.Do(func() {
+			release.Do(func() { close(r.release) })
+			claimMu.Lock()
+			select { case <-activate: default: close(reject) }
+			claimMu.Unlock()
+			stopPollTestScope(t, scope)
+			if c != nil { <-c.pollDone; <-c.workerDone }
+		}) }
+		t.Cleanup(cleanup)
+		defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		s.Reload(); s.Reload()
+		synctest.Wait()
+		select { case <-r.entered: t.Fatal("Receive before activation"); default: }
+		if len(timers) != 0 || len(s.reloadSymbols) != 0 || loads != 0 || c.pendingCalls != 2 { t.Fatal("preactivation work or lost intents") }
+		claimMu.Lock(); close(activate); claimMu.Unlock()
+		cancelStartup()
+		if startup.Err() == nil { t.Fatal("startup context did not cancel") }
+		<-r.entered
+		if got := <-timers; got != 100*time.Millisecond { t.Fatalf("delay=%v", got) }
+		if scope.Context().Err() != nil { t.Fatal("startup cancellation reached worker scope") }
+		release.Do(func() { close(r.release) })
+		<-c.pollDone
+		stopPollTestScope(t, scope)
+		<-c.workerDone
+		for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceSymbolQueued, libpf.AuxiliarySourceSymbolCoalesced} {
+			obs, _ := scope.KindObservation(kind)
+			if obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 { t.Errorf("kind=%v counts=%+v", kind, obs.Counts) }
+		}
+	})
+}
+
+func TestOwnedStartRejectRetainsUnknownIntent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, timers := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		r := &startTestReceiver{entered: make(chan struct{}), release: make(chan struct{})}
+		var mu sync.Mutex
+		var cause error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+		var cleanupOnce, rejectOnce sync.Once
+		var c *ownedMonitorControl
+		cleanup := func() { cleanupOnce.Do(func() {
+			rejectOnce.Do(func() { mu.Lock(); cause = errors.Join(cause, syscall.EPERM); close(reject); mu.Unlock() })
+			close(r.release)
+			stopPollTestScope(t, scope)
+			if c != nil { <-c.pollDone; <-c.workerDone }
+		}) }
+		t.Cleanup(cleanup); defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		s.Reload()
+		var otherMu sync.Mutex
+		var otherErr error
+		otherActivate, otherReject := make(chan struct{}), make(chan struct{})
+		other := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&otherMu, otherActivate, otherReject, &otherErr})
+		if err := s.StartOwnedMonitor(other, r); err == nil { t.Fatal("accepted duplicate start") }
+		rejectOnce.Do(func() { mu.Lock(); cause = syscall.EPERM; close(reject); mu.Unlock() })
+		synctest.Wait()
+		<-c.pollDone; <-c.workerDone
+		select { case <-r.entered: t.Fatal("Receive after rejection"); default: }
+		if len(timers) != 0 || len(s.reloadSymbols) != 0 || c.intentPhase != ownedIntentAbandonedUnknown || c.pendingCalls != 1 || c.inFlight != 0 {
+			t.Fatalf("rejected: phase=%v pending=%d inFlight=%d", c.intentPhase, c.pendingCalls, c.inFlight)
+		}
+	})
+}
+
+func TestOwnedStartRejectsMissingScopeAndLegacyConflict(t *testing.T) {
+	r := &pollTestReceiver{}
+	var mu sync.Mutex
+	var cause error
+	activate, reject := make(chan struct{}), make(chan struct{})
+	value := struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause}
+	ctx := context.WithValue(context.Background(), r, value)
+	if err := (&Symbolizer{}).StartOwnedMonitor(ctx, r); err == nil { t.Fatal("accepted missing scope") }
+	scope := newPollTestScope(t)
+	defer stopPollTestScope(t, scope)
+	mu.Lock(); cause = nil; mu.Unlock()
+	s := &Symbolizer{monitorMode: monitorLegacyRunning}
+	if err := s.StartOwnedMonitor(context.WithValue(scope.Context(), r, value), r); err == nil { t.Fatal("accepted legacy conflict") }
+}
+
+func TestPublicOwnedFlushRequiresActivationAndActualReturns(t *testing.T) {
+	if err := (&Symbolizer{}).FlushOwnedMonitor(nil); err == nil { t.Fatal("accepted nil context") }
+	if err := (&Symbolizer{}).FlushOwnedMonitor(context.Background()); err == nil { t.Fatal("accepted missing monitor") }
+	synctest.Test(t, func(t *testing.T) {
+		s, _ := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		r := &startTestReceiver{entered: make(chan struct{}), release: make(chan struct{})}
+		var mu sync.Mutex
+		var cause error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+		var release, cleanupOnce sync.Once
+		var c *ownedMonitorControl
+		cleanup := func() { cleanupOnce.Do(func() {
+			release.Do(func() { close(r.release) })
+			mu.Lock(); select { case <-activate: default: close(reject) }; mu.Unlock()
+			stopPollTestScope(t, scope)
+			if c != nil { <-c.pollDone; <-c.workerDone }
+		}) }
+		t.Cleanup(cleanup); defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		if err := s.FlushOwnedMonitor(context.Background()); err == nil { t.Fatal("accepted unactivated flush") }
+		c.mu.Lock(); before := c.flush; c.mu.Unlock()
+		if before != nil { t.Fatal("invalid flush consumed the claim") }
+		mu.Lock(); close(activate); mu.Unlock()
+		<-r.entered
+		release.Do(func() { close(r.release) })
+		<-c.pollDone
+		if err := s.FlushOwnedMonitor(context.Background()); err != nil { t.Fatal(err) }
+		select { case <-c.workerDone: default: t.Fatal("flush preceded real worker return") }
+		stopPollTestScope(t, scope)
+		if err := s.FlushOwnedMonitor(context.Background()); err != nil { t.Fatalf("committed result changed after scope stop: %v", err) }
+		for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceModuleExec, libpf.AuxiliarySourceSymbolExec} {
+			obs, err := scope.KindObservation(kind)
+			if err != nil || obs.Counts.Admitted != 0 { t.Errorf("empty kind=%v counts=%+v error=%v", kind, obs.Counts, err) }
+		}
+	})
+}
+
+func TestPublicOwnedFlushForcesRealBatches(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, timers := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		r := &workerRetryReceiver{records: make(chan pollTestRecord), acks: make(chan error, 2)}
+		var mu sync.Mutex; var cause error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+		var release, cleanupOnce sync.Once
+		var c *ownedMonitorControl
+		cleanup := func() { cleanupOnce.Do(func() {
+			release.Do(func() { close(r.records) })
+			mu.Lock(); select { case <-activate: default: close(reject) }; mu.Unlock()
+			stopPollTestScope(t, scope)
+			if c != nil { <-c.pollDone; <-c.workerDone }
+		}) }
+		t.Cleanup(cleanup); defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		mu.Lock(); close(activate); mu.Unlock()
+		r.records <- pollTestRecord{event: &kobject.Event{Subsystem: "module"}}
+		if err := <-r.acks; err != nil { t.Fatal(err) }
+		s.Reload()
+		for i := 0; i < 2; i++ { if got := <-timers; got != 100*time.Millisecond { t.Fatalf("delay=%v", got) } }
+		release.Do(func() { close(r.records) }); <-c.pollDone
+		if err := s.FlushOwnedMonitor(context.Background()); err != nil { t.Fatal(err) }
+		found := false
+		for _, mod := range s.modules.Load().([]Module) { if mod.Name() == "fixture" && !mod.stub && len(mod.symbols) > 0 { found = true } }
+		if !found { t.Fatal("flush did not update actual cache") }
+		stopPollTestScope(t, scope)
+		for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceModuleExec, libpf.AuxiliarySourceSymbolExec} {
+			obs, err := scope.KindObservation(kind)
+			if err != nil || obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 { t.Errorf("kind=%v counts=%+v error=%v", kind, obs.Counts, err) }
+		}
+	})
+}
+
+func TestPublicOwnedFlushDeadlineCannotBeRenewed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, timers := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		r := &workerRetryReceiver{records: make(chan pollTestRecord), acks: make(chan error, 1)}
+		var mu sync.Mutex; var cause error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+		entered, unblock := make(chan struct{}), make(chan struct{})
+		oldMetadata := loadModuleMetadata
+		loadModuleMetadata = func(m *Module, name string, old int64) bool {
+			if name == "fixture" { close(entered); <-unblock }
+			return oldMetadata(m, name, old)
+		}
+		opens := 0
+		openKallsyms = func() (io.ReadCloser, error) { opens++; return io.NopCloser(strings.NewReader(workerFixture)), nil }
+		var release, releaseIO, cleanupOnce sync.Once
+		var c *ownedMonitorControl
+		cleanup := func() { cleanupOnce.Do(func() {
+			release.Do(func() { close(r.records) }); releaseIO.Do(func() { close(unblock) })
+			mu.Lock(); select { case <-activate: default: close(reject) }; mu.Unlock()
+			stopPollTestScope(t, scope)
+			if c != nil { <-c.pollDone; <-c.workerDone }
+		}) }
+		t.Cleanup(cleanup); defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		mu.Lock(); close(activate); mu.Unlock()
+		r.records <- pollTestRecord{event: &kobject.Event{Subsystem: "module"}}
+		if err := <-r.acks; err != nil { t.Fatal(err) }
+		<-timers
+		release.Do(func() { close(r.records) }); <-c.pollDone
+		first := &workerTestDeadline{Context: context.Background(), done: make(chan struct{})}
+		result := make(chan error, 1)
+		go func() { result <- s.FlushOwnedMonitor(first) }()
+		synctest.Wait()
+		select { case <-entered: default: t.Fatal("metadata call did not enter") }
+		later, cancelLater := context.WithCancel(context.Background()); cancelLater()
+		if err := s.FlushOwnedMonitor(later); !errors.Is(err, context.Canceled) { t.Fatalf("later caller: %v", err) }
+		c.mu.Lock(); sameClaim := c.flush.ctx == first && c.flush.phase == ownedFlushPending; c.mu.Unlock()
+		if !sameClaim { t.Fatal("later caller replaced or consumed the first claim") }
+		first.expire()
+		if err := <-result; !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("first flush: %v", err) }
+		synctest.Wait()
+		select { case <-c.workerDone: t.Fatal("worker returned before metadata"); default: }
+		if err := s.FlushOwnedMonitor(context.Background()); !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("renewed flush: %v", err) }
+		releaseIO.Do(func() { close(unblock) }); <-c.workerDone
+		if opens != 0 { t.Fatalf("postdeadline symbol opens=%d", opens) }
+	})
+}
+
+func TestPublicOwnedFlushRejectsReceiverFailures(t *testing.T) {
+	for _, mode := range []string{"wrapped-eof", "joined-eof", "ack"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, _ := workerTestFixture(t)
+				scope := newPollTestScope(t)
+				r := &pollTestReceiver{}
+				switch mode {
+				case "wrapped-eof": r.records = []pollTestRecord{{err: fmt.Errorf("receive: %w", io.EOF)}}
+				case "joined-eof": r.records = []pollTestRecord{{err: errors.Join(io.EOF, syscall.EPERM)}}
+				case "ack": r.records = []pollTestRecord{{event: &kobject.Event{Subsystem: "other"}}}; r.ackErr = syscall.EPERM
+				}
+				var mu sync.Mutex; var cause error
+				activate, reject := make(chan struct{}), make(chan struct{})
+				ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+				var cleanupOnce sync.Once; var c *ownedMonitorControl
+				cleanup := func() { cleanupOnce.Do(func() {
+					mu.Lock(); select { case <-activate: default: close(reject) }; mu.Unlock()
+					stopPollTestScope(t, scope)
+					if c != nil { <-c.pollDone; <-c.workerDone }
+				}) }
+				t.Cleanup(cleanup); defer cleanup()
+				if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+				s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+				mu.Lock(); close(activate); mu.Unlock()
+				<-c.pollDone
+				err := s.FlushOwnedMonitor(context.Background())
+				if err == nil || (mode == "wrapped-eof" && !errors.Is(err, io.EOF)) || (mode != "wrapped-eof" && !errors.Is(err, syscall.EPERM)) {
+					t.Fatalf("mode=%s flush=%v", mode, err)
+				}
+			})
+		})
+	}
+}
+
+func TestPublicOwnedFlushRejectsLoadFailureAfterRetry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, _ := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		r := &workerRetryReceiver{records: make(chan pollTestRecord), acks: make(chan error, 1)}
+		var mu sync.Mutex; var cause error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+		timers := make(chan workerRetryTimer, 4)
+		reloadAfter = func(d time.Duration) <-chan time.Time { fire := make(chan time.Time, 1); timers <- workerRetryTimer{d, fire}; return fire }
+		goodDir := sysModule; sysModule = filepath.Join(goodDir, "missing")
+		var release, cleanupOnce sync.Once; var c *ownedMonitorControl
+		cleanup := func() { cleanupOnce.Do(func() {
+			release.Do(func() { close(r.records) })
+			mu.Lock(); select { case <-activate: default: close(reject) }; mu.Unlock()
+			stopPollTestScope(t, scope)
+			if c != nil { <-c.pollDone; <-c.workerDone }
+		}) }
+		t.Cleanup(cleanup); defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		mu.Lock(); close(activate); mu.Unlock()
+		r.records <- pollTestRecord{event: &kobject.Event{Subsystem: "module"}}
+		if err := <-r.acks; err != nil { t.Fatal(err) }
+		initial := <-timers
+		if initial.delay != 100*time.Millisecond { t.Fatalf("initial=%v", initial.delay) }
+		initial.fire <- time.Time{}
+		retry := <-timers
+		if retry.delay != 10*time.Second { t.Fatalf("retry=%v", retry.delay) }
+		sysModule = goodDir; retry.fire <- time.Time{}
+		cascade := <-timers
+		if cascade.delay != time.Minute { t.Fatalf("cascade=%v", cascade.delay) }
+		release.Do(func() { close(r.records) }); <-c.pollDone
+		if err := s.FlushOwnedMonitor(context.Background()); !errors.Is(err, os.ErrNotExist) { t.Fatalf("lost load error: %v", err) }
+		<-c.workerDone
+	})
+}
+
+type delayedWorkerContext struct {
+	context.Context
+	deadline time.Time
+	done chan struct{}
+	mu sync.Mutex
+	canceled bool
+}
+func (c *delayedWorkerContext) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c *delayedWorkerContext) Done() <-chan struct{} { return c.done }
+func (c *delayedWorkerContext) Err() error {
+	c.mu.Lock(); defer c.mu.Unlock()
+	if c.canceled { return context.Canceled }
+	return nil
+}
+func (c *delayedWorkerContext) cancel() { c.mu.Lock(); c.canceled = true; close(c.done); c.mu.Unlock() }
+
+func TestOwnedStartRejectsExpiredWorkerDeadlineWithoutNotification(t *testing.T) {
+	parent := &delayedWorkerContext{Context: context.Background(), deadline: time.Now().Add(-time.Second), done: make(chan struct{})}
+	defer parent.cancel()
+	scope := periodiccaller.NewOwnedScope(parent, nil)
+	defer stopPollTestScope(t, scope)
+	if err := scope.BindLifetime(&pollTestLifetime{}); err != nil { t.Fatal(err) }
+	r := &pollTestReceiver{}
+	var mu sync.Mutex; var cause error
+	activate, reject := make(chan struct{}), make(chan struct{})
+	ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+	s := &Symbolizer{reloadModules: make(chan libpf.Void, 1), reloadSymbols: make(chan libpf.Void, 1)}
+	err := s.StartOwnedMonitor(ctx, r)
+	if !errors.Is(err, context.DeadlineExceeded) || s.owned != nil { t.Fatalf("start=%v owned=%v", err, s.owned) }
+	mu.Lock(); shared := cause; mu.Unlock()
+	if !errors.Is(shared, context.DeadlineExceeded) { t.Fatalf("shared start error=%v", shared) }
+}
+
+func TestOwnedActivationPreservesSharedFailureAtWorkerDeadline(t *testing.T) {
+	r := &pollTestReceiver{}
+	var mu sync.Mutex; var cause error
+	activate, reject := make(chan struct{}), make(chan struct{})
+	ctx := context.WithValue(context.Background(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+	h, err := parseOwnedMonitorActivation(ctx, r)
+	if err != nil { t.Fatal(err) }
+	mu.Lock(); cause = syscall.EPERM; mu.Unlock()
+	worker := &delayedWorkerContext{Context: context.Background(), deadline: time.Now().Add(-time.Second), done: make(chan struct{})}
+	defer worker.cancel()
+	err = h.waitActivation(worker)
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, syscall.EPERM) { t.Fatalf("combined failure=%v", err) }
+}
+
+func TestOwnedIdleActivationRejectsElapsedWorkerDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, timers := workerTestFixture(t)
+		parent := &delayedWorkerContext{Context: context.Background(), deadline: time.Now().Add(time.Hour), done: make(chan struct{})}
+		scope := periodiccaller.NewOwnedScope(parent, nil)
+		if err := scope.BindLifetime(&pollTestLifetime{}); err != nil { t.Fatal(err) }
+		r := &startTestReceiver{entered: make(chan struct{}), release: make(chan struct{})}
+		var mu sync.Mutex; var cause error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+		var once sync.Once; var c *ownedMonitorControl
+		cleanup := func() { once.Do(func() { close(r.release); stopPollTestScope(t, scope); if c != nil { <-c.pollDone; <-c.workerDone }; parent.cancel() }) }
+		t.Cleanup(cleanup); defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		<-c.pollDone; <-c.workerDone
+		select { case <-r.entered: t.Fatal("Receive after worker deadline"); default: }
+		mu.Lock(); shared := cause; mu.Unlock()
+		if !errors.Is(shared, context.DeadlineExceeded) || len(timers) != 0 { t.Fatalf("shared=%v timers=%d", shared, len(timers)) }
+	})
+}
+
+func TestOwnedPublicPostSeedReloadQueuesAndCoalesces(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, _ := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		r := &workerRetryReceiver{records: make(chan pollTestRecord), acks: make(chan error, 1)}
+		var mu sync.Mutex; var cause error
+		activate, reject := make(chan struct{}), make(chan struct{})
+		ctx := context.WithValue(scope.Context(), r, struct { Mu *sync.Mutex; Activate <-chan struct{}; Reject <-chan struct{}; Err *error }{&mu, activate, reject, &cause})
+		timers := make(chan workerRetryTimer, 8)
+		reloadAfter = func(d time.Duration) <-chan time.Time { fire := make(chan time.Time, 1); timers <- workerRetryTimer{d, fire}; return fire }
+		entered, unblock, loaded := make(chan struct{}), make(chan struct{}), make(chan struct{})
+		oldMetadata := loadModuleMetadata
+		var metadataOnce sync.Once
+		loadModuleMetadata = func(m *Module, name string, old int64) bool { if name == "fixture" { metadataOnce.Do(func() { close(entered); <-unblock }) }; return oldMetadata(m, name, old) }
+		openKallsyms = func() (io.ReadCloser, error) { return &workerRetryReader{Reader: strings.NewReader(workerFixture), closed: loaded}, nil }
+		var release, releaseIO, cleanupOnce sync.Once; var c *ownedMonitorControl
+		cleanup := func() { cleanupOnce.Do(func() {
+			release.Do(func() { close(r.records) }); releaseIO.Do(func() { close(unblock) })
+			mu.Lock(); select { case <-activate: default: close(reject) }; mu.Unlock()
+			stopPollTestScope(t, scope)
+			if c != nil { <-c.pollDone; <-c.workerDone }
+		}) }
+		t.Cleanup(cleanup); defer cleanup()
+		if err := s.StartOwnedMonitor(ctx, r); err != nil { t.Fatal(err) }
+		s.monitorMu.Lock(); c = s.owned; s.monitorMu.Unlock()
+		mu.Lock(); close(activate); mu.Unlock()
+		synctest.Wait()
+		c.mu.Lock(); settled := c.intentPhase == ownedIntentSettled; c.mu.Unlock()
+		if !settled { t.Fatal("replay did not settle") }
+		r.records <- pollTestRecord{event: &kobject.Event{Subsystem: "module"}}
+		if err := <-r.acks; err != nil { t.Fatal(err) }
+		moduleTimer := <-timers
+		if moduleTimer.delay != 100*time.Millisecond { t.Fatalf("module delay=%v", moduleTimer.delay) }
+		moduleTimer.fire <- time.Time{}
+		<-entered
+		s.Reload(); s.Reload()
+		if len(s.reloadSymbols) != 1 { t.Fatal("public Reload did not retain a single queued token") }
+		releaseIO.Do(func() { close(unblock) })
+		symbolTimer := <-timers
+		if symbolTimer.delay != time.Minute { t.Fatalf("symbol delay=%v", symbolTimer.delay) }
+		synctest.Wait()
+		if len(s.reloadSymbols) != 0 { t.Fatal("worker did not merge the queued request") }
+		symbolTimer.fire <- time.Time{}
+		<-loaded; synctest.Wait()
+		found := false
+		for _, mod := range s.modules.Load().([]Module) { if mod.Name() == "fixture" && !mod.stub && len(mod.symbols) != 0 { found = true } }
+		if !found { t.Fatal("real cache was not updated") }
+		release.Do(func() { close(r.records) }); <-c.pollDone
+		c.mu.Lock(); c.ingress = ownedFrozen; c.mu.Unlock()
+		s.Reload()
+		<-c.workerDone
+		stopPollTestScope(t, scope)
+		for _, kind := range []libpf.AuxiliarySource{libpf.AuxiliarySourceSymbolQueued, libpf.AuxiliarySourceSymbolCoalesced, libpf.AuxiliarySourceSymbolExec} {
+			obs, _ := scope.KindObservation(kind)
+			if obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 { t.Errorf("kind=%v counts=%+v", kind, obs.Counts) }
+		}
+	})
+}
+
+type delayedArbitrationContext struct {
+	context.Context
+	deadline time.Time
+	mu sync.Mutex
+	armed bool
+	once sync.Once
+	entered, release chan struct{}
+}
+func (c *delayedArbitrationContext) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c *delayedArbitrationContext) Err() error {
+	c.mu.Lock(); armed := c.armed; c.mu.Unlock()
+	if armed { c.once.Do(func() { close(c.entered); <-c.release }) }
+	return nil
+}
+
+func TestOwnedFlushFinalArbitrationResamplesAfterActualReturns(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, timers := workerTestFixture(t)
+		scope := newPollTestScope(t)
+		c := workerTestControl()
+		g := newWorkerTestGuard(t, scope, c)
+		defer g.close()
+		entered, unblock := make(chan struct{}), make(chan struct{})
+		var releaseIO sync.Once
+		g.releases = append(g.releases, func() { releaseIO.Do(func() { close(unblock) }) })
+		loadModuleMetadata = func(_ *Module, name string, _ int64) bool {
+			if name == "fixture" { close(entered); <-unblock }
+			return false
+		}
+		g.workerStarted = scope.Go(func() { s.reloadWorker(scope.Context(), nil, c) })
+		if !g.workerStarted { t.Fatal("worker registration failed") }
+		g.pollStarted = workerTestPoll(scope, s, c, &pollTestReceiver{})
+		if !g.pollStarted { t.Fatal("poller registration failed") }
+		<-c.pollDone
+		s.reloadModules <- libpf.Void{}
+		<-timers
+		workerTestClaim(c, context.Background())
+		<-entered
+		first := &delayedArbitrationContext{Context: context.Background(), deadline: time.Now().Add(time.Hour), entered: make(chan struct{}), release: make(chan struct{})}
+		claim := &ownedFlushClaim{ctx: first, deadline: first.deadline, hasDeadline: true}
+		if err := ownedWorkerContextError(first); err != nil { t.Fatalf("initial eligibility: %v", err) }
+		first.mu.Lock(); first.armed = true; first.mu.Unlock()
+		var releaseFirst sync.Once; var wg sync.WaitGroup
+		wg.Add(1)
+		defer func() { releaseFirst.Do(func() { close(first.release) }); wg.Wait() }()
+		result := make(chan error, 1)
+		go func() { defer wg.Done(); _, err := ownedFlushFinalEligibility(claim, scope.Context(), scope, c.pollDone, c.workerDone); result <- err }()
+		<-first.entered
+		time.Sleep(time.Hour)
+		releaseIO.Do(func() { close(unblock) })
+		<-c.workerDone
+		if c.workerErr != nil { t.Fatalf("actual worker error: %v", c.workerErr) }
+		releaseFirst.Do(func() { close(first.release) })
+		if err := <-result; !errors.Is(err, context.DeadlineExceeded) { t.Fatalf("late final arbitration: %v", err) }
+	})
+}
+
+func TestOwnedFlushFinalEligibilitySamplesActualScope(t *testing.T) {
+	for _, mode := range []string{"failed", "sealed"} {
+		t.Run(mode, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				s, _ := workerTestFixture(t)
+				scope := newPollTestScope(t)
+				c := workerTestControl()
+				g := newWorkerTestGuard(t, scope, c)
+				defer g.close()
+				g.workerStarted = scope.Go(func() { s.reloadWorker(scope.Context(), nil, c) })
+				if !g.workerStarted { t.Fatal("worker registration failed") }
+				g.pollStarted = workerTestPoll(scope, s, c, &pollTestReceiver{})
+				if !g.pollStarted { t.Fatal("poller registration failed") }
+				<-c.pollDone
+				synctest.Wait()
+				if err := scope.Failure(); err != nil { t.Fatalf("early scope failure: %v", err) }
+				if _, err := scope.AuxiliaryBinding(); err != nil { t.Fatalf("early binding: %v", err) }
+				select { case <-c.workerDone: t.Fatal("worker returned before cohort request"); default: }
+				workerTestClaim(c, context.Background())
+				<-c.workerDone
+				if c.workerErr != nil { t.Fatalf("actual worker error: %v", c.workerErr) }
+				if mode == "failed" {
+					scope.Fail(syscall.EACCES)
+				} else {
+					stopPollTestScope(t, scope)
+					if err := scope.Failure(); err != nil { t.Fatalf("unexpected scope failure: %v", err) }
+				}
+				claim := &ownedFlushClaim{ctx: context.Background()}
+				ready, err := ownedFlushFinalEligibility(claim, context.Background(), scope, c.pollDone, c.workerDone)
+				if !ready || err == nil || (mode == "failed" && !errors.Is(err, syscall.EACCES)) {
+					t.Fatalf("mode=%s ready=%v final error=%v", mode, ready, err)
+				}
+			})
+		})
+	}
+}

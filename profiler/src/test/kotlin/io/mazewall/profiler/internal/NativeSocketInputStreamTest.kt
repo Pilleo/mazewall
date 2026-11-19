@@ -206,9 +206,7 @@ class NativeSocketInputStreamTest {
                     mock.memory,
                 )
                 try {
-                    stream.read()
-                    fail("Expected InterruptedIOException from sleep interruption")
-                } catch (e: InterruptedIOException) {
+                    assertThrows(InterruptedIOException::class.java) { stream.read() }
                     assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
                 } finally {
                     Thread.interrupted()
@@ -448,9 +446,7 @@ class NativeSocketInputStreamTest {
                 )
                 val buffer = ByteArray(1)
                 try {
-                    stream.read(buffer)
-                    fail("Expected InterruptedIOException from sleep interruption")
-                } catch (e: InterruptedIOException) {
+                    assertThrows(InterruptedIOException::class.java) { stream.read(buffer) }
                     assertTrue(Thread.currentThread().isInterrupted, "Interrupted status should be restored/preserved")
                 } finally {
                     Thread.interrupted()

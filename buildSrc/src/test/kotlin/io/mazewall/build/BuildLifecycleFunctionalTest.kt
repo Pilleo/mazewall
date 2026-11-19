@@ -21,7 +21,7 @@ class BuildLifecycleFunctionalTest {
             dependencyResolutionManagement {
                 versionCatalogs {
                     create("libs") {
-                        version("jacoco", "0.8.14")
+                        version("jacoco", "0.8.16")
                         version("ktlintEngine", "1.7.0")
                     }
                 }

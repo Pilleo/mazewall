@@ -47,4 +47,13 @@ proxied interface and has a guard-removal sensitivity check. Review remains
 pending; no S1–S3/native/JDBC/Security completion or automatic archive is claimed.
 
 ---
+## Repository-review expansion — 2026-11-04
+
+[SPR-03](../reviews/2026-11-04-repository-review-findings.md#spr-03) identifies retained
+S0 validating the configured default manager rather than the manager actually selected by
+Spring for the advised method. Qualify named/qualified/effective-manager selection through
+real advisor dispatch before readiness; retain the single-manager restriction. S2's related
+qualified-manager correction and common helper/classloader work remain implemented.
+
+---
 <!-- id: issue-20261008-011322-838-prove-actual-spring-advisor-placement-on-owned-inv  file: issue-20261008-011322-838-prove-actual-spring-advisor-placement-on-owned-inv.md -->

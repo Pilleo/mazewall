@@ -1,0 +1,443 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package hotspot
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"io"
+	"reflect"
+	"strings"
+	"syscall"
+	"testing"
+	"unsafe"
+
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	"go.opentelemetry.io/ebpf-profiler/remotememory"
+)
+
+type deniedPointerReader struct {
+	*bytes.Reader
+	cause error
+}
+
+func (r deniedPointerReader) ReadAt(p []byte, off int64) (int, error) {
+	if off == 0x400 {
+		return 0, r.cause
+	}
+	return r.Reader.ReadAt(p, off)
+}
+
+type bootstrapMaps struct{ interpreter.EbpfHandler }
+type bootstrapProcess struct{ process.Process }
+
+func TestObservedBootstrapCheckedPointerAndConfiguration(t *testing.T) {
+	cause := syscall.EACCES
+	d := hotspotInstance{rm: remotememory.RemoteMemory{ReaderAt: deniedPointerReader{bytes.NewReader(make([]byte, 2048)), cause}}}
+	if err := d.ConfigureHotSpotObservedBootstrap(123); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.bootstrapPointer(0x400); !errors.Is(err, cause) {
+		t.Fatalf("observed pointer did not preserve permission error: %v", err)
+	}
+	if err := d.ConfigureHotSpotObservedBootstrap(123); err == nil {
+		t.Fatal("duplicate observed configuration accepted")
+	}
+	if err := d.CheckHotSpotObservedBootstrap(124); err == nil {
+		t.Fatal("wrong observed PID accepted")
+	}
+	if err := d.CheckHotSpotObservedBootstrap(123); err == nil {
+		t.Fatal("uninitialized VM accepted")
+	}
+}
+
+func TestObservedBootstrapReadyWithoutEpochCounter(t *testing.T) {
+	d := hotspotInstance{d: &hotspotData{}}
+	if err := d.ConfigureHotSpotObservedBootstrap(123); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.d.GetOrInit(func() (hotspotVMData, error) { return hotspotVMData{}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	d.mainMappingsInserted = true
+	d.heapAreas = []jitArea{{start: 0x1000, end: 0x2000, codeStart: 0x1000}}
+	if err := d.CheckHotSpotObservedBootstrap(123); err != nil {
+		t.Fatal(err)
+	}
+	d.heapAreas[0].end = d.heapAreas[0].start
+	if err := d.CheckHotSpotObservedBootstrap(123); err == nil {
+		t.Fatal("invalid heap bounds accepted")
+	}
+}
+
+type failingDetachMaps struct{ interpreter.EbpfHandler }
+
+func (failingDetachMaps) DeleteProcData(libpf.InterpreterType, libpf.PID) error {
+	return syscall.EPERM
+}
+
+func (failingDetachMaps) DeletePidInterpreterMapping(libpf.PID, lpm.Prefix) error {
+	return syscall.EACCES
+}
+
+func TestBootstrapDetachPreservesCleanupCauses(t *testing.T) {
+	d := hotspotInstance{mainMappingsInserted: true, prefixes: libpf.Set[lpm.Prefix]{{}: {}}}
+	err := d.Detach(failingDetachMaps{}, 123)
+	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("missing detach cleanup causes: %v", err)
+	}
+}
+
+type initFaultReader struct {
+	*bytes.Reader
+	cause  error
+	offset int64
+}
+
+type blockingInitReader struct {
+	*bytes.Reader
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r blockingInitReader) ReadAt(p []byte, off int64) (int, error) {
+	if off == 0x110 {
+		close(r.entered)
+		<-r.release
+	}
+	return r.Reader.ReadAt(p, off)
+}
+
+func TestBootstrapReadinessWaitsForInitializationPublication(t *testing.T) {
+	data, mem := initializedVMFixture()
+	reader := blockingInitReader{bytes.NewReader(mem), make(chan struct{}), make(chan struct{})}
+	instance, err := data.Attach(nil, 123, 0, remotememory.RemoteMemory{ReaderAt: reader})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := instance.(*hotspotInstance)
+	target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	if err := d.ConfigureHotSpotEpoch(target); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- d.SynchronizeMappings(bootstrapMaps{}, nil, bootstrapProcess{}, nil) }()
+	<-reader.entered
+	if err := d.CheckHotSpotEpochBootstrap(target); err == nil {
+		t.Error("unpublished VM data reported ready")
+	}
+	close(reader.release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CheckHotSpotEpochBootstrap(target); err != nil {
+		t.Fatalf("published VM data not ready: %v", err)
+	}
+}
+
+func (r initFaultReader) ReadAt(p []byte, off int64) (int, error) {
+	if off == r.offset && r.cause != nil {
+		if errors.Is(r.cause, io.ErrUnexpectedEOF) {
+			return 4, nil
+		}
+		return 0, r.cause
+	}
+	return r.Reader.ReadAt(p, off)
+}
+
+func initializedVMFixture() (*hotspotData, []byte) {
+	mem := make([]byte, 0x20000)
+	put := func(addr int, value uint64) { binary.LittleEndian.PutUint64(mem[addr:], value) }
+	put(0, 0x10000)
+	for addr, value := range map[int]uint64{0x100: 0x1000, 0x108: 32, 0x110: 0, 0x118: 16, 0x120: 0x3000, 0x128: 32, 0x130: 0, 0x138: 8, 0x140: 16, 0x148: 24, 0x7000: 17, 0x7100: 0x7200, 0x7200: 0x8000, 0x7208: 0x9000, 0x7210: 0xa000, 0x7218: 0xb000} {
+		put(addr, value)
+	}
+	data := &hotspotData{
+		typePtrs:   hotspotIntrospectionTable{base: 0x100, stride: 0x108, typeOffset: 0x110, valueOffset: 0x118},
+		structPtrs: hotspotIntrospectionTable{base: 0x120, stride: 0x128, typeOffset: 0x130, fieldOffset: 0x138, addressOffset: 0x140, valueOffset: 0x148},
+	}
+	nameAt := 0xc000
+	name := func(s string) uint64 {
+		addr := nameAt
+		nameAt += copy(mem[nameAt:], s) + 1
+		return uint64(addr)
+	}
+	var vm hotspotVMData
+	root := reflect.TypeOf(vm.vmStructs)
+	typesAt, fieldsAt := 0x1000, 0x3000
+	for i := 0; i < root.NumField(); i++ {
+		klass := root.Field(i)
+		klassName := klass.Name
+		if tag := klass.Tag.Get("name"); tag != "" {
+			klassName = strings.Split(tag, ",")[0]
+		}
+		klassPtr := name(klassName)
+		if _, ok := klass.Type.FieldByName("Sizeof"); ok {
+			put(typesAt, klassPtr)
+			put(typesAt+16, 32)
+			typesAt += 32
+		}
+		for j := 0; j < klass.Type.NumField(); j++ {
+			field := klass.Type.Field(j)
+			if field.Name == "Sizeof" || field.Type.Kind() == reflect.Map {
+				continue
+			}
+			fieldName := strings.Split(field.Tag.Get("name"), ",")[0]
+			put(fieldsAt, klassPtr)
+			put(fieldsAt+8, name(fieldName))
+			value := uint64(0)
+			switch klass.Name + "." + field.Name {
+			case "JdkVersion.Current":
+				value = 0x7000
+			case "AbstractVMVersion.BuildNumber":
+				value = 0x7008
+			case "AbstractVMVersion.Release":
+				value = 0x7010
+			case "CodeCache.Heap":
+				value = 0x7100
+			case "CodeHeap.Segmap":
+				value = 16
+			case "VirtualSpace.HighBoundary":
+				value = 8
+			}
+			if field.Type == reflect.TypeOf(libpf.Address(0)) {
+				put(fieldsAt+16, value)
+			} else {
+				put(fieldsAt+24, value)
+			}
+			fieldsAt += 32
+		}
+	}
+	return data, mem
+}
+
+func TestBootstrapInitializationReadCauses(t *testing.T) {
+	for _, cause := range []error{nil, syscall.EPERM, syscall.EACCES, io.ErrUnexpectedEOF} {
+		data, mem := initializedVMFixture()
+		rm := remotememory.RemoteMemory{ReaderAt: initFaultReader{bytes.NewReader(mem), cause, 0x110}}
+		ordinary, err := data.Attach(nil, 123, 0, rm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ordinary.SynchronizeMappings(bootstrapMaps{}, nil, bootstrapProcess{}, nil); err != nil {
+			t.Fatalf("ordinary initialization with %v: %v", cause, err)
+		}
+		if !ordinary.(*hotspotInstance).mainMappingsInserted {
+			t.Fatalf("ordinary mappings incomplete with %v", cause)
+		}
+		instance, err := data.Attach(nil, 123, 0, rm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := instance.(*hotspotInstance)
+		target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+		if err := d.ConfigureHotSpotEpoch(target); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.SynchronizeMappings(bootstrapMaps{}, nil, bootstrapProcess{}, nil); err != nil {
+			t.Fatalf("legacy initialization with %v: %v", cause, err)
+		}
+		if !d.mainMappingsInserted {
+			t.Fatalf("real synchronization incomplete with %v", cause)
+		}
+		err = d.CheckHotSpotEpochBootstrap(target)
+		if cause == nil && err != nil {
+			t.Fatalf("successful zero offset rejected: %v", err)
+		}
+		if cause != nil && !errors.Is(err, cause) {
+			t.Fatalf("initialization %v not preserved: %v", cause, err)
+		}
+	}
+}
+
+func TestBootstrapInitializationEarlyReadCause(t *testing.T) {
+	for _, offset := range []int64{0x100, 0x108} {
+		data, mem := initializedVMFixture()
+		rm := remotememory.RemoteMemory{ReaderAt: initFaultReader{bytes.NewReader(mem), syscall.EACCES, offset}}
+		instance, err := data.Attach(nil, 123, 0, rm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = instance.SynchronizeMappings(bootstrapMaps{}, nil, bootstrapProcess{}, nil)
+		if !errors.Is(err, syscall.EACCES) {
+			t.Fatalf("offset %#x: missing read cause: %v", offset, err)
+		}
+	}
+}
+
+type edgePointerReader struct {
+	*bytes.Reader
+	offset int64
+	short  bool
+}
+
+func (r edgePointerReader) ReadAt(p []byte, off int64) (int, error) {
+	if off == r.offset {
+		if r.short {
+			return 4, nil
+		}
+		return 0, syscall.EACCES
+	}
+	return r.Reader.ReadAt(p, off)
+}
+
+func TestBootstrapPointerEdges(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		offset    int64
+		short     bool
+		low, high uint64
+		strict    bool
+		cause     error
+		ready     bool
+	}{
+		{"high denied", 0x408, false, 0x1000, 0x2000, true, syscall.EACCES, false},
+		{"low short", 0x400, true, 0x1000, 0x2000, true, io.ErrUnexpectedEOF, false},
+		{"high short", 0x408, true, 0x1000, 0x2000, true, io.ErrUnexpectedEOF, false},
+		{"zero bound", -1, false, 0, 0x2000, true, nil, false},
+		{"reversed bounds", -1, false, 0x2000, 0x1000, true, nil, false},
+		{"valid", -1, false, 0x1000, 0x2000, true, nil, true},
+		{"ordinary high denied", 0x408, false, 0x1000, 0x2000, false, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var vm hotspotVMData
+			v := &vm.vmStructs
+			v.CodeCache.Heap, v.CodeCache.LowBound, v.CodeCache.HighBound = 0x100, 0x400, 0x408
+			v.CodeHeap.Sizeof, v.CodeHeap.Segmap, v.VirtualSpace.HighBoundary = 32, 16, 8
+			mem := make([]byte, 0x500)
+			for addr, value := range map[int]uint64{0x100: 0x200, 0x200: 0x1000, 0x208: 0x2000, 0x210: 0x3000, 0x218: 0x4000, 0x400: tc.low, 0x408: tc.high} {
+				binary.LittleEndian.PutUint64(mem[addr:], value)
+			}
+			target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+			d := hotspotInstance{rm: remotememory.RemoteMemory{ReaderAt: edgePointerReader{bytes.NewReader(mem), tc.offset, tc.short}}, prefixes: make(libpf.Set[lpm.Prefix]), d: &hotspotData{}}
+			if _, err := d.d.GetOrInit(func() (hotspotVMData, error) { return vm, nil }); err != nil {
+				t.Fatal(err)
+			}
+			if tc.strict {
+				d.epochTarget = target
+			}
+			err := d.SynchronizeMappings(bootstrapMaps{}, nil, bootstrapProcess{}, nil)
+			if tc.ready {
+				if err != nil || !d.mainMappingsInserted {
+					t.Fatalf("expected ready, error %v", err)
+				}
+				if tc.strict && d.CheckHotSpotEpochBootstrap(target) != nil {
+					t.Fatal("valid target not ready")
+				}
+			} else if err == nil || d.mainMappingsInserted || (tc.cause != nil && !errors.Is(err, tc.cause)) {
+				t.Fatalf("expected failed required read or invalid bounds: err=%v, inserted=%t", err, d.mainMappingsInserted)
+			}
+		})
+	}
+}
+
+func (bootstrapProcess) PID() libpf.PID { return 123 }
+
+func (bootstrapMaps) UpdatePidInterpreterMapping(libpf.PID, lpm.Prefix, uint8, host.FileID, uint64) error {
+	return nil
+}
+func (bootstrapMaps) UpdateProcData(libpf.InterpreterType, libpf.PID, unsafe.Pointer) error {
+	return nil
+}
+
+func TestBootstrapRequiredPointerRead(t *testing.T) {
+	for _, tc := range []struct {
+		strict bool
+		cause  error
+	}{{true, syscall.EPERM}, {true, syscall.EACCES}, {true, context.Canceled}, {false, syscall.EPERM}} {
+		strict, cause := tc.strict, tc.cause
+		var vm hotspotVMData
+		v := &vm.vmStructs
+		v.CodeCache.Heap = 0x100
+		v.CodeCache.LowBound = 0x400
+		v.CodeCache.HighBound = 0x408
+		v.CodeHeap.Sizeof = 32
+		v.CodeHeap.Segmap = 16
+		v.VirtualSpace.HighBoundary = 8
+		mem := make([]byte, 0x500)
+		for addr, value := range map[int]uint64{0x100: 0x200, 0x200: 0x1000, 0x208: 0x2000, 0x210: 0x3000, 0x218: 0x4000} {
+			binary.LittleEndian.PutUint64(mem[addr:], value)
+		}
+		d := hotspotInstance{rm: remotememory.RemoteMemory{ReaderAt: deniedPointerReader{bytes.NewReader(mem), cause}}, prefixes: make(libpf.Set[lpm.Prefix])}
+		d.d = &hotspotData{}
+		if _, err := d.d.GetOrInit(func() (hotspotVMData, error) { return vm, nil }); err != nil {
+			t.Fatal(err)
+		}
+		if strict {
+			d.epochTarget = libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+		}
+		err := d.SynchronizeMappings(bootstrapMaps{}, nil, bootstrapProcess{}, nil)
+		if strict && (!errors.Is(err, cause) || d.mainMappingsInserted) {
+			t.Fatalf("strict pointer read: err=%v, inserted=%t", err, d.mainMappingsInserted)
+		}
+		if !strict && (err != nil || !d.mainMappingsInserted) {
+			t.Fatalf("ordinary pointer read: err=%v, inserted=%t", err, d.mainMappingsInserted)
+		}
+	}
+}
+
+func TestHotSpotEpochBootstrapReadiness(t *testing.T) {
+	target := libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}
+	d := hotspotInstance{epochTarget: target, d: &hotspotData{}}
+	if _, err := d.d.GetOrInit(func() (hotspotVMData, error) { return hotspotVMData{}, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if d.CheckHotSpotEpochBootstrap(target) == nil {
+		t.Fatal("uninitialized mappings reported ready")
+	}
+	d.heapAreas = []jitArea{{start: 0x1000, end: 0x2000, codeStart: 0x1000}}
+	if d.CheckHotSpotEpochBootstrap(target) == nil {
+		t.Fatal("heap areas without installed mappings reported ready")
+	}
+	d.heapAreas = nil
+	d.mainMappingsInserted = true
+	if d.CheckHotSpotEpochBootstrap(target) == nil {
+		t.Fatal("missing heap areas reported ready")
+	}
+	for _, area := range []jitArea{{}, {start: 0x1000, end: 0x1000, codeStart: 0x1000}, {start: 0x2000, end: 0x1000, codeStart: 0x2000}, {start: 0x1000, end: 0x2000, codeStart: 0x3000}} {
+		d.heapAreas = []jitArea{area}
+		if d.CheckHotSpotEpochBootstrap(target) == nil {
+			t.Fatalf("invalid heap area reported ready: %+v", area)
+		}
+	}
+	d.heapAreas = []jitArea{{start: 0x1000, end: 0x2000, codeStart: 0x1000}}
+	if err := d.CheckHotSpotEpochBootstrap(target); err != nil {
+		t.Fatalf("installed target rejected: %v", err)
+	}
+	for _, mismatch := range []libpf.HotSpotEpochTarget{
+		{PID: 124, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2},
+		{PID: 123, ProcessStartTicks: 457, CounterAddress: 0x800, InitialEpoch: 2},
+		{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x808, InitialEpoch: 2},
+		{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 3},
+	} {
+		if d.CheckHotSpotEpochBootstrap(mismatch) == nil {
+			t.Fatalf("mismatched target accepted: %+v", mismatch)
+		}
+	}
+}
+
+func TestBootstrapHeapReadPreservesCause(t *testing.T) {
+	for _, fixedHeap := range []bool{false, true} {
+		var vm hotspotVMData
+		vm.vmStructs.GrowableArrayInt.Sizeof = 8
+		vm.vmStructs.CodeHeap.Sizeof = 8
+		vm.vmStructs.CodeCache.Heaps = 0x100
+		if fixedHeap {
+			vm.vmStructs.CodeCache.Heap = 0x400
+		}
+		mem := make([]byte, 0x500)
+		binary.LittleEndian.PutUint64(mem[0x100:], 0x400)
+		d := hotspotInstance{rm: remotememory.RemoteMemory{ReaderAt: deniedPointerReader{bytes.NewReader(mem), syscall.EPERM}}, epochTarget: libpf.HotSpotEpochTarget{PID: 123}}
+		_, err := d.gatherHeapInfo(&vm)
+		if !errors.Is(err, syscall.EPERM) {
+			t.Fatalf("fixedHeap=%t: expected EPERM cause, got %v", fixedHeap, err)
+		}
+	}
+}

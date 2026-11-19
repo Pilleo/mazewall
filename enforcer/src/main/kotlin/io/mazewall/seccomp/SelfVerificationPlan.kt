@@ -133,6 +133,7 @@ internal data class SelfVerificationPlan(
 
                     is BpfInstruction.Alu,
                     is BpfInstruction.Jmp,
+                    is BpfInstruction.Ja,
                     -> Unit
                 }
             }

@@ -3,7 +3,12 @@
 package processmanager
 
 import (
+	"context"
+	"bytes"
+	"encoding/json"
+	"strings"
 	"errors"
+	"math"
 	"syscall"
 	"testing"
 
@@ -12,6 +17,7 @@ import (
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/reporter"
 	"go.opentelemetry.io/ebpf-profiler/reporter/samples"
+	"go.opentelemetry.io/ebpf-profiler/support"
 	"go.opentelemetry.io/ebpf-profiler/util"
 )
 
@@ -75,6 +81,24 @@ func epochPM(t *testing.T) (*ProcessManager, *epochTestInstance, *epochTestRepor
 	return p, i, r
 }
 
+func processingTestPM(t *testing.T) (*ProcessManager, *epochTestInstance, *epochTestReporter) {
+	t.Helper()
+	c, e := lru.New[frameCacheKey, libpf.Frames](frameCacheSize, hashFrameCacheKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	i := &epochTestInstance{epoch: 2}
+	r := &epochTestReporter{}
+	p := &ProcessManager{
+		epochTarget:   libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2},
+		epochFatal:    func(error) {},
+		frameCache:    c,
+		traceReporter: r,
+		interpreters:  map[libpf.PID]map[util.OnDiskFileIdentifier]interpreter.Instance{123: {util.OnDiskFileIdentifier{}: i}},
+	}
+	return p, i, r
+}
+
 func TestHotSpotEpochConfigurationRequiresFatalOwner(t *testing.T) {
 	p := &ProcessManager{}
 	if err := p.ConfigureHotSpotEpochTarget(libpf.HotSpotEpochTarget{PID: 123, ProcessStartTicks: 456, CounterAddress: 0x800, InitialEpoch: 2}); err == nil {
@@ -121,5 +145,480 @@ func TestHotSpotEpochFatalDeliveredWithoutLookup(t *testing.T) {
 	p.HandleTrace(epochRaw(2))
 	if !errors.Is(fatal, syscall.EACCES) {
 		t.Fatal("unlooked-up native error not session-fatal", fatal)
+	}
+}
+
+type blockingEpochTestReporter struct {
+	reporter.ExecutableReporter
+	trace   *libpf.Trace
+	meta    *samples.TraceEventMeta
+	err     error
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingEpochTestReporter) ReportTraceEvent(t *libpf.Trace, m *samples.TraceEventMeta) error {
+	r.trace, r.meta = t, m
+	if r.entered != nil {
+		close(r.entered)
+	}
+	if r.release != nil {
+		<-r.release
+	}
+	return r.err
+}
+
+type failingReleaseInstance struct {
+	interpreter.InstanceStubs
+	err error
+}
+
+func (*failingReleaseInstance) Detach(interpreter.EbpfHandler, libpf.PID) error { return nil }
+func (i *failingReleaseInstance) ReleaseResources() error                       { return i.err }
+
+func testProcessingBinding(hostTGID uint32) libpf.TraceDefinitionBinding {
+	return libpf.TraceDefinitionBinding{
+		Source:       libpf.TraceDefinitionPerfOutputV1,
+		Session:      "session-l4",
+		HostTGID:     hostTGID,
+		Birth:        456,
+		CounterMapID: 7,
+		PerfMapID:    8,
+		PossibleCPUs: 2,
+		Generation:   9,
+	}
+}
+
+func TestTraceProcessingAccountingPositiveEpochReport(t *testing.T) {
+	p, _, r := processingTestPM(t)
+	binding := testProcessingBinding(123)
+	p.ConfigureTraceDefinitionBinding(binding)
+
+	raw := epochRaw(2)
+	raw.CPU = 3
+	raw.Origin = support.TraceOriginSampling
+	raw.KTime = 999
+	raw.CorrelationID = 777
+	p.HandleTrace(raw)
+
+	if r.trace == nil {
+		t.Fatal("expected reporter to be called once")
+	}
+	obs, err := p.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected proof error: %v", err)
+	}
+	if !obs.HasBinding || obs.ExpectedBinding != binding {
+		t.Fatalf("expected attached binding %+v, got has=%v %+v", binding, obs.HasBinding, obs.ExpectedBinding)
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.ReporterOK != 1 || obs.Counts.PreReporterRejected != 0 || obs.Counts.ReporterError != 0 || obs.Counts.InFlight != 0 {
+		t.Fatalf("unexpected counts: %+v", obs.Counts)
+	}
+	if obs.Counts.TargetBound != 1 || obs.Counts.ForeignToBinding != 0 || obs.Counts.BindingUnknown != 0 {
+		t.Fatalf("unexpected binding partition: %+v", obs.Counts)
+	}
+	if obs.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("expected SourceLocalNonfinal, got %v", obs.Outcome)
+	}
+	wantScalars := TraceProcessingScalarSnapshot{
+		PID:             123,
+		TID:             456,
+		CPU:             3,
+		Origin:          support.TraceOriginSampling,
+		KTime:           999,
+		CorrelationID:   777,
+		HotSpotIdentity: libpf.HotSpotIdentity{Epoch: 2, State: libpf.HotSpotEpochStable},
+	}
+	if !obs.HasLastAdmitted || obs.LastAdmitted != wantScalars || !obs.HasLastClassified || obs.LastClassified != wantScalars {
+		t.Fatalf("unexpected scalar snapshots: admitted=%+v classified=%+v", obs.LastAdmitted, obs.LastClassified)
+	}
+	if obs.LastReporterErr != nil {
+		t.Fatalf("expected nil LastReporterErr, got %v", obs.LastReporterErr)
+	}
+	if obs.LastTerminal != TraceProcessingReporterOK {
+		t.Fatalf("expected reporter OK terminal, got %v", obs.LastTerminal)
+	}
+}
+
+func TestTraceProcessingAccountingGeneralInvalidFrameBeforeReporter(t *testing.T) {
+	p, _, r := processingTestPM(t)
+	p.epochTarget = libpf.HotSpotEpochTarget{}
+	var fatalCalls int
+	var fatalErr error
+	if err := p.ConfigureHotSpotObservedTarget(123, func(err error) {
+		fatalCalls++
+		fatalErr = err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	p.ConfigureTraceDefinitionBinding(testProcessingBinding(123))
+
+	raw := epochRaw(0)
+	raw.HotSpotIdentity = libpf.HotSpotIdentity{}
+	raw.FrameData = []uint64{0}
+	raw.CorrelationID = 55
+	p.HandleTrace(raw)
+
+	if r.trace != nil {
+		t.Fatal("expected return before reporter")
+	}
+	if fatalCalls != 1 || fatalErr == nil {
+		t.Fatalf("expected one observedFatal notification, got calls=%d err=%v", fatalCalls, fatalErr)
+	}
+	obs, err := p.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected proof error: %v", err)
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.PreReporterRejected != 1 || obs.Counts.ReporterOK != 0 || obs.Counts.ReporterError != 0 || obs.Counts.InFlight != 0 {
+		t.Fatalf("expected PreReporterRejected=1, got %+v", obs.Counts)
+	}
+	if obs.LastTerminal != TraceProcessingPreReporterInvalidFrame {
+		t.Fatalf("expected invalid-frame terminal, got %v", obs.LastTerminal)
+	}
+	if obs.Counts.TargetBound != 1 || obs.LastClassified.CorrelationID != 55 {
+		t.Fatalf("unexpected binding/detail: %+v", obs)
+	}
+}
+
+func TestTraceProcessingAccountingGeneralReleaseFailureStillReports(t *testing.T) {
+	p, _, r := processingTestPM(t)
+	p.epochTarget = libpf.HotSpotEpochTarget{}
+	var fatalCalls int
+	if err := p.ConfigureHotSpotObservedTarget(123, func(error) { fatalCalls++ }); err != nil {
+		t.Fatal(err)
+	}
+	p.interpreters[123] = map[util.OnDiskFileIdentifier]interpreter.Instance{
+		{}: &failingReleaseInstance{err: syscall.EIO},
+	}
+
+	p.HandleTrace(&libpf.EbpfTrace{PID: 123, TID: 456, CorrelationID: 88})
+
+	if r.trace == nil || fatalCalls != 1 {
+		t.Fatalf("expected release failure notification and reporter call, trace=%v fatalCalls=%d", r.trace, fatalCalls)
+	}
+	obs, err := p.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected proof error: %v", err)
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.ReporterOK != 1 || obs.Counts.PreReporterRejected != 0 {
+		t.Fatalf("release failure misclassified as pre-reporter reject: %+v", obs.Counts)
+	}
+}
+
+func TestTraceProcessingAccountingEpochInvalidExtentStillReports(t *testing.T) {
+	p, i, r := processingTestPM(t)
+	var fatalCalls int
+	p.epochFatal = func(error) { fatalCalls++ }
+	i.endErr = &libpf.HotSpotEpochError{State: libpf.HotSpotEpochReadError, Cause: syscall.EACCES}
+	r.err = syscall.EPERM
+
+	raw := epochRaw(2)
+	raw.FrameData = []uint64{0}
+	raw.CorrelationID = 101
+	p.HandleTrace(raw)
+
+	if r.trace == nil {
+		t.Fatal("expected epoch invalid extent to still call reporter")
+	}
+	if fatalCalls != 2 {
+		t.Fatalf("expected both epochFatal notification sites to run, got %d", fatalCalls)
+	}
+	obs, err := p.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected proof error: %v", err)
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.ReporterError != 1 || obs.Counts.PreReporterRejected != 0 || obs.Counts.ReporterOK != 0 || obs.Counts.InFlight != 0 {
+		t.Fatalf("expected exactly one ReporterError terminal, got %+v", obs.Counts)
+	}
+	if !errors.Is(obs.LastReporterErr, syscall.EPERM) {
+		t.Fatalf("expected LastReporterErr EPERM, got %v", obs.LastReporterErr)
+	}
+}
+
+func TestTraceProcessingAccountingReporterErrorGeneralAndEpochPaths(t *testing.T) {
+	// Epoch path reporter error
+	pEpoch, _, rEpoch := processingTestPM(t)
+	var epochFatalCalls int
+	pEpoch.epochFatal = func(error) { epochFatalCalls++ }
+	rEpoch.err = syscall.EACCES
+	pEpoch.HandleTrace(epochRaw(2))
+
+	obsEpoch, err := pEpoch.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected epoch proof error: %v", err)
+	}
+	if obsEpoch.Counts.Admitted != 1 || obsEpoch.Counts.ReporterError != 1 || obsEpoch.Counts.ReporterOK != 0 || epochFatalCalls != 1 {
+		t.Fatalf("unexpected epoch reporter error counts=%+v fatalCalls=%d", obsEpoch.Counts, epochFatalCalls)
+	}
+	if !errors.Is(obsEpoch.LastReporterErr, syscall.EACCES) {
+		t.Fatalf("expected EACCES on epoch path, got %v", obsEpoch.LastReporterErr)
+	}
+
+	// Follow-up clean report on the same PM resets LastReporterErr to nil
+	rEpoch.err = nil
+	rawClean := epochRaw(2)
+	rawClean.CorrelationID = 202
+	pEpoch.HandleTrace(rawClean)
+	obsEpoch2, err := pEpoch.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected second epoch proof error: %v", err)
+	}
+	if obsEpoch2.Counts.Admitted != 2 || obsEpoch2.Counts.ReporterError != 1 || obsEpoch2.Counts.ReporterOK != 1 || obsEpoch2.LastReporterErr != nil || obsEpoch2.LastClassified.CorrelationID != 202 {
+		t.Fatalf("stale LastReporterErr or counts on clean follow-up: %+v", obsEpoch2)
+	}
+
+	// General path reporter error
+	pGen, _, rGen := processingTestPM(t)
+	pGen.epochTarget = libpf.HotSpotEpochTarget{}
+	var genFatalCalls int
+	pGen.ConfigureHotSpotFatal(func(error) { genFatalCalls++ })
+	rGen.err = syscall.EPERM
+	pGen.HandleTrace(&libpf.EbpfTrace{PID: 123, TID: 456, CorrelationID: 303})
+
+	obsGen, err := pGen.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected general proof error: %v", err)
+	}
+	if obsGen.Counts.Admitted != 1 || obsGen.Counts.ReporterError != 1 || obsGen.Counts.ReporterOK != 0 || genFatalCalls != 1 || !errors.Is(obsGen.LastReporterErr, syscall.EPERM) {
+		t.Fatalf("unexpected general reporter error observation: %+v fatalCalls=%d", obsGen, genFatalCalls)
+	}
+}
+
+func TestTraceProcessingAccountingSameCorrelationIDTwoCallsCountTwo(t *testing.T) {
+	p, _, _ := processingTestPM(t)
+	raw1 := epochRaw(2)
+	raw1.CorrelationID = 4242
+	raw2 := epochRaw(2)
+	raw2.CorrelationID = 4242
+
+	p.HandleTrace(raw1)
+	p.HandleTrace(raw2)
+
+	obs, err := p.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected proof error: %v", err)
+	}
+	if obs.Counts.Admitted != 2 || obs.Counts.ReporterOK != 2 {
+		t.Fatalf("expected Admitted=2 ReporterOK=2 for duplicate CorrelationID, got %+v", obs.Counts)
+	}
+}
+
+func TestTraceProcessingAccountingBindingTargetForeignAndUnknown(t *testing.T) {
+	// 1. Default unconfigured -> BindingUnknown
+	pUnknown, _, _ := processingTestPM(t)
+	pUnknown.HandleTrace(epochRaw(2))
+	obsUnknown, err := pUnknown.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected unknown proof error: %v", err)
+	}
+	if obsUnknown.HasBinding || obsUnknown.Counts.BindingUnknown != 1 || obsUnknown.Counts.TargetBound != 0 || obsUnknown.Counts.ForeignToBinding != 0 {
+		t.Fatalf("expected BindingUnknown=1 when unconfigured, got %+v", obsUnknown)
+	}
+
+	// 2. Configured binding -> TargetBound vs ForeignToBinding
+	pBound, _, _ := processingTestPM(t)
+	binding := testProcessingBinding(123)
+	pBound.ConfigureTraceDefinitionBinding(binding)
+
+	targetTrace := epochRaw(2)
+	targetTrace.PID = 123
+	foreignTrace := &libpf.EbpfTrace{PID: 999, TID: 888, CorrelationID: 12}
+	zeroPIDTrace := &libpf.EbpfTrace{PID: 0, TID: 1, CorrelationID: 13}
+
+	pBound.HandleTrace(targetTrace)
+	pBound.HandleTrace(foreignTrace)
+	pBound.HandleTrace(zeroPIDTrace)
+
+	obsBound, err := pBound.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected bound proof error: %v", err)
+	}
+	if !obsBound.HasBinding || obsBound.ExpectedBinding != binding {
+		t.Fatalf("expected binding %+v, got %+v", binding, obsBound)
+	}
+	if obsBound.Counts.Admitted != 3 || obsBound.Counts.TargetBound != 1 || obsBound.Counts.ForeignToBinding != 2 || obsBound.Counts.BindingUnknown != 0 {
+		t.Fatalf("expected TargetBound=1 ForeignToBinding=2 BindingUnknown=0, got %+v", obsBound.Counts)
+	}
+}
+
+func TestTraceProcessingAccountingHeldReporterAndCancelStayInFlightUntilReturn(t *testing.T) {
+	p, _, _ := processingTestPM(t)
+	blocking := &blockingEpochTestReporter{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	p.traceReporter = blocking
+	p.ConfigureTraceDefinitionBinding(testProcessingBinding(123))
+
+	raw := epochRaw(2)
+	raw.CorrelationID = 909
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		p.HandleTrace(raw)
+	}()
+
+	<-blocking.entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if ctx.Err() == nil {
+		t.Fatal("expected canceled context")
+	}
+
+	obsHeld, err := p.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected held proof error: %v", err)
+	}
+	if obsHeld.Counts.Admitted != 1 || obsHeld.Counts.InFlight != 1 || obsHeld.Counts.ReporterOK != 0 || obsHeld.Counts.ReporterError != 0 || obsHeld.Counts.PreReporterRejected != 0 {
+		t.Fatalf("expected InFlight=1 while reporter held and context canceled, got %+v", obsHeld.Counts)
+	}
+	if !obsHeld.HasLastAdmitted || obsHeld.LastAdmitted.CorrelationID != 909 || obsHeld.HasLastClassified {
+		t.Fatalf("unexpected held detail state: %+v", obsHeld)
+	}
+
+	close(blocking.release)
+	<-done
+
+	obsDone, err := p.TraceProcessingObservation()
+	if err != nil {
+		t.Fatalf("unexpected post-release proof error: %v", err)
+	}
+	if obsDone.Counts.Admitted != 1 || obsDone.Counts.InFlight != 0 || obsDone.Counts.ReporterOK != 1 || !obsDone.HasLastClassified || obsDone.LastClassified.CorrelationID != 909 {
+		t.Fatalf("expected ReporterOK=1 InFlight=0 after reporter return, got %+v", obsDone)
+	}
+}
+
+func TestTraceProcessingAccountingOverflowStickyAndOperationalReturnUnchanged(t *testing.T) {
+	p, _, r := processingTestPM(t)
+	var fatalCalls int
+	p.epochFatal = func(error) { fatalCalls++ }
+	p.traceProcessing.counts.Admitted = math.MaxUint64
+	p.traceProcessing.counts.ReporterOK = math.MaxUint64
+	p.traceProcessing.counts.BindingUnknown = math.MaxUint64
+
+	raw := epochRaw(2)
+	raw.CorrelationID = 606
+	p.HandleTrace(raw)
+
+	if r.trace == nil || fatalCalls != 0 {
+		t.Fatalf("overflow altered operational return or invoked fatal callback: trace=%v fatalCalls=%d", r.trace, fatalCalls)
+	}
+	obs, err := p.TraceProcessingObservation()
+	if err == nil || !obs.Counts.Overflow || obs.ProofErr == nil {
+		t.Fatalf("expected sticky overflow proof error, got obs=%+v err=%v", obs, err)
+	}
+	if obs.Counts.Admitted != 0 {
+		t.Fatalf("expected Admitted to wrap to zero, got %d", obs.Counts.Admitted)
+	}
+}
+
+func TestTraceProcessingAccountingCloseRetiresReadout(t *testing.T) {
+	p, _, _ := processingTestPM(t)
+	p.HandleTrace(epochRaw(2))
+	if _, err := p.TraceProcessingObservation(); err != nil {
+		t.Fatalf("expected live readout before Close to succeed, got %v", err)
+	}
+	p.Close()
+	obs, err := p.TraceProcessingObservation()
+	if err == nil || obs.Outcome != libpf.AuxiliaryNotExercised {
+		t.Fatalf("expected readout after Close to fail closed, got obs=%+v err=%v", obs, err)
+	}
+}
+
+
+type hostileProcessingDiagnosticError struct{}
+func (hostileProcessingDiagnosticError) Error() string { panic("unexpected error formatting") }
+func (hostileProcessingDiagnosticError) Unwrap() error { panic("unexpected error unwrap") }
+type hostileDiagnosticProvider struct{}
+func (hostileDiagnosticProvider) DefinitionSourceDiagnostics() (json.RawMessage, error) {
+	return nil, hostileProcessingDiagnosticError{}
+}
+
+func TestProcessingDefinitionDiagnosticsPreservePreRetirementScalars(t *testing.T) {
+	reserved := &ProcessManager{}
+	reserved.traceProcessing.diagnosticsClaimed = true
+	if _, err := reserved.DefinitionSourceDiagnostics(); err != errDiagnosticPending { t.Fatal("reserved cache must remain pending") }
+	pm := &ProcessManager{}
+	pm.traceProcessing.counts = TraceProcessingCounts{Admitted: 2, ReporterOK: 1, InFlight: 1, BindingUnknown: 2}
+	pm.traceProcessing.hasLastAdmitted = true
+	pm.traceProcessing.lastAdmitted = TraceProcessingScalarSnapshot{PID: 42, TID: 43, CPU: 2, KTime: 17, CorrelationID: 99}
+	pm.traceProcessing.lastReporterErr = hostileProcessingDiagnosticError{}
+	live, err := pm.DefinitionSourceDiagnostics()
+	if err != nil { t.Fatal(err) }
+	var before localDiagnosticEnvelope
+	if err := json.Unmarshal(live, &before); err != nil { t.Fatal(err) }
+	if before.Processing == nil || before.Processing.Admitted != 2 || before.Processing.InFlight != 1 ||
+		!before.Processing.ReporterErrorPresent || before.Processing.LastAdmitted == nil || before.Processing.LastAdmitted.PID != 42 ||
+		before.Processing.Outcome != libpf.SourceLocalNonfinal { t.Fatal("missing local processing facts") }
+	pm.retireTraceProcessing()
+	frozen, err := pm.DefinitionSourceDiagnostics()
+	if err != nil { t.Fatal(err) }
+	pm.traceProcessing.mu.Lock()
+	pm.traceProcessing.counts = TraceProcessingCounts{}
+	pm.traceProcessing.lastAdmitted = TraceProcessingScalarSnapshot{}
+	pm.traceProcessing.mu.Unlock()
+	pm.retireTraceProcessing()
+	after, err := pm.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Equal(frozen, after) { t.Fatal("retired snapshot changed") }
+	frozen[0] = 'x'
+	again, err := pm.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Equal(after, again) { t.Fatal("caller modified cached diagnostic") }
+	for _, forbidden := range []string{"lastReporterErr", "ProofErr", "Pool", "Workers", "LastCtx"} {
+		if strings.Contains(string(again), forbidden) { t.Fatalf("owner leaked: %s", forbidden) }
+	}
+	partial, err := makeProcessingDiagnostic(processingDiagnostic{Unit: "handle-trace-input", Outcome: libpf.SourceLocalNonfinal}, hostileDiagnosticProvider{})
+	if err != nil || !strings.Contains(string(partial), "queue-getter-error") { t.Fatal("hostile provider error was not classified") }
+}
+
+
+func TestProcessingDiagnosticsRetainStickyGetterErrorWithBalancedCounts(t *testing.T) {
+	pm := &ProcessManager{}
+	admission := pm.admitTraceProcessing(&libpf.EbpfTrace{PID: 42, TID: 43, CorrelationID: 99})
+	admission.classifyReporter(nil)
+	admission.classifyReporter(nil)
+	observation, err := pm.TraceProcessingObservation()
+	if err == nil || observation.ProofErr == nil { t.Fatal("duplicate classification must leave a sticky proof error") }
+	if err := ReconcileTraceProcessingCounts(observation.Counts); err != nil { t.Fatal("fixture counts should balance") }
+	for _, frozen := range []bool{false, true} {
+		if frozen { pm.retireTraceProcessing() }
+		raw, err := pm.DefinitionSourceDiagnostics()
+		if err != nil { t.Fatal(err) }
+		var envelope localDiagnosticEnvelope
+		if err := json.Unmarshal(raw, &envelope); err != nil { t.Fatal(err) }
+		p := envelope.Processing
+		if p == nil || !p.ProofErrorPresent || !p.GetterErrorPresent || p.ReporterErrorPresent ||
+			p.Admitted != 1 || p.ReporterOK != 1 || p.InFlight != 0 || p.BindingUnknown != 1 ||
+			p.Outcome != libpf.SourceLocalNonfinal {
+			t.Fatalf("sticky observation error and balanced counts not preserved: %+v", p)
+		}
+	}
+}
+
+func TestProcessingDiagnosticsPreserveUnrepresentableBindingPresence(t *testing.T) {
+	bindings := []libpf.TraceDefinitionBinding{
+		{HostTGID: 42, Session: strings.Repeat("x", 257)},
+		{HostTGID: 42, Session: string([]byte{0xff})},
+		{HostTGID: 42, Session: "valid-session", PossibleCPUs: -1},
+	}
+	for _, binding := range bindings {
+		pm := &ProcessManager{}
+		pm.ConfigureTraceDefinitionBinding(binding)
+		raw, err := pm.DefinitionSourceDiagnostics()
+		if err != nil { t.Fatal(err) }
+		var envelope localDiagnosticEnvelope
+		if err := json.Unmarshal(raw, &envelope); err != nil { t.Fatal(err) }
+		if envelope.Processing == nil || !envelope.Processing.HasBinding || envelope.Processing.ExpectedBinding != nil ||
+			envelope.Processing.Outcome != libpf.SourceLocalNonfinal {
+			t.Fatalf("stored binding presence was changed: %+v", envelope.Processing)
+		}
+		missingRepresentation, missingBinding := false, false
+		for _, reason := range envelope.Missing {
+			if reason == "binding-unrepresentable" { missingRepresentation = true }
+			if reason == "processing-binding-absent" { missingBinding = true }
+		}
+		if !missingRepresentation || missingBinding { t.Fatalf("wrong binding reasons: %v", envelope.Missing) }
+		if strings.Contains(string(raw), "valid-session") || strings.Contains(string(raw), strings.Repeat("x", 257)) ||
+			strings.Contains(string(raw), "expected_binding") { t.Fatal("unrepresentable binding leaked") }
 	}
 }

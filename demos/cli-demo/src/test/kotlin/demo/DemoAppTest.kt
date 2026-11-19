@@ -38,15 +38,8 @@ class DemoAppTest {
     @Suppress("unused")
     fun networkBody() {
         val report = runNoNetwork()
-        when (val outcome = report.outcome) {
-            is ScenarioOutcome.Completed -> kotlin.test.fail(report.render())
-            is ScenarioOutcome.Denied -> assertTrue(report.passed)
-            is ScenarioOutcome.InfrastructureFailure -> {
-                assertEquals(ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
-                    ContainmentViolationDetector.diagnose(outcome.cause)?.evidence, report.render())
-                assertFalse(report.passed)
-            }
-        }
+        assertTrue(report.passed, report.render())
+        assertTrue(report.render().contains("INFERRED_PERMISSION_FAILURE"), report.render())
     }
 
     @Test
@@ -58,7 +51,7 @@ class DemoAppTest {
 
     @Test
     @EnabledIfLinuxAndSupported
-    fun `unsafe succeeds while safe requires authenticated containment evidence`() {
+    fun `unsafe succeeds and controlled safe refusal passes with explicit inferred evidence`() {
         io.mazewall.enforcer.api.IsolatedProcessTester.runIsolatedMethod(javaClass.name, "unsafeAndSafeBody")
     }
 
@@ -66,11 +59,8 @@ class DemoAppTest {
     fun unsafeAndSafeBody() {
         assertTrue(runUnsafe().passed)
         val safe = runSafe()
-        when (safe.outcome) {
-            is ScenarioOutcome.Denied -> assertTrue(safe.passed)
-            is ScenarioOutcome.InfrastructureFailure -> assertFalse(safe.passed)
-            is ScenarioOutcome.Completed -> assertFalse(safe.passed)
-        }
+        assertTrue(safe.passed, safe.render())
+        assertTrue(safe.render().contains("INFERRED_PERMISSION_FAILURE"), safe.render())
     }
 
     @Test

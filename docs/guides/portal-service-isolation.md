@@ -29,8 +29,9 @@ generates host stubs, worker dispatchers, immutable service manifests, and a
 JARs under `lib/`.
 
 For a generated Gradle build, `publishPortalWorkerArtifactMetadata` publishes
-the bundle path and SHA-256 under the host's generated resources, so
-`PortalRuntime.open()` discovers it automatically. An application can instead
+opaque bundle bytes and digest-addressed resource metadata in the host artifact.
+`PortalRuntimeConfig.load()` discovers those resources; the application still
+supplies the required named resource profiles before opening the runtime. It can instead
 provide the same `PortalWorkerArtifact(path, sha256)` through
 `PortalRuntimeConfig`; a conflicting override is rejected. The runtime verifies
 the archive digest, extracts it with entry and expanded-size limits, and
@@ -71,9 +72,61 @@ val runtime = PortalRuntime.open(
 Limited profiles require a writable delegated cgroup v2 root containing the
 requested `memory` and `cpu` controllers. Portal attaches the child PID and
 writes limits before worker readiness. It fails closed if that cannot happen.
-The 32 MiB gap between `memoryMaxBytes` and `maxHeapBytes` is mandatory JVM
-non-heap headroom. The fixed Landlock/Seccomp baseline remains identical for
+The minimum 32 MiB gap between `memoryMaxBytes` and `maxHeapBytes` is a validation
+floor, not proof that a particular JVM/workload has sufficient non-heap headroom.
+The fixed Landlock/Seccomp baseline remains identical for
 all profiles; readable-path and syscall differences are not profile features.
+
+## Usage rules that differ from threads
+
+- Reuse one application-owned runtime and its bindings. Each isolation group has
+  its own worker pool; creating a runtime per request repeats startup and caches.
+  Close the runtime at application shutdown and retain failed cleanup for retry.
+- Values are copied. Host object identity, static fields, DI instances, thread-local
+  context and transactions do not cross. Pass required context as explicit bounded
+  DTO fields; those fields do not automatically authenticate a caller.
+- `STATELESS` workers still reuse their own service instances and caches. Calls have
+  no worker affinity or per-call reset. Keep request/tenant state local; choose the
+  existing singleton mode deliberately when the application needs retained state.
+- A timeout or cancellation does not undo work. Use invocation evidence; never infer
+  that an unknown call is safe to retry. Result delivery and physical execution end
+  are different, including when a future has already completed exceptionally.
+- Codecs, DTO constructors and prepared-call mappings run in the host. Keep them
+  small and bounded; avoid blocking callbacks, cyclic waits and locks held across
+  calls. Guest background tasks can outlive a method and consume group resources.
+- Worker dependencies must work under the fixed filesystem/network/process policy.
+  Use explicit file grants and worker-local construction. Qualify startup and later
+  replacement under the host's policy; initial warm-up cannot authorize a later spawn.
+- Consume results with a finite outstanding window and release completed handles
+  and values. Neither admission counts nor encoded frame limits bound objects the
+  application keeps reachable after completion.
+
+The [proposed safeguards and delivery plan](../internals/designs/portal/portal-developer-experience.md#10-process-boundary-usage-safeguards)
+add generated snapshots, aggregate capacity checks and runnable qualification cases.
+Those additions remain planned; existing `prepare` requires arguments to remain
+stable until mapping/encoding ends.
+
+## Memory cost
+
+Each child JVM adds its own heap, metadata, JIT/GC state, native allocations and
+thread stacks. Application caches/models are duplicated per worker. Shared libraries
+and compatible CDS archives can share read-only pages, but ordinary mutable heaps
+remain separate. Compared with threads, expect a higher baseline; compared with a
+separate JVM API service, measure the complete host-plus-server deployment.
+
+The normal default launch uses `-Xmx64m`. This is a heap maximum, not an immediate
+allocation or a process-memory limit. Custom heap/cgroup limits must be configured
+together. Per-worker cgroup limits also need host/sibling headroom in the parent
+deployment; OOM termination is a possible limit outcome, not successful completion.
+The child is attached after launch and before guest readiness; existing bootstrap
+memory charges can remain in the parent, which also needs a deployment budget.
+
+During a call, original values, encoded copies, decoded objects and retained results
+may coexist. More groups/workers and queued/retained results multiply these costs.
+Use small measured pools, bounded result windows, compact DTOs and worker-local
+intermediate computation. RSS sums can double-count shared pages; report PSS and
+cgroup usage with their scope. See the [memory model and measurement plan](../internals/designs/portal/portal-developer-experience.md#11-memory-model-and-aggregate-capacity)
+for the proposed capacity checks and explicit measurement limits.
 
 ## Lifecycle and failure semantics
 
@@ -88,6 +141,13 @@ call.
 `PortalCallException.evidence` distinguishes a call that did not start, one
 that completed with a remote reply, and one with unknown completion. Treat an
 unknown completion as an application-level decision point, not a retry signal.
+
+Host SIGKILL bypasses application close hooks. Cleanup after host
+SIGKILL is not yet qualified, especially with a hung guest call, non-daemon guest
+threads or blocked shutdown hooks. RPC closure or worker main return is not proof
+of process death. Deployments requiring crash cleanup must qualify their process-tree
+supervision; the [planned lifecycle controls](../internals/designs/portal/portal-developer-experience.md#10-process-boundary-usage-safeguards)
+test this separately from graceful close.
 
 `PortalRuntime.health()` is local and read-only. It includes each group's
 resolved profile and resource contract alongside worker PIDs, state, and latest

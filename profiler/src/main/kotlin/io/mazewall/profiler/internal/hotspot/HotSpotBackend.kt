@@ -3,6 +3,7 @@ package io.mazewall.profiler.internal.hotspot
 import io.mazewall.platform.lifecycle.Pid
 import io.mazewall.platform.process.ProcessLauncher
 import io.mazewall.platform.process.RealProcessLauncher
+import io.mazewall.profiler.api.HotSpotObservationTarget
 import java.nio.file.Files
 import java.nio.file.Path
 
@@ -51,15 +52,39 @@ internal class HotSpotBackend(
     fun attach(
         pid: Pid,
         options: HotSpotAttachOptions,
+    ): HotSpotProfilingSession = launch(pid, options, HotSpotCaptureExpectation.Strict)
+
+    fun observe(
+        target: HotSpotObservationTarget,
+        options: HotSpotAttachOptions,
+    ): HotSpotProfilingSession = launch(target.pid, options, HotSpotCaptureExpectation.Observed(target))
+
+    private fun launch(
+        pid: Pid,
+        options: HotSpotAttachOptions,
+        expectation: HotSpotCaptureExpectation,
     ): HotSpotProfilingSession {
         require(pid.value > 0)
-        val assets = HotSpotAssets.load(options.assetsDirectory)
+        val assets = HotSpotAssets.load(options.assetsDirectory, expectation)
         val generation = targetIdentity.startTicks(pid)
+        val profileArguments = when (expectation) {
+            HotSpotCaptureExpectation.Strict -> listOf("--hotspot-identity=safepoint-epoch")
+            is HotSpotCaptureExpectation.Observed -> {
+                require(generation == expectation.target.processStartTicks) { "Observed target generation changed before acquisition" }
+                listOf(
+                    "--runtime-profile=${expectation.runtimeProfile}",
+                    "--hotspot-identity=unknown",
+                    "--expected-start-ticks=${expectation.target.processStartTicks}",
+                    "--expected-cgroup-id=${expectation.target.cgroupId}",
+                    "--expected-mntns=${expectation.target.mountNamespace}",
+                )
+            }
+        }
         val argv = options.launchPrefix +
             listOf(
             assets.collector.toString(),
                 "--capture",
-                "--protocol-version=2",
+                "--protocol-version=${expectation.schema}",
                 "--control-stdin",
             "--pid",
                 pid.value.toString(),
@@ -67,12 +92,12 @@ internal class HotSpotBackend(
                 assets.image,
                 "--store",
                 assets.store.toString(),
-            "--hotspot-identity=safepoint-epoch",
                 "--drain-full",
                 "--duration",
                 "${options.timing.sessionNanos}ns",
-        )
-        return HotSpotProfilingSession(HotSpotCollectorProcess.attach(argv, pid.value, generation, launcher, options.timing, options.retention))
+         ) +
+            profileArguments
+        return HotSpotProfilingSession(HotSpotCollectorProcess.attach(argv, pid.value, generation, launcher, options.timing, options.retention, expectation))
     }
 }
 

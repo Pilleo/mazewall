@@ -5,12 +5,15 @@ import java.io.IOException
 internal enum class ExpectedResult {
     ALLOWED,
     DENIED,
+    PERMISSION_REFUSED,
 }
 
 internal sealed interface ScenarioOutcome {
     data class Completed(val detail: String) : ScenarioOutcome
 
     data class Denied(val detail: String) : ScenarioOutcome
+
+    data class PermissionRefused(val cause: Throwable) : ScenarioOutcome
 
     data class InfrastructureFailure(val cause: Throwable) : ScenarioOutcome
 }
@@ -24,6 +27,7 @@ internal data class ScenarioResult(
         get() = when (expected) {
             ExpectedResult.ALLOWED -> outcome is ScenarioOutcome.Completed
             ExpectedResult.DENIED -> outcome is ScenarioOutcome.Denied
+            ExpectedResult.PERMISSION_REFUSED -> outcome is ScenarioOutcome.PermissionRefused || outcome is ScenarioOutcome.Denied
         }
 
     fun render(): String {
@@ -31,11 +35,28 @@ internal data class ScenarioResult(
         val observation = when (outcome) {
             is ScenarioOutcome.Completed -> "ALLOWED: ${outcome.detail}"
             is ScenarioOutcome.Denied -> "DENIED: ${outcome.detail}"
+            is ScenarioOutcome.PermissionRefused ->
+                "PERMISSION REFUSED: evidence=INFERRED_PERMISSION_FAILURE; ${describeFailure(outcome.cause)}"
             is ScenarioOutcome.InfrastructureFailure ->
-                "INFRASTRUCTURE FAILURE: ${outcome.cause.message ?: outcome.cause.javaClass.simpleName}"
+                "INFRASTRUCTURE FAILURE: ${describeFailure(outcome.cause)}"
         }
         return "[$status] $name (expected ${expected.name}): $observation"
     }
+}
+
+private fun describeFailure(failure: Throwable): String {
+    val seen = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Throwable, Boolean>())
+    val pending = ArrayDeque<Throwable>().apply { add(failure) }
+    val descriptions = mutableListOf<String>()
+    while (pending.isNotEmpty() && descriptions.size < 8) {
+        val current = pending.removeFirst()
+        if (!seen.add(current)) continue
+        val message = current.message.orEmpty().lineSequence().firstOrNull().orEmpty().take(500)
+        descriptions += "${current.javaClass.simpleName}: $message"
+        current.cause?.let(pending::addLast)
+        current.suppressed.forEach(pending::addLast)
+    }
+    return descriptions.joinToString(" -> ")
 }
 
 internal data class DemoReport(val results: List<ScenarioResult>) {

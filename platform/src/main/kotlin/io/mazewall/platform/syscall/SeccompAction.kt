@@ -71,6 +71,10 @@ public sealed interface SeccompAction {
     public data class ACT_ERRNO(
         public val errno: Int = NativeConstants.EPERM,
     ) : SeccompAction {
+        init {
+            require(errno in 1..MAX_ACTION_DATA) { "Seccomp errno must be in 1..65535, got $errno" }
+        }
+
         override val priority: Int = 4
         override val nativeCode: Int = NativeConstants.SECCOMP_RET_ERRNO
     }
@@ -79,6 +83,10 @@ public sealed interface SeccompAction {
     public data class ACT_TRACE(
         public val traceId: Int,
     ) : SeccompAction {
+        init {
+            require(traceId in 0..MAX_ACTION_DATA) { "Seccomp trace ID must be in 0..65535, got $traceId" }
+        }
+
         override val priority: Int = 4
         override val nativeCode: Int = NativeConstants.SECCOMP_RET_TRACE
     }
@@ -103,19 +111,18 @@ public sealed interface SeccompAction {
 
     /**
      * Returns the kernel return code for this action.
-     * For [ACT_ERRNO], this encodes the errno in the lower 16 bits:
-     * `SECCOMP_RET_ERRNO | (errno & 0xFFFF)`.
-     * For other actions, returns [nativeCode] directly.
+     * [ACT_ERRNO] and [ACT_TRACE] retain their validated 16-bit payloads.
+     * Other actions return [nativeCode] directly.
      *
      * This is used for union-aware self-verification (issue-20260824-011900).
      */
     public fun toKernelReturnCode(): Int =
         when (this) {
-            is ACT_ERRNO -> nativeCode or (errno and 0xFFFF)
+            is ACT_ERRNO -> nativeCode or errno
+            is ACT_TRACE -> nativeCode or traceId
             is ACT_KILL_PROCESS,
             is ACT_KILL_THREAD,
             is ACT_TRAP,
-            is ACT_TRACE,
             is ACT_NOTIFY,
             is ACT_LOG,
             is ACT_ALLOW,
@@ -129,3 +136,5 @@ public sealed interface SeccompAction {
         ): SeccompAction = a.stricter(b)
     }
 }
+
+private const val MAX_ACTION_DATA = 0xffff

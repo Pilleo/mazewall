@@ -95,8 +95,7 @@ internal object PureJavaBpfEngine : SeccompEngine<EngineState> {
         updateState(SeccompInstallationState.Uninitialized, useTsync)
         try {
             val arch = Arch.current()
-            val filters = policy.compiledFilters
-            ScopedBpfProgram.withProgram(filters, native) { program ->
+            ScopedBpfProgram.withProgram(policy.program, native) { program ->
                 val built = SeccompInstallationState.FilterBuilt(program)
                 updateState(built, useTsync)
                 val locked = built.lockPrivileges(native, platform)

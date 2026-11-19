@@ -1,0 +1,766 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package ebpf
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+	"errors"
+	"math"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+)
+
+func preloadCheckedForTest(p *asyncMapUpdaterPool, fileID host.FileID, apply func() (bool, error), reject func() error) *checkedMapUpdate {
+	request := &checkedMapUpdate{
+		apply:  apply,
+		reject: reject,
+		done:   make(chan checkedMapResult, 1),
+	}
+	request.proof = p.counts.beginCheckedRequest(p, fileID, request)
+	if len(p.workers) > 0 {
+		idx := uint64(fileID) % uint64(len(p.workers))
+		w := p.workers[idx]
+		request.proof.bindWorker(int(idx), w)
+		w.admission.Lock()
+		w.queue <- asyncMapInMapUpdate{FileID: fileID, checked: request, proof: request.proof}
+		request.proof.accept()
+		w.admission.Unlock()
+	}
+	return request
+}
+
+func preloadLegacyForTest(p *asyncMapUpdaterPool, outer *cebpf.Map, fileID host.FileID, inner *cebpf.Map) *asyncQueueRequest {
+	proof := p.counts.beginLegacyRequest(p, fileID, outer, inner)
+	if len(p.workers) > 0 {
+		idx := uint64(fileID) % uint64(len(p.workers))
+		w := p.workers[idx]
+		proof.bindWorker(int(idx), w)
+		w.admission.Lock()
+		w.queue <- asyncMapInMapUpdate{Outer: outer, FileID: fileID, Inner: inner, proof: proof}
+		proof.accept()
+		w.admission.Unlock()
+	}
+	return proof
+}
+
+func TestCheckedWorkerWaitsForActualDelete(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	done := make(chan struct{})
+	go func() { w.serve(); close(done) }()
+	entered, release := make(chan struct{}), make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		_, err := p.enqueueChecked(1, func() (bool, error) {
+			close(entered)
+			<-release
+			return false, syscall.EACCES
+		}, nil)
+		result <- err
+	}()
+	<-entered
+	select {
+	case err := <-result:
+		t.Fatalf("returned before worker completed: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-result; !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("missing delete failure: %v", err)
+	}
+	cancel()
+	<-done
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 1 || obs.QueueAccepted != 1 || obs.Failed != 1 || obs.Pending != 0 || !obs.PendingKnown || obs.LastPublished || !errors.Is(obs.LastApplyErr, syscall.EACCES) || !obs.AllWorkersEnded || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestOwnedStackDeltasPopulateBeforePublish(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	workerDone := make(chan struct{})
+	go func() { w.serve(); close(workerDone) }()
+	entered, release := make(chan struct{}), make(chan struct{})
+	published := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- installOwnedStackDeltas(123, 0,
+			func() error { close(entered); <-release; return nil },
+			func() error { t.Error("caller closed transferred handle"); return nil },
+			func() (bool, error) {
+				return p.enqueueChecked(123, func() (bool, error) { close(published); return true, nil }, nil)
+			},
+			func() error { t.Error("unexpected rollback"); return nil })
+	}()
+	<-entered
+	select {
+	case <-published:
+		t.Fatal("published before population")
+	case err := <-result:
+		t.Fatalf("returned before population: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-published:
+	default:
+		t.Fatal("returned before publication")
+	}
+	cancel()
+	<-workerDone
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 1 || obs.QueueAccepted != 1 || obs.AppliedPublished != 1 || obs.Pending != 0 || !obs.PendingKnown || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestOwnedStackDeltasPopulateFailureClosesOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}}}
+	closed, published := 0, 0
+	err := installOwnedStackDeltas(123, 0,
+		func() error { return syscall.EPERM },
+		func() error { closed++; return syscall.EACCES },
+		func() (bool, error) {
+			published++
+			return p.enqueueChecked(123, func() (bool, error) { return true, nil }, nil)
+		},
+		func() error { t.Error("unexpected rollback"); return nil })
+	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) || closed != 1 || published != 0 {
+		t.Fatalf("err=%v closed=%d published=%d", err, closed, published)
+	}
+	obs := p.queueObservation(false)
+	if obs.RequestsOwned != 0 || obs.QueueAccepted != 0 || obs.Outcome != libpf.AuxiliaryNotExercised || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestOwnedStackDeltasPublishedCloseFailure(t *testing.T) {
+	rollbacks := 0
+	err := installOwnedStackDeltas(123, 0, func() error { return nil }, func() error { t.Error("double close"); return nil },
+		func() (bool, error) { return true, syscall.EPERM },
+		func() error { rollbacks++; return syscall.EACCES })
+	var pending *stackDeltaPublishedError
+	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) || !errors.As(err, &pending) || pending.fileID != 123 || pending.mapID != 0 || rollbacks != 1 {
+		t.Fatalf("err=%v rollbacks=%d", err, rollbacks)
+	}
+}
+
+func TestCheckedWorkerCanceledBeforeAdmissionClosesOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}}}
+	closed := 0
+	published, err := p.enqueueChecked(1, func() (bool, error) { t.Error("unexpected apply"); return false, nil },
+		func() error { closed++; return syscall.EACCES })
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, syscall.EACCES) || closed != 1 || published {
+		t.Fatalf("published=%v err=%v closed=%d", published, err, closed)
+	}
+	obs := p.queueObservation(false)
+	if obs.RequestsOwned != 1 || obs.QueueAccepted != 0 || obs.Refused != 1 || obs.CleanupFailed != 1 || obs.LastPublished || !errors.Is(obs.LastCleanupErr, syscall.EACCES) || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestCheckedWorkerUnavailableClosesOnce(t *testing.T) {
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{{ctx: context.Background(), unavailable: true}}}
+	closed := 0
+	published, err := p.enqueueChecked(1, func() (bool, error) { t.Error("unexpected apply"); return false, nil },
+		func() error { closed++; return syscall.EACCES })
+	if !errors.Is(err, syscall.EACCES) || closed != 1 || published {
+		t.Fatalf("published=%v err=%v closed=%d", published, err, closed)
+	}
+	obs := p.queueObservation(false)
+	if obs.RequestsOwned != 1 || obs.QueueAccepted != 0 || obs.Refused != 1 || obs.CleanupFailed != 1 || !obs.LastUnavailable || obs.LastPublished || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestCheckedWorkerCancellationDrainsAdmitted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	closed := 0
+	request := preloadCheckedForTest(p, 7,
+		func() (bool, error) { t.Error("unexpected apply"); return false, nil },
+		func() error { closed++; return syscall.EPERM },
+	)
+	cancel()
+	w.serve()
+	result := <-request.done
+	if !errors.Is(result.err, context.Canceled) || !errors.Is(result.err, syscall.EPERM) || closed != 1 || result.published {
+		t.Fatalf("result=%+v closed=%d", result, closed)
+	}
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 1 || obs.QueueAccepted != 1 || obs.Aborted != 1 || obs.CleanupFailed != 1 || obs.Pending != 0 || !obs.PendingKnown || !obs.AllWorkersEnded || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestOwnedStackDeltasFailedPublishDoesNotDelete(t *testing.T) {
+	closed, rollback := 0, 0
+	err := installOwnedStackDeltas(123, 0, func() error { return nil }, func() error { t.Error("caller double-closed"); return nil },
+		func() (bool, error) { closed++; return false, errors.Join(syscall.EPERM, syscall.EACCES) },
+		func() error { rollback++; return nil })
+	if !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) || closed != 1 || rollback != 0 {
+		t.Fatalf("error=%v closed=%d rollback=%d", err, closed, rollback)
+	}
+}
+
+func TestQueueAccountingCheckedPublishedAndNotPublished(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 2)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	done := make(chan struct{})
+	go func() { w.serve(); close(done) }()
+
+	pub, err := p.enqueueChecked(10, func() (bool, error) { return true, nil }, nil)
+	if err != nil || !pub {
+		t.Fatalf("pub=%v err=%v", pub, err)
+	}
+	pub2, err2 := p.enqueueChecked(10, func() (bool, error) { return false, nil }, nil)
+	if err2 != nil || pub2 {
+		t.Fatalf("pub2=%v err2=%v", pub2, err2)
+	}
+	cancel()
+	<-done
+
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 2 || obs.QueueAccepted != 2 || obs.AppliedPublished != 1 || obs.AppliedNotPublished != 1 || obs.Pending != 0 || !obs.PendingKnown || !obs.AllWorkersEnded || obs.Outcome != libpf.SourceLocalNonfinal || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestQueueAccountingNoWorkersRefusalHasNoWorkerIndex(t *testing.T) {
+	p := &asyncMapUpdaterPool{}
+	closed := 0
+	pub, err := p.enqueueChecked(42, func() (bool, error) { t.Error("unexpected apply"); return true, nil },
+		func() error { closed++; return syscall.EBADF })
+	if pub || err == nil || !errors.Is(err, syscall.EBADF) || closed != 1 {
+		t.Fatalf("pub=%v err=%v closed=%d", pub, err, closed)
+	}
+	obs := p.queueObservation(false)
+	if obs.RequestsOwned != 1 || obs.QueueAccepted != 0 || obs.Refused != 1 || obs.CleanupFailed != 1 || obs.HasWorkerIdx || obs.LastWorker != nil || len(obs.Workers) != 0 || obs.LastFileID != 42 || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestQueueAccountingFailedPreservesPublishedBoolAndErrno(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 2)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	done := make(chan struct{})
+	go func() { w.serve(); close(done) }()
+
+	pub1, err1 := p.enqueueChecked(5, func() (bool, error) { return true, syscall.EPERM }, nil)
+	if !pub1 || !errors.Is(err1, syscall.EPERM) {
+		t.Fatalf("pub1=%v err1=%v", pub1, err1)
+	}
+	obs1 := p.queueObservation(false)
+	if obs1.Failed != 1 || !obs1.LastPublished || !errors.Is(obs1.LastApplyErr, syscall.EPERM) {
+		t.Fatalf("obs1=%+v", obs1)
+	}
+
+	pub2, err2 := p.enqueueChecked(5, func() (bool, error) { return false, syscall.EACCES }, nil)
+	if pub2 || !errors.Is(err2, syscall.EACCES) {
+		t.Fatalf("pub2=%v err2=%v", pub2, err2)
+	}
+	cancel()
+	<-done
+
+	obs2 := p.queueObservation(true)
+	if obs2.RequestsOwned != 2 || obs2.QueueAccepted != 2 || obs2.Failed != 2 || obs2.LastPublished || !errors.Is(obs2.LastApplyErr, syscall.EACCES) || obs2.Pending != 0 || obs2.ProofErr != nil {
+		t.Fatalf("obs2=%+v", obs2)
+	}
+}
+
+func TestQueueAccountingFullQueueAlreadyCanceledRefuses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	preloaded := preloadCheckedForTest(p, 1, func() (bool, error) { t.Error("unexpected preloaded apply"); return false, nil }, nil)
+	cancel()
+
+	closed := 0
+	pub, err := p.enqueueChecked(1, func() (bool, error) { t.Error("unexpected second apply"); return true, nil },
+		func() error { closed++; return syscall.EPERM })
+	if pub || !errors.Is(err, context.Canceled) || !errors.Is(err, syscall.EPERM) || closed != 1 {
+		t.Fatalf("pub=%v err=%v closed=%d", pub, err, closed)
+	}
+
+	p.EnqueueUpdate(nil, 1, nil)
+	w.serve()
+	res := <-preloaded.done
+	if !errors.Is(res.err, context.Canceled) || res.published {
+		t.Fatalf("preloaded res=%+v", res)
+	}
+
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 3 || obs.QueueAccepted != 1 || obs.Refused != 2 || obs.Aborted != 1 || obs.Applied != 0 || obs.Pending != 0 || !obs.PendingKnown || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestQueueAccountingLegacyUnavailableAndPreSendCancelRefused(t *testing.T) {
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	wUnavail := &asyncUpdateWorker{ctx: ctx1, queue: make(chan asyncMapInMapUpdate, 1), unavailable: true}
+	p1 := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{wUnavail}}
+	p1.EnqueueUpdate(nil, 9, nil)
+	obs1 := p1.queueObservation(false)
+	if obs1.RequestsOwned != 1 || obs1.QueueAccepted != 0 || obs1.Refused != 1 || obs1.Applied != 0 || !obs1.LastUnavailable || obs1.ProofErr != nil {
+		t.Fatalf("obs1=%+v", obs1)
+	}
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	cancel2()
+	wCanceled := &asyncUpdateWorker{ctx: ctx2, queue: make(chan asyncMapInMapUpdate, 1)}
+	p2 := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{wCanceled}}
+	p2.EnqueueUpdate(nil, 9, nil)
+	obs2 := p2.queueObservation(false)
+	if obs2.RequestsOwned != 1 || obs2.QueueAccepted != 0 || obs2.Refused != 1 || obs2.Applied != 0 || obs2.ProofErr != nil {
+		t.Fatalf("obs2=%+v", obs2)
+	}
+}
+
+func TestQueueAccountingLegacyPreloadedCancelAborted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	preloadLegacyForTest(p, nil, host.FileID(3), nil)
+	cancel()
+	w.serve()
+
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 1 || obs.QueueAccepted != 1 || obs.Aborted != 1 || obs.Applied != 0 || obs.Pending != 0 || !obs.PendingKnown || !obs.AllWorkersEnded || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
+	}
+}
+
+func TestQueueAccountingDuplicateClassifyAndOverflowStickyProofErrOnly(t *testing.T) {
+	var onErrors int
+	s := periodiccaller.NewOwnedScope(context.Background(), func(error) { onErrors++ })
+	w := &asyncUpdateWorker{ctx: s.Context(), queue: make(chan asyncMapInMapUpdate, 2)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	done := make(chan struct{})
+	go func() { w.serve(); close(done) }()
+
+	pub, err := p.enqueueChecked(1, func() (bool, error) { return true, nil }, nil)
+	if err != nil || !pub {
+		t.Fatalf("pub=%v err=%v", pub, err)
+	}
+	req := p.counts.lastChecked
+	if req == nil || req.proof == nil {
+		t.Fatal("missing recorded checked request")
+	}
+	req.proof.classify(queueFailed, false, syscall.EPERM)
+	select {
+	case extra := <-req.done:
+		t.Fatalf("unexpected second done send: %+v", extra)
+	default:
+	}
+	if onErrors != 0 || s.Failure() != nil {
+		t.Fatalf("onErrors=%d scopeFailure=%v", onErrors, s.Failure())
+	}
+	obsDup := p.queueObservation(false)
+	if obsDup.ProofErr == nil || obsDup.AppliedPublished != 1 || obsDup.Failed != 0 {
+		t.Fatalf("obsDup=%+v", obsDup)
+	}
+
+	p2 := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	p2.counts.requestsOwned = math.MaxUint64
+	pub2, err2 := p2.enqueueChecked(1, func() (bool, error) { return false, syscall.EACCES }, nil)
+	if pub2 || !errors.Is(err2, syscall.EACCES) {
+		t.Fatalf("pub2=%v err2=%v", pub2, err2)
+	}
+	obsOv := p2.queueObservation(false)
+	if obsOv.ProofErr == nil || obsOv.RequestsOwned != math.MaxUint64 || obsOv.Failed != 1 {
+		t.Fatalf("obsOv=%+v", obsOv)
+	}
+
+	sCtx, sCancel := context.WithTimeout(context.Background(), time.Second)
+	defer sCancel()
+	_ = s.Stop(sCtx)
+	<-done
+}
+
+func TestQueueAccountingExpiredStopMarksHeldAndPendingUnknown(t *testing.T) {
+	s := periodiccaller.NewOwnedScope(context.Background(), nil)
+	p := newAsyncMapUpdaterPool(s.Context(), 1, 1)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.enqueueChecked(1, func() (bool, error) {
+			close(entered)
+			<-release
+			return true, nil
+		}, nil)
+		done <- err
+	}()
+	<-entered
+
+	expiredCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	stopErr := s.Stop(expiredCtx)
+	if !errors.Is(stopErr, context.Canceled) {
+		t.Fatalf("stopErr=%v", stopErr)
+	}
+
+	obs := p.queueObservation(true)
+	if !obs.Held || obs.PendingKnown || obs.Pending != 0 || obs.AllWorkersEnded || obs.ScopeJoinedWitness || !obs.CallerJoinedClaim {
+		t.Fatalf("expected held and unknown pending on expired stop, got %+v", obs)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("worker err=%v", err)
+	}
+	joinCtx, joinCancel := context.WithTimeout(context.Background(), time.Second)
+	defer joinCancel()
+	_ = s.Stop(joinCtx)
+}
+
+func TestQueueAccountingF1DequeuedCancelBeforeSenderAcceptIsAborted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 2)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	workerDone := make(chan struct{})
+	go func() { w.serve(); close(workerDone) }()
+
+	entered1 := make(chan struct{})
+	release1 := make(chan struct{})
+	res1 := make(chan error, 1)
+	go func() {
+		_, err := p.enqueueChecked(1, func() (bool, error) {
+			close(entered1)
+			<-release1
+			return true, nil
+		}, nil)
+		res1 <- err
+	}()
+	<-entered1
+
+	req2 := &checkedMapUpdate{
+		apply:  func() (bool, error) { t.Error("unexpected apply on canceled request 2"); return false, nil },
+		reject: func() error { return syscall.EPERM },
+		done:   make(chan checkedMapResult, 1),
+	}
+	req2.proof = p.counts.beginCheckedRequest(p, 1, req2)
+	req2.proof.bindWorker(0, w)
+	w.admission.Lock()
+	w.queue <- asyncMapInMapUpdate{FileID: 1, checked: req2, proof: req2.proof}
+	w.admission.Unlock()
+
+	cancel()
+	close(release1)
+	if err := <-res1; err != nil {
+		t.Fatalf("req1 err=%v", err)
+	}
+	r2 := <-req2.done
+	if r2.published || !errors.Is(r2.err, context.Canceled) || !errors.Is(r2.err, syscall.EPERM) {
+		t.Fatalf("r2=%+v", r2)
+	}
+	obsMid := p.queueObservation(false)
+	if obsMid.ProofErr != nil || !obsMid.Held || obsMid.PendingKnown || obsMid.Aborted != 1 || obsMid.AdmissionHeld != 1 {
+		t.Fatalf("F1 mid-window observation failed: obsMid=%+v", obsMid)
+	}
+	req2.proof.accept()
+	<-workerDone
+
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 2 || obs.QueueAccepted != 2 || obs.Refused != 0 || obs.AppliedPublished != 1 || obs.Aborted != 1 || obs.CleanupFailed != 1 || obs.Pending != 0 || !obs.PendingKnown || obs.ProofErr != nil {
+		t.Fatalf("F1 dequeued cancel before sender accept miscounted: obs=%+v", obs)
+	}
+}
+
+func TestQueueAccountingF1BoundedConcurrentAdmissionAndCancelConservation(t *testing.T) {
+	for iter := 0; iter < 16; iter++ {
+		s := periodiccaller.NewOwnedScope(context.Background(), nil)
+		p := newAsyncMapUpdaterPool(s.Context(), 2, 2)
+		const callers = 12
+		var wg sync.WaitGroup
+		wg.Add(callers)
+		start := make(chan struct{})
+		for i := 0; i < callers; i++ {
+			id := host.FileID(i + 1)
+			go func(idx int, fid host.FileID) {
+				defer wg.Done()
+				<-start
+				var rejectFn func() error
+				if idx%2 == 0 {
+					rejectFn = func() error { return syscall.EPERM }
+				}
+				pub, err := p.enqueueChecked(fid, func() (bool, error) {
+					if idx%5 == 0 {
+						return false, syscall.EACCES
+					}
+					return idx%3 == 0, nil
+				}, rejectFn)
+				if err != nil {
+					if pub {
+						t.Errorf("iter %d caller %d published=true with err=%v", iter, idx, err)
+					}
+					if idx%5 == 0 && errors.Is(err, syscall.EACCES) {
+						return
+					}
+					if !errors.Is(err, context.Canceled) {
+						t.Errorf("iter %d caller %d unexpected err=%v", iter, idx, err)
+					}
+					if rejectFn != nil && !errors.Is(err, syscall.EPERM) {
+						t.Errorf("iter %d caller %d missing reject EPERM: %v", iter, idx, err)
+					}
+				}
+			}(i, id)
+		}
+		close(start)
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		if err := s.Stop(stopCtx); err != nil {
+			stopCancel()
+			t.Fatalf("iter %d stop err=%v", iter, err)
+		}
+		stopCancel()
+		wg.Wait()
+
+		obs := p.queueObservation(true)
+		if obs.RequestsOwned != callers || obs.AdmissionHeld != 0 || obs.Pending != 0 || !obs.PendingKnown || obs.Held || !obs.AllWorkersEnded || !obs.ScopeJoinedWitness || obs.ProofErr != nil {
+			t.Fatalf("iter %d conservation failed: obs=%+v", iter, obs)
+		}
+		if obs.QueueAccepted+obs.Refused != obs.RequestsOwned {
+			t.Fatalf("iter %d admission equation failed: obs=%+v", iter, obs)
+		}
+		if obs.Applied+obs.AppliedPublished+obs.AppliedNotPublished+obs.Failed+obs.Aborted != obs.QueueAccepted {
+			t.Fatalf("iter %d terminal equation failed: obs=%+v", iter, obs)
+		}
+	}
+}
+
+func TestQueueAccountingF2LegacyCloseRejectedInnerHelperAndAccountingWiring(t *testing.T) {
+	var onErrors int
+	s := periodiccaller.NewOwnedScope(context.Background(), func(error) { onErrors++ })
+	if err := closeRejectedInner(s.Context(), nil); err != nil {
+		t.Fatalf("expected nil error for nil inner map, got %v", err)
+	}
+	if onErrors != 0 || s.Failure() != nil {
+		t.Fatalf("unexpected scope error on nil inner map: onErrors=%d failure=%v", onErrors, s.Failure())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	req := p.counts.beginLegacyRequest(p, 11, nil, nil)
+	req.bindWorker(0, w)
+	req.noteRejectCleanup(syscall.EBADF)
+	req.classify(queueRefused, false, ctx.Err())
+
+	obs := p.queueObservation(false)
+	if obs.RequestsOwned != 1 || obs.Refused != 1 || obs.CleanupFailed != 1 || !errors.Is(obs.LastCleanupErr, syscall.EBADF) || !errors.Is(obs.LastApplyErr, context.Canceled) || obs.ProofErr != nil {
+		t.Fatalf("F2 legacy cleanup failure accounting failed: obs=%+v", obs)
+	}
+}
+
+func TestQueueAccountingF3ConcurrentWorkerIdentityAndCleanupErrReset(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w0 := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 2)}
+	w1 := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 2)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w0, w1}}
+	done0, done1 := make(chan struct{}), make(chan struct{})
+	go func() { w0.serve(); close(done0) }()
+	go func() { w1.serve(); close(done1) }()
+
+	enteredA := make(chan struct{})
+	releaseA := make(chan struct{})
+	doneA := make(chan error, 1)
+	go func() {
+		_, err := p.enqueueChecked(2, func() (bool, error) {
+			close(enteredA)
+			<-releaseA
+			return true, nil
+		}, nil)
+		doneA <- err
+	}()
+	<-enteredA
+
+	pubB, errB := p.enqueueChecked(3, func() (bool, error) {
+		return false, syscall.EACCES
+	}, nil)
+	if pubB || !errors.Is(errB, syscall.EACCES) {
+		t.Fatalf("pubB=%v errB=%v", pubB, errB)
+	}
+
+	close(releaseA)
+	if errA := <-doneA; errA != nil {
+		t.Fatalf("errA=%v", errA)
+	}
+	cancel()
+	<-done0
+	<-done1
+
+	obs := p.queueObservation(true)
+	if obs.LastFileID != 2 || obs.LastWorkerIdx != 0 || obs.LastWorker != w0 || !obs.LastPublished || obs.LastApplyErr != nil || obs.ProofErr != nil {
+		t.Fatalf("F3 mixed identity and result across concurrent workers: obs=%+v", obs)
+	}
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	w20 := &asyncUpdateWorker{ctx: ctx2, queue: make(chan asyncMapInMapUpdate, 2)}
+	w21 := &asyncUpdateWorker{ctx: ctx2, queue: make(chan asyncMapInMapUpdate, 2), unavailable: true}
+	p2 := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w20, w21}}
+	done20 := make(chan struct{})
+	go func() { w20.serve(); close(done20) }()
+
+	_, errFail := p2.enqueueChecked(1, func() (bool, error) { return true, nil }, func() error { return syscall.EBADF })
+	if !errors.Is(errFail, syscall.EBADF) {
+		t.Fatalf("errFail=%v", errFail)
+	}
+	pubClean, errClean := p2.enqueueChecked(2, func() (bool, error) { return true, nil }, nil)
+	if !pubClean || errClean != nil {
+		t.Fatalf("pubClean=%v errClean=%v", pubClean, errClean)
+	}
+	cancel2()
+	<-done20
+
+	obs2 := p2.queueObservation(true)
+	if obs2.CleanupFailed != 1 || obs2.LastFileID != 2 || obs2.LastWorkerIdx != 0 || obs2.LastCleanupErr != nil || obs2.LastApplyErr != nil || !obs2.LastPublished || obs2.ProofErr != nil {
+		t.Fatalf("F3 stale LastCleanupErr retained onto subsequent clean request: obs2=%+v", obs2)
+	}
+}
+
+func TestQueueAccountingF4LiveObservationDuringAdmissionTransition(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
+	workerDone := make(chan struct{})
+	go func() { w.serve(); close(workerDone) }()
+
+	req := &checkedMapUpdate{
+		apply: func() (bool, error) { return true, nil },
+		done:  make(chan checkedMapResult, 1),
+	}
+	req.proof = p.counts.beginCheckedRequest(p, 9, req)
+	req.proof.bindWorker(0, w)
+
+	obsLive := p.queueObservation(false)
+	if obsLive.ProofErr != nil || !obsLive.Held || obsLive.PendingKnown || obsLive.RequestsOwned != 1 || obsLive.AdmissionHeld != 1 {
+		t.Fatalf("F4 live observation during admission reported false conservation error or missing hold: obsLive=%+v", obsLive)
+	}
+
+	// Also verify a real producer blocked on a full queue under w.admission.Lock() while worker is paused in apply:
+	entered1 := make(chan struct{})
+	release1 := make(chan struct{})
+	res1 := make(chan error, 1)
+	go func() {
+		_, err := p.enqueueChecked(1, func() (bool, error) {
+			close(entered1)
+			<-release1
+			return true, nil
+		}, nil)
+		res1 <- err
+	}()
+	<-entered1
+
+	// Complete the earlier manual request by sending it into the 1-slot buffer so buffer is now full:
+	w.admission.Lock()
+	w.queue <- asyncMapInMapUpdate{FileID: 9, checked: req, proof: req.proof}
+	req.proof.accept()
+	w.admission.Unlock()
+
+	// Deterministically observe while request 2 has entered beginCheckedRequest (RequestsOwned=3,QueueAccepted=1,AdmissionHeld=1):
+	req3 := &checkedMapUpdate{
+		apply: func() (bool, error) { return false, nil },
+		done:  make(chan checkedMapResult, 1),
+	}
+	req3.proof = p.counts.beginCheckedRequest(p, 3, req3)
+	req3.proof.bindWorker(0, w)
+	obsBlocked := p.queueObservation(false)
+	if obsBlocked.ProofErr != nil || !obsBlocked.Held || obsBlocked.PendingKnown || obsBlocked.RequestsOwned != 3 || obsBlocked.AdmissionHeld != 1 || obsBlocked.QueueAccepted != 2 {
+		t.Fatalf("F4 blocked sender observation failed: obsBlocked=%+v", obsBlocked)
+	}
+	res3 := make(chan error, 1)
+	go func() {
+		w.admission.Lock()
+		w.queue <- asyncMapInMapUpdate{FileID: 3, checked: req3, proof: req3.proof}
+		req3.proof.accept()
+		w.admission.Unlock()
+		r3 := <-req3.done
+		res3 <- r3.err
+	}()
+
+	close(release1)
+	if err := <-res1; err != nil {
+		t.Fatalf("res1=%v", err)
+	}
+	rManual := <-req.done
+	if !rManual.published || rManual.err != nil {
+		t.Fatalf("rManual=%+v", rManual)
+	}
+	if err := <-res3; err != nil {
+		t.Fatalf("res3=%v", err)
+	}
+	cancel()
+	<-workerDone
+
+	obsFinal := p.queueObservation(true)
+	if obsFinal.RequestsOwned != 3 || obsFinal.QueueAccepted != 3 || obsFinal.AdmissionHeld != 0 || obsFinal.AppliedPublished != 2 || obsFinal.AppliedNotPublished != 1 || obsFinal.Pending != 0 || !obsFinal.PendingKnown || obsFinal.Held || obsFinal.ProofErr != nil {
+		t.Fatalf("obsFinal=%+v", obsFinal)
+	}
+}
+
+
+type hostileDiagnosticError struct{}
+func (hostileDiagnosticError) Error() string { panic("diagnostic must not format error") }
+func (hostileDiagnosticError) Unwrap() error { panic("diagnostic must not unwrap error") }
+
+func TestQueueDefinitionSourceDiagnosticsLocalOnly(t *testing.T) {
+	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{{ctx: context.Background(), queue: make(chan asyncMapInMapUpdate, 1)}}}
+	p.counts.requestsOwned = 1
+	p.counts.queueAccepted = 1
+	p.counts.proofErr = hostileDiagnosticError{}
+	p.counts.lastApplyErr = hostileDiagnosticError{}
+	p.counts.lastCleanupErr = hostileDiagnosticError{}
+	impl := &ebpfMapsImpl{updateWorkers: p}
+	raw, err := impl.DefinitionSourceDiagnostics()
+	if err != nil { t.Fatal(err) }
+	var got queueDiagnosticEnvelope
+	if err := json.Unmarshal(raw, &got); err != nil { t.Fatal(err) }
+	if got.Queue == nil || got.Queue.RequestsOwned != 1 || got.Queue.Pending != 1 || !got.Queue.Held ||
+		got.Queue.CallerJoinedClaim || !got.Queue.ProofErrorPresent || !got.Queue.LastApplyErrorPresent ||
+		!got.Queue.LastCleanupErrorPresent || got.Queue.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("incorrect local queue diagnostic: %+v", got.Queue)
+	}
+	for _, forbidden := range []string{"LastWorker", "LastQueue", "LastCtx", "LastChecked", "Pool", "Workers", "proofErr"} {
+		if strings.Contains(string(raw), forbidden) { t.Fatalf("owner leaked: %s", forbidden) }
+	}
+	p.workers[0].admission.Lock()
+	p.workers[0].serveEnded = true
+	p.workers[0].admission.Unlock()
+	ended, err := impl.DefinitionSourceDiagnostics()
+	if err != nil { t.Fatal(err) }
+	var endedObs queueDiagnosticEnvelope
+	if err := json.Unmarshal(ended, &endedObs); err != nil { t.Fatal(err) }
+	if endedObs.Queue == nil || !endedObs.Queue.AllWorkersEnded || endedObs.Queue.CallerJoinedClaim {
+		t.Fatal("worker end must not invent caller join")
+	}
+	raw[0] = 'x'
+	second, err := impl.DefinitionSourceDiagnostics()
+	if err != nil || len(second) == 0 || second[0] != '{' { t.Fatal("getter retained caller-owned bytes") }
+	missing, err := (&ebpfMapsImpl{}).DefinitionSourceDiagnostics()
+	if err != nil || !strings.Contains(string(missing), "queue-pool-missing") { t.Fatal("missing pool not explicit") }
+}

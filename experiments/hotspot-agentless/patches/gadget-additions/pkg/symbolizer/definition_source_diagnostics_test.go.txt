@@ -1,0 +1,202 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package symbolizer
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+)
+
+type outerDiagnosticAccessor interface {
+	DefinitionSourceDiagnosticsReady() <-chan struct{}
+	DefinitionSourceDiagnostics() (json.RawMessage, error)
+}
+
+type outerDiagnosticChild struct {
+	*heldPruneResolver
+	ready chan struct{}
+	readyCalls, getterCalls, stops int
+	err error
+	raw json.RawMessage
+	onGet func()
+}
+
+func (c *outerDiagnosticChild) StopAuxiliary(context.Context) error { c.stops++; return nil }
+func (c *outerDiagnosticChild) DefinitionSourceDiagnosticsReady() <-chan struct{} { c.readyCalls++; return c.ready }
+func (c *outerDiagnosticChild) DefinitionSourceDiagnostics() (json.RawMessage, error) { c.getterCalls++; if c.onGet != nil { c.onGet() }; return c.raw, c.err }
+
+type outerOpenDeadlineContext struct { done chan struct{}; deadline time.Time }
+func (c outerOpenDeadlineContext) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c outerOpenDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c outerOpenDeadlineContext) Err() error { return nil }
+func (c outerOpenDeadlineContext) Value(any) any { return nil }
+
+func TestOuterAbsoluteDeadlineOpenDone(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	close(child.ready)
+	ctx := outerOpenDeadlineContext{done: make(chan struct{}), deadline: time.Now().Add(-time.Second)}
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	if err := s.StopAuxiliary(ctx); err != nil { t.Fatal("native stop changed") }
+	raw, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("first-caller-closed")) || child.getterCalls != 0 || child.readyCalls != 0 { t.Fatal("expired budget reached child") }
+	select { case <-ctx.done: t.Fatal("Done closed"); default: }
+	again, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Equal(raw, again) || child.getterCalls != 0 { t.Fatal("expired memo changed") }
+}
+
+func TestOuterCommitDeadlineAfterCopy(t *testing.T) {
+	deadline := time.Unix(100, 0)
+	if outerDiagnosticExpiredAt(false, deadline, true, time.Unix(99, 0)) { t.Fatal("pre-copy budget expired") }
+	child := &outerDiagnosticChild{raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	if _, err := child.DefinitionSourceDiagnostics(); err != nil || child.getterCalls != 1 { t.Fatal("cached child copy failed") }
+	if !outerDiagnosticExpiredAt(false, deadline, true, time.Unix(101, 0)) { t.Fatal("late copy eligible to commit") }
+	if outerDiagnosticExpiredAt(false, deadline, false, time.Unix(101, 0)) || !outerDiagnosticExpiredAt(true, deadline, false, time.Unix(99, 0)) { t.Fatal("original Done/deadline facts ignored") }
+}
+
+func TestOuterForeignClaimAndCompetingCollectors(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	close(child.ready)
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	other := &Symbolizer{}
+	claim := s.beginLocalStop(context.Background())
+	foreign := other.beginLocalStop(context.Background())
+	s.finishLocalStop(foreign, pruneLoopJoined, false, -1)
+	if s.DefinitionSourceDiagnosticsReady() != s.localStopReady { t.Fatal("foreign claim changed readiness") }
+	select { case <-s.localStopReady: t.Fatal("foreign claim committed"); default: }
+	s.finishLocalStop(claim, pruneLoopUnknown, true, 0)
+	firstLocal := s.copyLocalPrune()
+	s.finishLocalStop(claim, pruneLoopJoined, false, -1)
+	if !bytes.Equal(firstLocal, s.copyLocalPrune()) || s.DefinitionSourceDiagnosticsReady() != child.ready { t.Fatal("replayed claim replaced local state") }
+	child.onGet = func() {
+		child.onGet = func() {
+			child.onGet = nil
+			child.err = hostilePruneDiagnosticError{}
+			winner, err := s.DefinitionSourceDiagnostics()
+			if err != nil || !bytes.Contains(winner, []byte("child-diagnostic-unknown")) { t.Fatal("first unknown did not commit") }
+			child.err = nil
+		}
+		loser, err := s.DefinitionSourceDiagnostics()
+		if err != nil || !bytes.Contains(loser, []byte("child-diagnostic-unknown")) { t.Fatal("second collector replaced memo") }
+	}
+	raw, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("child-diagnostic-unknown")) || child.getterCalls != 3 { t.Fatal("outer collector replaced memo") }
+	first := append([]byte(nil), raw...); raw[0] ^= 1; child.raw[0] ^= 1
+	again, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Equal(first, again) || child.getterCalls != 3 || s.DefinitionSourceDiagnosticsReady() != s.localDiagnosticMemoReady { t.Fatal("terminal memo changed") }
+}
+
+func TestOuterCapturedMemoBeatsLaterUnknown(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"channel":{"unit":"completed-receive","nil_barrier":18446744073709551615},"missing":[]}`)}
+	close(child.ready)
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	if err := s.StopAuxiliary(context.Background()); err != nil { t.Fatal("native stop changed") }
+	child.onGet = func() {
+		child.onGet = nil
+		winner, err := s.DefinitionSourceDiagnostics()
+		if err != nil || !bytes.Contains(winner, []byte("18446744073709551615")) { t.Fatal("captured memo did not win") }
+		child.err = hostilePruneDiagnosticError{}
+	}
+	raw, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("18446744073709551615")) || bytes.Contains(raw, []byte("child-diagnostic-unknown")) || child.getterCalls != 2 { t.Fatal("late unknown replaced captured memo") }
+	first := append([]byte(nil), raw...); raw[0] ^= 1; child.raw[0] ^= 1
+	again, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Equal(first, again) || child.getterCalls != 2 { t.Fatal("captured memo changed") }
+}
+
+func TestOuterDiagnosticOpenChildDoesNotDelayStop(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{})}
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	d, ok := any(s).(outerDiagnosticAccessor)
+	if !ok { t.Fatal("outer diagnostic capability missing") }
+	if d.DefinitionSourceDiagnosticsReady() != nil { t.Fatal("unclaimed readiness is not nil") }
+	if err := s.StopAuxiliary(context.Background()); err != nil { t.Fatal("native stop failed") }
+	if child.stops != 1 || child.readyCalls != 0 || child.getterCalls != 0 { t.Fatal("native stop queried diagnostics") }
+	if ready := d.DefinitionSourceDiagnosticsReady(); ready != child.ready { t.Fatal("pending child readiness not relayed") }
+	_, err := d.DefinitionSourceDiagnostics()
+	if err == nil || child.getterCalls != 0 { t.Fatal("open child was read or treated as terminal data") }
+}
+
+func TestOuterDiagnosticExpiredBudgetDoesNotCallChild(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{})}
+	close(child.ready)
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.StopAuxiliary(ctx); err != nil { t.Fatal("native stop failed") }
+	d, ok := any(s).(outerDiagnosticAccessor)
+	if !ok { t.Fatal("outer diagnostic capability missing") }
+	raw, err := d.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("first-caller-closed")) || child.readyCalls != 0 || child.getterCalls != 0 { t.Fatal("expired original budget reached child") }
+	_, _ = d.DefinitionSourceDiagnostics()
+	if child.readyCalls != 0 || child.getterCalls != 0 { t.Fatal("terminal expiry upgraded") }
+}
+
+func TestOuterDiagnosticClosedChildErrorIsTerminal(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{}), err: hostilePruneDiagnosticError{}}
+	close(child.ready)
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	if err := s.StopAuxiliary(context.Background()); err != nil { t.Fatal("native stop failed") }
+	d, ok := any(s).(outerDiagnosticAccessor)
+	if !ok { t.Fatal("outer diagnostic capability missing") }
+	raw, err := d.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("child-diagnostic-unknown")) || child.getterCalls != 1 { t.Fatal("closed child failure not terminal") }
+	_, _ = d.DefinitionSourceDiagnostics()
+	if child.getterCalls != 1 { t.Fatal("terminal failure retried child") }
+}
+
+func TestOuterDiagnosticCapturedCloneAndSchema(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"queue":{"unit":"owned-map-update-request","outcome":1,"requests_owned":18446744073709551615},"processing":{"unit":"handle-trace-input","outcome":1,"last_terminal":0},"channel":{"unit":"completed-receive"},"store":{"unit":"store-call"},"missing":[]}`)}
+	close(child.ready)
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	if err := s.StopAuxiliary(context.Background()); err != nil { t.Fatal(err) }
+	child.onGet = func() { s.pruneMu.Lock(); s.pruneMu.Unlock() }
+	raw, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("18446744073709551615")) || !bytes.Contains(raw, []byte(`"prune"`)) { t.Fatal("captured data missing") }
+	first := append([]byte(nil), raw...); raw[0] ^= 1; child.raw[0] ^= 1
+	again, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Equal(first, again) || child.getterCalls != 1 { t.Fatal("memo changed") }
+	select { case <-s.DefinitionSourceDiagnosticsReady(): default: t.Fatal("memo not ready") }
+}
+
+func TestOuterDiagnosticRejectsBadChild(t *testing.T) {
+	for _, payload := range []json.RawMessage{json.RawMessage(`{`), json.RawMessage(bytes.Repeat([]byte("x"), 32769)), json.RawMessage(`{"schema":1,"queue":{"unit":"owned-map-update-request","outcome":0},"missing":[]}`), json.RawMessage(`{"schema":1,"processing":{"unit":"handle-trace-input","outcome":1,"last_terminal":4},"missing":[]}`), json.RawMessage(`{"schema":1,"channel":{"unit":"completed-receive","last":{"hotspot_identity":{"extra":1}}},"missing":[]}`)} {
+		child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{}), raw: payload}; close(child.ready)
+		s := &Symbolizer{resolvers: []ResolverInstance{child}}
+		if err := s.StopAuxiliary(context.Background()); err != nil { t.Fatal(err) }
+		raw, err := s.DefinitionSourceDiagnostics()
+		if err != nil || !bytes.Contains(raw, []byte("child-diagnostic-unknown")) { t.Fatal("invalid child accepted") }
+	}
+}
+
+func TestOuterDiagnosticCopyExpiryAndUninvoked(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	close(child.ready)
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := s.StopAuxiliary(ctx); err != nil { t.Fatal(err) }
+	child.onGet = cancel
+	raw, err := s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("first-caller-closed")) { t.Fatal("late child upgraded expired claim") }
+	again, _ := s.DefinitionSourceDiagnostics(); if !bytes.Equal(raw, again) || child.getterCalls != 1 { t.Fatal("expired memo changed") }
+
+	s = &Symbolizer{}
+	claim := s.beginLocalStop(context.Background())
+	s.finishLocalStop(claim, pruneLoopUnknown, false, -1)
+	s.resolvers = []ResolverInstance{child}
+	raw, err = s.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("child-not-invoked")) || child.getterCalls != 1 { t.Fatal("later child adopted") }
+}
+
+func TestOuterDiagnosticLocalPending(t *testing.T) {
+	child := &outerDiagnosticChild{heldPruneResolver: &heldPruneResolver{}, ready: make(chan struct{})}
+	s := &Symbolizer{resolvers: []ResolverInstance{child}}
+	claim := s.beginLocalStop(context.Background())
+	if s.DefinitionSourceDiagnosticsReady() != s.localStopReady { t.Fatal("local readiness not exposed") }
+	select { case <-s.localStopReady: t.Fatal("pending local already closed"); default: }
+	if _, err := s.DefinitionSourceDiagnostics(); err != errOuterDiagnosticPending || child.getterCalls != 0 { t.Fatal("local pending misclassified") }
+	s.finishLocalStop(claim, pruneLoopUnknown, true, 0)
+	if s.DefinitionSourceDiagnosticsReady() != child.ready { t.Fatal("child readiness not relayed after freeze") }
+}

@@ -30,6 +30,7 @@ Skills live in `.agents/skills/` and are loaded when their task applies; do not 
 - Use sealed classes/interfaces for closed states and outcomes, enums for finite choices, and exhaustive `when`/`switch` branches over closed types.
 - Use strict domain types and pure decision functions; keep effects at explicit boundaries and necessary mutable state narrowly owned.
 - Choose the least visibility needed for each declaration and setter: local/private first, then `internal` or package-private, then public only for a required API or caller. Justify exceptions with an actual interop, lifecycle, or compatibility requirement.
+- Always prefer stricter coding practices that help to avoid illegal states and confusion in the future.
 
 ## Native and lifecycle discipline
 
@@ -83,7 +84,7 @@ Build maintenance commands are explicit: `./gradlew format`, `./gradlew updateDi
 
 ## Code intelligence and backlog
 
-- Prefer Codanna for symbols and callers, `./scripts/code_atlas.sh blast-radius <Symbol>` before changing public or cross-module symbols, and `./scripts/sg.sh` for structural search.
+- Use `./scripts/sg.sh` for structural search. Use `./scripts/adkw blast-radius <Symbol>` before changing public or cross-module symbols.
 - Use a file outline first for unknown or large files; it is recommended, not a pre-read gate for short or already-understood files.
 - Record discovered bugs, security gaps, and kernel nuances as a backlog issue using `./scripts/adkw new-issue`; keep `docs/internals/backlog/README.md` in sync.
 - Before a merge or rebase, inspect `git status` and preserve unrelated work. Never use destructive resets or checkouts to discard user changes.

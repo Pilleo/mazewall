@@ -4,12 +4,17 @@ package otel
 
 import (
 	"context"
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"errors"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
 	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/tracer"
 	"golang.org/x/sys/unix"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -17,6 +22,520 @@ import (
 type definitionDrainFixture struct {
 	readerDone, release chan struct{}
 	failure             error
+}
+
+type localDiagnosticFixture struct {
+	definitionDrainFixture
+	count uint64
+	child cachedDiagnosticChild
+	onSnapshot func()
+}
+
+func (b *localDiagnosticFixture) diagnosticChild() cachedDiagnosticChild { return b.child }
+
+type diagnosticChildFixture struct {
+	ready chan struct{}
+	raw json.RawMessage
+	err error
+	calls int
+	onGet func()
+}
+func (c *diagnosticChildFixture) DefinitionSourceDiagnosticsReady() <-chan struct{} { return c.ready }
+func (c *diagnosticChildFixture) DefinitionSourceDiagnostics() (json.RawMessage, error) {
+	c.calls++
+	if c.onGet != nil { c.onGet() }
+	return c.raw, c.err
+}
+type poisonousDiagnosticError struct{}
+func (poisonousDiagnosticError) Error() string { panic("unexpected Error") }
+func (poisonousDiagnosticError) Unwrap() error { panic("unexpected Unwrap") }
+
+type openDeadlineContext struct { done chan struct{}; deadline time.Time }
+func (c openDeadlineContext) Deadline() (time.Time, bool) { return c.deadline, true }
+func (c openDeadlineContext) Done() <-chan struct{} { return c.done }
+func (c openDeadlineContext) Err() error { return nil }
+func (c openDeadlineContext) Value(any) any { return nil }
+
+func TestDiagnosticOriginalDeadlineWithOpenDone(t *testing.T) {
+	child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	close(child.ready)
+	ctx := openDeadlineContext{done: make(chan struct{}), deadline: time.Now().Add(-time.Second)}
+	o := newDefinitionDrainOwner(&localDiagnosticFixture{child: child})
+	_ = o.stopAuxiliaryFinal(ctx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+	raw, err := o.diagnostic()
+	if err != nil || child.calls != 0 || !bytes.Contains(raw, []byte("first-caller-closed")) { t.Fatal("expired deadline called child") }
+	select { case <-ctx.done: t.Fatal("test Done closed"); default: }
+	again, _ := o.diagnostic(); if !bytes.Equal(raw, again) || child.calls != 0 { t.Fatal("deadline memo changed") }
+}
+
+func TestDiagnosticCommitDeadlineAfterCopy(t *testing.T) {
+	deadline := time.Unix(100, 0)
+	if diagnosticExpiredAt(false, deadline, true, time.Unix(99, 0)) { t.Fatal("pre-copy gate expired") }
+	child := &diagnosticChildFixture{raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	if _, err := child.DefinitionSourceDiagnostics(); err != nil || child.calls != 1 { t.Fatal("cached child copy failed") }
+	if !diagnosticExpiredAt(false, deadline, true, time.Unix(101, 0)) { t.Fatal("post-copy commit accepted expired deadline") }
+	if diagnosticExpiredAt(false, deadline, false, time.Unix(101, 0)) { t.Fatal("absent deadline expired") }
+	if !diagnosticExpiredAt(true, deadline, false, time.Unix(99, 0)) { t.Fatal("closed Done accepted") }
+}
+
+func TestDiagnosticClaimAndCompetingMemo(t *testing.T) {
+	child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	close(child.ready)
+	b := &localDiagnosticFixture{child: child, count: 7}
+	o := newDefinitionDrainOwner(b)
+	other := newDefinitionDrainOwner(&localDiagnosticFixture{})
+	_ = other.stopAuxiliaryFinal(context.Background(), nil)
+	b.onSnapshot = func() {
+		o.freezeLocalStop(other.localClaim, false, false, false, false, false)
+		if o.diagnosticReady() != o.localReady { t.Fatal("foreign claim froze local") }
+	}
+	_ = o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+	first := o.localStopFragment()
+	b.onSnapshot = nil; b.count = 99
+	o.freezeLocalStop(o.localClaim, false, false, false, false, false)
+	if !bytes.Equal(first, o.localStopFragment()) { t.Fatal("replayed claim replaced local freeze") }
+	child.onGet = func() {
+		child.onGet = nil; child.err = poisonousDiagnosticError{}
+		winner, err := o.diagnostic()
+		if err != nil || !bytes.Contains(winner, []byte("child-diagnostic-unknown")) { t.Fatal("nested unknown did not win") }
+		child.err = nil
+	}
+	raw, err := o.diagnostic()
+	if err != nil || !bytes.Contains(raw, []byte("child-diagnostic-unknown")) { t.Fatal("losing collector replaced memo") }
+	if o.diagnosticReady() != o.localMemoReady { t.Fatal("memo readiness not advanced") }
+	again, _ := o.diagnostic(); if !bytes.Equal(raw, again) { t.Fatal("terminal unknown changed") }
+}
+
+func TestDiagnosticEnumDomains(t *testing.T) {
+	for _, section := range []string{
+		`"queue":{"unit":"owned-map-update-request","outcome":0}`,
+		`"processing":{"unit":"handle-trace-input","outcome":0}`,
+		`"queue":{"unit":"owned-map-update-request","outcome":256}`,
+		`"queue":{"unit":"owned-map-update-request","outcome":4}`,
+		`"processing":{"unit":"handle-trace-input","outcome":256}`,
+		`"processing":{"unit":"handle-trace-input","outcome":4}`,
+		`"processing":{"unit":"handle-trace-input","outcome":1,"last_terminal":256}`,
+		`"processing":{"unit":"handle-trace-input","outcome":1,"last_terminal":4}`,
+	} {
+		child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,` + section + `,"missing":[]}`)}
+		close(child.ready)
+		o := newDefinitionDrainOwner(&localDiagnosticFixture{child: child})
+		_ = o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+		raw, err := o.diagnostic()
+		if err != nil || !bytes.Contains(raw, []byte("child-diagnostic-unknown")) { t.Fatalf("invalid enum accepted: %s", section) }
+	}
+	for _, n := range []string{"1", "2", "3"} {
+		child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"queue":{"unit":"owned-map-update-request","outcome":` + n + `,"requests_owned":18446744073709551615},"processing":{"unit":"handle-trace-input","outcome":` + n + `,"last_terminal":` + n + `},"missing":[]}`)}
+		close(child.ready)
+		o := newDefinitionDrainOwner(&localDiagnosticFixture{child: child})
+		_ = o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+		raw, err := o.diagnostic()
+		if err != nil || bytes.Contains(raw, []byte("child-diagnostic-unknown")) || !bytes.Contains(raw, []byte("18446744073709551615")) { t.Fatalf("valid enum rejected: %s", n) }
+	}
+	if _, ok := decodeChildDiagnostic(json.RawMessage(`{"schema":1,"processing":{"unit":"handle-trace-input","outcome":1,"last_terminal":0},"missing":[]}`)); !ok { t.Fatal("valid none terminal rejected") }
+}
+
+func TestDiagnosticUnknownBeforeChildReadyIsFinal(t *testing.T) {
+	child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	ctx := openDeadlineContext{done: make(chan struct{}), deadline: time.Now().Add(-time.Second)}
+	o := newDefinitionDrainOwner(&localDiagnosticFixture{child: child})
+	_ = o.stopAuxiliaryFinal(ctx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+	if o.diagnosticReady() != child.ready { t.Fatal("open child not relayed") }
+	raw, err := o.diagnostic()
+	if err != nil || child.calls != 0 || !bytes.Contains(raw, []byte("first-caller-closed")) { t.Fatal("missing deadline unknown") }
+	close(child.ready)
+	again, _ := o.diagnostic()
+	if !bytes.Equal(raw, again) || child.calls != 0 || o.diagnosticReady() != o.localMemoReady { t.Fatal("later readiness replaced terminal memo") }
+}
+
+func TestDiagnosticRelay(t *testing.T) {
+	child := &diagnosticChildFixture{ready: make(chan struct{}), err: poisonousDiagnosticError{}}
+	b := &localDiagnosticFixture{child: child, count: 3}
+	o := newDefinitionDrainOwner(b)
+	r := &otelResolverInstance{definitionDrain: o}
+	if r.DefinitionSourceDiagnosticsReady() != nil { t.Fatal("unclaimed readiness") }
+	_ = o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+	if r.DefinitionSourceDiagnosticsReady() != child.ready { t.Fatal("child readiness not relayed") }
+	if _, err := r.DefinitionSourceDiagnostics(); err != errLocalDiagnosticPending || child.calls != 0 { t.Fatal("open child was read") }
+	close(child.ready)
+	child.onGet = func() { o.mu.Lock(); o.mu.Unlock() }
+	raw, err := r.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Contains(raw, []byte("child-diagnostic-unknown")) || child.calls != 1 { t.Fatal("closed unavailable child must be terminal unknown") }
+	child.raw = json.RawMessage(`{"schema":1,"missing":[]}`); child.err = nil
+	again, err := r.DefinitionSourceDiagnostics()
+	if err != nil || !bytes.Equal(raw, again) || child.calls != 1 { t.Fatal("terminal unknown changed") }
+	if r.DefinitionSourceDiagnosticsReady() != o.localMemoReady { t.Fatal("terminal readiness") }
+	select { case <-o.localMemoReady: default: t.Fatal("terminal readiness open") }
+}
+
+func TestDiagnosticRelayCompositionAndExpiry(t *testing.T) {
+	for _, expire := range []bool{false, true} {
+		child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"queue":{"unit":"owned-map-update-request","outcome":1,"requests_owned":18446744073709551615},"processing":{"unit":"handle-trace-input","outcome":1,"has_binding":true,"expected_binding":{"session":"s","birth":18446744073709551615},"epoch_target":{"initial_epoch":18446744073709551615},"last_admitted":{"hotspot_identity":{"epoch":18446744073709551615,"read_error":-1}}},"missing":["binding-unrepresentable"]}`)}
+		close(child.ready)
+		b := &localDiagnosticFixture{child: child}
+		o := newDefinitionDrainOwner(b)
+		ctx, cancel := context.WithCancel(context.Background())
+		_ = o.stopAuxiliaryFinal(ctx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+		if expire { child.onGet = cancel }
+		raw, err := o.diagnostic()
+		if err != nil { t.Fatal(err) }
+		if expire && !bytes.Contains(raw, []byte("first-caller-closed")) { t.Fatal("expired copy committed") }
+		if !expire && !bytes.Contains(raw, []byte("18446744073709551615")) { t.Fatal("uint64 precision lost") }
+		copy := append([]byte(nil), raw...); raw[0] ^= 1
+		again, _ := o.diagnostic(); if !bytes.Equal(copy, again) { t.Fatal("memo alias") }
+		cancel()
+	}
+}
+
+func TestDiagnosticRelayMissingAndBadChild(t *testing.T) {
+	r := &otelResolverInstance{}
+	if r.DefinitionSourceDiagnosticsReady() != nil { t.Fatal("getter created owner") }
+	if _, err := r.DefinitionSourceDiagnostics(); err == nil || r.ownedDefinitionDrain() != nil { t.Fatal("getter created owner") }
+	child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	close(child.ready)
+	b := &localDiagnosticFixture{child: child}
+	o := newDefinitionDrainOwner(b)
+	_ = o.stopAuxiliaryFinal(context.Background(), nil)
+	raw, _ := o.diagnostic()
+	if !bytes.Contains(raw, []byte("child-not-invoked")) || child.calls != 0 { t.Fatal("uninvoked child adopted") }
+	_ = o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+	again, _ := o.diagnostic(); if !bytes.Equal(raw, again) || child.calls != 0 { t.Fatal("missing memo changed") }
+	for _, payload := range []json.RawMessage{json.RawMessage(`{`), json.RawMessage(bytes.Repeat([]byte("x"), 32769)), json.RawMessage(`{"schema":1,"queue":{"unit":"owned-map-update-request","outcome":1,"requests_owned":"1"},"missing":[]}`), json.RawMessage(`{"schema":1,"queue":{"unit":"owned-map-update-request","outcome":1,"Requests_Owned":1},"missing":[]}`), json.RawMessage(`{"schema":1,"processing":{"unit":"handle-trace-input","outcome":1,"last_admitted":{"hotspot_identity":{"extra":1}}},"missing":[]}`), json.RawMessage(`{"schema":1,"processing":{"unit":"handle-trace-input","outcome":1,"epoch_target":[]},"missing":[]}`)} {
+		child = &diagnosticChildFixture{ready: make(chan struct{}), raw: payload}; close(child.ready)
+		o = newDefinitionDrainOwner(&localDiagnosticFixture{child: child})
+		_ = o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+		raw, _ = o.diagnostic(); if !bytes.Contains(raw, []byte("child-diagnostic-unknown")) { t.Fatal("bad child accepted") }
+	}
+}
+
+func (b *localDiagnosticFixture) localDiagnosticSnapshot() (channelDiagnostic, storeDiagnostic) {
+	if b.onSnapshot != nil { b.onSnapshot() }
+	return projectChannelDiagnostic(channelSnapshot{nonNilToHandleTrace: b.count}), projectStoreDiagnostic(storeSnapshot{inputs: b.count})
+}
+
+func TestDiagnosticLocalFreezePending(t *testing.T) {
+	child := &diagnosticChildFixture{ready: make(chan struct{})}
+	b := &localDiagnosticFixture{child: child}
+	o := newDefinitionDrainOwner(b)
+	b.onSnapshot = func() {
+		if o.diagnosticReady() != o.localReady { t.Fatal("local readiness not relayed") }
+		select { case <-o.localReady: t.Fatal("local readiness closed before freeze"); default: }
+		if _, err := o.diagnostic(); err != errLocalDiagnosticPending || child.calls != 0 { t.Fatal("local pending became terminal") }
+	}
+	_ = o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+	if o.diagnosticReady() != child.ready { t.Fatal("readiness did not advance to child") }
+}
+
+func TestDiagnosticExpiredBeforeChildCopy(t *testing.T) {
+	child := &diagnosticChildFixture{ready: make(chan struct{}), raw: json.RawMessage(`{"schema":1,"missing":[]}`)}
+	close(child.ready)
+	o := newDefinitionDrainOwner(&localDiagnosticFixture{child: child})
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = o.stopAuxiliaryFinal(ctx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, nil })
+	cancel()
+	raw, err := o.diagnostic()
+	if err != nil || child.calls != 0 || !bytes.Contains(raw, []byte("first-caller-closed")) { t.Fatal("expired gate called child") }
+	again, err := o.diagnostic()
+	if err != nil || child.calls != 0 || !bytes.Equal(raw, again) { t.Fatal("expired memo changed") }
+}
+
+func TestFirstLocalStopFreeze(t *testing.T) {
+	for _, invoked := range []bool{false, true} {
+		t.Run(fmt.Sprint(invoked), func(t *testing.T) {
+			b := &localDiagnosticFixture{count: 3}
+			o := newDefinitionDrainOwner(b)
+			deadline := time.Now().Add(-time.Second)
+			ctx, cancel := context.WithDeadline(context.Background(), deadline)
+			defer cancel()
+			var stop auxiliaryNativeStop
+			if invoked { stop = func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { return tracer.DefinitionAuxiliaryObservation{}, errors.New("private failure") } }
+			_ = o.stopAuxiliaryFinal(ctx, stop)
+			select { case <-o.localReady: default: t.Fatal("local freeze not ready") }
+			first := o.localStopFragment()
+			var d localStopDiagnostic
+			if err := json.Unmarshal(first, &d); err != nil { t.Fatal(err) }
+			if d.ChildInvoked != invoked || !d.FirstContextDone || !d.HasDeadline || d.DeadlineSeconds != deadline.Unix() || d.DeadlineNanoseconds != deadline.Nanosecond() || !d.NativeError || d.Channel.NonNilToHandleTrace != 3 { t.Fatalf("unexpected freeze: %+v", d) }
+			b.count = 99
+			o.freezeLocalStop(o.localClaim, !invoked, false, false, false, false)
+			_ = o.stopAuxiliaryFinal(context.Background(), stop)
+			if !bytes.Equal(first, o.localStopFragment()) { t.Fatal("first fragment changed") }
+			first[0] ^= 1
+			if bytes.Equal(first, o.localStopFragment()) { t.Fatal("fragment exposed owner bytes") }
+			if bytes.Contains(o.localStopFragment(), []byte("private failure")) { t.Fatal("error escaped into JSON") }
+		})
+	}
+}
+
+type definitionReadoutLifetimeFixture struct {
+	mu                         sync.Mutex
+	active                     bool
+	actionActive               atomic.Bool
+	validateCalls, withCalls   atomic.Uint32
+	validateFailAt, withFailAt uint32
+}
+
+func (f *definitionReadoutLifetimeFixture) Session() string {
+	return "session"
+}
+func (f *definitionReadoutLifetimeFixture) HostTGID() uint32 {
+	return 123
+}
+func (f *definitionReadoutLifetimeFixture) Birth() uint64 {
+	return 456
+}
+func (f *definitionReadoutLifetimeFixture) Validate() error {
+	n := f.validateCalls.Add(1)
+	if n == f.validateFailAt {
+		return unix.EACCES
+	}
+	return nil
+}
+func (f *definitionReadoutLifetimeFixture) WithDefinitionReadout(action func() error) error {
+	f.mu.Lock()
+	n := f.withCalls.Add(1)
+	if !f.active || n == f.withFailAt {
+		f.mu.Unlock()
+		return unix.EPERM
+	}
+	f.mu.Unlock()
+	f.actionActive.Store(true)
+	defer f.actionActive.Store(false)
+	if action != nil {
+		return action()
+	}
+	return nil
+}
+
+type definitionSampleFixture struct {
+	definitionDrainFixture
+	lifetime  libpf.TraceDefinitionLifetime
+	samples   atomic.Uint32
+	sampleErr error
+	onSample  func()
+	zero      bool
+	rows      []libpf.TraceDefinitionCPUCounts
+}
+
+func (b *definitionSampleFixture) DefinitionLifetime() libpf.TraceDefinitionLifetime {
+	return b.lifetime
+}
+func (b *definitionSampleFixture) SampleDefinitions(context.Context) (libpf.TraceDefinitionObservation, error) {
+	b.samples.Add(1)
+	lifetime, ok := b.lifetime.(*definitionReadoutLifetimeFixture)
+	if !ok || !lifetime.actionActive.Load() {
+		return libpf.TraceDefinitionObservation{}, errors.New("sample invoked outside readout authority action")
+	}
+	if b.onSample != nil {
+		b.onSample()
+	}
+	observation := libpf.TraceDefinitionObservation{
+		Binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "session", HostTGID: 123, Birth: 456, CounterMapID: 7, PerfMapID: 8, PossibleCPUs: 1, Generation: 9},
+		Rows:    b.rows,
+		Reader:  libpf.TraceDefinitionReaderCounts{Received: 1, HandedOff: 1},
+		Outcome: libpf.TraceDefinitionFinal,
+	}
+	if b.zero {
+		observation.Rows[0] = libpf.TraceDefinitionCPUCounts{}
+		observation.Reader = libpf.TraceDefinitionReaderCounts{}
+		observation.Outcome = libpf.TraceDefinitionNotExercised
+	}
+	return observation, b.sampleErr
+}
+
+func newDefinitionSampleFixture() (*definitionSampleFixture, *definitionReadoutLifetimeFixture) {
+	lifetime := &definitionReadoutLifetimeFixture{active: true}
+	b := &definitionSampleFixture{definitionDrainFixture: definitionDrainFixture{readerDone: make(chan struct{}), release: make(chan struct{})}, lifetime: lifetime}
+	b.rows = []libpf.TraceDefinitionCPUCounts{{Attempted: 1, Submitted: 1}}
+	return b, lifetime
+}
+
+func TestDefinitionAccountingSampleFixtureRequiresAuthorityAction(t *testing.T) {
+	b, lifetime := newDefinitionSampleFixture()
+	ctx := context.Background()
+	if _, err := b.SampleDefinitions(ctx); err == nil {
+		t.Fatal("fixture admitted sampling before authority action")
+	}
+	if err := lifetime.WithDefinitionReadout(func() error {
+		_, err := b.SampleDefinitions(ctx)
+		return err
+	}); err != nil {
+		t.Fatal("fixture refused sampling inside authority action", err)
+	}
+	if _, err := b.SampleDefinitions(ctx); err == nil {
+		t.Fatal("fixture cached authority after action returned")
+	}
+}
+
+func TestDefinitionAccountingDrainSamplesAfterConsumerAndCopiesOnce(t *testing.T) {
+	b, _ := newDefinitionSampleFixture()
+	o := newDefinitionDrainOwner(b)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	done, secondDone := make(chan struct{}), make(chan struct{})
+	var firstErr, secondErr error
+	var started, secondStarted bool
+	var release sync.Once
+	t.Cleanup(func() {
+		cancel(); release.Do(func() { close(b.release) })
+		if started { definitionOwnerModelJoin(t, "first drain", done); definitionOwnerModelJoin(t, "trace owner", o.done) }
+		if secondStarted { definitionOwnerModelJoin(t, "second drain", secondDone) }
+	})
+	started = true
+	go func() { defer close(done); _, firstErr = o.drain(ctx) }()
+	select {
+	case <-b.readerDone:
+	case <-ctx.Done():
+		t.Fatal("reader did not reach handoff", ctx.Err())
+	}
+	if b.samples.Load() != 0 {
+		t.Fatal("sampled before consumer joined")
+	}
+	waiter, stopWaiter := context.WithCancel(context.Background())
+	stopWaiter()
+	partial, err := o.drain(waiter)
+	if !errors.Is(err, context.Canceled) || partial.TraceDefinition != nil {
+		t.Fatal("waiter received qualified partial observation", partial, err)
+	}
+	secondStarted = true
+	go func() { defer close(secondDone); _, secondErr = o.drain(ctx) }()
+	release.Do(func() { close(b.release) })
+	firstJoined := definitionOwnerModelJoin(t, "first drain", done)
+	secondJoined := definitionOwnerModelJoin(t, "second drain", secondDone)
+	ownerJoined := definitionOwnerModelJoin(t, "trace owner", o.done)
+	if !firstJoined || !secondJoined || !ownerJoined { return }
+	if firstErr != nil || secondErr != nil { t.Errorf("drain errors: %v / %v", firstErr, secondErr); return }
+	b.rows[0].Attempted = 888
+	first, err := o.drain(ctx)
+	if err != nil || first.TraceDefinition == nil || first.TraceDefinition.Outcome != libpf.TraceDefinitionFinal || len(first.TraceDefinition.Rows) != 1 || first.TraceDefinition.Rows[0].Attempted != 1 {
+		t.Fatal("final sample missing", first, err)
+	}
+	first.TraceDefinition.Rows[0].Attempted = 999
+	second, err := o.drain(ctx)
+	if err != nil || second.TraceDefinition == nil || len(second.TraceDefinition.Rows) != 1 || second.TraceDefinition.Rows[0].Attempted != 1 || b.samples.Load() != 1 {
+		t.Fatal("result aliased or sampled more than once", second, err, b.samples.Load())
+	}
+}
+
+func TestDefinitionAccountingEarlyDrainFailureCannotUpgrade(t *testing.T) {
+	b, lifetime := newDefinitionSampleFixture()
+	lifetime.active = false
+	o := newDefinitionDrainOwner(b)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	var release sync.Once
+	var started bool
+	t.Cleanup(func() { cancel(); release.Do(func() { close(b.release) }); if started { definitionOwnerModelJoin(t, "early trace owner", o.done) } })
+	started = true
+	r, err := o.drain(ctx)
+	if !definitionOwnerModelJoin(t, "early trace owner", o.done) { return }
+	if !errors.Is(err, unix.EPERM) || r.TraceDefinition != nil { t.Fatal("direct early drain armed accounting", r, err) }
+	lifetime.active = true
+	if r, err := o.drain(ctx); !errors.Is(err, unix.EPERM) || r.TraceDefinition != nil || b.samples.Load() != 0 {
+		t.Fatal("failed early drain upgraded later", r, err)
+	}
+	select {
+	case <-b.readerDone:
+		t.Fatal("early authority failure nevertheless flushed reader")
+	default:
+	}
+}
+
+func TestDefinitionAccountingZeroSampleStillRequiresAuthorityAndIsNotExercised(t *testing.T) {
+	for _, active := range []bool{false, true} {
+		b, lifetime := newDefinitionSampleFixture()
+		b.zero = true
+		lifetime.active = active
+		close(b.release)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		o := newDefinitionDrainOwner(b)
+		started := false
+		t.Cleanup(func() { cancel(); if started { definitionOwnerModelJoin(t, "zero trace owner", o.done) } })
+		started = true
+		r, err := o.drain(ctx)
+		if !definitionOwnerModelJoin(t, "zero trace owner", o.done) { return }
+		cancel()
+		if !active {
+			if err == nil || r.TraceDefinition != nil {
+				t.Fatal("zero counts bypassed native authority", r, err)
+			}
+			continue
+		}
+		if err != nil || r.TraceDefinition == nil || r.TraceDefinition.Outcome != libpf.TraceDefinitionNotExercised || !r.BuffersDrained {
+			t.Fatal("owned final zero sample became positive exercised evidence", r, err)
+		}
+	}
+}
+
+type definitionLifetimeWithoutReadout struct{ libpf.TraceDefinitionLifetime }
+
+func TestDefinitionAccountingMissingReadoutExtensionRefusesBeforeFlush(t *testing.T) {
+	b, lifetime := newDefinitionSampleFixture()
+	b.lifetime = definitionLifetimeWithoutReadout{lifetime}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	o := newDefinitionDrainOwner(b)
+	var release sync.Once
+	var started bool
+	t.Cleanup(func() { cancel(); release.Do(func() { close(b.release) }); if started { definitionOwnerModelJoin(t, "missing-provider owner", o.done) } })
+	started = true
+	r, err := o.drain(ctx)
+	if !definitionOwnerModelJoin(t, "missing-provider owner", o.done) { return }
+	if err == nil || r.TraceDefinition != nil || b.samples.Load() != 0 { t.Fatal("missing readout provider fell back to unaccounted success", r, err) }
+	select {
+	case <-b.readerDone:
+		t.Fatal("missing readout provider nevertheless flushed reader")
+	default:
+	}
+}
+
+func TestDefinitionAccountingDrainDiscardsFailedProvisionalSample(t *testing.T) {
+	for _, phase := range []string{"validate_before", "validate_after_join", "validate_after_sample", "window_before", "window_sample", "window_publish", "sample_eperm", "quiesce_eacces", "cancel_sample"} {
+		t.Run(phase, func(t *testing.T) {
+			b, lifetime := newDefinitionSampleFixture()
+			close(b.release)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			cause := error(unix.EACCES)
+			switch phase {
+			case "validate_before":
+				lifetime.validateFailAt = 1
+			case "validate_after_join":
+				lifetime.validateFailAt = 2
+			case "validate_after_sample":
+				lifetime.validateFailAt = 3
+			case "window_before":
+				lifetime.withFailAt = 1
+				cause = unix.EPERM
+			case "window_sample":
+				lifetime.withFailAt = 2
+				cause = unix.EPERM
+			case "window_publish":
+				lifetime.withFailAt = 3
+				cause = unix.EPERM
+			case "sample_eperm":
+				b.sampleErr = unix.EPERM
+				cause = unix.EPERM
+			case "quiesce_eacces":
+				b.failure = unix.EACCES
+			case "cancel_sample":
+				b.onSample = cancel
+				cause = context.Canceled
+			}
+			o := newDefinitionDrainOwner(b)
+			var started bool
+			t.Cleanup(func() { cancel(); if started { definitionOwnerModelJoin(t, "failed trace owner", o.done) } })
+			started = true
+			r, err := o.drain(ctx)
+			if !definitionOwnerModelJoin(t, "failed trace owner", o.done) { return }
+			if !errors.Is(err, cause) || r.TraceDefinition != nil || r.BuffersDrained { t.Fatal("failed finalization published provisional success", phase, r, err) }
+		})
+	}
+}
+
+func definitionOwnerModelJoinIfStarted(t *testing.T, name string, owner *definitionDrainOwner) bool {
+	if owner == nil { return true }
+	owner.mu.Lock()
+	started := owner.traceStarted
+	owner.mu.Unlock()
+	if !started { return true }
+	return definitionOwnerModelJoin(t, name, owner.done)
 }
 
 func TestHotSpotDefinitionDrainDispatchesOnlyInitializedOwnedProfiles(t *testing.T) {
@@ -33,14 +552,24 @@ func TestHotSpotDefinitionDrainDispatchesOnlyInitializedOwnedProfiles(t *testing
 			backend := &definitionDrainFixture{readerDone: make(chan struct{}), release: done}
 			o := &otelResolverInstance{options: test.options, trc: &tracer.Tracer{}, consumerDone: done, definitionDrain: newDefinitionDrainOwner(backend)}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
+			firstOwner := o.definitionDrain
+			t.Cleanup(func() {
+				cancel()
+				definitionOwnerModelJoinIfStarted(t, "first dispatch owner", firstOwner)
+				current := o.ownedDefinitionDrain()
+				if current != firstOwner { definitionOwnerModelJoinIfStarted(t, "second dispatch owner", current) }
+			})
 			observation, err := o.DrainDefinitions(ctx)
+			if !definitionOwnerModelJoinIfStarted(t, "first dispatch owner", firstOwner) { return }
 			if err != nil || !observation.BuffersDrained || !observation.ReaderStopped || !observation.ConsumerStopped {
 				t.Fatal("initialized owned profile did not dispatch its existing drain owner", observation, err)
 			}
 			// Dispatch is not initialization: the real tracer must still refuse an unstarted reader.
 			o.definitionDrain = nil
 			observation, err = o.DrainDefinitions(ctx)
+			secondOwner := o.ownedDefinitionDrain()
+			if !definitionOwnerModelJoinIfStarted(t, "second dispatch owner", secondOwner) { return }
+			if secondOwner == nil || secondOwner == firstOwner { t.Fatal("dispatch failed to create a distinct second owner") }
 			if err == nil || !strings.Contains(err.Error(), "owned definition reader not started") || observation.BuffersDrained {
 				t.Fatal("unstarted real definition reader was not checked", observation, err)
 			}
@@ -78,34 +607,37 @@ func TestDefinitionConsumerDrainJoinsFinalCallback(t *testing.T) {
 	b := &definitionDrainFixture{readerDone: make(chan struct{}), release: make(chan struct{})}
 	o := newDefinitionDrainOwner(b)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { _, err := o.stop(ctx); done <- err }()
+	done := make(chan struct{})
+	var stopErr error
+	var started bool
+	var release sync.Once
+	t.Cleanup(func() { cancel(); release.Do(func() { close(b.release) }); if started { definitionOwnerModelJoin(t, "drain", done); definitionOwnerModelJoin(t, "owner", o.done) } })
+	started = true
+	go func() { defer close(done); _, stopErr = o.drain(ctx) }()
 	select {
 	case <-b.readerDone:
-	case err := <-done:
-		t.Fatal("reader drain skipped", err)
-	case <-ctx.Done():
-		t.Fatal("reader not drained")
+	case <-done: t.Errorf("reader drain skipped: %v", stopErr); return
+	case <-ctx.Done(): t.Error("reader not drained"); return
 	}
-	select {
-	case err := <-done:
-		t.Fatal("consumer join invented", err)
-	default:
-	}
-	close(b.release)
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	r, err := o.stop(ctx)
-	if err != nil || !r.ReaderStopped || !r.ConsumerStopped || !r.BuffersDrained {
-		t.Fatal("final handoff lost", r, err)
-	}
+	select { case <-done: t.Errorf("consumer join invented: %v", stopErr); return; default: }
+	release.Do(func() { close(b.release) })
+	joined := definitionOwnerModelJoin(t, "drain", done)
+	ownerJoined := definitionOwnerModelJoin(t, "owner", o.done)
+	if !joined || !ownerJoined { return }
+	if stopErr != nil { t.Error(stopErr); return }
+	r, err := o.drain(ctx)
+	if err != nil || !r.ReaderStopped || !r.ConsumerStopped || !r.BuffersDrained { t.Errorf("final handoff lost: %+v / %v", r, err) }
 }
 func TestDefinitionConsumerDrainTimeoutAndPermissionStayPartial(t *testing.T) {
 	for _, failure := range []error{unix.EPERM, unix.EACCES} {
 		o := newDefinitionDrainOwner(&definitionDrainFixture{failure: failure})
-		r, err := o.stop(context.Background())
+		failureCtx, failureCancel := context.WithTimeout(context.Background(), time.Second)
+		started := false
+		t.Cleanup(func() { failureCancel(); if started { definitionOwnerModelJoin(t, "permission owner", o.done) } })
+		started = true
+		r, err := o.drain(failureCtx)
+		if !definitionOwnerModelJoin(t, "permission owner", o.done) { return }
+		failureCancel()
 		if !errors.Is(err, failure) || r.BuffersDrained {
 			t.Fatal("permission failure downgraded", r, err)
 		}
@@ -113,19 +645,295 @@ func TestDefinitionConsumerDrainTimeoutAndPermissionStayPartial(t *testing.T) {
 	b := &definitionDrainFixture{readerDone: make(chan struct{}), release: make(chan struct{})}
 	o := newDefinitionDrainOwner(b)
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { _, err := o.stop(ctx); done <- err }()
+	done := make(chan struct{})
+	var stopErr error
+	var started bool
+	var release sync.Once
+	t.Cleanup(func() { cancel(); release.Do(func() { close(b.release) }); if started { definitionOwnerModelJoin(t, "drain", done); definitionOwnerModelJoin(t, "owner", o.done) } })
+	started = true
+	go func() { defer close(done); _, stopErr = o.drain(ctx) }()
 	select {
 	case <-b.readerDone:
-	case err := <-done:
-		cancel()
-		t.Fatal("drain skipped", err)
-	case <-time.After(time.Second):
-		cancel()
-		t.Fatal("reader did not drain")
+	case <-done: t.Errorf("drain skipped: %v", stopErr); return
+	case <-time.After(time.Second): t.Error("reader did not drain"); return
 	}
 	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatal("consumer timeout lost", err)
+	joined := definitionOwnerModelJoin(t, "drain", done)
+	ownerJoined := definitionOwnerModelJoin(t, "owner", o.done)
+	if !joined || !ownerJoined { return }
+	if !errors.Is(stopErr, context.Canceled) { t.Errorf("consumer timeout lost: %v", stopErr) }
+}
+
+// These helpers model trace observations and a missing opaque native receipt only.
+func definitionOwnerModelJoin(t *testing.T, name string, done <-chan struct{}) bool {
+	t.Helper()
+	select { case <-done: return true; case <-time.After(time.Second): t.Errorf("%s did not finish", name); return false }
+}
+
+func TestDefinitionAuxiliaryModelFreezesPendingTrace(t *testing.T) {
+	b, _ := newDefinitionSampleFixture()
+	o := newDefinitionDrainOwner(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	traceDone, nativeDone, nativeEntered := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	var traceStarted, nativeStarted bool
+	var traceErr, nativeErr error
+	var calls atomic.Uint32
+	t.Cleanup(func() {
+		cancel(); release.Do(func() { close(b.release) })
+		if nativeStarted { definitionOwnerModelJoin(t, "native", nativeDone) }
+		if traceStarted { definitionOwnerModelJoin(t, "trace", traceDone); definitionOwnerModelJoin(t, "trace owner", o.done) }
+	})
+	traceStarted = true
+	go func() { defer close(traceDone); _, traceErr = o.drain(ctx) }()
+	if !definitionOwnerModelJoin(t, "reader handoff", b.readerDone) { return }
+	nativeStarted = true
+	go func() {
+		defer close(nativeDone)
+		nativeErr = o.stopAuxiliaryFinal(ctx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) {
+			calls.Add(1)
+			close(nativeEntered)
+			return tracer.DefinitionAuxiliaryObservation{}, nil
+		})
+	}()
+	if !definitionOwnerModelJoin(t, "native callback", nativeEntered) || !definitionOwnerModelJoin(t, "native stop", nativeDone) { return }
+	if nativeErr != nil || calls.Load() != 1 { t.Errorf("native result=%v calls=%d", nativeErr, calls.Load()) }
+	first, firstErr := o.stop(ctx)
+	if firstErr == nil || !strings.Contains(firstErr.Error(), "trace drain missing or pending") || first.TraceDefinition != nil || first.BuffersDrained || first.Auxiliary == nil || first.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing { t.Errorf("pending trace combined projection: %+v / %v", first, firstErr) }
+	release.Do(func() { close(b.release) })
+	if !definitionOwnerModelJoin(t, "trace", traceDone) || !definitionOwnerModelJoin(t, "trace owner", o.done) { return }
+	if traceErr != nil { t.Errorf("trace drain: %v", traceErr) }
+	trace, err := o.drain(ctx)
+	if err != nil || trace.TraceDefinition == nil || !trace.BuffersDrained { t.Errorf("later trace did not finish: %+v / %v", trace, err) }
+	if err := o.stopAuxiliaryFinal(ctx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { calls.Add(1); return tracer.DefinitionAuxiliaryObservation{}, nil }); err != nil { t.Errorf("cached native result: %v", err) }
+	again, againErr := o.stop(ctx)
+	if calls.Load() != 1 || againErr == nil || !strings.Contains(againErr.Error(), "trace drain missing or pending") || again.TraceDefinition != nil || again.BuffersDrained { t.Errorf("late trace changed frozen combined result: %+v / %v calls=%d", again, againErr, calls.Load()) }
+}
+
+func TestDefinitionAuxiliaryModelCopiesReadyTraceAndMissingReceipt(t *testing.T) {
+	b, _ := newDefinitionSampleFixture()
+	o := newDefinitionDrainOwner(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	traceDone, nativeDone := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	var traceStarted, nativeStarted bool
+	var traceErr, nativeErr error
+	var calls atomic.Uint32
+	t.Cleanup(func() {
+		cancel(); release.Do(func() { close(b.release) })
+		if nativeStarted { definitionOwnerModelJoin(t, "native", nativeDone) }
+		if traceStarted { definitionOwnerModelJoin(t, "trace", traceDone); definitionOwnerModelJoin(t, "trace owner", o.done) }
+	})
+	release.Do(func() { close(b.release) })
+	traceStarted = true
+	go func() { defer close(traceDone); _, traceErr = o.drain(ctx) }()
+	if !definitionOwnerModelJoin(t, "trace", traceDone) || !definitionOwnerModelJoin(t, "trace owner", o.done) { return }
+	if traceErr != nil { t.Errorf("trace drain: %v", traceErr); return }
+	nativeStarted = true
+	go func() {
+		defer close(nativeDone)
+		nativeErr = o.stopAuxiliaryFinal(ctx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { calls.Add(1); return tracer.DefinitionAuxiliaryObservation{}, nil })
+	}()
+	if !definitionOwnerModelJoin(t, "native", nativeDone) { return }
+	if nativeErr != nil { t.Errorf("native stop: %v", nativeErr); return }
+	first, err := o.stop(ctx)
+	if err != nil || first.TraceDefinition == nil || len(first.TraceDefinition.Rows) != 1 || first.Auxiliary == nil { t.Errorf("model snapshot missing: %+v / %v", first, err); return }
+	if first.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing || first.TraceDefinition.Binding.Session != "session" || first.TraceDefinition.Binding.HostTGID != 123 || first.TraceDefinition.Binding.Birth != 456 { t.Errorf("model binding/disposition: %+v", first) }
+	b.rows[0].Attempted = 91
+	first.TraceDefinition.Rows[0].Attempted = 92
+	*first.Auxiliary = tracer.DefinitionAuxiliaryObservation{}
+	again, err := o.stop(ctx)
+	if err != nil || again.TraceDefinition == nil || len(again.TraceDefinition.Rows) != 1 || again.Auxiliary == nil { t.Errorf("cached snapshot missing: %+v / %v", again, err); return }
+	if again.TraceDefinition.Rows[0].Attempted != 1 || again.Auxiliary == first.Auxiliary || calls.Load() != 1 || again.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing { t.Errorf("cache aliased or re-queried: %+v calls=%d", again, calls.Load()) }
+}
+
+func TestDefinitionAuxiliaryModelFirstContextAndDuplicateWait(t *testing.T) {
+	b, _ := newDefinitionSampleFixture()
+	o := newDefinitionDrainOwner(b)
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	traceDone, nativeEntered, nativeDone, duplicateDone, canceledDone := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	var traceStarted, nativeStarted, duplicateStarted, canceledStarted bool
+	var traceErr, nativeErr, duplicateErr, canceledErr error
+	var calls atomic.Uint32
+	sentinel := errors.New("model native stop error")
+	t.Cleanup(func() {
+		cancelFirst(); release.Do(func() { close(b.release) })
+		if duplicateStarted { definitionOwnerModelJoin(t, "duplicate", duplicateDone) }
+		if canceledStarted { definitionOwnerModelJoin(t, "canceled duplicate", canceledDone) }
+		if nativeStarted { definitionOwnerModelJoin(t, "first native", nativeDone) }
+		if traceStarted { definitionOwnerModelJoin(t, "trace", traceDone); definitionOwnerModelJoin(t, "trace owner", o.done) }
+	})
+	release.Do(func() { close(b.release) })
+	traceStarted = true
+	go func() { defer close(traceDone); _, traceErr = o.drain(firstCtx) }()
+	if !definitionOwnerModelJoin(t, "trace", traceDone) || !definitionOwnerModelJoin(t, "trace owner", o.done) { return }
+	if traceErr != nil { t.Errorf("trace drain: %v", traceErr); return }
+	nativeStarted = true
+	go func() {
+		defer close(nativeDone)
+		nativeErr = o.stopAuxiliaryFinal(firstCtx, func(ctx context.Context) (tracer.DefinitionAuxiliaryObservation, error) {
+			calls.Add(1)
+			close(nativeEntered)
+			<-ctx.Done()
+			return tracer.DefinitionAuxiliaryObservation{}, errors.Join(ctx.Err(), sentinel)
+		})
+	}()
+	if !definitionOwnerModelJoin(t, "native callback", nativeEntered) { return }
+	duplicateCtx, cancelDuplicate := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancelDuplicate()
+	duplicateStarted = true
+	go func() {
+		defer close(duplicateDone)
+		duplicateErr = o.stopAuxiliaryFinal(duplicateCtx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { calls.Add(1); return tracer.DefinitionAuxiliaryObservation{}, nil })
+	}()
+	if !definitionOwnerModelJoin(t, "duplicate", duplicateDone) { return }
+	if !errors.Is(duplicateErr, context.DeadlineExceeded) || firstCtx.Err() != nil || calls.Load() != 1 { t.Errorf("duplicate changed first stop: err=%v first=%v calls=%d", duplicateErr, firstCtx.Err(), calls.Load()) }
+	canceledCtx, cancelDuplicateNow := context.WithCancel(context.Background())
+	cancelDuplicateNow()
+	canceledStarted = true
+	go func() { defer close(canceledDone); canceledErr = o.stopAuxiliaryFinal(canceledCtx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { calls.Add(1); return tracer.DefinitionAuxiliaryObservation{}, nil }) }()
+	if !definitionOwnerModelJoin(t, "canceled duplicate", canceledDone) { return }
+	if !errors.Is(canceledErr, context.Canceled) || firstCtx.Err() != nil || calls.Load() != 1 { t.Errorf("canceled duplicate changed first stop: err=%v first=%v calls=%d", canceledErr, firstCtx.Err(), calls.Load()) }
+	cancelFirst()
+	if !definitionOwnerModelJoin(t, "first native", nativeDone) { return }
+	if !errors.Is(nativeErr, context.Canceled) || !errors.Is(nativeErr, sentinel) { t.Errorf("first native causes lost: %v", nativeErr) }
+	result, err := o.stop(context.Background())
+	if !errors.Is(err, sentinel) || !errors.Is(err, context.Canceled) || result.TraceDefinition == nil || result.Auxiliary == nil || result.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing || result.AuxiliaryStopped { t.Errorf("combined cached result: %+v / %v", result, err) }
+	againErr := o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { calls.Add(1); return tracer.DefinitionAuxiliaryObservation{}, nil })
+	if !errors.Is(againErr, sentinel) || !errors.Is(againErr, context.Canceled) || calls.Load() != 1 { t.Errorf("cached native result=%v calls=%d", againErr, calls.Load()) }
+}
+
+func TestDefinitionAuxiliaryModelFirstDeadlineFreezesPendingTrace(t *testing.T) {
+	b, _ := newDefinitionSampleFixture()
+	o := newDefinitionDrainOwner(b)
+	traceCtx, cancelTrace := context.WithCancel(context.Background())
+	traceDone, nativeEntered, nativeDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	var traceStarted, nativeStarted bool
+	var traceErr, nativeErr error
+	var calls atomic.Uint32
+	var cancelFirst context.CancelFunc
+	t.Cleanup(func() {
+		if cancelFirst != nil { cancelFirst() }
+		cancelTrace(); release.Do(func() { close(b.release) })
+		if nativeStarted { definitionOwnerModelJoin(t, "native deadline", nativeDone) }
+		if traceStarted { definitionOwnerModelJoin(t, "trace", traceDone); definitionOwnerModelJoin(t, "trace owner", o.done) }
+	})
+	traceStarted = true
+	go func() { defer close(traceDone); _, traceErr = o.drain(traceCtx) }()
+	if !definitionOwnerModelJoin(t, "reader handoff", b.readerDone) { return }
+	firstCtx, firstCancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	cancelFirst = firstCancel
+	nativeStarted = true
+	go func() {
+		defer close(nativeDone)
+		nativeErr = o.stopAuxiliaryFinal(firstCtx, func(ctx context.Context) (tracer.DefinitionAuxiliaryObservation, error) {
+			calls.Add(1)
+			close(nativeEntered)
+			<-ctx.Done()
+			return tracer.DefinitionAuxiliaryObservation{}, errors.Join(ctx.Err(), unix.EACCES)
+		})
+	}()
+	if !definitionOwnerModelJoin(t, "native entered", nativeEntered) { return }
+	if firstCtx.Err() != nil { t.Errorf("first deadline expired before native entry: %v", firstCtx.Err()); return }
+	if !definitionOwnerModelJoin(t, "native deadline", nativeDone) { return }
+	if !errors.Is(nativeErr, context.DeadlineExceeded) || !errors.Is(nativeErr, unix.EACCES) || strings.Contains(nativeErr.Error(), "trace drain missing") { t.Errorf("native causes contaminated or lost: %v", nativeErr) }
+	combined, combinedErr := o.stop(context.Background())
+	if !errors.Is(combinedErr, context.DeadlineExceeded) || !errors.Is(combinedErr, unix.EACCES) || !strings.Contains(combinedErr.Error(), "trace drain missing or pending") || combined.TraceDefinition != nil || combined.BuffersDrained || combined.Auxiliary == nil || combined.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing { t.Errorf("deadline combined snapshot: %+v / %v", combined, combinedErr) }
+	release.Do(func() { close(b.release) })
+	traceJoined := definitionOwnerModelJoin(t, "trace", traceDone)
+	ownerJoined := definitionOwnerModelJoin(t, "trace owner", o.done)
+	if !traceJoined || !ownerJoined { return }
+	if traceErr != nil { t.Errorf("late trace: %v", traceErr) }
+	if combined.Auxiliary != nil { *combined.Auxiliary = tracer.DefinitionAuxiliaryObservation{} }
+	again, againErr := o.stop(context.Background())
+	if again.Auxiliary == nil || again.Auxiliary == combined.Auxiliary || again.TraceDefinition != nil || !errors.Is(againErr, unix.EACCES) || !errors.Is(againErr, context.DeadlineExceeded) || calls.Load() != 1 { t.Errorf("deadline cache changed: %+v / %v calls=%d", again, againErr, calls.Load()) }
+	repeatErr := o.stopAuxiliaryFinal(context.Background(), func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { calls.Add(1); return tracer.DefinitionAuxiliaryObservation{}, nil })
+	if !errors.Is(repeatErr, unix.EACCES) || !errors.Is(repeatErr, context.DeadlineExceeded) || calls.Load() != 1 { t.Errorf("cached native error: %v calls=%d", repeatErr, calls.Load()) }
+}
+
+func TestDefinitionAuxiliaryModelDuplicateDeadlineAndUnlockedGetter(t *testing.T) {
+	b, _ := newDefinitionSampleFixture()
+	o := newDefinitionDrainOwner(b)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	traceDone, nativeEntered, nativeDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	duplicateDone, getterDone, nativeRelease := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseTrace, releaseNative sync.Once
+	var traceStarted, nativeStarted, duplicateStarted, getterStarted bool
+	var traceErr, nativeErr, duplicateErr, getterErr error
+	var getter symbolizer.DefinitionStopObservation
+	var calls atomic.Uint32
+	t.Cleanup(func() {
+		cancel(); releaseTrace.Do(func() { close(b.release) }); releaseNative.Do(func() { close(nativeRelease) })
+		if getterStarted { definitionOwnerModelJoin(t, "getter", getterDone) }
+		if duplicateStarted { definitionOwnerModelJoin(t, "duplicate", duplicateDone) }
+		if nativeStarted { definitionOwnerModelJoin(t, "native", nativeDone) }
+		if traceStarted { definitionOwnerModelJoin(t, "trace", traceDone); definitionOwnerModelJoin(t, "trace owner", o.done) }
+	})
+	releaseTrace.Do(func() { close(b.release) })
+	traceStarted = true
+	go func() { defer close(traceDone); _, traceErr = o.drain(ctx) }()
+	traceJoined := definitionOwnerModelJoin(t, "trace", traceDone)
+	ownerJoined := definitionOwnerModelJoin(t, "trace owner", o.done)
+	if !traceJoined || !ownerJoined { return }
+	if traceErr != nil { t.Errorf("trace: %v", traceErr); return }
+	nativeStarted = true
+	go func() {
+		defer close(nativeDone)
+		nativeErr = o.stopAuxiliaryFinal(ctx, func(ctx context.Context) (tracer.DefinitionAuxiliaryObservation, error) {
+			calls.Add(1)
+			close(nativeEntered)
+			select { case <-nativeRelease: return tracer.DefinitionAuxiliaryObservation{}, nil; case <-ctx.Done(): return tracer.DefinitionAuxiliaryObservation{}, ctx.Err() }
+		})
+	}()
+	if !definitionOwnerModelJoin(t, "native entered", nativeEntered) { return }
+	getterStarted = true
+	go func() { defer close(getterDone); getter, getterErr = o.result() }()
+	if !definitionOwnerModelJoin(t, "getter while native blocked", getterDone) { return }
+	if getterErr != nil || getter.TraceDefinition == nil { t.Errorf("getter blocked or lost trace: %+v / %v", getter, getterErr) }
+	duplicateCtx, cancelDuplicate := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancelDuplicate()
+	duplicateStarted = true
+	go func() { defer close(duplicateDone); duplicateErr = o.stopAuxiliaryFinal(duplicateCtx, func(context.Context) (tracer.DefinitionAuxiliaryObservation, error) { calls.Add(1); return tracer.DefinitionAuxiliaryObservation{}, nil }) }()
+	if !definitionOwnerModelJoin(t, "duplicate", duplicateDone) { return }
+	if !errors.Is(duplicateErr, context.DeadlineExceeded) || ctx.Err() != nil || calls.Load() != 1 { t.Errorf("duplicate affected first: %v / %v calls=%d", duplicateErr, ctx.Err(), calls.Load()) }
+	releaseNative.Do(func() { close(nativeRelease) })
+	if !definitionOwnerModelJoin(t, "native", nativeDone) { return }
+	if nativeErr != nil { t.Errorf("first native error: %v", nativeErr) }
+	first, firstErr := o.stop(ctx)
+	second, secondErr := o.stop(ctx)
+	if firstErr != nil || secondErr != nil || first.TraceDefinition == nil || second.TraceDefinition == nil || first.Auxiliary == nil || second.Auxiliary == nil || first.Auxiliary == second.Auxiliary || first.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing || second.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing || calls.Load() != 1 { t.Errorf("nonfinal cached result: %+v / %v; %+v / %v calls=%d", first, firstErr, second, secondErr, calls.Load()) }
+}
+
+// This checks necessary scalar facts, not issuance of an all-source receipt.
+func TestDefinitionAuxiliaryModelIncompleteConjunction(t *testing.T) {
+	for _, tc := range []struct { name string; missingAux, traceNotFinal, noReader, noConsumer, noBuffer, traceError bool }{
+		{name: "missing-auxiliary", missingAux: true},
+		{name: "zero-missing-auxiliary"},
+		{name: "trace-not-final", traceNotFinal: true},
+		{name: "reader-incomplete", noReader: true},
+		{name: "consumer-incomplete", noConsumer: true},
+		{name: "buffer-incomplete", noBuffer: true},
+		{name: "trace-pending-error", traceError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			trace := libpf.TraceDefinitionObservation{Outcome: libpf.TraceDefinitionFinal, Binding: libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "session", HostTGID: 123, Birth: 456, CounterMapID: 7, PerfMapID: 8, PossibleCPUs: 1, Generation: 9}}
+			if tc.traceNotFinal { trace.Outcome = libpf.TraceDefinitionNotExercised }
+			aux := tracer.DefinitionAuxiliaryObservation{}
+			r := symbolizer.DefinitionStopObservation{ReaderStopped: !tc.noReader, ConsumerStopped: !tc.noConsumer, BuffersDrained: !tc.noBuffer, AuxiliaryStopped: true, TraceDefinition: &trace, Auxiliary: &aux}
+			if tc.missingAux { r.Auxiliary = nil }
+			var traceErr error
+			if tc.traceError { traceErr = errors.New("trace pending") }
+			traceReady := traceErr == nil && r.ReaderStopped && r.ConsumerStopped && r.BuffersDrained && r.TraceDefinition.Outcome == libpf.TraceDefinitionFinal
+			wantTraceReady := !(tc.traceNotFinal || tc.noReader || tc.noConsumer || tc.noBuffer || tc.traceError)
+			if traceReady != wantTraceReady { t.Errorf("trace prerequisite=%v want=%v", traceReady, wantTraceReady) }
+			validationErr := validateCombinedFinal(r, traceErr, nil)
+			// Missing is a nonfinal value; the validator need not return an error for it.
+			nativeFinal := r.Auxiliary != nil && r.Auxiliary.Disposition() == tracer.DefinitionAuxiliaryFrozenFinal
+			complete := validationErr == nil && traceReady && r.AuxiliaryStopped && nativeFinal
+			if complete { t.Error("missing native receipt produced a complete conjunction") }
+			if r.Auxiliary != nil && r.Auxiliary.Disposition() != tracer.DefinitionAuxiliaryMissing { t.Errorf("zero receipt was not Missing: %v", r.Auxiliary.Disposition()) }
+		})
 	}
 }

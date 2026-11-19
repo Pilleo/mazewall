@@ -63,4 +63,12 @@ Implementation and local qualification are complete. This issue remains open for
 repository review; no merge or remote package-delivery acceptance is claimed.
 
 ---
+## Repository-review secondary-route expansion — 2026-11-04
+
+[DOCS-04](../reviews/2026-11-04-repository-review-findings.md#docs-04) confirms CONTRIBUTING
+and REPRODUCING_RESULTS still invoke absent scripts/run_tests.sh. The earlier GETTING_STARTED/
+enforcer repair is present. Point these remaining routes to maintained unitCheck/kernelCheck/
+container guidance and statically validate commands/references, without inventing a new launcher.
+
+---
 <!-- id: issue-20261016-015032-003-repair-first-time-library-installation-guidance  file: issue-20261016-015032-003-repair-first-time-library-installation-guidance.md -->

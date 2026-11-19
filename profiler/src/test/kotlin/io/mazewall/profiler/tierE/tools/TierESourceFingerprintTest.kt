@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.Locale
 
 class TierESourceFingerprintTest {
     @Test
@@ -42,11 +43,11 @@ class TierESourceFingerprintTest {
             val fileDigest = MessageDigest
                 .getInstance("SHA-256")
                 .digest("// frozen source\n".toByteArray(StandardCharsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
+                .joinToString("") { "%02x".format(Locale.ROOT, it) }
             val expectedAggregate = MessageDigest
                 .getInstance("SHA-256")
                 .digest("build.gradle.kts\u0000regular\u0000$fileDigest\n".toByteArray(StandardCharsets.UTF_8))
-                .joinToString("") { "%02x".format(it) }
+                .joinToString("") { "%02x".format(Locale.ROOT, it) }
             assertEquals(expectedAggregate, before)
             assertEquals(
                 "regular",

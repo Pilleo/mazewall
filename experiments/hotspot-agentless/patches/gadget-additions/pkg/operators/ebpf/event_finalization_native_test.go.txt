@@ -6,10 +6,16 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/perf"
+	"github.com/cilium/ebpf/ringbuf"
 	gadgetcontext "github.com/inspektor-gadget/inspektor-gadget/pkg/gadget-context"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/params"
@@ -72,7 +78,7 @@ func TestStrictFullFinalizationRequiresBothOwnedStackHelpers(t *testing.T) {
 }
 func TestStrictFullFinalizationHookRunsBeforeResourceRetirement(t *testing.T) {
 	r := newEventDrainReader()
-	close(r.done)
+	r.finish(nil)
 	called := false
 	i := &ebpfInstance{tracers: map[string]*Tracer{"openat": {eventDrain: r}}, eventStopOptions: &operators.EventFinalizationOptions{StrictFull: true, AfterReadout: func(ctx context.Context) error {
 		called = true
@@ -81,10 +87,567 @@ func TestStrictFullFinalizationHookRunsBeforeResourceRetirement(t *testing.T) {
 		}
 		return unix.EPERM
 	}}}
-	err := (nativeEventStopBackend{instance: i}).Join(context.Background())
+	h := newEventReadoutHold()
+	b := nativeEventStopBackend{instance: i, hold: h}
+	i.eventFinalizer = newEventStopOwner(b)
+	i.publishOwnedEventInitialization(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := b.Join(ctx)
 	if !called || !errors.Is(err, unix.EPERM) {
 		t.Fatal("definition hook skipped or downgraded", called, err)
 	}
+}
+
+func TestOwnedCloseBeforeInitializationWaitsForPublication(t *testing.T) {
+	i := eventFinalizationScopeFixture()
+	admission, err := admitEventFinalizationScope(i)
+	if err != nil { t.Fatal(err) }
+	h := newEventReadoutHold()
+	b := nativeEventStopBackend{instance: i, hold: h}
+	i.eventFinalizer = newEventStopOwner(b)
+	i.eventFinalizer.admission = admission
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h.bindStopContext(ctx)
+	var publishOnce sync.Once
+	publish := func() { publishOnce.Do(func() { i.publishOwnedEventInitialization(unix.EACCES) }) }
+	closeDone := make(chan struct{})
+	var closeErr error
+	launched := false
+	t.Cleanup(func() {
+		publish()
+		if launched {
+			select {
+			case <-closeDone:
+			case <-time.After(5 * time.Second): t.Errorf("close caller did not return")
+			}
+		}
+		h.stateMu.Lock()
+		requested := h.closeRequested
+		h.stateMu.Unlock()
+		if requested {
+			select {
+			case <-h.closeDone:
+			case <-time.After(5 * time.Second): t.Errorf("disposal worker did not return")
+			}
+		}
+	})
+	launched = true
+	go func() { closeErr = i.closeOwnedEvents(); close(closeDone) }()
+	select {
+	case <-closeDone:
+	case <-time.After(5 * time.Second): t.Fatal("pre-initialization close blocked")
+	}
+	var pending *eventDisposalPending
+	if !errors.As(closeErr, &pending) { t.Fatalf("expected pending close, got %v", closeErr) }
+	select {
+	case <-h.closeDone: t.Fatal("disposal completed before initialization publication")
+	default:
+	}
+	if err := h.beginResourceUse(ctx, false); err == nil {
+		if endErr := h.endResourceUse(ctx, false); endErr != nil { t.Errorf("release unexpected admission: %v", endErr) }
+		t.Fatal("sealed owner admitted a new resource use")
+	}
+	publish()
+	i.publishOwnedEventInitialization(nil)
+	select {
+	case <-h.closeDone:
+	case <-time.After(5 * time.Second): t.Fatal("disposal did not observe initialization")
+	}
+	h.stateMu.Lock()
+	initErr := h.initErr
+	h.stateMu.Unlock()
+	if !errors.Is(initErr, unix.EACCES) { t.Fatalf("first initialization error lost: %v", initErr) }
+	if !errors.Is(pending, unix.EACCES) { t.Fatal("pending error did not expose late initialization error") }
+	if err := i.closeOwnedEvents(); !errors.Is(err, unix.EACCES) {
+		t.Fatalf("completed close lost initialization error: %v", err)
+	}
+}
+
+func TestT5RejectsIncompleteCloseFunctions(t *testing.T) {
+	if _, err := newEventReadoutHoldWithClosers(eventCloseFunctions{}); err == nil {
+		t.Fatal("empty close bundle accepted")
+	}
+}
+
+func TestT5RetireWaitsForPhysicalCloseAndReceiver(t *testing.T) {
+	i := eventFinalizationScopeFixture()
+	i.collectionSpec.Maps["events_alias"] = i.collectionSpec.Maps["events"]
+	admission, err := admitEventFinalizationScope(i)
+	if err != nil { t.Fatal(err) }
+	root := &definitionRootFixture{}
+	i.links = []link.Link{root}
+	reader := &ringbuf.Reader{}
+	perfReader := &perf.Reader{}
+	program := &ebpf.Program{}
+	events, lost := &ebpf.Map{}, &ebpf.Map{}
+	i.collection = &ebpf.Collection{Programs: map[string]*ebpf.Program{"capture_openat": program}, Maps: map[string]*ebpf.Map{"events": events, "events_alias": events, "events_lost_samples": lost}}
+	tracer := i.tracers["openat"]
+	tracer.ringbufReader, tracer.perfReader = reader, perfReader
+	tracer.lostSampleMap = lost
+	tracer.eventDrain = newEventDrainReader()
+	entered, releaseReader, afterReader := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	releaseReceiver, receiverDone, retireDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var enterOnce, afterOnce, releaseReaderOnce, releaseReceiverOnce sync.Once
+	var ringCalls, perfCalls, programCalls, mapCalls atomic.Uint32
+	closers := eventCloseFunctions{
+		ringReaderClose: func(r *ringbuf.Reader) error {
+			if r != reader { return errors.New("unexpected ring reader") }
+			ringCalls.Add(1)
+			enterOnce.Do(func() { close(entered) })
+			<-releaseReader
+			return unix.EACCES
+		},
+		perfReaderClose: func(r *perf.Reader) error {
+			if r != perfReader { return errors.New("unexpected perf reader") }
+			perfCalls.Add(1)
+			afterOnce.Do(func() { close(afterReader) })
+			return nil
+		},
+		programClose: func(p *ebpf.Program) error {
+			if p != program { return errors.New("unexpected program") }
+			programCalls.Add(1); return nil
+		},
+		mapClose: func(m *ebpf.Map) error {
+			if m != events && m != lost { return errors.New("unexpected map") }
+			mapCalls.Add(1); return nil
+		},
+	}
+	h, err := newEventReadoutHoldWithClosers(closers)
+	if err != nil { t.Fatal(err) }
+	b := nativeEventStopBackend{instance: i, hold: h}
+	i.eventFinalizer = newEventStopOwner(b)
+	i.eventFinalizer.admission = admission
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	h.bindStopContext(ctx)
+	var retireErr error
+	receiverLaunched, retireLaunched := false, false
+	t.Cleanup(func() {
+		releaseReaderOnce.Do(func() { close(releaseReader) })
+		releaseReceiverOnce.Do(func() { close(releaseReceiver) })
+		if retireLaunched {
+			select {
+			case <-retireDone:
+				if retireErr != nil && !errors.Is(retireErr, context.DeadlineExceeded) && !errors.Is(retireErr, context.Canceled) && !errors.Is(retireErr, unix.EACCES) { t.Errorf("unexpected Retire error: %v", retireErr) }
+			case <-time.After(5*time.Second): t.Errorf("Retire caller did not return")
+			}
+		}
+		if receiverLaunched {
+			select { case <-receiverDone: case <-time.After(5*time.Second): t.Errorf("receiver did not return") }
+		}
+		h.stateMu.Lock(); requested := h.closeRequested; h.stateMu.Unlock()
+		if requested {
+			select {
+			case <-h.closeDone:
+				h.stateMu.Lock(); actual := h.closeErr; h.stateMu.Unlock()
+				if !errors.Is(actual, unix.EACCES) { t.Errorf("worker lost expected reader error: %v", actual) }
+			case <-time.After(5*time.Second): t.Errorf("disposal worker did not return")
+			}
+		}
+	})
+	i.wg.Add(1)
+	receiverLaunched = true
+	go func() { <-releaseReceiver; tracer.eventDrain.finish(nil); i.wg.Done(); close(receiverDone) }()
+	i.publishOwnedEventInitialization(nil)
+	retireLaunched = true
+	go func() { retireErr = b.Retire(); close(retireDone) }()
+	select { case <-entered: case <-time.After(5*time.Second): t.Fatal("reader close not entered") }
+	select { case <-h.closeDone: t.Fatal("disposal finished while reader close blocked"); default: }
+	select { case <-retireDone: case <-time.After(5*time.Second): t.Fatal("Retire did not respect its deadline") }
+	if !errors.Is(retireErr, context.DeadlineExceeded) { t.Fatalf("Retire lost deadline: %v", retireErr) }
+	var pending *eventDisposalPending
+	if !errors.As(retireErr, &pending) { t.Fatalf("Retire did not retain pending work: %v", retireErr) }
+	var repeated *eventDisposalPending
+	if err := closeEventCollection(i); !errors.As(err, &repeated) { t.Fatalf("repeat close not pending: %v", err) }
+	if ringCalls.Load() != 1 || programCalls.Load() != 0 || mapCalls.Load() != 0 { t.Fatal("effects escaped blocked reader") }
+	releaseReaderOnce.Do(func() { close(releaseReader) })
+	select { case <-afterReader: case <-time.After(5*time.Second): t.Fatal("later reader close not attempted") }
+	if !errors.Is(pending, unix.EACCES) { t.Fatal("late reader error missing from pending diagnostic") }
+	observation, ok := i.EventFinalization()
+	if !ok || !strings.Contains(observation.Error, unix.EACCES.Error()) || observation.ResourcesRetired || observation.LossComplete {
+		t.Fatalf("late reader failure missing from pending status: %+v", observation)
+	}
+	if programCalls.Load() != 0 || mapCalls.Load() != 0 { t.Fatal("collection closed before receiver completion") }
+	select { case <-h.closeDone: t.Fatal("disposal finished before receiver return"); default: }
+	releaseReceiverOnce.Do(func() { close(releaseReceiver) })
+	select { case <-receiverDone: case <-time.After(5*time.Second): t.Fatal("receiver did not finish") }
+	select { case <-h.closeDone: case <-time.After(5*time.Second): t.Fatal("disposal did not finish") }
+	if root.closes.Load() != 1 || ringCalls.Load() != 1 || perfCalls.Load() != 1 || programCalls.Load() != 1 || mapCalls.Load() != 2 {
+		t.Fatalf("wrong effect counts: link=%d ring=%d perf=%d program=%d maps=%d", root.closes.Load(), ringCalls.Load(), perfCalls.Load(), programCalls.Load(), mapCalls.Load())
+	}
+	if err := i.closeOwnedEvents(); !errors.Is(err, unix.EACCES) { t.Fatalf("completed close lost reader error: %v", err) }
+	if root.closes.Load() != 1 || ringCalls.Load() != 1 || perfCalls.Load() != 1 || programCalls.Load() != 1 || mapCalls.Load() != 2 { t.Fatal("repeat close retried aliased effects") }
+	observation, ok = i.EventFinalization()
+	if !ok || !strings.Contains(observation.Error, unix.EACCES.Error()) || observation.ResourcesRetired || observation.LossComplete {
+		t.Fatalf("completed status lost reader failure: %+v", observation)
+	}
+}
+
+type t5LifecycleLink struct { link.Link; closes atomic.Uint32; closeErr error }
+
+func (l *t5LifecycleLink) Close() error { l.closes.Add(1); return l.closeErr }
+
+// This host model supplies no kernel ring to Flush; Join and Quiesce remain native paths.
+type t5LifecycleBackend struct { nativeEventStopBackend }
+
+func (b t5LifecycleBackend) Flush() error { return nil }
+
+type t5LifecycleModel struct {
+	i *ebpfInstance
+	h *eventReadoutHold
+	b nativeEventStopBackend
+	link *t5LifecycleLink
+	ring, programs, maps atomic.Uint32
+	ringErr error
+}
+
+func t5NewLifecycleModel(t *testing.T, callback func(context.Context) error, ringHook func()) *t5LifecycleModel {
+	t.Helper()
+	m := &t5LifecycleModel{i: eventFinalizationScopeFixture(), link: &t5LifecycleLink{}}
+	i := m.i
+	admission, err := admitEventFinalizationScope(i)
+	if err != nil { t.Fatal(err) }
+	i.links = []link.Link{m.link}
+	reader := &ringbuf.Reader{}
+	program := &ebpf.Program{}
+	events, lost := &ebpf.Map{}, &ebpf.Map{}
+	i.collection = &ebpf.Collection{Programs: map[string]*ebpf.Program{"capture_openat": program}, Maps: map[string]*ebpf.Map{"events": events, "events_lost_samples": lost}}
+	tracer := i.tracers["openat"]
+	tracer.ringbufReader, tracer.lostSampleMap, tracer.mapType = reader, lost, ebpf.RingBuf
+	tracer.eventDrain = newEventDrainReader()
+	closers := eventCloseFunctions{
+		ringReaderClose: func(r *ringbuf.Reader) error {
+			if r != reader { return errors.New("unexpected reader") }
+			m.ring.Add(1); if ringHook != nil { ringHook() }; return m.ringErr
+		},
+		perfReaderClose: func(*perf.Reader) error { return errors.New("unexpected perf reader") },
+		programClose: func(p *ebpf.Program) error {
+			if p != program { return errors.New("unexpected program") }; m.programs.Add(1); return nil
+		},
+		mapClose: func(p *ebpf.Map) error {
+			if p != events && p != lost { return errors.New("unexpected map") }; m.maps.Add(1); return nil
+		},
+	}
+	m.h, err = newEventReadoutHoldWithClosers(closers)
+	if err != nil { t.Fatal(err) }
+	m.b = nativeEventStopBackend{instance: i, hold: m.h}
+	i.eventStopOptions = &operators.EventFinalizationOptions{StrictFull: true, Accounting: &operators.SelectedAccountingTarget{Session: "model", PID: 123, Birth: 456}, AfterReadout: callback}
+	i.eventFinalizer = newEventStopOwner(t5LifecycleBackend{m.b})
+	i.eventFinalizer.admission = admission
+	i.eventFinalizer.definitionRoot = &definitionReadoutRoot{link: m.link, programID: 7, admission: admission, collection: i.collection, program: program, maps: map[string]*ebpf.Map{"events": events, "events_lost_samples": lost}, reader: reader, drain: tracer.eventDrain}
+	return m
+}
+
+func TestT5JoinCloseWaitsForActualCallbackReturn(t *testing.T) {
+	entered, release, receiverDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	collectionDone, ownedDone := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	m := t5NewLifecycleModel(t, func(context.Context) error { close(entered); <-release; return nil }, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	m.h.bindStopContext(ctx)
+	var collectionErr, ownedErr error
+	receiverStarted, pipelineStarted, collectionStarted, ownedStarted := false, false, false, false
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		if receiverStarted { select { case <-receiverDone: case <-time.After(5*time.Second): t.Errorf("receiver did not return") } }
+		if collectionStarted { select { case <-collectionDone: if collectionErr != nil { var pending *eventDisposalPending; if !errors.As(collectionErr, &pending) { t.Errorf("collection close: %v", collectionErr) } }; case <-time.After(5*time.Second): t.Errorf("collection close caller blocked") } }
+		if ownedStarted { select { case <-ownedDone: if ownedErr != nil { var pending *eventDisposalPending; if !errors.As(ownedErr, &pending) { t.Errorf("owned close: %v", ownedErr) } }; case <-time.After(5*time.Second): t.Errorf("owned close caller blocked") } }
+		if pipelineStarted { select { case <-m.i.eventFinalizer.done: case <-time.After(5*time.Second): t.Errorf("Join pipeline did not return") } }
+		m.h.stateMu.Lock(); requested := m.h.closeRequested; m.h.stateMu.Unlock()
+		if requested { select { case <-m.h.closeDone: m.h.stateMu.Lock(); actual := m.h.closeErr; m.h.stateMu.Unlock(); if actual != nil { t.Errorf("disposal worker: %v", actual) }; case <-time.After(5*time.Second): t.Errorf("disposal worker did not return") } }
+	})
+	m.i.wg.Add(1)
+	receiverStarted = true
+	go func() { m.i.tracers["openat"].eventDrain.finish(nil); m.i.wg.Done(); close(receiverDone) }()
+	m.i.publishOwnedEventInitialization(nil)
+	pipelineStarted = true
+	go m.i.eventFinalizer.execute(ctx)
+	select { case <-entered: case <-time.After(5*time.Second): t.Fatal("Join callback not entered") }
+	collectionStarted = true
+	go func() { collectionErr = closeEventCollection(m.i); close(collectionDone) }()
+	ownedStarted = true
+	go func() { ownedErr = m.i.closeOwnedEvents(); close(ownedDone) }()
+	select { case <-collectionDone: case <-time.After(5*time.Second): t.Fatal("collection close blocked") }
+	select { case <-ownedDone: case <-time.After(5*time.Second): t.Fatal("owned close blocked") }
+	var first, second *eventDisposalPending
+	if !errors.As(collectionErr, &first) || !errors.As(ownedErr, &second) { t.Fatalf("close did not return pending: %v / %v", collectionErr, ownedErr) }
+	if m.ring.Load() != 0 || m.programs.Load() != 0 || m.maps.Load() != 0 { t.Fatal("physical effect before callback return") }
+	called := false
+	if err := m.h.withAfterReadout(ctx, func(context.Context) error { called = true; return nil }); err == nil || called { t.Fatal("readout admitted after seal") }
+	if _, err := m.b.Sample(); err == nil { t.Fatal("sample admitted after seal") }
+	select { case <-m.h.closeDone: t.Fatal("disposal finished before callback return"); default: }
+	releaseOnce.Do(func() { close(release) })
+	select { case <-m.i.eventFinalizer.done: case <-time.After(5*time.Second): t.Fatal("Join pipeline did not finish") }
+	_, joinErr := m.i.eventFinalizer.result()
+	if joinErr == nil { t.Fatal("sealed Join reported success") }
+	select { case <-m.h.closeDone: case <-time.After(5*time.Second): t.Fatal("disposal did not finish") }
+	if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 1 || m.maps.Load() != 2 { t.Fatal("wrong disposal effect counts") }
+	if err := m.i.closeOwnedEvents(); err != nil { t.Fatalf("completed disposal: %v", err) }
+	if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 1 || m.maps.Load() != 2 { t.Fatal("repeat close retried effects") }
+}
+
+func TestT5HealthyRetireWaitsForPhysicalReturn(t *testing.T) {
+	entered, release, receiverDone, retireDone := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseOnce, enteredOnce sync.Once
+	m := t5NewLifecycleModel(t, func(context.Context) error { return nil }, func() { enteredOnce.Do(func() { close(entered) }); <-release })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	m.h.bindStopContext(ctx)
+	var retireErr error
+	receiverStarted, retireStarted := false, false
+	t.Cleanup(func() {
+		releaseOnce.Do(func() { close(release) })
+		if receiverStarted { select { case <-receiverDone: case <-time.After(5*time.Second): t.Errorf("receiver did not return") } }
+		if retireStarted { select { case <-retireDone: if retireErr != nil && !errors.Is(retireErr, context.Canceled) && !errors.Is(retireErr, context.DeadlineExceeded) { t.Errorf("Retire caller: %v", retireErr) }; case <-time.After(5*time.Second): t.Errorf("Retire caller did not return") } }
+		m.h.stateMu.Lock(); requested := m.h.closeRequested; m.h.stateMu.Unlock()
+		if requested { select { case <-m.h.closeDone: m.h.stateMu.Lock(); actual := m.h.closeErr; m.h.stateMu.Unlock(); if actual != nil { t.Errorf("disposal worker: %v", actual) }; case <-time.After(5*time.Second): t.Errorf("disposal worker did not return") } }
+	})
+	m.i.wg.Add(1)
+	receiverStarted = true
+	go func() { m.i.tracers["openat"].eventDrain.finish(nil); m.i.wg.Done(); close(receiverDone) }()
+	m.i.publishOwnedEventInitialization(nil)
+	select { case <-receiverDone: case <-time.After(5*time.Second): t.Fatal("receiver did not finish") }
+	if err := m.b.Quiesce(); err != nil { t.Fatalf("actual Quiesce: %v", err) }
+	retireStarted = true
+	go func() { retireErr = m.b.Retire(); close(retireDone) }()
+	select { case <-entered: case <-time.After(5*time.Second): t.Fatal("physical reader close not entered") }
+	if err := ctx.Err(); err != nil { t.Fatalf("first context expired before release: %v", err) }
+	select { case <-retireDone: t.Fatal("Retire returned before physical close"); default: }
+	select { case <-m.h.closeDone: t.Fatal("disposal finished before physical close"); default: }
+	releaseOnce.Do(func() { close(release) })
+	select { case <-retireDone: case <-time.After(5*time.Second): t.Fatal("Retire did not return") }
+	if retireErr != nil { t.Fatalf("healthy Retire: %v", retireErr) }
+	select { case <-m.h.closeDone: default: t.Fatal("Retire returned before disposal completion") }
+	if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 1 || m.maps.Load() != 2 { t.Fatal("wrong physical effect counts") }
+	if err := m.b.Retire(); err != nil { t.Fatalf("repeat Retire: %v", err) }
+	if err := m.i.closeOwnedEvents(); err != nil { t.Fatalf("repeat Close: %v", err) }
+	if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 1 || m.maps.Load() != 2 { t.Fatal("repeat retried effects") }
+}
+
+func TestT5DisposalBoundaryFailuresAndFailedStart(t *testing.T) {
+	for _, scenario := range []string{"producer_failure", "replacement", "failed_start"} {
+		t.Run(scenario, func(t *testing.T) {
+			readerReached, releaseReceiver, receiverDone, closeCallerDone := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var readerOnce, releaseOnce, publishOnce sync.Once
+			m := t5NewLifecycleModel(t, func(context.Context) error { return nil }, func() { readerOnce.Do(func() { close(readerReached) }) })
+			original := m.i.collection
+			startErr := errors.New("model Start failed")
+			var publicationErr error
+			if scenario == "failed_start" { publicationErr = startErr }
+			if scenario == "failed_start" { m.ringErr = unix.EACCES }
+			if scenario == "producer_failure" { m.link.closeErr = unix.EPERM }
+			publish := func() { publishOnce.Do(func() { m.i.publishOwnedEventInitialization(publicationErr) }) }
+			var closeErr error
+			receiverStarted, closeStarted := false, false
+			t.Cleanup(func() {
+				publish()
+				releaseOnce.Do(func() { close(releaseReceiver) })
+				if closeStarted { select { case <-closeCallerDone: if closeErr != nil { var pending *eventDisposalPending; if !errors.As(closeErr, &pending) && !errors.Is(closeErr, unix.EPERM) && !errors.Is(closeErr, startErr) { t.Errorf("close caller: %v", closeErr) } }; case <-time.After(5*time.Second): t.Errorf("close caller did not return") } }
+				if receiverStarted { select { case <-receiverDone: case <-time.After(5*time.Second): t.Errorf("receiver did not return") } }
+				m.h.stateMu.Lock(); requested := m.h.closeRequested; m.h.stateMu.Unlock()
+				if requested {
+					select {
+					case <-m.h.closeDone:
+						m.h.stateMu.Lock(); actual := m.h.closeErr; m.h.stateMu.Unlock()
+						switch scenario {
+						case "producer_failure": if !errors.Is(actual, unix.EPERM) { t.Errorf("worker lost link error: %v", actual) }
+						case "replacement": if actual == nil { t.Errorf("worker accepted replacement") }
+						case "failed_start": if !errors.Is(actual, startErr) { t.Errorf("worker lost Start error: %v", actual) }
+						}
+					case <-time.After(5*time.Second): t.Errorf("disposal worker did not return")
+					}
+				}
+			})
+			m.i.wg.Add(1)
+			receiverStarted = true
+			go func() { <-releaseReceiver; m.i.tracers["openat"].eventDrain.finish(nil); m.i.wg.Done(); close(receiverDone) }()
+			if scenario != "failed_start" { publish() }
+			var replacement *ebpf.Collection
+			if scenario == "replacement" {
+				replacement = &ebpf.Collection{Programs: map[string]*ebpf.Program{"replacement": {}}, Maps: map[string]*ebpf.Map{"replacement": {}}}
+				m.h.stateMu.Lock(); m.i.collection = replacement; m.h.stateMu.Unlock()
+			}
+			closeStarted = true
+			go func() { closeErr = closeEventCollection(m.i); close(closeCallerDone) }()
+			select { case <-closeCallerDone: case <-time.After(5*time.Second): t.Fatal("close caller blocked") }
+			var pending *eventDisposalPending
+			if !errors.As(closeErr, &pending) { t.Fatalf("close was not pending: %v", closeErr) }
+			if scenario == "failed_start" {
+				if m.link.closes.Load() != 0 || m.ring.Load() != 0 { t.Fatal("effect before Start publication") }
+				publish()
+				m.i.publishOwnedEventInitialization(nil)
+				m.h.stateMu.Lock(); actualStartErr := m.h.initErr; m.h.stateMu.Unlock()
+				if !errors.Is(actualStartErr, startErr) { t.Fatalf("first Start error overwritten: %v", actualStartErr) }
+			}
+			select { case <-readerReached: case <-time.After(5*time.Second): t.Fatal("reader close not attempted") }
+			if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 0 || m.maps.Load() != 0 { t.Fatal("wrong effects before receiver return") }
+			select { case <-m.h.closeDone: t.Fatal("disposal completed before receiver return"); default: }
+			if scenario == "producer_failure" {
+				if !errors.Is(pending, unix.EPERM) { t.Fatal("pending diagnostic lost link failure") }
+				observation, ok := m.i.EventFinalization()
+				if !ok || !strings.Contains(observation.Error, unix.EPERM.Error()) || observation.ResourcesRetired || observation.LossComplete { t.Fatalf("status lost producer failure: %+v", observation) }
+			}
+			releaseOnce.Do(func() { close(releaseReceiver) })
+			select { case <-receiverDone: case <-time.After(5*time.Second): t.Fatal("receiver did not finish") }
+			select { case <-m.h.closeDone: case <-time.After(5*time.Second): t.Fatal("disposal did not finish") }
+			result := m.i.closeOwnedEvents()
+			m.h.stateMu.Lock(); current := m.i.collection; m.h.stateMu.Unlock()
+			switch scenario {
+			case "producer_failure":
+				if !errors.Is(result, unix.EPERM) || current != original || m.programs.Load() != 0 || m.maps.Load() != 0 { t.Fatalf("producer failure did not withhold collection: %v", result) }
+			case "replacement":
+				if result == nil || current != replacement || m.programs.Load() != 0 || m.maps.Load() != 0 { t.Fatalf("replacement association was not protected: %v", result) }
+			case "failed_start":
+				if !errors.Is(result, startErr) || !errors.Is(result, unix.EACCES) || !errors.Is(pending, startErr) || !errors.Is(pending, unix.EACCES) || current != nil || m.programs.Load() != 1 || m.maps.Load() != 2 { t.Fatalf("failed Start cleanup lost cause or effects: %v", result) }
+				observation, ok := m.i.EventFinalization()
+				if !ok || !strings.Contains(observation.Error, startErr.Error()) || !strings.Contains(observation.Error, unix.EACCES.Error()) || observation.ResourcesRetired || observation.LossComplete { t.Fatalf("status lost Start or reader failure: %+v", observation) }
+			}
+			if m.link.closes.Load() != 1 || m.ring.Load() != 1 { t.Fatal("repeat close retried link or reader") }
+		})
+	}
+}
+
+func TestT5StartFenceConcurrentAndLegacyCallers(t *testing.T) {
+	m := t5NewLifecycleModel(t, func(context.Context) error { return nil }, nil)
+	i := m.i
+	collection, spec, owner := i.collection, i.collectionSpec, i.eventFinalizer
+	program, eventMap := collection.Programs["capture_openat"], collection.Maps["events"]
+	reader := i.tracers["openat"].ringbufReader
+	gate := make(chan struct{})
+	done := [2]chan struct{}{make(chan struct{}), make(chan struct{})}
+	var release sync.Once
+	var result [2]error
+	var launched [2]bool
+	t.Cleanup(func() {
+		release.Do(func() { close(gate) })
+		for n := range done {
+			if launched[n] { select { case <-done[n]: case <-time.After(5*time.Second): t.Errorf("claim %d did not return", n) } }
+		}
+	})
+	for n := range done {
+		launched[n] = true
+		go func(n int) { <-gate; result[n] = i.beginEventStart(); close(done[n]) }(n)
+	}
+	release.Do(func() { close(gate) })
+	for n := range done { select { case <-done[n]: case <-time.After(5*time.Second): t.Fatal("concurrent claim blocked") } }
+	if (result[0] == nil) == (result[1] == nil) { t.Fatalf("expected one claim: %v / %v", result[0], result[1]) }
+	if i.collection != collection || i.collectionSpec != spec || i.eventFinalizer != owner || collection.Programs["capture_openat"] != program || collection.Maps["events"] != eventMap || i.tracers["openat"].ringbufReader != reader || len(i.links) != 1 || i.links[0] != m.link || m.link.closes.Load() != 0 || m.ring.Load() != 0 || m.programs.Load() != 0 || m.maps.Load() != 0 {
+		t.Fatal("claim changed resources")
+	}
+	i.finishEventStart(false)
+	i.eventStopOptions = nil
+	gc := gadgetcontext.New(context.Background(), "t5-claimed-start")
+	defer gc.Cancel()
+	if err := i.Start(gc); err == nil || !strings.Contains(err.Error(), "already claimed") { t.Fatalf("owned Start not rejected at entry: %v", err) }
+	i.publishOwnedEventInitialization(unix.EACCES)
+	i.publishOwnedEventInitialization(nil)
+	if err := i.beginEventStart(); err == nil { t.Fatal("failed owned Start was reusable") }
+	if err := i.Start(gc); err == nil || !strings.Contains(err.Error(), "already claimed") { t.Fatalf("failed owned public Start was reusable: %v", err) }
+	if i.collection != collection || i.collectionSpec != spec || i.eventFinalizer != owner || collection.Programs["capture_openat"] != program || collection.Maps["events"] != eventMap || i.tracers["openat"].ringbufReader != reader || len(i.links) != 1 || i.links[0] != m.link || m.link.closes.Load() != 0 || m.ring.Load() != 0 || m.programs.Load() != 0 || m.maps.Load() != 0 { t.Fatal("rejected Start changed resources") }
+	ready := t5NewLifecycleModel(t, func(context.Context) error { return nil }, nil)
+	if err := ready.i.beginEventStart(); err != nil { t.Fatal(err) }
+	ready.i.finishEventStart(false)
+	ready.i.publishOwnedEventInitialization(nil)
+	if err := ready.i.Start(gc); err == nil || !strings.Contains(err.Error(), "already claimed") { t.Fatalf("ready owned Start was reusable: %v", err) }
+	requested := eventFinalizationScopeFixture()
+	if err := requested.beginEventStart(); err != nil { t.Fatal(err) }
+	requested.finishEventStart(true)
+	if err := requested.beginEventStart(); err == nil { t.Fatal("owned request was reusable after failed preparation") }
+	legacy := eventFinalizationScopeFixture()
+	for n := 0; n < 2; n++ {
+		if err := legacy.beginEventStart(); err != nil { t.Fatalf("legacy sequential claim %d: %v", n, err) }
+		legacy.finishEventStart(false)
+	}
+}
+
+func TestT5PublicClosePreparedAndLegacyBoundary(t *testing.T) {
+	m := t5NewLifecycleModel(t, func(context.Context) error { return nil }, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	gc := gadgetcontext.New(context.Background(), "t5-close-boundary")
+	defer gc.Cancel()
+	op := &ebpfOperator{gadgetObjs: map[operators.GadgetContext]gadgetObjects{gc: {}}}
+	m.i.bpfOperator = op
+	if err := m.i.beginEventStart(); err != nil { t.Fatal(err) }
+	m.i.finishEventStart(false)
+	m.h.bindStopContext(ctx)
+	receiverDone, retireDone := make(chan struct{}), make(chan struct{})
+	calls := [3]chan struct{}{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+	var callErr [3]error
+	var started [3]bool
+	var retireErr error
+	receiverStarted, retireStarted := false, false
+	t.Cleanup(func() {
+		if receiverStarted { select { case <-receiverDone: case <-time.After(5*time.Second): t.Errorf("receiver did not return") } }
+		if retireStarted { select { case <-retireDone: if retireErr != nil && !errors.Is(retireErr, context.Canceled) && !errors.Is(retireErr, context.DeadlineExceeded) { t.Errorf("Retire: %v", retireErr) }; case <-time.After(5*time.Second): t.Errorf("Retire did not return") } }
+		for n := range calls { if started[n] { select { case <-calls[n]: if n == 1 && callErr[n] == nil { t.Errorf("replacement Close unexpectedly succeeded") } else if n != 1 && callErr[n] != nil { t.Errorf("Close caller %d: %v", n, callErr[n]) }; case <-time.After(5*time.Second): t.Errorf("Close caller %d did not return", n) } } }
+		m.h.stateMu.Lock(); requested := m.h.closeRequested; m.h.stateMu.Unlock()
+		if requested { select { case <-m.h.closeDone: m.h.stateMu.Lock(); actual := m.h.closeErr; m.h.stateMu.Unlock(); if actual != nil { t.Errorf("disposal: %v", actual) }; case <-time.After(5*time.Second): t.Errorf("disposal worker did not return") } }
+	})
+	m.i.wg.Add(1)
+	receiverStarted = true
+	go func() { m.i.tracers["openat"].eventDrain.finish(nil); m.i.wg.Done(); close(receiverDone) }()
+	m.i.publishOwnedEventInitialization(nil)
+	select { case <-receiverDone: case <-time.After(5*time.Second): t.Fatal("receiver did not return") }
+	if err := m.b.Quiesce(); err != nil { t.Fatalf("Quiesce: %v", err) }
+	retireStarted = true
+	go func() { retireErr = m.b.Retire(); close(retireDone) }()
+	select { case <-retireDone: case <-time.After(5*time.Second): t.Fatal("Retire did not return") }
+	if retireErr != nil { t.Fatalf("Retire: %v", retireErr) }
+	select { case <-m.h.closeDone: default: t.Fatal("Retire returned before physical disposal") }
+	started[0] = true
+	go func() { callErr[0] = m.i.Close(gc); close(calls[0]) }()
+	select { case <-calls[0]: case <-time.After(5*time.Second): t.Fatal("prepared Close blocked") }
+	if callErr[0] != nil { t.Fatalf("prepared Close: %v", callErr[0]) }
+	if _, exists := op.gadgetObjs[gc]; exists { t.Fatal("prepared Close skipped gadget bookkeeping") }
+	if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 1 || m.maps.Load() != 2 { t.Fatal("wrong prepared effect counts") }
+	replacement := &ebpf.Collection{Programs: map[string]*ebpf.Program{}, Maps: map[string]*ebpf.Map{}}
+	m.h.stateMu.Lock(); m.i.collection = replacement; m.h.stateMu.Unlock()
+	op.gadgetObjs[gc] = gadgetObjects{}
+	started[1] = true
+	go func() { callErr[1] = m.i.Close(gc); close(calls[1]) }()
+	select { case <-calls[1]: case <-time.After(5*time.Second): t.Fatal("replacement Close blocked") }
+	m.h.stateMu.Lock(); current := m.i.collection; m.h.stateMu.Unlock()
+	if callErr[1] == nil || current != replacement { t.Fatalf("prepared Close consumed replacement: %v", callErr[1]) }
+	if _, exists := op.gadgetObjs[gc]; !exists { t.Fatal("failed prepared Close reached cleanup tail") }
+	if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 1 || m.maps.Load() != 2 { t.Fatal("replacement retried physical effects") }
+	m.i.eventStopOptions = nil
+	if err := m.i.Start(gc); err == nil || !strings.Contains(err.Error(), "already claimed") { t.Fatalf("closed owned Start was reusable: %v", err) }
+	legacyOp := &ebpfOperator{gadgetObjs: map[operators.GadgetContext]gadgetObjects{gc: {}}}
+	legacy := &ebpfInstance{bpfOperator: legacyOp, collection: &ebpf.Collection{Programs: map[string]*ebpf.Program{}, Maps: map[string]*ebpf.Map{}}}
+	started[2] = true
+	go func() { callErr[2] = legacy.Close(gc); close(calls[2]) }()
+	select { case <-calls[2]: case <-time.After(5*time.Second): t.Fatal("legacy Close blocked") }
+	if callErr[2] != nil || legacy.collection != nil { t.Fatalf("legacy empty collection not closed: %v", callErr[2]) }
+	if _, exists := legacyOp.gadgetObjs[gc]; exists { t.Fatal("legacy Close skipped gadget bookkeeping") }
+}
+
+func TestT5ProgramAliasInventoryRejected(t *testing.T) {
+	m := t5NewLifecycleModel(t, func(context.Context) error { return nil }, nil)
+	m.i.collection.Programs["other_name"] = m.i.collection.Programs["capture_openat"]
+	receiverDone, callerDone := make(chan struct{}), make(chan struct{})
+	receiverStarted, callerStarted := false, false
+	var callerErr error
+	t.Cleanup(func() {
+		if receiverStarted { select { case <-receiverDone: case <-time.After(5*time.Second): t.Errorf("receiver did not return") } }
+		if callerStarted { select { case <-callerDone: case <-time.After(5*time.Second): t.Errorf("close caller did not return") } }
+		m.h.stateMu.Lock(); requested := m.h.closeRequested; m.h.stateMu.Unlock()
+		if requested { select { case <-m.h.closeDone: m.h.stateMu.Lock(); actual := m.h.closeErr; m.h.stateMu.Unlock(); if actual == nil || !strings.Contains(actual.Error(), "inventory changed") { t.Errorf("inventory rejection: %v", actual) }; case <-time.After(5*time.Second): t.Errorf("disposal worker did not return") } }
+	})
+	m.i.wg.Add(1)
+	receiverStarted = true
+	go func() { m.i.tracers["openat"].eventDrain.finish(nil); m.i.wg.Done(); close(receiverDone) }()
+	m.i.publishOwnedEventInitialization(nil)
+	callerStarted = true
+	go func() { callerErr = m.i.closeOwnedEvents(); close(callerDone) }()
+	select { case <-callerDone: case <-time.After(5*time.Second): t.Fatal("close caller blocked") }
+	if callerErr == nil { t.Fatal("aliased program inventory accepted") }
+	select { case <-m.h.closeDone: case <-time.After(5*time.Second): t.Fatal("disposal did not return") }
+	if err := m.i.closeOwnedEvents(); err == nil || !strings.Contains(err.Error(), "inventory changed") { t.Fatalf("wrong inventory rejection: %v", err) }
+	if m.link.closes.Load() != 1 || m.ring.Load() != 1 || m.programs.Load() != 0 || m.maps.Load() != 0 { t.Fatal("invalid inventory reached collection effects") }
 }
 
 func TestSelectedTargetMetadataNeedsNoCollection(t *testing.T) {

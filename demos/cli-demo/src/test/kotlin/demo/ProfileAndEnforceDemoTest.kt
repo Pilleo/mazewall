@@ -83,6 +83,7 @@ class ProfileAndEnforceDemoTest {
             when (val outcome = result.outcome) {
                 is ScenarioOutcome.Completed -> kotlin.test.fail(report.summary())
                 is ScenarioOutcome.Denied -> assertTrue(result.passed)
+                is ScenarioOutcome.PermissionRefused -> kotlin.test.fail("Profile mode still requires authenticated denial")
                 is ScenarioOutcome.InfrastructureFailure -> {
                     assertEquals(io.mazewall.enforcer.api.ContainmentViolationEvidence.INFERRED_PERMISSION_FAILURE,
                         io.mazewall.enforcer.diagnostics.ContainmentViolationDetector.diagnose(outcome.cause)?.evidence,

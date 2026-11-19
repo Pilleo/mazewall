@@ -1,0 +1,484 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package periodiccaller
+
+import (
+	"context"
+	"errors"
+	"math"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func kindBookID(source libpf.AuxiliarySource, session string) libpf.AuxiliaryBinding {
+	return libpf.AuxiliaryBinding{
+		Source:     source,
+		Session:    session,
+		HostTGID:   9,
+		Birth:      8,
+		Generation: 7,
+	}
+}
+
+func TestKindBookScopeFreezeModel(t *testing.T) {
+	for _, mode := range []string{"matching", "changed", "cleanup"} {
+		t.Run(mode, func(t *testing.T) {
+			s := NewOwnedScope(context.Background(), nil)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				if err := s.Stop(ctx); errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("cleanup timed out: %v", err)
+				}
+				select {
+				case <-s.done:
+				case <-ctx.Done():
+					t.Error("scope worker did not finish")
+				}
+			})
+			lifetime := &countedStopLifetime{session: "kind-model"}
+			if err := s.BindLifetime(lifetime); err != nil { t.Fatal(err) }
+			kind := libpf.AuxiliarySourceInterpreterMetrics
+			op, err := s.AdmitKind(kind)
+			if err != nil || op == nil { t.Fatalf("admit: %v", err) }
+			if err := op.Complete(); err != nil { t.Fatal(err) }
+			if mode == "changed" { lifetime.session = "changed" }
+			if mode == "cleanup" {
+				if err := s.AddFinalizer(func() error { return syscall.EPERM }); err != nil { t.Fatal(err) }
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			stopErr := s.Stop(ctx)
+			select {
+			case <-s.done:
+			case <-ctx.Done():
+				t.Error("scope worker did not finish")
+				return
+			}
+			obs, obsErr := s.KindObservation(kind)
+			if obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 || obs.Counts.InFlight != 0 { t.Errorf("counts: %#v", obs.Counts) }
+			if mode == "matching" {
+				if stopErr != nil || obsErr != nil || obs.Outcome != libpf.AuxiliaryFinal || obs.Binding.Source != kind {
+					t.Errorf("matching model: %#v stop=%v err=%v", obs, stopErr, obsErr)
+				}
+			} else if obs.Outcome == libpf.AuxiliaryFinal || stopErr == nil || obsErr == nil {
+				t.Errorf("failure accepted: %#v stop=%v err=%v", obs, stopErr, obsErr)
+			}
+			if mode == "cleanup" && (!errors.Is(stopErr, syscall.EPERM) || !errors.Is(obsErr, syscall.EPERM)) {
+				t.Errorf("lost cleanup cause: stop=%v kind=%v", stopErr, obsErr)
+			}
+			original := obs
+			obs.Binding.Session = "mutated"
+			obs.Counts.Completed = 99
+			again, againErr := s.KindObservation(kind)
+			if again.Binding != original.Binding || again.Counts != original.Counts || again.Outcome != original.Outcome || (againErr == nil) != (obsErr == nil) {
+				t.Errorf("kind cache changed: %#v vs %#v", again, original)
+			}
+		})
+	}
+}
+
+func TestKindBook_KB01_UnboundPruneKindNotFabricated(t *testing.T) {
+	book := NewKindBook()
+	op, err := book.Admit(libpf.AuxiliarySourcePruneCycle, libpf.AuxiliaryBinding{}, false)
+	if err != nil || op == nil {
+		t.Fatalf("KB01 admit: op=%v err=%v", op, err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	forged := kindBookID(libpf.AuxiliarySourcePruneCycle, "forged-target")
+	book.Freeze(false, forged, nil)
+	obs, err := book.Observation(libpf.AuxiliarySourcePruneCycle)
+	if obs.Outcome != libpf.SourceLocalNonfinal || obs.Outcome == libpf.AuxiliaryFinal {
+		t.Fatalf("KB01 outcome %v", obs.Outcome)
+	}
+	if obs.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("KB01 unbound freeze published a binding: %+v", obs.Binding)
+	}
+	if err == nil || !strings.Contains(err.Error(), "auxiliary kind identity unknown") {
+		t.Fatalf("KB01 identity error: %v", err)
+	}
+	if obs.Counts.Admitted != 1 || obs.Counts.Completed != 1 || obs.Counts.Failed != 0 {
+		t.Fatalf("KB01 counts %+v", obs.Counts)
+	}
+}
+
+func TestKindBook_KB02_PendingReadErrors(t *testing.T) {
+	book := NewKindBook()
+	obs, err := book.Observation(libpf.AuxiliarySourcePruneCycle)
+	if err == nil || obs.Outcome == libpf.AuxiliaryNotExercised && err == nil {
+		t.Fatalf("KB02 pending read must error, obs=%+v err=%v", obs, err)
+	}
+	if !strings.Contains(err.Error(), "auxiliary snapshot not yet frozen") {
+		t.Fatalf("KB02 error %v", err)
+	}
+}
+
+func TestKindBook_KB03_FrozenZeroNotExercised(t *testing.T) {
+	book := NewKindBook()
+	book.Freeze(false, libpf.AuxiliaryBinding{}, nil)
+	for _, kind := range allowedAuxiliarySources {
+		obs, err := book.Observation(kind)
+		if err != nil || obs.Outcome != libpf.AuxiliaryNotExercised || obs.Counts.Admitted != 0 {
+			t.Fatalf("KB03 frozen zero %v obs=%+v err=%v", kind, obs, err)
+		}
+	}
+	op, err := book.Admit(libpf.AuxiliarySourcePruneCycle, libpf.AuxiliaryBinding{}, false)
+	if op != nil || err == nil {
+		t.Fatalf("KB03 frozen admit op=%v err=%v", op, err)
+	}
+	obs, obsErr := book.Observation(libpf.AuxiliarySourcePruneCycle)
+	if obsErr != nil || obs.Outcome != libpf.AuxiliaryNotExercised || obs.Counts.Admitted != 0 {
+		t.Fatalf("KB03 rejected admit mutated frozen zero: %+v err=%v", obs, obsErr)
+	}
+}
+
+func TestKindBook_KB04_UnknownKindAfterFreezeErrors(t *testing.T) {
+	book := NewKindBook()
+	book.Freeze(false, libpf.AuxiliaryBinding{}, nil)
+	for _, kind := range []libpf.AuxiliarySource{0, libpf.AuxiliarySourcePeriodicCaller} {
+		obs, err := book.Observation(kind)
+		if err == nil || (obs.Outcome == libpf.AuxiliaryNotExercised && err == nil) {
+			t.Fatalf("KB04 book kind %v obs=%+v err=%v", kind, obs, err)
+		}
+	}
+	scope := NewOwnedScope(context.Background(), nil)
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := scope.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []libpf.AuxiliarySource{0, libpf.AuxiliarySourcePeriodicCaller} {
+		obs, err := scope.KindObservation(kind)
+		if err == nil || (obs.Outcome == libpf.AuxiliaryNotExercised && err == nil) {
+			t.Fatalf("KB04 scope kind %v obs=%+v err=%v", kind, obs, err)
+		}
+	}
+}
+
+func TestKindBook_KB05_DuplicateNoSecondRelease(t *testing.T) {
+	book := NewKindBook()
+	op, err := book.Admit(libpf.AuxiliarySourcePruneScanOtel, libpf.AuxiliaryBinding{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releases := 0
+	op.release = func() { releases++ }
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	dup := op.Complete()
+	if dup == nil || !strings.Contains(dup.Error(), "auxiliary kind duplicate terminal rejected on complete") {
+		t.Fatalf("KB05 duplicate: %v", dup)
+	}
+	if releases != 1 {
+		t.Fatalf("KB05 releases %d", releases)
+	}
+	book.mu.Lock()
+	kl := book.ledgers[libpf.AuxiliarySourcePruneScanOtel]
+	book.mu.Unlock()
+	if kl.Completed != 1 || kl.Failed != 0 || !kl.Overflow || kl.InFlight != 0 {
+		t.Fatalf("KB05 ledger %+v", kl)
+	}
+}
+
+func TestKindBook_KB06_CheckedOverflowDoesNotWrap(t *testing.T) {
+	book := NewKindBook()
+	book.mu.Lock()
+	kl := book.ledgers[libpf.AuxiliarySourcePruneScanSymtab]
+	kl.Admitted = math.MaxUint64
+	book.ledgers[libpf.AuxiliarySourcePruneScanSymtab] = kl
+	book.mu.Unlock()
+	op, err := book.Admit(libpf.AuxiliarySourcePruneScanSymtab, libpf.AuxiliaryBinding{}, false)
+	if op != nil || err == nil || !strings.Contains(err.Error(), "auxiliary kind counter overflow") {
+		t.Fatalf("KB06 admit overflow op=%v err=%v", op, err)
+	}
+	book.mu.Lock()
+	after := book.ledgers[libpf.AuxiliarySourcePruneScanSymtab]
+	book.mu.Unlock()
+	if after.Admitted != math.MaxUint64 || after.InFlight != 0 || !after.Overflow {
+		t.Fatalf("KB06 admit wrap %+v", after)
+	}
+
+	scope := NewOwnedScope(context.Background(), nil)
+	kindOp, err := scope.AdmitKind(libpf.AuxiliarySourcePruneScanDebuginfod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope.mu.Lock()
+	scope.kinds.mu.Lock()
+	seeded := scope.kinds.ledgers[libpf.AuxiliarySourcePruneScanDebuginfod]
+	seeded.Completed = math.MaxUint64
+	scope.kinds.ledgers[libpf.AuxiliarySourcePruneScanDebuginfod] = seeded
+	scope.kinds.mu.Unlock()
+	scope.mu.Unlock()
+	if err := kindOp.Complete(); err == nil || !strings.Contains(err.Error(), "auxiliary kind counter overflow") {
+		t.Fatalf("KB06 terminal overflow: %v", err)
+	}
+	scope.mu.Lock()
+	scope.kinds.mu.Lock()
+	held := scope.kinds.ledgers[libpf.AuxiliarySourcePruneScanDebuginfod]
+	scope.kinds.mu.Unlock()
+	scope.mu.Unlock()
+	if held.InFlight != 1 || held.Completed != math.MaxUint64 || !held.Overflow {
+		t.Fatalf("KB06 terminal wrap %+v", held)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := scope.Stop(stopCtx); errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("KB06 overflow terminal did not release the worker borrow")
+	}
+}
+
+func TestKindBook_KB07_HoldFreezeLateCompleteRepeatedFreeze(t *testing.T) {
+	book := NewKindBook()
+	kind := libpf.AuxiliarySourcePeriodicMetrics
+	expected := kindBookID(kind, "held-sess")
+	op, err := book.Admit(kind, expected, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book.Freeze(true, libpf.AuxiliaryBinding{}, context.DeadlineExceeded)
+	obs, err := book.Observation(kind)
+	if obs.Outcome != libpf.SourceLocalNonfinal || !obs.HeldWork || obs.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("KB07 held snapshot %+v", obs)
+	}
+	if obs.Counts.InFlight != 1 || obs.Counts.Completed != 0 {
+		t.Fatalf("KB07 held counts %+v", obs.Counts)
+	}
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "auxiliary kind identity unknown") {
+		t.Fatalf("KB07 held error %v", err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	book.Freeze(false, expected, nil)
+	obs2, err2 := book.Observation(kind)
+	if obs2.Counts != obs.Counts || obs2.Outcome != obs.Outcome || obs2.HeldWork != obs.HeldWork || obs2.Binding != obs.Binding {
+		t.Fatalf("KB07 later freeze upgraded snapshot: %+v", obs2)
+	}
+	if err2 == nil || err2.Error() != err.Error() || !errors.Is(err2, context.DeadlineExceeded) {
+		t.Fatalf("KB07 later freeze changed error: %v -> %v", err, err2)
+	}
+	book.mu.Lock()
+	live := book.ledgers[kind]
+	book.mu.Unlock()
+	if live.InFlight != 0 || live.Completed != 1 {
+		t.Fatalf("KB07 late terminal did not update the ledger: %+v", live)
+	}
+}
+
+func TestKindBook_KB08_UnknownIdentityClearsExpected(t *testing.T) {
+	book := NewKindBook()
+	kind := libpf.AuxiliarySourcePIDCleanup
+	first := kindBookID(kind, "first")
+	if _, err := book.Admit(kind, first, true); err != nil {
+		t.Fatal(err)
+	}
+	op, err := book.Admit(kind, first, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	book.Freeze(false, first, nil)
+	obs, err := book.Observation(kind)
+	if obs.Binding != (libpf.AuxiliaryBinding{}) || obs.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("KB08 published identity %+v outcome %v", obs.Binding, obs.Outcome)
+	}
+	if err == nil || !strings.Contains(err.Error(), "auxiliary kind identity unknown") {
+		t.Fatalf("KB08 error %v", err)
+	}
+	if obs.Counts.Admitted != 2 || obs.Counts.Completed != 1 || obs.Counts.InFlight != 1 {
+		t.Fatalf("KB08 counts %+v", obs.Counts)
+	}
+}
+
+func TestKindBook_KB09_BoundAdmitIgnoresActualMutation(t *testing.T) {
+	book := NewKindBook()
+	kind := libpf.AuxiliarySourceInterpreterMetrics
+	expected := kindBookID(kind, "bound-sess")
+	op, err := book.Admit(kind, expected, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected.Session = "mutated-after-admit"
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	actual := kindBookID(kind, "bound-sess")
+	actual.Source = libpf.AuxiliarySourcePeriodicCaller
+	book.Freeze(false, actual, nil)
+	obs, err := book.Observation(kind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs.Binding.Session != "bound-sess" || obs.Binding.Source != kind || obs.Outcome != libpf.AuxiliaryFinal {
+		t.Fatalf("KB09 binding %+v outcome %v", obs.Binding, obs.Outcome)
+	}
+
+	other := NewKindBook()
+	mismatch := kindBookID(kind, "expected-sess")
+	otherOp, err := other.Admit(kind, mismatch, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := otherOp.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	changed := mismatch
+	changed.Session = "actual-sess"
+	other.Freeze(false, changed, nil)
+	miss, missErr := other.Observation(kind)
+	if missErr == nil || !strings.Contains(missErr.Error(), "changed auxiliary kind identity") {
+		t.Fatalf("KB09 mismatch error %v", missErr)
+	}
+	if miss.Binding != (libpf.AuxiliaryBinding{}) || miss.Counts.Failed != 0 || miss.Outcome != libpf.SourceLocalNonfinal {
+		t.Fatalf("KB09 mismatch published %+v", miss)
+	}
+}
+
+func TestKindBook_KB10_ReleaseAcquiresBookMutex(t *testing.T) {
+	book := NewKindBook()
+	op, err := book.Admit(libpf.AuxiliarySourcePruneScanSymtab, libpf.AuxiliaryBinding{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	op.release = func() {
+		called = true
+		if !book.mu.TryLock() {
+			t.Error("KB10 release callback could not acquire the book mutex")
+			return
+		}
+		book.mu.Unlock()
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("KB10 release was not called")
+	}
+}
+
+func TestKindBook_KB11_NilBookAdmitAndOperationNoOp(t *testing.T) {
+	var book *KindBook
+	op, err := book.Admit(libpf.AuxiliarySourcePruneCycle, libpf.AuxiliaryBinding{}, false)
+	if op != nil || err != nil {
+		t.Fatalf("KB11 admit op=%v err=%v", op, err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Fail(errors.New("err")); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Abort(); err != nil || op.Skip() != nil || op.Incomplete(errors.New("inc")) != nil {
+		t.Fatal("KB11 nil operation was not a no-op")
+	}
+	book.Freeze(true, libpf.AuxiliaryBinding{}, context.DeadlineExceeded)
+}
+
+func TestKindBook_KB12_AdapterKindBorrowBlocksFinalizer(t *testing.T) {
+	scope := NewOwnedScope(context.Background(), nil)
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePruneCycle)
+	if err != nil || op == nil {
+		t.Fatalf("KB12 admit op=%v err=%v", op, err)
+	}
+	retired := make(chan struct{})
+	if err := scope.AddFinalizer(func() error { close(retired); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := scope.Stop(expired); !errors.Is(err, context.Canceled) {
+		t.Fatalf("KB12 stop %v", err)
+	}
+	select {
+	case <-retired:
+		t.Fatal("KB12 finalizer ran while kind operation was held")
+	default:
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	stopCtx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err := scope.Stop(stopCtx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("KB12 second stop %v", err)
+	}
+	select {
+	case <-retired:
+	default:
+		t.Fatal("KB12 finalizer did not run after the kind terminal")
+	}
+}
+
+func TestKindBook_KB13_StickyDeadlinePreserved(t *testing.T) {
+	scope := NewOwnedScope(context.Background(), nil)
+	if err := scope.BindLifetime(&testLifetime{session: "deadline-kind", tgid: 11, birth: 22}); err != nil {
+		t.Fatal(err)
+	}
+	op, err := scope.AdmitKind(libpf.AuxiliarySourcePeriodicMetrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadlineCtx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	stopErr := scope.Stop(deadlineCtx)
+	if !errors.Is(stopErr, context.DeadlineExceeded) {
+		t.Fatalf("KB13 stop %v", stopErr)
+	}
+	obs, err := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if obs.Outcome != libpf.SourceLocalNonfinal || !obs.HeldWork || obs.Binding != (libpf.AuxiliaryBinding{}) {
+		t.Fatalf("KB13 snapshot %+v", obs)
+	}
+	if obs.Counts.InFlight != 1 || obs.Counts.Completed != 0 {
+		t.Fatalf("KB13 counts %+v", obs.Counts)
+	}
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("KB13 dropped deadline cause: %v", err)
+	}
+	if err := op.Complete(); err != nil {
+		t.Fatal(err)
+	}
+	obs2, err2 := scope.KindObservation(libpf.AuxiliarySourcePeriodicMetrics)
+	if obs2.Counts != obs.Counts || obs2.Binding != obs.Binding || obs2.HeldWork != obs.HeldWork || obs2.Outcome != obs.Outcome {
+		t.Fatalf("KB13 late completion upgraded snapshot: %+v", obs2)
+	}
+	if err2 == nil || !errors.Is(err2, context.DeadlineExceeded) || err2.Error() != err.Error() {
+		t.Fatalf("KB13 late completion dropped deadline: %v -> %v", err, err2)
+	}
+	fresh, freshCancel := context.WithTimeout(context.Background(), time.Second)
+	defer freshCancel()
+	if err := scope.Stop(fresh); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("KB13 repeated stop %v", err)
+	}
+}
+
+func TestKindBook_KB14_StartDoesNotAutoAdmitAllowedKinds(t *testing.T) {
+	scope := NewOwnedScope(context.Background(), nil)
+	if err := scope.BindLifetime(&testLifetime{session: "sess-1", tgid: 100, birth: 12345}); err != nil {
+		t.Fatal(err)
+	}
+	stopFunc := Start(scope.Context(), 10*time.Millisecond, func() {})
+	time.Sleep(30 * time.Millisecond)
+	stopFunc()
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := scope.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range allowedAuxiliarySources {
+		obs, err := scope.KindObservation(kind)
+		if err != nil || obs.Outcome != libpf.AuxiliaryNotExercised || obs.Counts.Admitted != 0 {
+			t.Fatalf("KB14 Start auto-admitted %v obs=%+v err=%v", kind, obs, err)
+		}
+	}
+}

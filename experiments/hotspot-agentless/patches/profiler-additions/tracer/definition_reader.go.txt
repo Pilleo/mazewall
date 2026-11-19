@@ -1,0 +1,88 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"unsafe"
+
+	"github.com/cilium/ebpf/perf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/support"
+)
+
+// Attribution is only read after the complete selected native header is present.
+func (t *Tracer) observeTraceDefinitionRecord(record *perf.Record, readErr error) (target bool, err error) {
+	s := t.definitionSource
+	if s == nil {
+		return false, nil
+	}
+	defer func() {
+		if err != nil {
+			if target {
+				t.traceReaderCounters.definitionRejectedRecord.Add(1)
+			}
+			s.fail(err)
+		}
+	}()
+	if readErr != nil {
+		if errors.Is(readErr, os.ErrDeadlineExceeded) || (errors.Is(readErr, perf.ErrFlushed) && t.traceReaderCounters.drain != nil && t.traceReaderCounters.drain.requested.Load()) {
+			return false, nil
+		}
+		t.traceReaderCounters.readError.Add(1)
+		return false, fmt.Errorf("definition perf read: %w", readErr)
+	}
+	if record.CPU < 0 || record.CPU >= s.binding.PossibleCPUs {
+		return false, fmt.Errorf("definition perf record CPU not owned")
+	}
+	if record.LostSamples != 0 {
+		return false, nil
+	}
+	if len(record.RawSample) < int(unsafe.Offsetof(support.Trace{}.Frame_data)) {
+		if len(record.RawSample) == 0 {
+			t.traceReaderCounters.noData.Add(1)
+		}
+		return false, fmt.Errorf("definition perf record lacks complete attribution header")
+	}
+	pid := binary.NativeEndian.Uint32(record.RawSample[:4])
+	if pid == 0 {
+		return false, fmt.Errorf("definition perf record has no process identity")
+	}
+	target = pid == s.binding.HostTGID
+	if target {
+		t.traceReaderCounters.definitionReceived.Add(1)
+	}
+	if binary.NativeEndian.Uint32(record.RawSample[4:8]) == 0 {
+		return target, fmt.Errorf("definition perf record has no thread identity")
+	}
+	origin := binary.NativeEndian.Uint32(record.RawSample[708:712])
+	switch origin {
+	case uint32(support.TraceOriginSampling), uint32(support.TraceOriginOffCPU), uint32(support.TraceOriginProbe):
+	default:
+		return target, fmt.Errorf("origin %d: %w", origin, errOriginUnexpected)
+	}
+	return target, nil
+}
+
+func (t *Tracer) sendTraceDefinition(ctx context.Context, out chan<- *libpf.EbpfTrace, trace *libpf.EbpfTrace, target bool) bool {
+	if !sendTrace(ctx, out, trace) {
+		if target {
+			t.traceReaderCounters.definitionHandoffAborted.Add(1)
+		}
+		if t.definitionSource != nil {
+			t.definitionSource.fail(ctx.Err())
+			if c := t.traceReaderCounters.drain; c != nil {
+				c.setError(ctx.Err())
+			}
+		}
+		return false
+	}
+	if target {
+		t.traceReaderCounters.definitionHandedOff.Add(1)
+	}
+	return true
+}

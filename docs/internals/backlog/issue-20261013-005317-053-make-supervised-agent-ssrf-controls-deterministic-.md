@@ -23,4 +23,12 @@ MockAttackLlm deterministically emits tool calls, but ssrf targets169.254.169.25
 **Acceptance:** Offline comparison reaches a genuinely listening private target; protected mode denies that same target through the unchanged production classifier. Missing listener/unrelated timeout is infrastructure failure. Exact CONNECT + VFORK/FORK and early VFORK behavior remain. A real global-unicast positive may remain a separately labeled optional online check; never permit loopback in the real classifier to manufacture a positive.
 
 ---
+## Repository-review revalidation — 2026-11-04
+
+[KD-01](../reviews/2026-11-04-repository-review-findings.md#kd-01) retains this owner:
+actual metadata routing is not a deterministic successful-unrestricted/denied-supervised
+control. Use an acquired local endpoint and preserve exact route/outcome evidence; existing
+HTTP compatibility repairs are not reopened. No real metadata request ran during review.
+
+---
 <!-- id: issue-20261013-005317-053-make-supervised-agent-ssrf-controls-deterministic-  file: issue-20261013-005317-053-make-supervised-agent-ssrf-controls-deterministic-.md -->

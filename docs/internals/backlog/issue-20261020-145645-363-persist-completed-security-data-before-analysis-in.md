@@ -105,4 +105,13 @@ to the old head and must not be relabelled current-head proof. No claim is made
 that all preexisting tests or the entire repository now support root execution.
 
 ---
+## Repository-review provenance gap — 2026-11-04
+
+[DOCS-05](../reviews/2026-11-04-repository-review-findings.md#docs-05) found the linked
+approved completed-security-data spec/plan files absent in the direct filesystem inventory.
+Recover their actual retained location/approval provenance before depending on them; do not
+invent replacement approval. This is an authority-link gap, not evidence that cached scan data
+is corrupt or that a successful ineligible no-scan CI job executed vulnerability analysis.
+
+---
 <!-- id: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in  file: issue-20261020-145645-363-persist-completed-security-data-before-analysis-in.md -->

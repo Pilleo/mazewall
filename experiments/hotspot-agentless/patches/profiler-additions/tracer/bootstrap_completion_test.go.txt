@@ -1,0 +1,741 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/process"
+	"golang.org/x/sys/unix"
+)
+
+func reportTestChannelClosed(ch <-chan struct{}) bool {
+	select { case <-ch: return true; default: return false }
+}
+
+func TestPartialMapAcquisitionDisposal(t *testing.T) {
+	owner := &cebpf.Map{}
+	loadErr := fmt.Errorf("load map: %w", unix.EPERM)
+	closeErr := errors.New("close failed")
+	var calls []string
+	effects := reportDisposalEffects{
+		mapFD: func(m *cebpf.Map) int { if m != owner { t.Fatal("wrong owner") }; calls = append(calls, "FD"); return 17 },
+		closeMap: func(m *cebpf.Map) error { if m != owner { t.Fatal("wrong owner") }; calls = append(calls, "close"); return closeErr },
+	}
+	dispose := func(e *bootstrapCleanupError) error { return e.disposeReportOriginalsWith(effects) }
+	result := disposeMapAcquisitionFailure(loadErr, map[string]*cebpf.Map{"one": owner, "alias": owner}, nil, dispose)
+	cleanup, ok := result.(*bootstrapCleanupError)
+	if !ok || !errors.Is(result, unix.EPERM) || !errors.Is(result, closeErr) { t.Fatal("acquisition or disposal cause lost") }
+	g := cleanup.reportDisposal
+	if !g.unknown || g.maps[owner].fd != 17 || !errors.Is(g.maps[owner].err, closeErr) || strings.Join(calls, ",") != "FD,close" { t.Fatal("partial owner disposition lost or retried") }
+	starts := 0
+	start := func(func()) { starts++ }
+	completeReportPreparationFailure(cleanup, nil, nil, start)
+	completeReportPreparationFailure(cleanup, nil, nil, start)
+	if starts != 1 || len(calls) != 2 { t.Fatal("duplicate handoff or disposal") }
+
+	effects.closeMap = func(*cebpf.Map) error { calls = append(calls, "success"); return nil }
+	maps := map[string]*cebpf.Map{"one": owner}
+	if got := disposeMapAcquisitionFailure(loadErr, maps, nil, dispose); got != loadErr || len(maps) != 0 { t.Fatal("successful disposal changed original cause") }
+}
+
+func TestReportScopeCoordinatedFailure(t *testing.T) {
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	keeper, err := registerReportPreparationKeeper(scope.AddFinalizer)
+	if err != nil { t.Fatal(err) }
+	stages := make(chan reportAwaitAction, 3)
+	keeper.beforeWait = func(action reportAwaitAction) { stages <- action }
+	query, closeGate := make(chan struct{}), make(chan struct{})
+	queryEntered, queryReturned, closeEntered := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	producerDone, stopDone := make(chan struct{}), make(chan struct{})
+	var releaseQuery, releaseClose, releasePark sync.Once
+	owner := &cebpf.Map{}
+	cause, closeErr := errors.New("query failure"), errors.New("close failure")
+	var graph *failedReportDisposal
+	var result error
+	t.Cleanup(func() {
+		releaseQuery.Do(func() { close(query) })
+		releaseClose.Do(func() { close(closeGate) })
+		<-producerDone
+		releasePark.Do(func() { close(graph.park) }) // Test-only model release.
+		<-stopDone
+	})
+	go func() { _ = scope.Stop(context.Background()); close(stopDone) }()
+	go func() {
+		defer close(producerDone)
+		close(queryEntered)
+		<-query
+		close(queryReturned)
+		cleanup := &bootstrapCleanupError{maps: map[string]*cebpf.Map{"owner": owner}, err: cause}
+		effects := reportDisposalEffects{
+			mapFD: func(*cebpf.Map) int { return 17 },
+			closeMap: func(*cebpf.Map) error { <-queryReturned; close(closeEntered); <-closeGate; return closeErr },
+		}
+		closeResult := cleanup.disposeReportOriginalsWith(effects)
+		cleanup.err = errors.Join(cause, closeResult)
+		graph, result = cleanup.reportDisposal, cleanup.err
+		completeReportPreparationFailure(cleanup, keeper, scope, func(func()) { panic("scoped quarantine") })
+	}()
+	<-queryEntered
+	if <-stages != reportAwaitConstruction || keeper.nextAction() != reportAwaitConstruction || reportTestChannelClosed(keeper.ready) { t.Fatal("query did not retain construction wait") }
+	releaseQuery.Do(func() { close(query) })
+	<-closeEntered
+	if keeper.nextAction() != reportAwaitConstruction || reportTestChannelClosed(keeper.ready) { t.Fatal("close return was published prematurely") }
+	releaseClose.Do(func() { close(closeGate) })
+	if <-stages != reportAwaitQuarantine { t.Fatal("unknown disposition did not reach park") }
+	<-producerDone
+	if keeper.nextAction() != reportAwaitQuarantine || !reportTestChannelClosed(keeper.ready) || graph == nil || keeper.graph != graph || reportTestChannelClosed(graph.park) || graph.maps[owner].fd != 17 || !errors.Is(graph.maps[owner].err, closeErr) || !errors.Is(result, cause) || !errors.Is(result, closeErr) {
+		t.Fatal("actual disposition or original cause lost")
+	}
+	keeper.complete(nil)
+	if keeper.graph != graph { t.Fatal("duplicate completion discarded graph") }
+	releasePark.Do(func() { close(graph.park) })
+	if keeper.nextAction() != reportAwaitComplete || !reportTestChannelClosed(graph.park) { t.Fatal("released model graph did not complete") }
+}
+
+func TestReportScopeTransferAndClosedEnrollment(t *testing.T) {
+	closed := periodiccaller.NewOwnedScope(context.Background(), nil)
+	_ = closed.Stop(context.Background())
+	if keeper, err := registerReportPreparationKeeper(closed.AddFinalizer); err == nil || keeper != nil { t.Fatal("closed scope admitted keeper") }
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	keeper, err := registerReportPreparationKeeper(scope.AddFinalizer)
+	if err != nil { t.Fatal(err) }
+	owner := &cebpf.Map{}
+	tracer := &Tracer{ebpfMaps: map[string]*cebpf.Map{"owner": owner}}
+	transferReportPreparation(tracer, keeper)
+	keeper.complete(&failedReportDisposal{unknown: true, park: make(chan struct{})})
+	if keeper.nextAction() != reportAwaitComplete { t.Fatal("successful transfer not complete") }
+	if err := scope.Stop(context.Background()); err != nil { t.Fatal(err) }
+	if keeper.graph != nil || tracer.ebpfMaps["owner"] != owner { t.Fatal("transfer did not disarm keeper") }
+}
+
+func TestReportDisposalConnectedHandoff(t *testing.T) {
+	mapOwner, programOwner := &cebpf.Map{}, &cebpf.Program{}
+	preparationErr, closeErr := errors.New("preparation"), errors.New("close")
+	cleanup := &bootstrapCleanupError{
+		maps: map[string]*cebpf.Map{"one": mapOwner, "alias": mapOwner},
+		programs: map[string]*cebpf.Program{"program": programOwner}, err: preparationErr,
+	}
+	var calls []string
+	effects := reportDisposalEffects{
+		programFD: func(p *cebpf.Program) int { if p != programOwner { t.Fatal("wrong program") }; calls = append(calls, "program FD"); return 23 },
+		closeProgram: func(p *cebpf.Program) error { if p != programOwner { t.Fatal("wrong program") }; calls = append(calls, "program close"); return closeErr },
+		mapFD: func(m *cebpf.Map) int { if m != mapOwner { t.Fatal("wrong map") }; calls = append(calls, "map FD"); return 17 },
+		closeMap: func(m *cebpf.Map) error { if m != mapOwner { t.Fatal("wrong map") }; calls = append(calls, "map close"); return closeErr },
+	}
+	disposeErr := cleanup.disposeReportOriginalsWith(effects)
+	cleanup.err = errors.Join(preparationErr, disposeErr) // Same cause join as the initializer branch.
+	g := cleanup.reportDisposal
+	if !g.unknown || g.maps[mapOwner].fd != 17 || !errors.Is(g.maps[mapOwner].err, closeErr) || g.programs[programOwner].fd != 23 || !errors.Is(g.programs[programOwner].err, closeErr) {
+		t.Fatal("actual owner provenance and disposition not retained")
+	}
+	if strings.Join(calls, ",") != "program FD,program close,map FD,map close" { t.Fatalf("unexpected disposal effects: %v", calls) }
+	if !errors.Is(cleanup, preparationErr) || !errors.Is(cleanup, closeErr) { t.Fatal("original causes lost") }
+	starts := 0
+	var parked func()
+	start := func(f func()) { starts++; parked = f }
+	completeReportPreparationFailure(cleanup, nil, nil, start)
+	completeReportPreparationFailure(cleanup, nil, nil, start)
+	if starts != 1 || parked == nil || len(calls) != 4 { t.Fatal("duplicate root or repeated close") }
+
+	success := &bootstrapCleanupError{maps: map[string]*cebpf.Map{"one": mapOwner}, err: preparationErr}
+	effects.closeMap = func(m *cebpf.Map) error { calls = append(calls, "successful close"); return nil }
+	if err := success.disposeReportOriginalsWith(effects); err != nil { t.Fatal(err) }
+	completeReportPreparationFailure(success, nil, nil, start)
+	if starts != 1 || success.reportDisposal.unknown || len(success.maps) != 0 { t.Fatal("successful disposal started a root") }
+}
+
+// Legacy isolated model checks; not evidence for the coordinated F1b control.
+func TestReportPreparationKeeper(t *testing.T) {
+	refused := errors.New("closed registration")
+	allocated := false
+	k, err := registerReportPreparationKeeper(func(func() error) error { return refused })
+	if err == nil { allocated = true }
+	if !errors.Is(err, refused) || k != nil || allocated { t.Fatal("closed registration admitted construction") }
+
+	var finalizer func() error
+	k, err = registerReportPreparationKeeper(func(f func() error) error { finalizer = f; return nil })
+	if err != nil || finalizer == nil { t.Fatal("finalizer not enrolled") }
+	entered, done := make(chan struct{}), make(chan struct{})
+	go func() { close(entered); _ = finalizer(); close(done) }()
+	<-entered
+	closes := 0
+	select { case <-done: t.Fatal("finalizer passed pending construction"); default: }
+	if closes != 0 { t.Fatal("finalizer closed a resource while query was held") }
+	closes++ // The constructor's modeled close, after the query returned.
+	park := make(chan struct{})
+	g := &failedReportDisposal{unknown: true, park: park}
+	cleanup := &bootstrapCleanupError{err: errors.New("original failure"), reportDisposal: g}
+	k.complete(cleanup.reportDisposal) // Only after the modeled query and close return.
+	k.complete(nil) // A duplicate completion cannot discard the graph.
+	if k.graph != g { t.Fatal("published graph was discarded") }
+	cleanup, g = nil, nil
+	select { case <-done: t.Fatal("unknown disposition was released"); default: }
+	if closes != 1 { t.Fatal("keeper retried disposal") }
+	close(park) // Test-only modeled physical-release witness.
+	<-done
+
+	var successfulFinalizer func() error
+	success, err := registerReportPreparationKeeper(func(f func() error) error { successfulFinalizer = f; return nil })
+	if err != nil { t.Fatal(err) }
+	success.complete(nil) // Ordinary tracer has accepted ownership.
+	success.complete(&failedReportDisposal{unknown: true, park: make(chan struct{})})
+	if success.graph != nil { t.Fatal("successful transfer was not final") }
+	if err := successfulFinalizer(); err != nil { t.Fatal(err) }
+}
+
+// Legacy isolated quarantine checks; not evidence for the coordinated F1b control.
+func TestReportDisposalQuarantine(t *testing.T) {
+	closeErr := errors.New("unknown close")
+	valid, closes := true, 0
+	d := captureReportClose(func() int {
+		if !valid { t.Fatal("FD read after close") }
+		return 17 // Fake provenance only; never used as an OS descriptor.
+	}, func() error {
+		closes++
+		valid = false
+		return closeErr
+	})
+	if d.fd != 17 || !errors.Is(d.err, closeErr) || closes != 1 {
+		t.Fatal("close disposition was not captured before disown")
+	}
+	park := make(chan struct{})
+	g := &failedReportDisposal{unknown: true, park: park}
+	var worker func()
+	starts := 0
+	start := func(f func()) { starts++; worker = f }
+	g.quarantine(true, start)
+	if starts != 0 { t.Fatal("scoped failure started a worker") }
+	g.quarantine(false, start)
+	g.quarantine(false, start)
+	if starts != 1 || worker == nil || closes != 1 { t.Fatal("unexpected quarantine start or close retry") }
+	// The constructor's error is not the worker's root.
+	cause := errors.New("preparation failure")
+	cleanup := &bootstrapCleanupError{err: errors.Join(cause, closeErr), reportDisposal: g}
+	if !errors.Is(cleanup, cause) || !errors.Is(cleanup, closeErr) { t.Fatal("original causes lost") }
+	cleanup = nil
+	g = nil
+	done := make(chan struct{})
+	go func() { worker(); close(done) }()
+	select {
+	case <-done: t.Fatal("worker returned before physical release")
+	default:
+	}
+	close(park) // Test-only release of the private modeled wait.
+	<-done
+	if closes != 1 { t.Fatal("quarantine retried close") }
+	(&failedReportDisposal{park: make(chan struct{})}).quarantine(false, start)
+	if starts != 1 { t.Fatal("released disposal started a worker") }
+}
+
+type completionLifetime struct{}
+
+func (completionLifetime) Session() string  { return "session" }
+func (completionLifetime) HostTGID() uint32 { return 42 }
+func (completionLifetime) Birth() uint64    { return 7 }
+func (completionLifetime) Validate() error  { return nil }
+
+type invalidCompletionLifetime struct {
+	completionLifetime
+	pid     uint32
+	session string
+	err     error
+}
+
+func (l invalidCompletionLifetime) HostTGID() uint32 { return l.pid }
+func (l invalidCompletionLifetime) Session() string  { return l.session }
+func (l invalidCompletionLifetime) Validate() error  { return l.err }
+
+func completionConfig() *Config {
+	return &Config{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 42, ProcessStartTicks: 7, CounterAddress: 8}, TraceDefinitionLifetime: completionLifetime{}}
+}
+
+func TestObservedBootstrapCompletionBoundary(t *testing.T) {
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	calls := 0
+	go func() {
+		_, err := completeTracerBootstrap(context.Background(), &Tracer{},
+			&Config{HotSpotObservedPID: 42, TraceDefinitionLifetime: completionLifetime{}},
+			func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+				t.Error("epoch callback called")
+				return nil
+			},
+			func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+				calls++
+				close(entered)
+				<-release
+				return nil
+			}, func(err error) error { return err }, func(pid, tid libpf.PID) process.Process {
+				if pid != 42 || tid != 42 {
+					t.Errorf("process identity %v/%v", pid, tid)
+				}
+				return nil
+			})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("returned before observed bootstrap: %v", err)
+	case <-entered:
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("returned while observed bootstrap pending: %v", err)
+	default:
+	}
+	close(release)
+	if err := <-done; err != nil || calls != 1 {
+		t.Fatalf("bootstrap calls=%d error=%v", calls, err)
+	}
+}
+
+func TestObservedBootstrapRejectsInvalidConfiguration(t *testing.T) {
+	invalid := errors.New("invalid lifetime")
+	for _, tc := range []struct {
+		name   string
+		cfg    *Config
+		cancel bool
+		want   error
+	}{
+		{"wrong pid", &Config{HotSpotObservedPID: 42, TraceDefinitionLifetime: invalidCompletionLifetime{pid: 43, session: "session"}}, false, nil},
+		{"empty session", &Config{HotSpotObservedPID: 42, TraceDefinitionLifetime: invalidCompletionLifetime{pid: 42}}, false, nil},
+		{"invalid lifetime", &Config{HotSpotObservedPID: 42, TraceDefinitionLifetime: invalidCompletionLifetime{err: invalid}}, false, invalid},
+		{"conflicting targets", &Config{HotSpotObservedPID: 42, HotSpotEpochTarget: completionConfig().HotSpotEpochTarget}, false, nil},
+		{"canceled", &Config{HotSpotObservedPID: 42, TraceDefinitionLifetime: completionLifetime{}}, true, context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancel {
+				cancel()
+			}
+			calls, disposals := 0, 0
+			callback := func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error { calls++; return nil }
+			got, err := completeTracerBootstrap(ctx, &Tracer{}, tc.cfg, callback, callback, func(err error) error { disposals++; return err }, nil)
+			if got != nil || err == nil || calls != 0 || disposals != 1 || (tc.want != nil && !errors.Is(err, tc.want)) {
+				t.Fatalf("tracer=%v err=%v calls=%d disposals=%d", got, err, calls, disposals)
+			}
+		})
+	}
+}
+
+func TestObservedBootstrapFailureDoesNotReturnTracer(t *testing.T) {
+	cause := errors.New("observed bootstrap failed")
+	disposals := 0
+	got, err := completeTracerBootstrap(context.Background(), &Tracer{},
+		&Config{HotSpotObservedPID: 42, TraceDefinitionLifetime: completionLifetime{}},
+		nil, func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error { return cause },
+		func(err error) error { disposals++; return err }, func(libpf.PID, libpf.PID) process.Process { return nil })
+	if got != nil || !errors.Is(err, cause) || disposals != 1 {
+		t.Fatalf("tracer=%v error=%v disposals=%d", got, err, disposals)
+	}
+}
+
+func TestBootstrapCompletionBoundary(t *testing.T) {
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	calls := 0
+	sequence := make([]string, 0, 9)
+	go func() {
+		_, err := completeTracerBootstrap(context.Background(), &Tracer{}, completionConfig(), func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+			calls++
+			close(entered)
+			<-release
+			return nil
+		}, nil, func(err error) error { return err }, func(libpf.PID, libpf.PID) process.Process { return nil })
+		if err == nil {
+			sequence = append(sequence, "ready")
+			for i := 0; i < 8; i++ {
+				sequence = append(sequence, "burst")
+			}
+		}
+		done <- err
+	}()
+	<-entered
+	select {
+	case <-done:
+		t.Fatal("returned before bootstrap")
+	default:
+	}
+	close(release)
+	if err := <-done; err != nil || calls != 1 {
+		t.Fatalf("bootstrap: %v, calls %d", err, calls)
+	}
+	if len(sequence) != 9 || sequence[0] != "ready" {
+		t.Fatalf("sequence: %v", sequence)
+	}
+	for _, event := range sequence[1:] {
+		if event != "burst" {
+			t.Fatalf("sequence: %v", sequence)
+		}
+	}
+	_, err := completeTracerBootstrap(context.Background(), &Tracer{}, &Config{}, func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+		t.Fatal("unexpected bootstrap")
+		return nil
+	}, nil, func(err error) error { t.Fatal("unexpected disposal"); return err }, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBootstrapCanceledBeforeReady(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	got, err := completeTracerBootstrap(ctx, &Tracer{}, completionConfig(), func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+		t.Fatal("canceled bootstrap called")
+		return nil
+	}, nil, func(err error) error { return err }, nil)
+	if got != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("tracer=%v error=%v", got, err)
+	}
+}
+
+func TestBootstrapSkippedUnboundConfigurations(t *testing.T) {
+	configs := []*Config{
+		{},
+		{TraceDefinitionLifetime: completionLifetime{}},
+		{HotSpotEpochTarget: completionConfig().HotSpotEpochTarget},
+		{HotSpotObservedPID: 42},
+	}
+	for _, cfg := range configs {
+		tr := &Tracer{}
+		got, err := completeTracerBootstrap(context.Background(), tr, cfg, func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+			t.Fatal("unexpected bootstrap")
+			return nil
+		}, func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+			t.Fatal("unexpected observed bootstrap")
+			return nil
+		}, func(err error) error { t.Fatal("unexpected disposal"); return err }, nil)
+		if got != tr || err != nil {
+			t.Fatalf("tracer=%v error=%v", got, err)
+		}
+	}
+}
+
+func TestBootstrapBlockedStopAndDeferredSkip(t *testing.T) {
+	cause, stopFailure := errors.New("bootstrap"), errors.New("stop")
+	p, m := &cebpf.Program{}, &cebpf.Map{}
+	source := &traceDefinitionSource{}
+	tr := &Tracer{definitionSource: source, ebpfProgs: map[string]*cebpf.Program{"p": p}, ebpfMaps: map[string]*cebpf.Map{"m": m}}
+	entered, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	stops, closes := 0, 0
+	go func() {
+		err := disposeBootstrapFailureWith(tr, cause, func(context.Context) error {
+			stops++
+			close(entered)
+			<-release
+			return stopFailure
+		}, func(*cebpf.Program) error { closes++; return nil }, func(*cebpf.Map) error { closes++; return nil })
+		err = stopFailedConstructor(true, true, err, func(context.Context) error { stops++; return nil })
+		done <- err
+	}()
+	<-entered
+	select {
+	case <-done:
+		t.Fatal("returned before stop joined")
+	default:
+	}
+	close(release)
+	err := <-done
+	var pending *bootstrapCleanupError
+	if !errors.As(err, &pending) || !errors.Is(err, cause) || !errors.Is(err, stopFailure) || !errors.Is(source.err, cause) || pending.tracer != tr || stops != 1 || closes != 0 || pending.programs["p"] != p || pending.maps["m"] != m {
+		t.Fatalf("cleanup: %v", err)
+	}
+}
+
+func TestBootstrapFailureDoesNotReturnTracer(t *testing.T) {
+	cause := errors.New("bootstrap failed")
+	cleanup := errors.New("cleanup failed")
+	disposals := 0
+	got, err := completeTracerBootstrap(context.Background(), &Tracer{}, completionConfig(), func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error {
+		return cause
+	}, nil, func(err error) error {
+		disposals++
+		return errors.Join(err, cleanup)
+	}, func(libpf.PID, libpf.PID) process.Process { return nil })
+	if got != nil || disposals != 1 || !errors.Is(err, cause) || !errors.Is(err, cleanup) {
+		t.Fatalf("tracer=%v disposals=%d error=%v", got, disposals, err)
+	}
+}
+
+func TestBootstrapCleanupOwnership(t *testing.T) {
+	cause, stopFailure, closeFailure := errors.New("bootstrap"), errors.New("stop"), errors.New("close")
+	p, m := &cebpf.Program{}, &cebpf.Map{}
+	tr := &Tracer{ebpfProgs: map[string]*cebpf.Program{"a": p, "alias": p}, ebpfMaps: map[string]*cebpf.Map{"m": m}}
+	closes, stops := 0, 0
+	err := disposeBootstrapFailureWith(tr, cause, func(context.Context) error { stops++; return stopFailure }, func(*cebpf.Program) error { closes++; return nil }, func(*cebpf.Map) error { closes++; return nil })
+	var pending *bootstrapCleanupError
+	if !errors.As(err, &pending) || !errors.Is(err, cause) || !errors.Is(err, stopFailure) || stops != 1 || closes != 0 || pending.programs["a"] != p || pending.maps["m"] != m {
+		t.Fatalf("stop failure: %+v", err)
+	}
+	err = disposeBootstrapFailureWith(tr, cause, func(context.Context) error { stops++; return nil }, func(*cebpf.Program) error { closes++; return closeFailure }, func(*cebpf.Map) error { closes++; return nil })
+	if !errors.As(err, &pending) || !errors.Is(err, cause) || !errors.Is(err, closeFailure) || closes != 2 || pending.programs["a"] != p || pending.programs["alias"] != p || len(pending.maps) != 0 {
+		t.Fatalf("close failure: %+v", err)
+	}
+	order := []string{}
+	err = disposeBootstrapFailureWith(tr, cause, func(context.Context) error { order = append(order, "stop"); return nil }, func(*cebpf.Program) error { order = append(order, "program"); return nil }, func(*cebpf.Map) error { order = append(order, "map"); return nil })
+	if !errors.As(err, &pending) || strings.Join(order, ",") != "stop,program,map" || len(pending.programs) != 0 || len(pending.maps) != 0 {
+		t.Fatalf("successful cleanup: %v, order %v", err, order)
+	}
+}
+
+func TestBootstrapConstructorPosition(t *testing.T) {
+	b, err := os.ReadFile("tracer.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	start := strings.Index(s, "func NewTracer(")
+	if start < 0 {
+		t.Fatal("constructor not found")
+	}
+	end := strings.Index(s[start:], "// Close provides")
+	if end < 0 {
+		t.Fatal("constructor end not found")
+	}
+	s = s[start : start+end]
+	last := -1
+	for _, marker := range []string{"initializeMapsAndPrograms(", "acquireTraceDefinitionSource(", "pmebpf.LoadMaps(", "pm.New(", "ConfigureHotSpotEpochTarget(", "ConfigureHotSpotObservedTarget(", "monitorPIDEventsMapSingle", "return completeTracerBootstrap(", "processManager.BootstrapHotSpotEpoch, processManager.BootstrapHotSpotObserved"} {
+		i := strings.Index(s, marker)
+		if i <= last {
+			t.Fatalf("constructor order: %s", marker)
+		}
+		last = i
+	}
+}
+
+func TestScopedTracerCloseWaitsForPhysicalTail(t *testing.T) {
+	runScopedTracerCloseModel(t, false, false)
+}
+
+func TestScopedTracerCloseContinuesAfterScopeFailure(t *testing.T) {
+	runScopedTracerCloseModel(t, true, false)
+}
+
+func TestScopedBootstrapDisposesOriginalsAfterClose(t *testing.T) {
+	runScopedTracerCloseModel(t, false, true)
+}
+
+func runScopedTracerCloseModel(t *testing.T, preFailed, bootstrap bool) {
+	t.Helper()
+	primary := errors.New("model scope failure")
+	oldInfo, oldCloner, oldCloser := traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser
+	mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "tail-model", tgid: 1234, birth: 5678}}
+	counts, config, perf, pid := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+	infos := map[*cebpf.Map]traceDefinitionMapInfo{
+		counts: {Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101},
+		config: {Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102},
+		perf:   {Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 1, ID: 103},
+		pid:    {Type: uint32(cebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 100, ID: 104},
+	}
+	var mu sync.Mutex
+	closed := make(map[*cebpf.Map]int)
+	traceDefinitionInfoFn = func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+		info, ok := infos[m]
+		if !ok { return traceDefinitionMapInfo{}, unix.EINVAL }
+		return info, nil
+	}
+	traceDefinitionMapCloner = func(m *cebpf.Map) (*cebpf.Map, error) {
+		info, ok := infos[m]
+		if !ok { return nil, unix.EINVAL }
+		clone := &cebpf.Map{}
+		infos[clone] = info
+		return clone, nil
+	}
+	traceDefinitionMapCloser = func(m *cebpf.Map) error {
+		mu.Lock()
+		closed[m]++
+		mu.Unlock()
+		return nil
+	}
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	var owner *definitionOwner
+	tracer := &Tracer{auxiliaryScope: scope}
+	started, workerDone, unblock := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	tailStarted, tailRelease, stopDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var releaseWorker, releaseTail sync.Once
+	callerCtx, cancelCaller := context.WithCancel(context.Background())
+	workerLaunched, stopLaunched := false, false
+	var stopErr error
+	var tailCount int
+	var tailAfterOwner bool
+	t.Cleanup(func() {
+		releaseWorker.Do(func() { close(unblock) })
+		releaseTail.Do(func() { close(tailRelease) })
+		cancelCaller()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := scope.Stop(ctx)
+		scopeDone := ctx.Err() == nil
+		cancel()
+		if !scopeDone { t.Error("scope cleanup timed out") }
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, unix.EACCES) && !errors.Is(err, primary) { t.Errorf("scope cleanup: %v", err) }
+		allDone, stopJoined := scopeDone, !stopLaunched
+		if workerLaunched {
+			select { case <-workerDone: case <-time.After(2*time.Second): t.Error("worker cleanup timed out"); allDone = false }
+		}
+		if stopLaunched {
+			select { case <-stopDone: stopJoined = true; case <-time.After(2*time.Second): t.Error("caller cleanup timed out"); allDone = false }
+		}
+		if owner != nil {
+			if stopLaunched && stopJoined {
+				select { case <-tracer.scopedClose.done: case <-time.After(2*time.Second): t.Error("tracer cleanup timed out"); allDone = false }
+				if owner.Closed() {
+					select { case <-owner.scopeJoinDone: case <-time.After(2*time.Second): t.Error("owner join cleanup timed out"); allDone = false }
+				} else {
+					allDone = false
+				}
+			} else if !stopLaunched && scopeDone {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				err := owner.closeWithContext(ctx)
+				cancel()
+				if err != nil { t.Errorf("owner cleanup: %v", err) }
+			}
+			select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Error("physical owner cleanup timed out"); allDone = false }
+		}
+		if allDone { traceDefinitionInfoFn, traceDefinitionMapCloner, traceDefinitionMapCloser = oldInfo, oldCloner, oldCloser }
+	})
+	maps := map[string]*cebpf.Map{traceDefinitionCounterMap: counts, traceDefinitionConfigMap: config, "trace_events": perf, "pid_events": pid}
+	var err error
+	owner, err = acquireDefinitionOwner(context.Background(), mock, maps)
+	if err != nil {
+		var pending *traceDefinitionOwnerError
+		if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }
+		t.Fatalf("acquire model owner: %v", err)
+	}
+	tracer.definitionOwner = owner
+	clones := []*cebpf.Map{owner.countsMap, owner.configMap, owner.perfMap, owner.pidMap}
+	if len(infos) != 8 { t.Fatal("expected four model clones") }
+	if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatalf("bind lifetime: %v", err) }
+	if mock.holds.Load() != 2 { t.Fatal("expected two retained holds") }
+	workerLaunched = scope.Go(func() { defer close(workerDone); close(started); <-unblock })
+	if !workerLaunched { t.Fatal("producer enrollment failed") }
+	select { case <-started: case <-time.After(2*time.Second): t.Fatal("producer did not enter") }
+	physical := func() error {
+		mu.Lock()
+		tailCount++
+		tailAfterOwner = owner.Closed() && len(closed) == 4
+		mu.Unlock()
+		close(tailStarted)
+		<-tailRelease
+		if bootstrap { return nil }
+		return unix.EACCES
+	}
+	if bootstrap {
+		progOK, progFail := &cebpf.Program{}, &cebpf.Program{}
+		tracer.ebpfProgs = map[string]*cebpf.Program{"ok": progOK, "ok-alias": progOK, "failed": progFail}
+		tracer.ebpfMaps = map[string]*cebpf.Map{"ok": counts, "ok-alias": counts, "failed": config}
+		programCloses := make(map[*cebpf.Program]int)
+		mapCloses := make(map[*cebpf.Map]int)
+		stopCalls := 0
+		stop := func(context.Context) error { mu.Lock(); stopCalls++; mu.Unlock(); return nil }
+		closeProgram := func(p *cebpf.Program) error {
+			mu.Lock(); programCloses[p]++; mu.Unlock()
+			if p == progFail { return unix.EACCES }
+			return nil
+		}
+		closeMap := func(m *cebpf.Map) error {
+			mu.Lock(); mapCloses[m]++; mu.Unlock()
+			if m == config { return unix.EPERM }
+			return nil
+		}
+		stopLaunched = true
+		disposeErr := disposeBootstrapFailureWithTail(tracer, primary, stop, closeProgram, closeMap, physical)
+		close(stopDone)
+		var retained *bootstrapCleanupError
+		var pending *traceDefinitionOwnerError
+		if !errors.As(disposeErr, &retained) || !errors.As(disposeErr, &pending) || !errors.Is(disposeErr, primary) || !errors.Is(disposeErr, context.DeadlineExceeded) {
+			t.Fatalf("expected pending retained bootstrap: %v", disposeErr)
+		}
+		message, unwrapped := retained.Error(), retained.Unwrap()
+		select { case <-tailStarted: t.Fatal("tail ran before producer joined"); default: }
+		mu.Lock()
+		untouched := len(programCloses) == 0 && len(mapCloses) == 0 && len(closed) == 0 && stopCalls == 0
+		mu.Unlock()
+		if !untouched || mock.holds.Load() != 2 { t.Fatal("bootstrap resources closed before producer joined") }
+		releaseWorker.Do(func() { close(unblock) })
+		select { case <-workerDone: case <-time.After(2*time.Second): t.Fatal("producer did not return") }
+		select { case <-tailStarted: case <-time.After(2*time.Second): t.Fatal("tail did not start") }
+		select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner did not close") }
+		mu.Lock()
+		untouched = tailAfterOwner && tailCount == 1 && len(programCloses) == 0 && len(mapCloses) == 0
+		mu.Unlock()
+		if !untouched { t.Fatal("original disposal preceded physical tail return") }
+		select { case <-tracer.scopedClose.done: t.Fatal("tracer completed before physical tail returned"); default: }
+		releaseTail.Do(func() { close(tailRelease) })
+		select { case <-tracer.scopedClose.done: case <-time.After(2*time.Second): t.Fatal("tracer disposal did not finish") }
+		select { case <-owner.scopeJoinDone: case <-time.After(2*time.Second): t.Fatal("owner join did not finish") }
+		mu.Lock()
+		valid := programCloses[progOK] == 1 && programCloses[progFail] == 1 && len(programCloses) == 2 && mapCloses[counts] == 1 && mapCloses[config] == 1 && len(mapCloses) == 2 && stopCalls == 0 && tailCount == 1 && len(closed) == 4 && closed[counts] == 0 && closed[config] == 0
+		for _, clone := range clones { valid = valid && closed[clone] == 1 }
+		mu.Unlock()
+		if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("bootstrap disposal provenance incorrect") }
+		if len(retained.programs) != 1 || retained.programs["failed"] != progFail || len(retained.maps) != 1 || retained.maps["failed"] != config { t.Fatal("failed original handles not retained") }
+		if retained.Error() != message || retained.Unwrap() != unwrapped { t.Fatal("published bootstrap error mutated") }
+		if !errors.Is(disposeErr, primary) || !errors.Is(disposeErr, unix.EACCES) || !errors.Is(disposeErr, unix.EPERM) { t.Fatalf("late bootstrap errors lost: %v", disposeErr) }
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := tracer.closeScopedTracerWith(ctx, physical)
+		cancel()
+		mu.Lock()
+		valid = tailCount == 1 && programCloses[progOK] == 1 && programCloses[progFail] == 1 && mapCloses[counts] == 1 && mapCloses[config] == 1
+		mu.Unlock()
+		if !valid || !errors.Is(err, primary) || !errors.Is(err, unix.EPERM) { t.Fatalf("repeat bootstrap close: %v", err) }
+		readouts := 0
+		if owner.WithCoveredReadout(func() error { readouts++; return nil }) == nil || readouts != 0 { t.Fatal("repeat bootstrap close renewed readout") }
+		return
+	}
+	stopLaunched = true
+	if preFailed {
+		scope.Fail(primary)
+		cancelCaller()
+		stopErr = tracer.closeScopedTracerWith(callerCtx, physical)
+		close(stopDone)
+	} else {
+		go func() { stopErr = tracer.closeScopedTracerWith(callerCtx, physical); close(stopDone) }()
+		select { case <-scope.Context().Done(): case <-time.After(2*time.Second): t.Fatal("scope stop did not begin") }
+		cancelCaller()
+	}
+	select { case <-stopDone: case <-time.After(2*time.Second): t.Fatal("caller did not return") }
+	var pending *traceDefinitionOwnerError
+	if !errors.As(stopErr, &pending) || !errors.Is(stopErr, context.Canceled) { t.Fatalf("expected pending owner: %v", stopErr) }
+	if preFailed && !errors.Is(stopErr, primary) { t.Fatalf("pending result lost scope failure: %v", stopErr) }
+	select { case <-tailStarted: t.Fatal("tail ran before producer joined"); default: }
+	mu.Lock()
+	n := len(closed)
+	mu.Unlock()
+	if n != 0 || mock.holds.Load() != 2 || owner.Closing() || owner.Quarantined() { t.Fatal("owner closed before producer joined") }
+	calls := 0
+	if owner.WithCoveredReadout(func() error { calls++; return nil }) == nil || calls != 0 { t.Fatal("sealed readout admitted") }
+	releaseWorker.Do(func() { close(unblock) })
+	select { case <-workerDone: case <-time.After(2*time.Second): t.Fatal("producer did not return") }
+	select { case <-tailStarted: case <-time.After(2*time.Second): t.Fatal("tail did not enter") }
+	select { case <-owner.scopeJoinDone: case <-time.After(2*time.Second): t.Fatal("owner join did not complete") }
+	select { case <-owner.closeReqDone: case <-time.After(2*time.Second): t.Fatal("owner physical close did not complete") }
+	select { case <-tracer.scopedClose.done: t.Fatal("tracer completed before tail returned"); default: }
+	mu.Lock()
+	valid := tailAfterOwner && tailCount == 1 && len(closed) == 4 && closed[counts] == 0 && closed[config] == 0 && closed[perf] == 0 && closed[pid] == 0
+	for _, clone := range clones { valid = valid && closed[clone] == 1 }
+	mu.Unlock()
+	if !valid || mock.holds.Load() != 0 || mock.releaseCalls.Load() != 1 { t.Fatal("owner cleanup provenance incorrect") }
+	releaseTail.Do(func() { close(tailRelease) })
+	select { case <-tracer.scopedClose.done: case <-time.After(2*time.Second): t.Fatal("tracer close did not complete") }
+	if !errors.Is(stopErr, unix.EACCES) || !errors.Is(stopErr, context.Canceled) || !errors.Is(owner.CloseErr(), unix.EACCES) || errors.Is(owner.CloseErr(), context.Canceled) || !errors.Is(scope.Failure(), unix.EACCES) { t.Fatal("late physical error was not retained") }
+	if preFailed && (!errors.Is(stopErr, primary) || !errors.Is(scope.Failure(), primary) || errors.Is(owner.CloseErr(), primary)) { t.Fatal("scope failure was lost or stored as physical close") }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err = tracer.closeScopedTracerWith(ctx, physical)
+	cancel()
+	mu.Lock()
+	valid = tailCount == 1
+	mu.Unlock()
+	if !valid || !errors.Is(err, unix.EACCES) { t.Fatalf("repeat close: %v", err) }
+	if preFailed && !errors.Is(err, primary) { t.Fatalf("repeat close lost scope failure: %v", err) }
+	if owner.WithCoveredReadout(func() error { calls++; return nil }) == nil || calls != 0 { t.Fatal("repeat close renewed readout") }
+}

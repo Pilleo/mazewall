@@ -1,0 +1,69 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package execinfomanager
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+	"syscall"
+	"testing"
+
+	"go.opentelemetry.io/ebpf-profiler/host"
+	sdtypes "go.opentelemetry.io/ebpf-profiler/nativeunwind/stackdeltatypes"
+	pmebpf "go.opentelemetry.io/ebpf-profiler/processmanager/ebpfapi"
+)
+
+type failingOwnershipMaps struct {
+	pmebpf.EbpfHandler
+	deleted    uint16
+	mapID      uint16
+	deletes    int
+	acquireErr error
+	cleanupErr error
+}
+
+func (m *failingOwnershipMaps) UpdateUnwindInfo(uint16, sdtypes.UnwindInfo) error { return nil }
+func (m *failingOwnershipMaps) UpdateExeIDToStackDeltas(host.FileID, []pmebpf.StackDeltaEBPF) (uint16, error) {
+	return m.mapID, m.acquireErr
+}
+func (m *failingOwnershipMaps) UpdateStackDeltaPages(host.FileID, []uint16, uint16, uint64) error {
+	return syscall.EPERM
+}
+func (m *failingOwnershipMaps) DeleteExeIDToStackDeltas(_ host.FileID, id uint16) error {
+	m.deleted = id
+	m.deletes++
+	return m.cleanupErr
+}
+
+func TestLoadDeltasRollsBackAcquiredMap(t *testing.T) {
+	for _, id := range []uint16{7, 0} {
+		m := &failingOwnershipMaps{mapID: id, cleanupErr: syscall.EACCES}
+		state := executableInfoManagerState{ebpf: m, unwindInfoIndex: make(map[sdtypes.UnwindInfo]uint16)}
+		fileID := host.FileID(0x123456789abcdef0)
+		_, err := state.loadDeltas(fileID, []sdtypes.StackDelta{{Address: 0x1000}})
+		want := fmt.Sprintf("FileID %x mapID %d", fileID, id)
+		if m.deletes != 1 || m.deleted != id || !errors.Is(err, syscall.EPERM) || !errors.Is(err, syscall.EACCES) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected identity %q, deleted=%d count=%d err=%v", want, m.deleted, m.deletes, err)
+		}
+	}
+}
+
+func TestLoadDeltasDoesNotDeleteUnacquiredMap(t *testing.T) {
+	m := &failingOwnershipMaps{acquireErr: syscall.ESRCH}
+	state := executableInfoManagerState{ebpf: m, unwindInfoIndex: make(map[sdtypes.UnwindInfo]uint16)}
+	_, err := state.loadDeltas(host.FileID(1), []sdtypes.StackDelta{{Address: 0x1000}})
+	if !errors.Is(err, syscall.ESRCH) || m.deletes != 0 {
+		t.Fatalf("unacquired map: deletes=%d err=%v", m.deletes, err)
+	}
+}
+
+func TestLoadDeltasSuccessfulCleanupNotUnresolved(t *testing.T) {
+	m := &failingOwnershipMaps{mapID: 7}
+	state := executableInfoManagerState{ebpf: m, unwindInfoIndex: make(map[sdtypes.UnwindInfo]uint16)}
+	_, err := state.loadDeltas(host.FileID(1), []sdtypes.StackDelta{{Address: 0x1000}})
+	if !errors.Is(err, syscall.EPERM) || m.deletes != 1 || strings.Contains(err.Error(), "unresolved") {
+		t.Fatalf("cleanup should not be unresolved: deletes=%d err=%v", m.deletes, err)
+	}
+}

@@ -27,6 +27,8 @@ import io.mazewall.platform.native.NativeFileSystem
 import io.mazewall.platform.process.JvmChildProcess
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.junit.jupiter.api.parallel.Execution
+import org.junit.jupiter.api.parallel.ExecutionMode
 import java.net.URLClassLoader
 import java.nio.file.Files
 import java.nio.file.Path
@@ -39,6 +41,7 @@ import javax.tools.ToolProvider
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
+@Execution(ExecutionMode.CONCURRENT)
 class PreparedCloseOwnershipTest {
     @TempDir lateinit var directory: Path
 
@@ -202,13 +205,16 @@ class PreparedCloseOwnershipTest {
             listOf(Path.of(System.getProperty("java.home"), "bin", "java").toString()) +
                 coverageArguments +
                 listOf(
-                "--enable-native-access=ALL-UNNAMED",
-                "-cp",
-                System.getProperty("java.class.path"),
-                PreparedCloseOwnershipProbe::class.java.name,
-                directory.toString(),
-                mode,
-            ),
+                    "-XX:TieredStopAtLevel=1",
+                    "-Xmx256m",
+                    "-Xms64m",
+                    "--enable-native-access=ALL-UNNAMED",
+                    "-cp",
+                    System.getProperty("java.class.path"),
+                    PreparedCloseOwnershipProbe::class.java.name,
+                    directory.toString(),
+                    mode,
+                ),
         ).redirectErrorStream(true)
         JvmChildProcess.stripInheritedJvmOptions(builder.environment())
         val process = builder.start()

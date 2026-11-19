@@ -1,0 +1,187 @@
+--- a/pkg/symbolizer/symbolizer.go
++++ b/pkg/symbolizer/symbolizer.go
+@@ -18,10 +18,12 @@
+ 
+ import (
+ 	"context"
++	"fmt"
+ 	"sync"
+ 	"time"
+ 
+ 	"go.opentelemetry.io/ebpf-profiler/libpf"
++	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+ )
+ 
+ const (
+@@ -38,6 +40,7 @@
+ )
+ 
+ type SymbolizerOptions struct {
++	KindBook                *periodiccaller.KindBook
+ 	TraceDefinitionLifetime libpf.TraceDefinitionLifetime
+ 	HotSpotEpochTarget      libpf.HotSpotEpochTarget
+ 	OnHotSpotFatal          func(error)
+@@ -108,6 +111,7 @@
+ }
+ 
+ func NewSymbolizer(opts SymbolizerOptions) (*Symbolizer, error) {
++	opts.KindBook = periodiccaller.NewKindBook()
+ 	r, err := newResolverInstances(opts)
+ 	if err != nil {
+ 		return nil, err
+@@ -169,10 +173,12 @@
+ 	for {
+ 		select {
+ 		case <-ticker.C:
++			op, _ := s.options.KindBook.Admit(libpf.AuxiliarySourcePruneCycle, libpf.AuxiliaryBinding{}, false)
+ 			now := time.Now()
+ 			for _, r := range s.resolvers {
+ 				r.PruneOldObjects(now, s.pruneObjTTL)
+ 			}
++			_ = op.Complete()
+ 		case <-s.exit:
+ 			return
+ 		}
+@@ -273,3 +279,10 @@
+ 
+ 	return res, nil
+ }
++
++func (s *Symbolizer) KindObservation(kind libpf.AuxiliarySource) (libpf.KindObservation, error) {
++	if s == nil || s.options.KindBook == nil {
++		return libpf.KindObservation{}, fmt.Errorf("nil kind book")
++	}
++	return s.options.KindBook.Observation(kind)
++}
+--- a/pkg/symbolizer/otel/otel.go
++++ b/pkg/symbolizer/otel/otel.go
+@@ -138,11 +138,14 @@
+ // prune cycles, ensuring that in-flight events referencing that ID have
+ // time to be consumed by lookupOrWait.
+ func (o *otelResolverInstance) PruneOldObjects(now time.Time, ttl time.Duration) {
++	op, _ := o.options.KindBook.Admit(libpf.AuxiliarySourcePruneScanOtel, libpf.AuxiliaryBinding{}, false)
+ 	if o.trc == nil {
++		_ = op.Skip()
+ 		return
+ 	}
+ 	stackCacheMap := o.trc.GetStackCacheMap()
+ 	if stackCacheMap == nil {
++		_ = op.Skip()
+ 		return
+ 	}
+ 
+@@ -167,10 +170,12 @@
+ 	}
+ 	if err := iter.Err(); err != nil {
+ 		log.Debugf("OtelResolverInstance.PruneOldObjects: BPF map iteration aborted, skipping prune cycle: %v", err)
++		_ = op.Incomplete(err)
+ 		return
+ 	}
+ 
+ 	o.pruneCorrelationMap(activeBPF)
++	_ = op.Complete()
+ }
+ 
+ // pruneCorrelationMap performs the two-cycle pruning logic given a set
+--- a/pkg/symbolizer/symtab/symtab.go
++++ b/pkg/symbolizer/symtab/symtab.go
+@@ -28,6 +28,8 @@
+ 	log "github.com/sirupsen/logrus"
+ 	"golang.org/x/sys/unix"
+ 
++	"go.opentelemetry.io/ebpf-profiler/libpf"
++
+ 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+ 	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
+ )
+@@ -88,6 +90,7 @@
+ }
+ 
+ func (s *symtabResolverInstance) PruneOldObjects(now time.Time, ttl time.Duration) {
++	op, _ := s.options.KindBook.Admit(libpf.AuxiliarySourcePruneScanSymtab, libpf.AuxiliaryBinding{}, false)
+ 	s.lockSymbolTables.Lock()
+ 	tableRemovedCount := 0
+ 	symbolRemovedCount := 0
+@@ -105,6 +108,7 @@
+ 			len(s.symbolTables), s.symbolCountTotal)
+ 	}
+ 	s.lockSymbolTables.Unlock()
++	_ = op.Complete()
+ }
+ 
+ func (s *symtabResolverInstance) GetEbpfReplacements() map[string]any {
+--- a/pkg/symbolizer/debuginfod/debuginfod.go
++++ b/pkg/symbolizer/debuginfod/debuginfod.go
+@@ -23,6 +23,7 @@
+ 	"time"
+ 
+ 	log "github.com/sirupsen/logrus"
++	"go.opentelemetry.io/ebpf-profiler/libpf"
+ 
+ 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+ )
+@@ -78,8 +79,8 @@
+ }
+ 
+ func (d *debuginfodResolverInstance) PruneOldObjects(now time.Time, ttl time.Duration) {
++	op, _ := d.options.KindBook.Admit(libpf.AuxiliarySourcePruneScanDebuginfod, libpf.AuxiliaryBinding{}, false)
+ 	d.lockSymbolTablesFromBuildID.Lock()
+-	defer d.lockSymbolTablesFromBuildID.Unlock()
+ 
+ 	buildIDRemovedCount := 0
+ 	buildIDSymbolRemovedCount := 0
+@@ -95,6 +96,8 @@
+ 			buildIDRemovedCount, buildIDSymbolRemovedCount,
+ 			len(d.symbolTablesFromBuildID))
+ 	}
++	d.lockSymbolTablesFromBuildID.Unlock()
++	_ = op.Complete()
+ }
+ 
+ func (d *debuginfodResolverInstance) newSymbolTableFromPath(path string, buildIDStr string, task symbolizer.Task) (*symbolizer.SymbolTable, error) {
+--- a/pkg/symbolizer/otel/prune_test.go
++++ b/pkg/symbolizer/otel/prune_test.go
+@@ -19,6 +19,9 @@
+ 	"time"
+ 
+ 	"github.com/stretchr/testify/assert"
++	"go.opentelemetry.io/ebpf-profiler/libpf"
++	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
++	oteltracer "go.opentelemetry.io/ebpf-profiler/tracer"
+ )
+ 
+ func TestPruneCorrelationMap_BasicCleanup(t *testing.T) {
+@@ -89,9 +92,33 @@
+ 
+ func TestPruneOldObjects_NilTracer(t *testing.T) {
+ 	o := newTestInstance()
++	book := periodiccaller.NewKindBook()
++	o.options.KindBook = book
+ 	o.storeTrace(100, makeFrames("func_a"), 123, 456)
+ 
+ 	// Should be a no-op, not panic.
+ 	o.PruneOldObjects(time.Now(), time.Minute)
+ 	assert.Contains(t, o.correlationMap, uint64(100))
++
++	book.Freeze(false, libpf.AuxiliaryBinding{}, nil)
++	obs, _ := book.Observation(libpf.AuxiliarySourcePruneScanOtel)
++	assert.Equal(t, uint64(1), obs.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs.Counts.Skipped)
++	assert.Equal(t, uint64(0), obs.Counts.Completed)
++	assert.Equal(t, libpf.SourceLocalNonfinal, obs.Outcome)
+ }
++
++func TestPruneOldObjects_NilMap(t *testing.T) {
++	o := newTestInstance()
++	book := periodiccaller.NewKindBook()
++	o.options.KindBook = book
++	o.trc = &oteltracer.Tracer{}
++
++	o.PruneOldObjects(time.Now(), time.Minute)
++
++	book.Freeze(false, libpf.AuxiliaryBinding{}, nil)
++	obs, _ := book.Observation(libpf.AuxiliarySourcePruneScanOtel)
++	assert.Equal(t, uint64(1), obs.Counts.Admitted)
++	assert.Equal(t, uint64(1), obs.Counts.Skipped)
++	assert.Equal(t, uint64(0), obs.Counts.Completed)
++}

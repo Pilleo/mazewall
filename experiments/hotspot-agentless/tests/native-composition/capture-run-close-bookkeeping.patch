@@ -1,0 +1,122 @@
+--- a/internal/capture/collector.go
++++ b/internal/capture/collector.go
+@@ -42,13 +42,70 @@
+ 
+ // Run uses one Gadget symbolizer and its existing process discovery, cache,
+ // waiters, map replacements and pruning. Only event enrichment is queued here.
++// Native-only effect receipts; this type is absent from normal source.
++type nativeCloseState uint8
++
++const (
++	nativeCloseNotAcquired nativeCloseState = iota
++	nativeCloseOwned
++	nativeCloseRetained
++	nativeCloseClosed
++	nativeCloseFailed
++)
++
++type nativeCloseResult struct {
++	state nativeCloseState
++	err   error
++}
++
++// Native test-only point observation; fields are not an ordering proof.
++type nativeRunBoundary struct {
++	available                           bool
++	runStart, hardDeadline, observedAt  time.Time
++	requestErr, runContextErr, ownedErr error
++	requestCause, runCause, ownedCause  error
++	fatalErr, runErr, eventErr          error
++	watchDone                           bool
++	watchErr                            error
++}
++
++func nativeCaptureRunBoundary(request, run, owned context.Context, deadline time.Time, fatal *fatalState, watchDone <-chan struct{}, watchErr *error, runErr, eventErr error) nativeRunBoundary {
++	value := nativeRunBoundary{
++		available: true, runStart: deadline.Add(-time.Minute), hardDeadline: deadline, observedAt: time.Now(),
++		requestErr: request.Err(), runContextErr: run.Err(), ownedErr: owned.Err(),
++		requestCause: context.Cause(request), runCause: context.Cause(run), ownedCause: context.Cause(owned),
++		fatalErr: fatal.Err(), runErr: runErr, eventErr: eventErr,
++	}
++	select {
++	case <-watchDone:
++		value.watchDone = true
++		value.watchErr = *watchErr
++	default:
++	}
++	return value
++}
++
++func (r *nativeCloseResult) record(err error) {
++	if r.state != nativeCloseOwned && r.state != nativeCloseRetained {
++		return
++	}
++	r.err = err
++	r.state = nativeCloseClosed
++	if err != nil {
++		r.state = nativeCloseFailed
++	}
++}
++
+ type captureRun struct {
+-	symbolizer *symbolizer.Symbolizer
+-	gadget     operators.GadgetContext
+-	enrichment *Enricher
+-	pidfd      int
+-	barrier    *identity.ExecBarrier
+-	retained   bool
++	symbolizer         *symbolizer.Symbolizer
++	gadget             operators.GadgetContext
++	enrichment         *Enricher
++	pidfd              int
++	barrier            *identity.ExecBarrier
++	retained           bool
++	nativePidfdClose   nativeCloseResult
++	nativeBarrierClose nativeCloseResult
++	nativeRunBoundary  nativeRunBoundary
+ }
+ 
+ func Run(ctx context.Context, cfg Config, writer io.Writer) error {
+@@ -94,10 +151,15 @@
+ 		return fmt.Errorf("own target pidfd: %w", err)
+ 	}
+ 	r.pidfd = pidfd
++	r.nativePidfdClose.state = nativeCloseOwned
+ 	defer func() {
+ 		r.retained = retainFullResources
+ 		if !retainFullResources {
+-			resultErr = errors.Join(resultErr, unix.Close(pidfd))
++			err := unix.Close(pidfd)
++			r.nativePidfdClose.record(err)
++			resultErr = errors.Join(resultErr, err)
++		} else {
++			r.nativePidfdClose.state = nativeCloseRetained
+ 		}
+ 	}()
+ 	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", cfg.PID))
+@@ -118,9 +180,14 @@
+ 			return err
+ 		}
+ 		r.barrier = execBarrier
++		r.nativeBarrierClose.state = nativeCloseOwned
+ 		defer func() {
+ 			if !retainFullResources {
+-				resultErr = errors.Join(resultErr, execBarrier.Close())
++				err := execBarrier.Close()
++				r.nativeBarrierClose.record(err)
++				resultErr = errors.Join(resultErr, err)
++			} else {
++				r.nativeBarrierClose.state = nativeCloseRetained
+ 			}
+ 		}()
+ 		checks = append(checks, execBarrier.Check)
+@@ -377,6 +444,9 @@
+ 			cause = "request"
+ 		}
+ 		eventFinalization, eventFinalizationErr = eventFinalizationSnapshot(gc, cause)
++		if cfg.DrainFull {
++			r.nativeRunBoundary = nativeCaptureRunBoundary(requestCtx, ctx, ownedCtx, hardEventDeadline, &fatal, watchDone, &watchErr, runErr, eventFinalizationErr)
++		}
+ 		if eventFinalization != nil && !eventFinalization.ReceiverJoined {
+ 			retainFullResources = cfg.DrainFull
+ 			// A held writer/callback cannot be safely locked for a final summary.

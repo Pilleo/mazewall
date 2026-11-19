@@ -40,5 +40,18 @@ for exact current-main/immutable development graph and retained receipts.
 Locally addressed only: issue stays open; no publication/merge, released pins,
 workspace-off/full privileged CI/image/native/persisted-profile acceptance yet.
 
+**Current-checkout port (2026-10-23):** Remaining-plan Task4a reproduced the
+startup-frozen receiver, late registration/current replay and command-local raw
+replay failures in this checkout. Its six-file minimal port includes necessary
+predecessor callback assembly, preserving current metadata/filter behavior.
+Independent review then reproduced an overtaken Add resurrecting membership;
+its scoped current-pointer/pre-delete guard correction passes behavioral controls
+in both modes and connected watcher/cmd race checks (2.625s/4.150s), with clean
+scoped re-review. Unregister invalidates queued subscription
+work, not an entered callback: feature-owned stop/join remains required. This
+host-only checkpoint does not replace the historical receipts or close the
+release/native/persisted-profile gates. See the
+[remaining plan](../../superpowers/plans/2026-10-23-hotspot-remaining-acceptance.md).
+
 ---
 <!-- id: issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w  file: issue-20261019-170844-967-deliver-hotspot-container-lifecycle-events-after-w.md -->

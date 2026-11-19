@@ -69,7 +69,7 @@
 +#include "correlation_ids.h"
 +extern struct hotspot_procs_t hotspot_procs;
  
-@@ -337,1 +337,24 @@
+@@ -337,1 +339,24 @@
 +  pid_t epoch_pid = trace->pid;
 +  HotspotProcInfo *epoch_info = bpf_map_lookup_elem(&hotspot_procs, &epoch_pid);
 +  if (epoch_info && epoch_info->counter_address) {
@@ -94,12 +94,12 @@
 +
 +
    // Build traceCache
-@@ -355,3 +379,4 @@
+@@ -355,3 +380,4 @@
    traceCache->tid = trace->tid;
 +  traceCache->hotspot_identity = trace->hotspot_identity;
  
    u16 len = trace->frame_data_len;
-@@ -375,1 +400,5 @@
+@@ -374,1 +400,5 @@
 -  u64 correlation_id = bpf_ktime_get_ns();
 +  u64 correlation_id = next_correlation_id();
 +  if (!correlation_id) {

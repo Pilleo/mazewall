@@ -77,6 +77,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFails
@@ -342,10 +343,23 @@ class ConfinedHelperControlTest {
                     afterSocketClose(fd)
                 }
             }
+            private val acceptThread = AtomicReference<Thread?>()
+            private val daemonEngine = object : NativeEngine by native {
+                override val raw = object : RawSyscallOperations by native.raw {
+                    override fun poll(
+                        fds: ManagedSegment,
+                        nfds: Long,
+                        timeout: Int,
+                    ): LinuxNative.SyscallResult<Long, LinuxNative.SyscallHandledState.Unhandled> {
+                        val bounded = if (Thread.currentThread() === acceptThread.get() && timeout > 20) 20 else timeout
+                        return native.raw.poll(fds, nfds, bounded)
+                    }
+                }
+            }
             private val daemon = SeccompDaemonEngine(
                 path.toString(),
                 notifHandlerFactory = { _, _ -> error("No notification listener") },
-                engine = native,
+                engine = daemonEngine,
                 socketManager = sockets,
                 hooks = io.mazewall.platform.seccomp.daemon.SeccompConnectionHooks(
                     beforeListener = { socket, deadline ->
@@ -370,6 +384,7 @@ class ConfinedHelperControlTest {
             )
             private val ended = CompletableFuture<Unit>()
             private val thread = Thread.ofPlatform().start {
+                acceptThread.set(Thread.currentThread())
                 try {
                     daemon.run()
                     ended.complete(Unit)

@@ -1,0 +1,2407 @@
+diff --git a/support/ebpf/interpreter_dispatcher.ebpf.c b/support/ebpf/interpreter_dispatcher.ebpf.c
+--- a/support/ebpf/interpreter_dispatcher.ebpf.c
++++ b/support/ebpf/interpreter_dispatcher.ebpf.c
+@@ -9,6 +9,7 @@
+ #include "types.h"
+ #include "correlation_ids.h"
+ extern struct hotspot_procs_t hotspot_procs;
++#include "kobject_witness.h"
+ 
+ // Begin shared maps
+ 
+diff --git a/support/ebpf/Makefile b/support/ebpf/Makefile
+--- a/support/ebpf/Makefile
++++ b/support/ebpf/Makefile
+@@ -66,2 +66,5 @@
++interpreter_dispatcher.ebpf.$(TARGET_ARCH).o: interpreter_dispatcher.ebpf.c errors.h kobject_witness.h
++	$(BPF_CLANG) $(FLAGS) -MMD -MP -o $@
++
+ %.ebpf.$(TARGET_ARCH).o: %.ebpf.c errors.h
+ 	$(BPF_CLANG) $(FLAGS) -MMD -MP -o $@
+diff --git a/support/ebpf/kobject_witness.h b/support/ebpf/kobject_witness.h
+new file mode 100644
+--- /dev/null
++++ b/support/ebpf/kobject_witness.h
+@@ -0,0 +1,798 @@
++#ifndef OPTI_KOBJECT_WITNESS_H
++#define OPTI_KOBJECT_WITNESS_H
++
++#include "bpfdefs.h"
++
++#if !defined(TESTING_COREDUMP)
++
++#define KW_INLINE static __attribute__((always_inline, unused)) inline
++#define KW_BINDING_ABI_VERSION 2ULL
++#define KW_CLOSED (1ULL << 63)
++#define KW_ACTIVE_MASK (KW_CLOSED - 1)
++#define KW_DEPTH 8
++#define KW_RETRIES 16
++#define KW_LAYOUT_LIMIT (1U << 20)
++#define KW_OFFSET(type, field) __builtin_offsetof(type, field)
++
++enum kw_stage {
++  KW_ENV, KW_BROADCAST, KW_ALLOCATION, KW_RELAY, KW_STAGE_COUNT
++};
++enum kw_fault {
++  KW_BAD_BINDING = 1U << 0,
++  KW_CAPACITY = 1U << 1,
++  KW_NESTING = 1U << 2,
++  KW_CORRELATION = 1U << 3,
++  KW_UNREGISTERED = 1U << 4,
++  KW_ARITHMETIC = 1U << 5,
++  KW_UPSTREAM_FAILURE = 1U << 6,
++  KW_RECIPIENT_FAILURE = 1U << 7,
++  KW_READ_FAILURE = 1U << 8,
++  KW_DUPLICATE = 1U << 9,
++  KW_ADMISSION_FAILURE = 1U << 10,
++  KW_DOMAIN_MUTATION = 1U << 11,
++  KW_EPERM = 1U << 12,
++  KW_EACCES = 1U << 13
++};
++struct kw_binding_value {
++  u64 cookie, port_id, generation, listen_all_nsid_mask, abi_version;
++};
++struct kw_stage_value {
++  u64 attempted, succeeded, failed, skipped, active;
++};
++struct kw_counts_value {
++  u64 faults;
++  s64 first_error;
++  struct kw_stage_value stages[KW_STAGE_COUNT];
++  u64 admitted, queued, overrun, filtered_or_failed;
++  u64 root_started, root_returned;
++  u64 classic_entries[KW_STAGE_COUNT];
++};
++struct kw_frame_value {
++  u64 subject, flags;
++};
++struct kw_context_value {
++  u64 task_identity, generation;
++  volatile u64 depth_word;
++  struct kw_frame_value roots[KW_DEPTH], recipients[KW_DEPTH];
++};
++struct kw_layout_value {
++  u64 generation, listen_all_nsid_mask;
++  u32 version, pointer_bytes, ulong_bytes;
++  u32 sock_size, nlk_size, bcast_size;
++  u32 sock_cookie, sock_net;
++  u32 nlk_flags, nlk_portid, nlk_ngroups, nlk_groups;
++  u32 bcast_exclude, bcast_net, bcast_portid, bcast_group;
++};
++BPF_RODATA_VAR(struct kw_layout_value, kw_layout, {0})
++
++_Static_assert(sizeof(struct kw_binding_value) == 40, "kw binding ABI");
++_Static_assert(KW_OFFSET(struct kw_binding_value, cookie) == 0, "kw binding cookie");
++_Static_assert(KW_OFFSET(struct kw_binding_value, port_id) == 8, "kw binding port");
++_Static_assert(KW_OFFSET(struct kw_binding_value, generation) == 16, "kw binding generation");
++_Static_assert(KW_OFFSET(struct kw_binding_value, listen_all_nsid_mask) == 24, "kw binding mask");
++_Static_assert(KW_OFFSET(struct kw_binding_value, abi_version) == 32, "kw binding version");
++_Static_assert(sizeof(struct kw_stage_value) == 40, "kw stage ABI");
++_Static_assert(KW_OFFSET(struct kw_stage_value, attempted) == 0, "kw stage attempts");
++_Static_assert(KW_OFFSET(struct kw_stage_value, succeeded) == 8, "kw stage successes");
++_Static_assert(KW_OFFSET(struct kw_stage_value, failed) == 16, "kw stage failures");
++_Static_assert(KW_OFFSET(struct kw_stage_value, skipped) == 24, "kw stage skips");
++_Static_assert(KW_OFFSET(struct kw_stage_value, active) == 32, "kw stage active");
++_Static_assert(sizeof(struct kw_counts_value) == 256, "kw counter ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, faults) == 0, "kw faults ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, first_error) == 8, "kw error ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, stages) == 16, "kw stages ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, stages[1]) == 56, "kw broadcast ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, stages[2]) == 96, "kw allocation ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, stages[3]) == 136, "kw relay ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, admitted) == 176, "kw A ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, queued) == 184, "kw Q ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, overrun) == 192, "kw O ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, filtered_or_failed) == 200, "kw F ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, root_started) == 208, "kw root ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, root_returned) == 216, "kw return ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, classic_entries) == 224, "kw classic entries ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, classic_entries[KW_ENV]) == 224, "kw env entry ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, classic_entries[KW_BROADCAST]) == 232, "kw broadcast entry ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, classic_entries[KW_ALLOCATION]) == 240, "kw allocation entry ABI");
++_Static_assert(KW_OFFSET(struct kw_counts_value, classic_entries[KW_RELAY]) == 248, "kw relay entry ABI");
++_Static_assert(sizeof(struct kw_context_value) == 280, "kw context ABI");
++_Static_assert(sizeof(struct kw_frame_value) == 16, "kw frame ABI");
++_Static_assert(KW_OFFSET(struct kw_frame_value, flags) == 8, "kw frame flags");
++_Static_assert(KW_OFFSET(struct kw_context_value, task_identity) == 0, "kw task identity");
++_Static_assert(KW_OFFSET(struct kw_context_value, generation) == 8, "kw context generation");
++_Static_assert(KW_OFFSET(struct kw_context_value, depth_word) == 16, "kw atomic depth");
++_Static_assert(KW_OFFSET(struct kw_context_value, roots) == 24, "kw roots ABI");
++_Static_assert(KW_OFFSET(struct kw_context_value, recipients) == 152, "kw recipients ABI");
++_Static_assert(sizeof(struct kw_layout_value) == 80, "kw layout ABI");
++_Static_assert(KW_OFFSET(struct kw_layout_value, generation) == 0, "kw layout generation");
++_Static_assert(KW_OFFSET(struct kw_layout_value, listen_all_nsid_mask) == 8, "kw layout mask");
++_Static_assert(KW_OFFSET(struct kw_layout_value, version) == 16, "kw layout version");
++_Static_assert(KW_OFFSET(struct kw_layout_value, pointer_bytes) == 20, "kw layout pointer");
++_Static_assert(KW_OFFSET(struct kw_layout_value, ulong_bytes) == 24, "kw layout ulong");
++_Static_assert(KW_OFFSET(struct kw_layout_value, sock_size) == 28, "kw layout sock size");
++_Static_assert(KW_OFFSET(struct kw_layout_value, nlk_size) == 32, "kw layout nlk size");
++_Static_assert(KW_OFFSET(struct kw_layout_value, bcast_size) == 36, "kw layout bcast size");
++_Static_assert(KW_OFFSET(struct kw_layout_value, sock_cookie) == 40, "kw layout cookie");
++_Static_assert(KW_OFFSET(struct kw_layout_value, sock_net) == 44, "kw layout net");
++_Static_assert(KW_OFFSET(struct kw_layout_value, nlk_flags) == 48, "kw layout flags");
++_Static_assert(KW_OFFSET(struct kw_layout_value, nlk_portid) == 52, "kw layout port");
++_Static_assert(KW_OFFSET(struct kw_layout_value, nlk_ngroups) == 56, "kw layout ngroups");
++_Static_assert(KW_OFFSET(struct kw_layout_value, nlk_groups) == 60, "kw layout groups");
++_Static_assert(KW_OFFSET(struct kw_layout_value, bcast_exclude) == 64, "kw layout exclude");
++_Static_assert(KW_OFFSET(struct kw_layout_value, bcast_net) == 68, "kw layout bcast net");
++_Static_assert(KW_OFFSET(struct kw_layout_value, bcast_portid) == 72, "kw layout bcast port");
++_Static_assert(KW_OFFSET(struct kw_layout_value, bcast_group) == 76, "kw layout bcast group");
++
++struct {
++  __uint(type, BPF_MAP_TYPE_ARRAY);
++  __uint(max_entries, 1);
++  __uint(map_flags, 1U << 10); /* Linux BPF_F_MMAPABLE. */
++  __type(key, u32);
++  __type(value, u64);
++} kw_control SEC(".maps");
++struct {
++  __uint(type, BPF_MAP_TYPE_ARRAY);
++  __uint(max_entries, 1);
++  __type(key, u32);
++  __type(value, struct kw_binding_value);
++} kw_binding SEC(".maps");
++struct {
++  __uint(type, BPF_MAP_TYPE_ARRAY);
++  __uint(max_entries, 1);
++  __type(key, u32);
++  __type(value, struct kw_counts_value);
++} kw_counts SEC(".maps");
++struct {
++  __uint(type, BPF_MAP_TYPE_HASH);
++  __uint(max_entries, 4096);
++  __type(key, u64);
++  __type(value, struct kw_context_value);
++} kw_contexts SEC(".maps");
++
++KW_INLINE struct kw_counts_value *kw_get_counts(void)
++{
++  u32 zero = 0;
++  return bpf_map_lookup_elem(&kw_counts, &zero);
++}
++KW_INLINE u64 *kw_get_control(void)
++{
++  u32 zero = 0;
++  return bpf_map_lookup_elem(&kw_control, &zero);
++}
++KW_INLINE struct kw_binding_value *kw_get_binding(void)
++{
++  u32 zero = 0;
++  return bpf_map_lookup_elem(&kw_binding, &zero);
++}
++KW_INLINE void kw_fault(struct kw_counts_value *counts, u64 bits, s64 error)
++{
++  if (!counts)
++    return;
++  if (error == -1)
++    bits |= KW_EPERM;
++  if (error == -13)
++    bits |= KW_EACCES;
++  __sync_fetch_and_or(&counts->faults, bits);
++  if (error)
++    __sync_val_compare_and_swap(&counts->first_error, (s64)0, error);
++}
++KW_INLINE bool kw_increment(struct kw_counts_value *counts, volatile u64 *counter)
++{
++  for (u32 retry = 0; retry < KW_RETRIES; retry++) {
++    u64 old = *counter;
++    if (old == ~0ULL) {
++      kw_fault(counts, KW_ARITHMETIC, 0);
++      return false;
++    }
++    if (__sync_val_compare_and_swap(counter, old, old + 1) == old)
++      return true;
++  }
++  kw_fault(counts, KW_ARITHMETIC, 0);
++  return false;
++}
++KW_INLINE bool kw_decrement(struct kw_counts_value *counts, volatile u64 *counter)
++{
++  for (u32 retry = 0; retry < KW_RETRIES; retry++) {
++    u64 old = *counter;
++    if (!old) {
++      kw_fault(counts, KW_ARITHMETIC, 0);
++      return false;
++    }
++    if (__sync_val_compare_and_swap(counter, old, old - 1) == old)
++      return true;
++  }
++  kw_fault(counts, KW_ARITHMETIC, 0);
++  return false;
++}
++KW_INLINE bool kw_admit(struct kw_counts_value *counts, volatile u64 *control)
++{
++  for (u32 retry = 0; retry < KW_RETRIES; retry++) {
++    u64 old = *control;
++    if (old & KW_CLOSED)
++      return false;
++    if ((old & KW_ACTIVE_MASK) == KW_ACTIVE_MASK) {
++      kw_fault(counts, KW_ARITHMETIC | KW_ADMISSION_FAILURE, 0);
++      return false;
++    }
++    if (__sync_val_compare_and_swap(control, old, old + 1) == old)
++      return true;
++  }
++  kw_fault(counts, KW_ADMISSION_FAILURE, 0);
++  return false;
++}
++KW_INLINE bool kw_release(struct kw_counts_value *counts, volatile u64 *control)
++{
++  for (u32 retry = 0; retry < KW_RETRIES; retry++) {
++    u64 old = *control;
++    if (!(old & KW_ACTIVE_MASK)) {
++      kw_fault(counts, KW_ADMISSION_FAILURE, 0);
++      return false;
++    }
++    if (__sync_val_compare_and_swap(control, old, old - 1) == old)
++      return true;
++  }
++  kw_fault(counts, KW_ADMISSION_FAILURE, 0);
++  return false;
++}
++KW_INLINE bool kw_span(u32 offset, u32 size, u32 width)
++{
++  return size <= KW_LAYOUT_LIMIT && (width == 4 || width == 8) &&
++         size >= width && offset <= size - width;
++}
++KW_INLINE bool kw_layout_valid(struct kw_counts_value *counts,
++                               const struct kw_binding_value *binding)
++{
++  bool valid = binding && binding->abi_version == KW_BINDING_ABI_VERSION && binding->cookie &&
++    binding->port_id && binding->port_id <= 0xffffffffULL && binding->generation &&
++    binding->listen_all_nsid_mask &&
++    !(binding->listen_all_nsid_mask & (binding->listen_all_nsid_mask - 1)) &&
++    kw_layout.generation == binding->generation &&
++    kw_layout.listen_all_nsid_mask == binding->listen_all_nsid_mask &&
++    kw_layout.version == 1 && kw_layout.pointer_bytes == 8 && kw_layout.ulong_bytes == 8 &&
++    kw_layout.nlk_size >= kw_layout.sock_size &&
++    kw_span(kw_layout.sock_cookie, kw_layout.sock_size, 8) &&
++    kw_span(kw_layout.sock_net, kw_layout.sock_size, 8) &&
++    kw_span(kw_layout.nlk_flags, kw_layout.nlk_size, 8) &&
++    kw_span(kw_layout.nlk_portid, kw_layout.nlk_size, 4) &&
++    kw_span(kw_layout.nlk_ngroups, kw_layout.nlk_size, 4) &&
++    kw_span(kw_layout.nlk_groups, kw_layout.nlk_size, 8) &&
++    kw_span(kw_layout.bcast_exclude, kw_layout.bcast_size, 8) &&
++    kw_span(kw_layout.bcast_net, kw_layout.bcast_size, 8) &&
++    kw_span(kw_layout.bcast_portid, kw_layout.bcast_size, 4) &&
++    kw_span(kw_layout.bcast_group, kw_layout.bcast_size, 4);
++  if (!valid)
++    kw_fault(counts, KW_BAD_BINDING, 0);
++  return valid;
++}
++KW_INLINE bool kw_read(struct kw_counts_value *counts, u64 base, u32 offset,
++                       u32 container_size, void *out, u32 width)
++{
++  u64 address = base + offset;
++  if (!base || !kw_span(offset, container_size, width) || address < base ||
++      address > ~0ULL - (width - 1)) {
++    kw_fault(counts, KW_READ_FAILURE, 0);
++    return false;
++  }
++  int error = bpf_probe_read_kernel(out, width, (const void *)address);
++  if (error) {
++    kw_fault(counts, KW_READ_FAILURE, error);
++    return false;
++  }
++  return true;
++}
++
++#define KW_CONTEXT_LOCK (1ULL << 63)
++#define KW_CONTEXT_POISON (1ULL << 62)
++#define KW_ROOT_MASK 0xffffffffULL
++#define KW_RECIPIENT_MASK 0x3fffffffULL
++
++KW_INLINE void kw_context_poison(struct kw_counts_value *counts,
++                                 struct kw_context_value *ctx, u64 fault)
++{
++  __sync_fetch_and_or(&ctx->depth_word, KW_CONTEXT_POISON);
++  kw_fault(counts, fault, 0);
++}
++KW_INLINE void kw_context_unlock_poison(struct kw_context_value *ctx)
++{
++  for (u32 retry = 0; retry < KW_RETRIES; retry++) {
++    u64 old = ctx->depth_word;
++    if (__sync_val_compare_and_swap(&ctx->depth_word, old,
++                                    old & ~KW_CONTEXT_LOCK) == old)
++      return;
++  }
++}
++KW_INLINE bool kw_context_lock(struct kw_counts_value *counts,
++                               struct kw_context_value *ctx, u64 *depth)
++{
++  for (u32 retry = 0; retry < KW_RETRIES; retry++) {
++    u64 old = ctx->depth_word;
++    if (old & KW_CONTEXT_POISON)
++      return false;
++    if (old & KW_CONTEXT_LOCK) {
++      kw_context_poison(counts, ctx, KW_CORRELATION);
++      return false;
++    }
++    if (__sync_val_compare_and_swap(&ctx->depth_word, old,
++                                    old | KW_CONTEXT_LOCK) == old) {
++      if ((old & KW_ROOT_MASK) > KW_DEPTH ||
++          ((old >> 32) & KW_RECIPIENT_MASK) > KW_DEPTH) {
++        kw_context_poison(counts, ctx, KW_CORRELATION);
++        kw_context_unlock_poison(ctx);
++        return false;
++      }
++      *depth = old;
++      return true;
++    }
++  }
++  kw_context_poison(counts, ctx, KW_CORRELATION);
++  return false;
++}
++KW_INLINE void kw_context_finish(struct kw_counts_value *counts,
++                                 struct kw_context_value *ctx, u64 key,
++                                 u64 depth)
++{
++  if (!depth && !(ctx->depth_word & KW_CONTEXT_POISON)) {
++    long error = bpf_map_delete_elem(&kw_contexts, &key);
++    if (!error)
++      return;
++    kw_fault(counts, KW_READ_FAILURE, error);
++  }
++  for (u32 retry = 0; retry < KW_RETRIES; retry++) {
++    u64 old = ctx->depth_word;
++    u64 next = depth | (old & KW_CONTEXT_POISON);
++    if (__sync_val_compare_and_swap(&ctx->depth_word, old, next) == old)
++      return;
++  }
++  kw_context_poison(counts, ctx, KW_CORRELATION);
++  kw_context_unlock_poison(ctx);
++}
++
++#define KW_FRAME_ACTIVE 1ULL
++#define KW_FRAME_ROOT 2ULL
++#define KW_FRAME_NATIVE_SEEN 4ULL
++enum kw_terminal { KW_SUCCEEDED, KW_FAILED, KW_SKIPPED };
++#define KW_TERMINAL(stage, value, flags) \
++  ((stage) == KW_ALLOCATION ? ((u64)(value) ? KW_SUCCEEDED : KW_FAILED) : \
++   ((s32)(value) < 0 ? KW_FAILED : \
++    ((stage) == KW_ENV && (s32)(value) == 0 && !((flags) & KW_FRAME_NATIVE_SEEN) ? \
++     KW_SKIPPED : KW_SUCCEEDED)))
++#define KW_STAGE_PARENT(parent, child) \
++  (((parent) == KW_ENV && (child) == KW_BROADCAST) || \
++   ((parent) == KW_BROADCAST && (child) == KW_ALLOCATION))
++_Static_assert(KW_TERMINAL(KW_ALLOCATION, 0, 0) == KW_FAILED, "NULL allocation fails");
++_Static_assert(KW_TERMINAL(KW_ALLOCATION, ~0ULL, 0) == KW_SUCCEEDED, "kernel pointer is not errno");
++_Static_assert(KW_TERMINAL(KW_ENV, 0, 0) == KW_SKIPPED, "suppressed Env is skipped");
++_Static_assert(KW_TERMINAL(KW_ENV, 0, KW_FRAME_NATIVE_SEEN) == KW_SUCCEEDED, "native output seen");
++_Static_assert(KW_TERMINAL(KW_ENV, -1, 0) == KW_FAILED, "Env permission failure");
++_Static_assert(KW_TERMINAL(KW_BROADCAST, 1, 0) == KW_SUCCEEDED, "positive result succeeds");
++_Static_assert(KW_TERMINAL(KW_RELAY, -13, 0) == KW_FAILED, "Relay permission failure");
++_Static_assert(KW_STAGE_PARENT(KW_ENV, KW_BROADCAST), "Env owns Broadcast");
++_Static_assert(KW_STAGE_PARENT(KW_BROADCAST, KW_ALLOCATION), "Broadcast owns Allocation");
++_Static_assert(!KW_STAGE_PARENT(KW_ENV, KW_ALLOCATION), "missing stage is not inherited");
++
++KW_INLINE struct kw_context_value *kw_context_get(struct kw_counts_value *counts,
++                                                 const struct kw_binding_value *binding,
++                                                 u64 key, bool create)
++{
++  u64 task = bpf_get_current_task();
++  if (!task) {
++    kw_fault(counts, KW_CORRELATION, 0);
++    return NULL;
++  }
++  struct kw_context_value *ctx = bpf_map_lookup_elem(&kw_contexts, &key);
++  if (!ctx && create) {
++    struct kw_context_value initial = {0};
++    initial.task_identity = task;
++    initial.generation = binding->generation;
++    int error = bpf_map_update_elem(&kw_contexts, &key, &initial, BPF_NOEXIST);
++    if (error && error != -17) { /* EEXIST means a nested callback created it. */
++      kw_fault(counts, KW_CAPACITY, error);
++      return NULL;
++    }
++    ctx = bpf_map_lookup_elem(&kw_contexts, &key);
++    if (!ctx)
++      kw_fault(counts, KW_CORRELATION, 0);
++  }
++  if (ctx && (ctx->task_identity != task || ctx->generation != binding->generation)) {
++    kw_context_poison(counts, ctx, KW_CORRELATION | KW_DOMAIN_MUTATION);
++    return NULL;
++  }
++  return ctx;
++}
++KW_INLINE void kw_stage_enter(enum kw_stage stage)
++{
++  struct kw_counts_value *counts = kw_get_counts();
++  struct kw_binding_value *binding = kw_get_binding();
++  u64 *control = kw_get_control();
++  if (!counts)
++    return;
++  if ((u32)stage >= KW_STAGE_COUNT) {
++    kw_fault(counts, KW_CORRELATION, 0);
++    return;
++  }
++  /* Diagnostic entry count precedes layout/binding/admission/correlation filters. */
++  kw_increment(counts, &counts->classic_entries[stage]);
++  if (!control || !kw_layout_valid(counts, binding))
++    return;
++  u64 key = bpf_get_current_pid_tgid();
++  bool root = stage == KW_ENV || stage == KW_RELAY;
++  bool open = !(*(volatile u64 *)control & KW_CLOSED);
++  struct kw_context_value *ctx = kw_context_get(counts, binding, key, root && open);
++  if (!ctx) {
++    if (open)
++      kw_fault(counts, KW_UNREGISTERED, 0);
++    return;
++  }
++  u64 depth;
++  if (!kw_context_lock(counts, ctx, &depth))
++    return;
++  u32 roots = depth & KW_ROOT_MASK;
++  if (roots >= KW_DEPTH) {
++    kw_context_poison(counts, ctx, KW_NESTING);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  u64 flags = (depth >> 32) << 32;
++  bool active = false;
++  if (root) {
++    flags |= KW_FRAME_ROOT;
++    active = kw_admit(counts, control);
++  } else {
++    u64 parent_index = (u32)(roots - 1U);
++    asm volatile("" : "+r"(parent_index));
++    if (parent_index >= KW_DEPTH) {
++      kw_context_poison(counts, ctx, KW_UNREGISTERED);
++      kw_context_finish(counts, ctx, key, depth);
++      return;
++    }
++    struct kw_frame_value *parent = &ctx->roots[parent_index];
++    if (parent->flags & KW_FRAME_ACTIVE) {
++      if (!KW_STAGE_PARENT(parent->subject, stage)) {
++        kw_context_poison(counts, ctx, KW_CORRELATION | KW_UNREGISTERED);
++        kw_context_finish(counts, ctx, key, depth);
++        return;
++      }
++      active = true;
++      if (stage == KW_BROADCAST)
++        parent->flags |= KW_FRAME_NATIVE_SEEN;
++    }
++  }
++  if (active)
++    flags |= KW_FRAME_ACTIVE;
++  ctx->roots[roots].subject = stage;
++  ctx->roots[roots].flags = flags;
++  /* Keep the real token/frame even if a diagnostic counter faults. */
++  if (active) {
++    if (root)
++      kw_increment(counts, &counts->root_started);
++    kw_increment(counts, &counts->stages[stage].attempted);
++    kw_increment(counts, &counts->stages[stage].active);
++  }
++  kw_context_finish(counts, ctx, key, depth + 1);
++}
++KW_INLINE void kw_stage_exit(enum kw_stage stage, s64 result)
++{
++  struct kw_counts_value *counts = kw_get_counts();
++  struct kw_binding_value *binding = kw_get_binding();
++  u64 *control = kw_get_control();
++  if (!counts || !control || !kw_layout_valid(counts, binding))
++    return;
++  if ((u32)stage >= KW_STAGE_COUNT) {
++    kw_fault(counts, KW_CORRELATION, 0);
++    return;
++  }
++  u64 key = bpf_get_current_pid_tgid();
++  struct kw_context_value *ctx = kw_context_get(counts, binding, key, false);
++  if (!ctx) {
++    if (!(*(volatile u64 *)control & KW_CLOSED))
++      kw_fault(counts, KW_CORRELATION, 0);
++    return;
++  }
++  u64 depth;
++  if (!kw_context_lock(counts, ctx, &depth))
++    return;
++  u32 roots = depth & KW_ROOT_MASK;
++  u64 index = (u32)(roots - 1U);
++  asm volatile("" : "+r"(index));
++  if (index >= KW_DEPTH) {
++    kw_context_poison(counts, ctx, KW_CORRELATION);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  struct kw_frame_value frame = ctx->roots[index];
++  if (frame.subject != (u64)stage || (depth >> 32) != (frame.flags >> 32)) {
++    kw_context_poison(counts, ctx, KW_CORRELATION);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  if (frame.flags & KW_FRAME_ACTIVE) {
++    enum kw_terminal terminal = KW_TERMINAL(stage, result, frame.flags);
++    switch (terminal) {
++    case KW_FAILED:
++      kw_increment(counts, &counts->stages[stage].failed);
++      kw_fault(counts, KW_UPSTREAM_FAILURE, stage == KW_ALLOCATION ? 0 : (s64)(s32)result);
++      break;
++    case KW_SUCCEEDED:
++      kw_increment(counts, &counts->stages[stage].succeeded);
++      break;
++    case KW_SKIPPED:
++      kw_increment(counts, &counts->stages[stage].skipped);
++      break;
++    }
++    kw_decrement(counts, &counts->stages[stage].active);
++    if (frame.flags & KW_FRAME_ROOT) {
++      kw_increment(counts, &counts->root_returned);
++      kw_release(counts, control);
++    }
++  }
++  ctx->roots[index].subject = 0;
++  ctx->roots[index].flags = 0;
++  kw_context_finish(counts, ctx, key, depth - 1);
++}
++
++#define KW_REC_ADMITTED 1ULL
++#define KW_REC_QUEUED 2ULL
++#define KW_REC_OVERRUN 4ULL
++#define KW_REC_ENQUEUE_PENDING 8ULL
++#define KW_REC_OVERRUN_PENDING 16ULL
++#define KW_REC_OUTCOMES (KW_REC_QUEUED | KW_REC_OVERRUN)
++#define KW_REC_PENDING (KW_REC_ENQUEUE_PENDING | KW_REC_OVERRUN_PENDING)
++
++KW_INLINE void kw_poison_current(struct kw_counts_value *counts,
++                                 const struct kw_binding_value *binding,
++                                 u64 key, u64 fault)
++{
++  struct kw_context_value *ctx = kw_context_get(counts, binding, key, false);
++  if (ctx)
++    kw_context_poison(counts, ctx, fault);
++  else
++    kw_fault(counts, fault, 0);
++}
++/* -1 is unknown/rejecting, not an ineligible socket. */
++KW_INLINE int kw_socket_match(struct kw_counts_value *counts,
++                              const struct kw_binding_value *binding, u64 sk)
++{
++  u64 cookie = 0, flags = 0;
++  u32 port = 0;
++  if (!kw_read(counts, sk, kw_layout.sock_cookie, kw_layout.sock_size, &cookie, 8))
++    return -1;
++  if (cookie != binding->cookie)
++    return 0;
++  if (!kw_read(counts, sk, kw_layout.nlk_portid, kw_layout.nlk_size, &port, 4) ||
++      !kw_read(counts, sk, kw_layout.nlk_flags, kw_layout.nlk_size, &flags, 8))
++    return -1;
++  if (port != binding->port_id || (flags & binding->listen_all_nsid_mask)) {
++    kw_fault(counts, KW_DOMAIN_MUTATION, 0);
++    return -1;
++  }
++  return 1;
++}
++KW_INLINE int kw_recipient_eligible(struct kw_counts_value *counts,
++                                    const struct kw_binding_value *binding,
++                                    u64 sk, u64 broadcast)
++{
++  u64 exclude = 0, net = 0, socket_net = 0, groups = 0, membership = 0;
++  u32 port = 0, group = 0, ngroups = 0;
++  if (!kw_read(counts, sk, kw_layout.nlk_ngroups, kw_layout.nlk_size, &ngroups, 4))
++    return -1;
++  if (!ngroups)
++    return 0;
++  /* This profile owns only group 1; reject any unmeasured bitmap words. */
++  if (ngroups > 64) {
++    kw_fault(counts, KW_DOMAIN_MUTATION, 0);
++    return -1;
++  }
++  if (!kw_read(counts, sk, kw_layout.nlk_groups, kw_layout.nlk_size, &groups, 8) ||
++      !kw_read(counts, groups, 0, 8, &membership, 8))
++    return -1;
++  if (membership & ~1ULL) {
++    kw_fault(counts, KW_DOMAIN_MUTATION, 0);
++    return -1;
++  }
++  if (!kw_read(counts, broadcast, kw_layout.bcast_exclude, kw_layout.bcast_size, &exclude, 8) ||
++      !kw_read(counts, broadcast, kw_layout.bcast_portid, kw_layout.bcast_size, &port, 4) ||
++      !kw_read(counts, broadcast, kw_layout.bcast_group, kw_layout.bcast_size, &group, 4) ||
++      !kw_read(counts, broadcast, kw_layout.bcast_net, kw_layout.bcast_size, &net, 8) ||
++      !kw_read(counts, sk, kw_layout.sock_net, kw_layout.sock_size, &socket_net, 8))
++    return -1;
++  return exclude != sk && port != binding->port_id && group == 1 &&
++         (membership & 1) && net == socket_net;
++}
++KW_INLINE void kw_recipient_enter_call(u64 sk, u64 broadcast)
++{
++  struct kw_counts_value *counts = kw_get_counts();
++  struct kw_binding_value *binding = kw_get_binding();
++  if (!counts || !kw_layout_valid(counts, binding))
++    return;
++  u64 key = bpf_get_current_pid_tgid();
++  int match = kw_socket_match(counts, binding, sk);
++  if (match < 0) {
++    kw_poison_current(counts, binding, key, KW_READ_FAILURE);
++    return;
++  }
++  if (!match)
++    return;
++  int eligible = kw_recipient_eligible(counts, binding, sk, broadcast);
++  if (eligible < 0) {
++    kw_poison_current(counts, binding, key, KW_CORRELATION);
++    return;
++  }
++  /* Admission precedes the kernel's inherited clone-failure branch. */
++  if (eligible)
++    kw_increment(counts, &counts->admitted);
++  struct kw_context_value *ctx = kw_context_get(counts, binding, key, eligible != 0);
++  if (!ctx)
++    return;
++  u64 depth;
++  if (!kw_context_lock(counts, ctx, &depth))
++    return;
++  u32 roots = depth & KW_ROOT_MASK;
++  u32 recipients = depth >> 32;
++  if (recipients >= KW_DEPTH) {
++    kw_context_poison(counts, ctx, KW_NESTING);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  if (eligible) {
++    u64 parent_index = (u32)(roots - 1U);
++    asm volatile("" : "+r"(parent_index));
++    if (parent_index >= KW_DEPTH ||
++        !(ctx->roots[parent_index].flags & KW_FRAME_ACTIVE) ||
++        (ctx->roots[parent_index].subject != KW_BROADCAST &&
++         ctx->roots[parent_index].subject != KW_RELAY))
++      kw_fault(counts, KW_UNREGISTERED, 0);
++  }
++  ctx->recipients[recipients].subject = sk;
++  ctx->recipients[recipients].flags = ((u64)roots << 32) |
++    (eligible ? KW_REC_ADMITTED : 0);
++  kw_context_finish(counts, ctx, key, depth + (1ULL << 32));
++}
++KW_INLINE void kw_recipient_exit_call(u64 sk)
++{
++  struct kw_counts_value *counts = kw_get_counts();
++  struct kw_binding_value *binding = kw_get_binding();
++  if (!counts || !kw_layout_valid(counts, binding))
++    return;
++  u64 key = bpf_get_current_pid_tgid();
++  int match = kw_socket_match(counts, binding, sk);
++  if (match < 0) {
++    kw_poison_current(counts, binding, key, KW_CORRELATION);
++    return;
++  }
++  if (!match)
++    return;
++  struct kw_context_value *ctx = kw_context_get(counts, binding, key, false);
++  if (!ctx) {
++    kw_fault(counts, KW_CORRELATION, 0);
++    return;
++  }
++  u64 depth;
++  if (!kw_context_lock(counts, ctx, &depth))
++    return;
++  u32 roots = depth & KW_ROOT_MASK;
++  u32 recipients = depth >> 32;
++  u64 index = (u32)(recipients - 1U);
++  asm volatile("" : "+r"(index));
++  if (index >= KW_DEPTH) {
++    kw_context_poison(counts, ctx, KW_CORRELATION);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  struct kw_frame_value frame = ctx->recipients[index];
++  if (frame.subject != sk || (frame.flags >> 32) != roots ||
++      (frame.flags & KW_REC_PENDING)) {
++    kw_context_poison(counts, ctx, KW_CORRELATION);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  u64 flags = frame.flags;
++  if ((flags & KW_REC_ADMITTED) && !(flags & KW_REC_OUTCOMES)) {
++    kw_increment(counts, &counts->filtered_or_failed);
++    kw_fault(counts, KW_RECIPIENT_FAILURE, 0);
++  }
++  if ((flags & KW_REC_OUTCOMES) == KW_REC_OUTCOMES)
++    kw_fault(counts, KW_DUPLICATE, 0);
++  ctx->recipients[index].subject = 0;
++  ctx->recipients[index].flags = 0;
++  kw_context_finish(counts, ctx, key, depth - (1ULL << 32));
++}
++KW_INLINE void kw_delivery_call(u64 sk, bool overrun, bool returned, s64 result)
++{
++  struct kw_counts_value *counts = kw_get_counts();
++  struct kw_binding_value *binding = kw_get_binding();
++  if (!counts || !kw_layout_valid(counts, binding))
++    return;
++  u64 key = bpf_get_current_pid_tgid();
++  int match = kw_socket_match(counts, binding, sk);
++  if (match < 0) {
++    kw_poison_current(counts, binding, key, KW_CORRELATION);
++    return;
++  }
++  if (!match)
++    return;
++  if (returned) {
++    if (overrun) {
++      kw_increment(counts, &counts->overrun);
++      kw_fault(counts, KW_RECIPIENT_FAILURE, 0);
++    } else {
++      /* __netlink_sendskb commits the queue before every normal return. */
++      kw_increment(counts, &counts->queued);
++      if ((s32)result < 0)
++        kw_fault(counts, KW_DOMAIN_MUTATION, 0);
++    }
++  }
++  struct kw_context_value *ctx = kw_context_get(counts, binding, key, false);
++  if (!ctx) {
++    kw_fault(counts, KW_UNREGISTERED, 0);
++    return;
++  }
++  u64 depth;
++  if (!kw_context_lock(counts, ctx, &depth))
++    return;
++  u32 roots = depth & KW_ROOT_MASK;
++  u32 recipients = depth >> 32;
++  u64 index = (u32)(recipients - 1U);
++  asm volatile("" : "+r"(index));
++  if (index >= KW_DEPTH) {
++    kw_context_poison(counts, ctx, KW_UNREGISTERED | KW_CORRELATION);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  struct kw_frame_value *frame = &ctx->recipients[index];
++  if (frame->subject != sk ||
++      !(frame->flags & KW_REC_ADMITTED) ||
++      (frame->flags >> 32) != roots) {
++    kw_context_poison(counts, ctx, KW_UNREGISTERED | KW_CORRELATION);
++    kw_context_finish(counts, ctx, key, depth);
++    return;
++  }
++  u64 pending = overrun ? KW_REC_OVERRUN_PENDING : KW_REC_ENQUEUE_PENDING;
++  u64 outcome = overrun ? KW_REC_OVERRUN : KW_REC_QUEUED;
++  if (!returned) {
++    if (frame->flags & (KW_REC_PENDING | KW_REC_OUTCOMES))
++      kw_context_poison(counts, ctx, KW_DUPLICATE);
++    else
++      frame->flags |= pending;
++  } else {
++    if (!(frame->flags & pending))
++      kw_fault(counts, KW_CORRELATION, 0);
++    if (frame->flags & KW_REC_OUTCOMES)
++      kw_fault(counts, KW_DUPLICATE, 0);
++    frame->flags = (frame->flags & ~pending) | outcome;
++  }
++  kw_context_finish(counts, ctx, key, depth);
++}
++
++#if defined(__x86_64)
++#define KW_RETURN(ctx) ((s64)(ctx)->ax)
++#elif defined(__aarch64__)
++#define KW_RETURN(ctx) ((s64)(ctx)->regs[0])
++#else
++#error unsupported witness pt_regs architecture
++#endif
++#define KW_CLASSIC(prefix, target, stage) \
++  SEC("kprobe/" target) int prefix##_enter(struct pt_regs *ctx UNUSED) { \
++    kw_stage_enter(stage); return 0; \
++  } \
++  SEC("kretprobe/" target) int prefix##_exit(struct pt_regs *ctx) { \
++    kw_stage_exit(stage, KW_RETURN(ctx)); return 0; \
++  }
++KW_CLASSIC(kw_env, "kobject_uevent_env", KW_ENV)
++KW_CLASSIC(kw_broadcast, "kobject_uevent_net_broadcast", KW_BROADCAST)
++KW_CLASSIC(kw_allocation, "alloc_uevent_skb", KW_ALLOCATION)
++KW_CLASSIC(kw_relay, "uevent_net_rcv_skb", KW_RELAY)
++SEC("fentry/do_one_broadcast") int kw_recipient_enter(u64 *ctx)
++{ kw_recipient_enter_call(ctx[0], ctx[1]); return 0; }
++SEC("fexit/do_one_broadcast") int kw_recipient_exit(u64 *ctx)
++{ kw_recipient_exit_call(ctx[0]); return 0; }
++SEC("fentry/__netlink_sendskb") int kw_enqueue_enter(u64 *ctx)
++{ kw_delivery_call(ctx[0], false, false, 0); return 0; }
++SEC("fexit/__netlink_sendskb") int kw_enqueue_exit(u64 *ctx)
++{ kw_delivery_call(ctx[0], false, true, (s64)ctx[2]); return 0; }
++SEC("fentry/netlink_overrun") int kw_overrun_enter(u64 *ctx)
++{ kw_delivery_call(ctx[0], true, false, 0); return 0; }
++SEC("fexit/netlink_overrun") int kw_overrun_exit(u64 *ctx)
++{ kw_delivery_call(ctx[0], true, true, 0); return 0; }
++
++#endif /* !TESTING_COREDUMP */
++#endif /* OPTI_KOBJECT_WITNESS_H */
+diff --git a/tracer/tracer.go b/tracer/tracer.go
+--- a/tracer/tracer.go
++++ b/tracer/tracer.go
+@@ -8,6 +8,7 @@
+ 	"bufio"
+ 	"bytes"
+ 	"context"
++	"encoding/binary"
+ 	"errors"
+ 	"fmt"
+ 	"math"
+@@ -20,6 +21,7 @@
+ 
+ 	cebpf "github.com/cilium/ebpf"
+ 	"github.com/cilium/ebpf/asm"
++	"github.com/cilium/ebpf/btf"
+ 	"github.com/cilium/ebpf/link"
+ 	"github.com/elastic/go-perf"
+ 	"go.opentelemetry.io/ebpf-profiler/internal/linux"
+@@ -75,6 +77,8 @@
+ // Tracer provides an interface for loading and initializing the eBPF components as
+ // well as for monitoring the output maps for new traces and count updates.
+ type Tracer struct {
++	kobjectWitness       *preparedKobjectWitness
++	reportProducer       *reportProducerSource
+ 	definitionSource     *traceDefinitionSource
+ 	definitionOwner      *definitionOwner
+ 	auxiliaryScope       *periodiccaller.OwnedScope
+@@ -228,6 +232,22 @@
+ }
+ 
+ // NewTracer loads eBPF code and map definitions from the ELF module at the configured path.
++func prepareTracerKobject(ctx context.Context, scope *periodiccaller.OwnedScope, prepare func(context.Context, *periodiccaller.OwnedScope) (*preparedKobjectWitness, error)) (*preparedKobjectWitness, error) {
++	p, err := prepare(ctx, scope)
++	if err != nil { return p, err }
++	if p == nil { return nil, errors.New("missing prepared kobject witness") }
++	return p, scope.AddCloser(p.Retire)
++}
++
++func retireTracerKobject(p *preparedKobjectWitness) error {
++	if p == nil { return nil }
++	return p.Retire()
++}
++
++func disposeTracerBootstrap(ctx context.Context, t *Tracer, cause error) error {
++	return disposeBootstrapFailure(t, errors.Join(cause, t.finishKobjectBeforeSeal(ctx)))
++}
++
+ func NewTracer(ctx context.Context, cfg *Config) (result *Tracer, resultErr error) {
+ 	auxCtx, auxiliary := newAuxiliaryContext(ctx, cfg)
+ 	bootstrapCleanupHandled := false
+@@ -236,6 +256,15 @@
+ 			resultErr = stopFailedConstructor(result == nil, bootstrapCleanupHandled, resultErr, auxiliary.Stop)
+ 		}
+ 	}()
++	var reportKeeper *reportPreparationKeeper
++	if auxiliary != nil {
++		var enrollErr error
++		reportKeeper, enrollErr = registerReportPreparationKeeper(auxiliary.AddFinalizer)
++		if enrollErr != nil {
++			return nil, enrollErr
++		}
++		defer reportKeeper.complete(nil)
++	}
+ 	if cfg.TraceDefinitionLifetime != nil {
+ 		if _, ok := cfg.TraceDefinitionLifetime.(libpf.TraceDefinitionRetainer); !ok {
+ 			return nil, fmt.Errorf("trace definition lifetime lacks retainer capability")
+@@ -252,8 +281,11 @@
+ 	}
+ 
+ 	// Based on includeTracers we decide later which are loaded into the kernel.
+-	ebpfMaps, ebpfProgs, stackdeltaInnerMapSpec, err := initializeMapsAndPrograms(kmod, cfg)
++	ebpfMaps, ebpfProgs, stackdeltaInnerMapSpec, reportProducer, err := initializeMapsAndPrograms(ctx, kmod, cfg)
+ 	if err != nil {
++		if cleanup, ok := err.(*bootstrapCleanupError); ok {
++			completeReportPreparationFailure(cleanup, reportKeeper, auxiliary, startReportQuarantine)
++		}
+ 		return nil, fmt.Errorf("failed to load eBPF code: %w", err)
+ 	}
+ 
+@@ -298,6 +330,12 @@
+ 			cancel()
+ 		}
+ 	}()
++	var preparedWitness *preparedKobjectWitness
++	defer func() {
++		if result == nil && preparedWitness != nil {
++			resultErr = errors.Join(resultErr, preparedWitness.Retire())
++		}
++	}()
+ 	if definitionOwner != nil && auxiliary != nil {
+ 		if err := auxiliary.BindLifetime(definitionOwner.HeldLifetime()); err != nil {
+ 			for _, m := range ebpfMaps {
+@@ -308,6 +346,12 @@
+ 			}
+ 			return nil, err
+ 		}
++		preparedWitness, err = prepareTracerKobject(ctx, auxiliary, prepareKobjectWitness)
++		if err != nil {
++			for _, m := range ebpfMaps { err = errors.Join(err, m.Close()) }
++			for _, p := range ebpfProgs { err = errors.Join(err, p.Close()) }
++			return nil, err
++		}
+ 	}
+ 	ebpfHandler, err := pmebpf.LoadMaps(auxCtx, cfg.IncludeTracers, ebpfMaps, stackdeltaInnerMapSpec)
+ 	if err != nil {
+@@ -340,6 +384,7 @@
+ 	perfEventList := []*perf.Event{}
+ 
+ 	tracer := &Tracer{
++		kobjectWitness:         preparedWitness,
+ 		definitionSource:       definitionSource,
+ 		definitionOwner:        definitionOwner,
+ 		auxiliaryScope:         auxiliary,
+@@ -350,6 +395,7 @@
+ 		pidEvents:              make(chan libpf.PIDTID, pidEventBufferSize),
+ 		ebpfMaps:               ebpfMaps,
+ 		ebpfProgs:              ebpfProgs,
++		reportProducer:         reportProducer,
+ 		hooks:                  make(map[hookPoint]link.Link),
+ 		intervals:              cfg.Intervals,
+ 		hasBatchOperations:     hasBatchOperations,
+@@ -358,12 +404,14 @@
+ 		probabilisticInterval:  cfg.ProbabilisticInterval,
+ 		probabilisticThreshold: cfg.ProbabilisticThreshold,
+ 	}
++	preparedWitness = nil
++	transferReportPreparation(tracer, reportKeeper)
+ 	tracer.preparePIDMailbox(cfg)
+ 	tracer.preparePIDProcess()
+ 	if auxiliary != nil {
+ 		if err := auxiliary.Failure(); err != nil {
+ 			bootstrapCleanupHandled = true
+-			return nil, disposeBootstrapFailure(tracer, err)
++			return nil, disposeTracerBootstrap(ctx, tracer, err)
+ 		}
+ 	}
+ 
+@@ -376,20 +424,22 @@
+ 
+ 	return completeTracerBootstrap(ctx, tracer, cfg, processManager.BootstrapHotSpotEpoch, processManager.BootstrapHotSpotObserved, func(cause error) error {
+ 		bootstrapCleanupHandled = true
+-		return disposeBootstrapFailure(tracer, cause)
++		return disposeTracerBootstrap(ctx, tracer, cause)
+ 	}, process.New)
+ }
+ 
+ // Close provides functionality for Tracer to perform cleanup tasks.
+ // NOTE: Close may be called multiple times in succession.
+ func (t *Tracer) Close() {
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++	defer cancel()
++	var presealErr error
++	if t.auxiliaryScope != nil { presealErr = t.finishKobjectBeforeSeal(ctx) }
+ 	if s := t.definitionSource; s != nil {
+ 		s.fail(errTraceDefinitionSourceClosed)
+ 	}
+-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+-	defer cancel()
+ 	if t.auxiliaryScope != nil {
+-		if err := t.closeScopedTracer(ctx); err != nil {
++		if err := errors.Join(presealErr, t.closeScopedTracer(ctx)); err != nil {
+ 			t.auxiliaryScope.Fail(err)
+ 		}
+ 		return
+@@ -449,11 +499,146 @@
+ 	return t.ebpfMaps["stack_cache2correlation_id"]
+ }
+ 
++// prepareKobjectNativeSpec owns and isolates a fresh same-ELF witness specification.
++func prepareKobjectNativeSpec(full *cebpf.CollectionSpec, kernel *btf.Spec, binding kobjectSocketBinding) (*cebpf.CollectionSpec, kwKernelLayout, error) {
++	var zero kwKernelLayout
++	if full == nil || kernel == nil {
++		return nil, zero, errors.New("witness specification and kernel BTF are required")
++	}
++	spec := full.Copy()
++	if err := validateKobjectNativeSpec(spec); err != nil {
++		return nil, zero, fmt.Errorf("validate witness specification: %w", err)
++	}
++	for _, name := range [...]string{"kw_binding", "kw_control", "kw_counts", "kw_contexts"} {
++		if len(spec.Maps[name].Contents) != 0 {
++			return nil, zero, fmt.Errorf("witness map %s is not fresh", name)
++		}
++	}
++	if spec.Types == nil {
++		return nil, zero, errors.New("witness BTF is missing")
++	}
++	var data *btf.Datasec
++	if err := spec.Types.TypeByName(".rodata.var", &data); err != nil || data == nil {
++		return nil, zero, errors.New("witness rodata BTF is missing")
++	}
++	var variable *btf.Var
++	if err := spec.Types.TypeByName("kw_layout", &variable); err != nil || variable == nil {
++		return nil, zero, errors.New("witness layout BTF is missing")
++	}
++	rodata := spec.Maps[".rodata.var"]
++	if rodata == nil || rodata.ValueSize == 0 || rodata.ValueSize != data.Size || len(rodata.Contents) != 1 {
++		return nil, zero, errors.New("invalid witness rodata map")
++	}
++	key, keyOK := rodata.Contents[0].Key.(uint32)
++	raw, valueOK := rodata.Contents[0].Value.([]byte)
++	if !keyOK || key != 0 || !valueOK || uint64(len(raw)) != uint64(rodata.ValueSize) {
++		return nil, zero, errors.New("invalid witness rodata initializer")
++	}
++	var offset uint32
++	matches := 0
++	for _, entry := range data.Vars {
++		v, ok := entry.Type.(*btf.Var)
++		if !ok || v == nil || v.Name != "kw_layout" {
++			continue
++		}
++		matches++
++		if v != variable || entry.Size != 80 || uint64(entry.Offset)+80 > uint64(len(raw)) || uint64(entry.Offset)+80 > uint64(data.Size) {
++			return nil, zero, errors.New("invalid witness layout extent")
++		}
++		offset = entry.Offset
++	}
++	if matches != 1 {
++		return nil, zero, errors.New("witness layout must occur exactly once in rodata")
++	}
++	// The SDK versions differ in whether Set writes through to map contents.
++	rodata.Contents = append([]cebpf.MapKV(nil), rodata.Contents...)
++	rodata.Contents[0].Value = append([]byte(nil), raw...)
++	allowed := map[string]bool{"kw_control": false, "kw_binding": false, "kw_counts": false, "kw_contexts": false, ".rodata.var": false}
++	for name, program := range spec.Programs {
++		if !strings.HasPrefix(name, "kw_") {
++			continue
++		}
++		for _, ins := range program.Instructions {
++			if !ins.IsLoadFromMap() {
++				continue
++			}
++			ref := ins.Reference()
++			if _, ok := allowed[ref]; !ok {
++				return nil, zero, fmt.Errorf("witness program %s references unexpected map %q", name, ref)
++			}
++			allowed[ref] = true
++		}
++	}
++	for name, referenced := range allowed {
++		if !referenced {
++			return nil, zero, fmt.Errorf("witness map %s is not referenced", name)
++		}
++	}
++	layout, err := configureKobjectKernelLayout(spec, kernel, binding)
++	if err != nil {
++		return nil, zero, fmt.Errorf("configure witness layout: %w", err)
++	}
++	// Preserve every other rodata byte, including any changes made by Set.
++	if len(rodata.Contents) != 1 {
++		return nil, zero, errors.New("invalid configured witness rodata initializer")
++	}
++	key, keyOK = rodata.Contents[0].Key.(uint32)
++	raw, valueOK = rodata.Contents[0].Value.([]byte)
++	if !keyOK || key != 0 || !valueOK || uint64(len(raw)) != uint64(rodata.ValueSize) {
++		return nil, zero, errors.New("invalid configured witness rodata initializer")
++	}
++	privateBytes := append([]byte(nil), raw...)
++	encoded := layout.encode()
++	copy(privateBytes[int(offset):int(offset)+len(encoded)], encoded[:])
++	rodata.Contents = []cebpf.MapKV{{Key: uint32(0), Value: privateBytes}}
++	for name := range spec.Programs {
++		if !strings.HasPrefix(name, "kw_") {
++			delete(spec.Programs, name)
++		}
++	}
++	for name := range spec.Maps {
++		if _, keep := allowed[name]; !keep {
++			delete(spec.Maps, name)
++		}
++	}
++	for name := range spec.Variables {
++		if name != "kw_layout" {
++			delete(spec.Variables, name)
++		}
++	}
++	bindingBytes := make([]byte, 40)
++	for i, value := range [...]uint64{binding.cookie, uint64(binding.portID), binding.generation, layout.listenMask, kwBindingABIVersion} {
++		binary.NativeEndian.PutUint64(bindingBytes[i*8:], value)
++	}
++	controlBytes := make([]byte, 8)
++	binary.NativeEndian.PutUint64(controlBytes, uint64(1)<<63)
++	spec.Maps["kw_binding"].Contents = []cebpf.MapKV{{Key: uint32(0), Value: bindingBytes}}
++	spec.Maps["kw_control"].Contents = []cebpf.MapKV{{Key: uint32(0), Value: controlBytes}}
++	spec.Maps["kw_counts"].Contents = []cebpf.MapKV{{Key: uint32(0), Value: make([]byte, kwCounterWireSize)}}
++	return spec, layout, nil
++}
++
++// The witness loads an independently owned subset from this same ELF later.
++func pruneKobjectNativeSpec(spec *cebpf.CollectionSpec) {
++	for _, prefix := range [...]string{
++		"kw_env", "kw_broadcast", "kw_allocation", "kw_relay",
++		"kw_recipient", "kw_enqueue", "kw_overrun",
++	} {
++		delete(spec.Programs, prefix+"_enter")
++		delete(spec.Programs, prefix+"_exit")
++	}
++	for _, name := range [...]string{"kw_control", "kw_binding", "kw_counts", "kw_contexts"} {
++		delete(spec.Maps, name)
++	}
++	// Keep the ordinary rodata map, but never synchronize the unused witness variable.
++	delete(spec.Variables, "kw_layout")
++}
++
+ // initializeMapsAndPrograms loads the definitions for the eBPF maps and programs provided
+ // by the embedded elf file and loads these into the kernel.
+-func initializeMapsAndPrograms(kmod *kallsyms.Module, cfg *Config) (
++func initializeMapsAndPrograms(ctx context.Context, kmod *kallsyms.Module, cfg *Config) (
+ 	ebpfMaps map[string]*cebpf.Map, ebpfProgs map[string]*cebpf.Program,
+-	stackdeltaInnerMapSpec *cebpf.MapSpec, err error,
++	stackdeltaInnerMapSpec *cebpf.MapSpec, reportProducer *reportProducerSource, err error,
+ ) {
+ 	// Loading specifications about eBPF programs and maps from the embedded elf file
+ 	// does not load them into the kernel.
+@@ -463,13 +648,14 @@
+ 	// programs into the kernel.
+ 	major, minor, patch, err := linux.GetCurrentKernelVersion()
+ 	if err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to get kernel version: %w", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to get kernel version: %w", err)
+ 	}
+ 
+ 	coll, err := support.LoadCollectionSpec()
+ 	if err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to load specification for tracers: %w", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to load specification for tracers: %w", err)
+ 	}
++	pruneKobjectNativeSpec(coll)
+ 
+ 	if major > 6 || (major == 6 && minor >= 16) {
+ 		// Tracepoint format for sched_process_free has changed in v6.16+.
+@@ -480,7 +666,7 @@
+ 
+ 	// Initialize eBPF variables before loading programs and maps.
+ 	if err = loadRodataVars(coll, kmod, cfg); err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to set RODATA variables: %v", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to set RODATA variables: %v", err)
+ 	}
+ 
+ 	ebpfMaps = make(map[string]*cebpf.Map)
+@@ -493,26 +679,36 @@
+ 	// Since we load maps individually with cebpf.NewMap, we must manually propagate
+ 	// variable values back into the map spec contents before creating the maps.
+ 	if err = syncVariablesToMapSpecs(coll); err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to sync variables to map specs: %v", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to sync variables to map specs: %v", err)
+ 	}
+ 
+ 	// Load all maps into the kernel that are used later on in eBPF programs. So we can rewrite
+ 	// in the next step the placesholders in the eBPF programs with the file descriptors of the
+ 	// loaded maps in the kernel.
+ 	if err = loadAllMaps(coll, cfg, ebpfMaps); err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to load eBPF maps: %v", err)
++		return nil, nil, nil, nil, disposeMapAcquisitionFailure(fmt.Errorf("failed to load eBPF maps: %w", err), ebpfMaps, ebpfProgs, (*bootstrapCleanupError).disposeReportOriginals)
++	}
++	reportProducer, err = prepareReportProducer(ctx, cfg, ebpfMaps)
++	if err != nil {
++		cause := fmt.Errorf("failed to prepare report producer: %w", err)
++		cleanup := &bootstrapCleanupError{maps: ebpfMaps, programs: ebpfProgs, err: cause}
++		if closeErr := cleanup.disposeReportOriginals(); closeErr != nil {
++			cleanup.err = errors.Join(cause, closeErr)
++			return nil, nil, nil, nil, cleanup
++		}
++		return nil, nil, nil, nil, cause
+ 	}
+ 
+ 	// Replace the place holders for map access in the eBPF programs with
+ 	// the file descriptors of the loaded maps.
+ 	if err = rewriteMaps(coll, ebpfMaps); err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to rewrite maps: %v", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to rewrite maps: %v", err)
+ 	}
+ 
+ 	if cfg.KernelVersionCheck {
+ 		if hasProbeReadBug(major, minor, patch) {
+ 			if err = checkForMaccessPatch(coll, ebpfMaps, kmod); err != nil {
+-				return nil, nil, nil, fmt.Errorf("your kernel version %d.%d.%d may be "+
++				return nil, nil, nil, nil, fmt.Errorf("your kernel version %d.%d.%d may be "+
+ 					"affected by a Linux kernel bug that can lead to system "+
+ 					"freezes, terminating host agent now to avoid "+
+ 					"triggering this bug.\n"+
+@@ -589,14 +785,14 @@
+ 
+ 	if err = loadPerfUnwinders(coll, ebpfProgs, ebpfMaps["perf_progs"], tailCallProgs,
+ 		cfg.BPFVerifierLogLevel); err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to load perf eBPF programs: %v", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to load perf eBPF programs: %v", err)
+ 	}
+ 
+ 	if cfg.OffCPUThreshold > 0 || len(cfg.ProbeLinks) > 0 || cfg.LoadProbe {
+ 		// Load the tail call destinations if any kind of event profiling is enabled.
+ 		if err = loadProbeUnwinders(coll, ebpfProgs, ebpfMaps["kprobe_progs"], tailCallProgs,
+ 			cfg.BPFVerifierLogLevel, ebpfMaps["perf_progs"].FD()); err != nil {
+-			return nil, nil, nil, fmt.Errorf("failed to load kprobe eBPF programs: %v", err)
++			return nil, nil, nil, nil, fmt.Errorf("failed to load kprobe eBPF programs: %v", err)
+ 		}
+ 	}
+ 
+@@ -615,7 +811,7 @@
+ 		}
+ 		if err = loadProbeUnwinders(coll, ebpfProgs, ebpfMaps["kprobe_progs"], offCPUProgs,
+ 			cfg.BPFVerifierLogLevel, ebpfMaps["perf_progs"].FD()); err != nil {
+-			return nil, nil, nil, fmt.Errorf("failed to load kprobe eBPF programs: %v", err)
++			return nil, nil, nil, nil, fmt.Errorf("failed to load kprobe eBPF programs: %v", err)
+ 		}
+ 	}
+ 
+@@ -629,19 +825,19 @@
+ 		}
+ 		if err = loadProbeUnwinders(coll, ebpfProgs, ebpfMaps["kprobe_progs"], probeProgs,
+ 			cfg.BPFVerifierLogLevel, ebpfMaps["perf_progs"].FD()); err != nil {
+-			return nil, nil, nil, fmt.Errorf("failed to load uprobe eBPF programs: %v", err)
++			return nil, nil, nil, nil, fmt.Errorf("failed to load uprobe eBPF programs: %v", err)
+ 		}
+ 	}
+ 
+ 	if err = loadKallsymsTrigger(coll, ebpfProgs, cfg.BPFVerifierLogLevel); err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to load kallsym eBPF program: %v", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to load kallsym eBPF program: %v", err)
+ 	}
+ 
+ 	if err = removeTemporaryMaps(ebpfMaps); err != nil {
+-		return nil, nil, nil, fmt.Errorf("failed to remove temporary maps: %v", err)
++		return nil, nil, nil, nil, fmt.Errorf("failed to remove temporary maps: %v", err)
+ 	}
+ 
+-	return ebpfMaps, ebpfProgs, innerMapTemplate, nil
++	return ebpfMaps, ebpfProgs, innerMapTemplate, reportProducer, nil
+ }
+ 
+ // removeTemporaryMaps unloads and deletes eBPF maps that are only required for the
+@@ -742,7 +938,7 @@
+ ) error {
+ 	restoreRlimit, err := rlimit.MaximizeMemlock()
+ 	if err != nil {
+-		return fmt.Errorf("failed to adjust rlimit: %v", err)
++		return fmt.Errorf("failed to adjust rlimit: %w", err)
+ 	}
+ 	defer restoreRlimit()
+ 
+@@ -784,7 +980,7 @@
+ 		}
+ 		ebpfMap, err := cebpf.NewMap(mapSpec)
+ 		if err != nil {
+-			return fmt.Errorf("failed to load %s: %v", mapName, err)
++			return fmt.Errorf("failed to load %s: %w", mapName, err)
+ 		}
+ 		ebpfMaps[mapName] = ebpfMap
+ 	}
+@@ -1256,7 +1452,17 @@
+ func (t *Tracer) StartMapMonitors(ctx context.Context, traceOutChan chan<- *libpf.EbpfTrace) error {
+ 	definitionCtx := ctx
+ 	ctx = t.auxiliaryContext(ctx)
+-	if err := t.kernelSymbolizer.StartMonitor(ctx); err != nil {
++	var monitorErr error
++	if t.auxiliaryScope != nil {
++		if t.kobjectWitness == nil {
++			monitorErr = errors.New("owned kobject witness unavailable")
++		} else {
++			monitorErr = t.kobjectWitness.start(definitionCtx, ctx, t.kernelSymbolizer)
++		}
++	} else {
++		monitorErr = t.kernelSymbolizer.StartMonitor(ctx)
++	}
++	if err := monitorErr; err != nil {
+ 		if t.definitionSource != nil {
+ 			t.definitionSource.fail(err)
+ 		}
+diff --git a/kallsyms/kallsyms.go b/kallsyms/kallsyms.go
+--- a/kallsyms/kallsyms.go
++++ b/kallsyms/kallsyms.go
+@@ -15,10 +15,12 @@
+ 	"io"
+ 	"os"
+ 	"path"
++	"reflect"
+ 	"slices"
+ 	"sort"
+ 	"strconv"
+ 	"strings"
++	"sync"
+ 	"sync/atomic"
+ 	"time"
+ 	"unsafe"
+@@ -95,6 +97,11 @@
+ // the kernel symbols.
+ type Symbolizer struct {
+ 	modules atomic.Value
++	monitorMu sync.Mutex
++	monitorMode monitorMode
++	owned *ownedMonitorControl
++	activation *ownedMonitorActivation
++	ownedCtx context.Context
+ 
+ 	reloadModules chan libpf.Void
+ 	reloadSymbols chan libpf.Void
+@@ -352,7 +359,8 @@
+ 		}
+ 	}
+ 
+-	for scanner := bufio.NewScanner(r); scanner.Scan(); {
++	scanner := bufio.NewScanner(r)
++	for scanner.Scan() {
+ 		// Avoid heap allocation by not using scanner.Text().
+ 		// NOTE: The underlying bytes will change with the next call to scanner.Scan(),
+ 		// so make sure to not keep any references after the end of the loop iteration.
+@@ -466,6 +474,9 @@
+ 			}
+ 		}
+ 	}
++	if err := scanner.Err(); err != nil {
++		return fmt.Errorf("read kallsyms: %w", err)
++	}
+ 	if mod != nil {
+ 		mod.finish()
+ 	}
+@@ -482,12 +493,12 @@
+ 
+ // loadKallsyms will reload kernel symbols. This function can run concurrently with
+ // module and symbol lookups. The reload result is visible atomically after success.
+-func (s *Symbolizer) loadKallsyms() error {
++func (s *Symbolizer) loadKallsyms() (result error) {
+ 	file, err := openKallsyms()
+ 	if err != nil {
+-		return fmt.Errorf("unable to open kallsyms: %v", err)
++		return fmt.Errorf("unable to open kallsyms: %w", err)
+ 	}
+-	defer file.Close()
++	defer func() { result = errors.Join(result, file.Close()) }()
+ 
+ 	return s.updateSymbolsFrom(file)
+ }
+@@ -498,12 +509,12 @@
+ }
+ 
+ // loadModules will reload module metadata.
+-func (s *Symbolizer) loadModules() (bool, error) {
++func (s *Symbolizer) loadModules() (changed bool, result error) {
+ 	dir, err := os.Open(sysModule)
+ 	if err != nil {
+ 		return false, err
+ 	}
+-	defer dir.Close()
++	defer func() { result = errors.Join(result, dir.Close()) }()
+ 
+ 	needReloadSymbols := false
+ 	modules, _ := s.modules.Load().([]Module)
+@@ -560,7 +571,7 @@
+ }
+ 
+ // reloadWorker is the goroutine handling the reloads of the kallsyms.
+-func (s *Symbolizer) reloadWorker(ctx context.Context, kobjectClient *kobject.Client) {
++func (s *Symbolizer) reloadWorker(ctx context.Context, kobjectClient *kobject.Client, control *ownedMonitorControl) {
+ 	scope := periodiccaller.OwnedScopeFrom(ctx)
+ 	var activeModulesOp *periodiccaller.OwnedOperation
+ 	var activeSymbolsOp *periodiccaller.OwnedOperation
+@@ -568,80 +579,876 @@
+ 	noTimeout := make(<-chan time.Time)
+ 	nextKallsymsReload := noTimeout
+ 	nextModulesReload := noTimeout
++	var workerErr error
++	var wake <-chan struct{}
++	if control != nil { wake = control.flushWake }
++	var scopeDeadlineWake <-chan time.Time
++	if control != nil {
++		if deadline, ok := ctx.Deadline(); ok { timer := time.NewTimer(time.Until(deadline)); defer timer.Stop(); scopeDeadlineWake = timer.C }
++	}
++	defer func() {
++		if activeModulesOp != nil { workerErr = errors.Join(workerErr, activeModulesOp.Abort()) }
++		if activeSymbolsOp != nil { workerErr = errors.Join(workerErr, activeSymbolsOp.Abort()) }
++		if control == nil { return }
++		control.mu.Lock()
++		if control.flush != nil { workerErr = errors.Join(workerErr, control.flush.ctx.Err()) }
++		workerErr = errors.Join(workerErr, ownedWorkerContextError(ctx), control.cause)
++		control.mu.Unlock()
++		if workerErr != nil { control.fail(scope, workerErr) }
++		control.mu.Lock()
++		control.workerErr = workerErr
++		control.mu.Unlock()
++		close(control.workerDone)
++	}()
++	eligible := func() error {
++		if control == nil { return nil }
++		control.mu.Lock()
++		claim, cause := control.flush, control.cause
++		var claimResult error
++		if claim != nil && claim.phase == ownedFlushRejected { claimResult = claim.err }
++		if claim == nil && control.ingress != ownedFailed { cause = nil }
++		control.mu.Unlock()
++		if scope == nil { return errors.New("owned worker requires scope") }
++		var claimErr error
++		if claim != nil {
++			claimErr = claim.ctx.Err()
++			if claim.hasDeadline && !time.Now().Before(claim.deadline) { claimErr = errors.Join(claimErr, context.DeadlineExceeded) }
++			if deadline, ok := claim.ctx.Deadline(); ok && !time.Now().Before(deadline) { claimErr = errors.Join(claimErr, context.DeadlineExceeded) }
++		}
++		return errors.Join(ownedWorkerContextError(ctx), scope.Failure(), cause, claimErr, claimResult)
++	}
++	scheduleModules := func(delay time.Duration, immediate bool) error {
++		if nextModulesReload != noTimeout { return nil }
++		var err error
++		activeModulesOp, err = scope.AdmitKind(libpf.AuxiliarySourceModuleExec)
++		if control != nil && (err != nil || activeModulesOp == nil) { return errors.Join(err, errors.New("module execution admission failed")) }
++		if immediate { nextModulesReload = make(<-chan time.Time) } else { nextModulesReload = reloadAfter(delay) }
++		return nil
++	}
++	scheduleSymbols := func(delay time.Duration, immediate bool) error {
++		if nextKallsymsReload != noTimeout { return nil }
++		var err error
++		activeSymbolsOp, err = scope.AdmitKind(libpf.AuxiliarySourceSymbolExec)
++		if control != nil && (err != nil || activeSymbolsOp == nil) { return errors.Join(err, errors.New("symbol execution admission failed")) }
++		if immediate { nextKallsymsReload = make(<-chan time.Time) } else { nextKallsymsReload = reloadAfter(delay) }
++		return nil
++	}
++	finish := func(op *periodiccaller.OwnedOperation, err error) error {
++		if op == nil { return nil }
++		var terminal error
++		if err == nil { terminal = op.Complete() } else { terminal = op.Fail(err) }
++		if control != nil { return terminal }
++		return nil
++	}
++	executeModules := func() (bool, error, error) {
++		if err := eligible(); err != nil { return false, nil, err }
++		changed, loadErr := s.loadModules()
++		contractErr := eligible()
++		contractErr = errors.Join(contractErr, finish(activeModulesOp, errors.Join(loadErr, contractErr)))
++		activeModulesOp = nil
++		nextModulesReload = noTimeout
++		return changed, loadErr, contractErr
++	}
++	executeSymbols := func() (error, error) {
++		if err := eligible(); err != nil { return nil, err }
++		loadErr := s.loadKallsyms()
++		contractErr := eligible()
++		contractErr = errors.Join(contractErr, finish(activeSymbolsOp, errors.Join(loadErr, contractErr)))
++		activeSymbolsOp = nil
++		nextKallsymsReload = noTimeout
++		return loadErr, contractErr
++	}
+ 	for {
+-		select {
+-		case <-s.reloadModules:
+-			// Just trigger reloading of modules with small delay to batch
+-			// potentially multiple module loads.
+-			if nextModulesReload == noTimeout {
+-				activeModulesOp, _ = scope.AdmitKind(libpf.AuxiliarySourceModuleExec)
+-				nextModulesReload = reloadAfter(100 * time.Millisecond)
+-			}
+-		case <-nextModulesReload:
+-			reloadSymbols, err := s.loadModules()
+-			op := activeModulesOp
+-			activeModulesOp = nil
+-			if err == nil {
+-				if op != nil {
+-					_ = op.Complete()
++		if control != nil {
++			control.mu.Lock(); claim := control.flush; control.mu.Unlock()
++			if claim != nil {
++				select {
++				case <-control.pollDone:
++				case <-claim.done: control.mu.Lock(); workerErr = claim.err; control.mu.Unlock(); return
++				case <-claim.ctx.Done(): workerErr = claim.ctx.Err(); return
++				case <-ctx.Done(): workerErr = ctx.Err(); return
+ 				}
+-				log.Debugf("Kernel modules metadata reloaded, new symbols: %v", reloadSymbols)
+-				nextModulesReload = noTimeout
+-				if reloadSymbols && nextKallsymsReload == noTimeout {
+-					activeSymbolsOp, _ = scope.AdmitKind(libpf.AuxiliarySourceSymbolExec)
+-					nextKallsymsReload = reloadAfter(time.Minute)
++				for {
++					control.mu.Lock()
++					if control.pollOutcome != ownedPollDrained || control.pollErr != nil || control.ingress != ownedFrozen {
++						workerErr = errors.Join(errors.New("owned poller not drained"), control.pollErr, control.cause)
++						control.mu.Unlock(); return
++					}
++					if control.inFlight == 0 { break }
++					control.mu.Unlock()
++					select {
++					case <-control.flushWake:
++					case <-claim.done: control.mu.Lock(); workerErr = claim.err; control.mu.Unlock(); return
++					case <-claim.ctx.Done(): workerErr = claim.ctx.Err(); return
++					case <-ctx.Done(): workerErr = ctx.Err(); return
++					}
+ 				}
+-			} else {
+-				if op != nil {
+-					_ = op.Fail(err)
++				var modules, symbols bool
++				select { case <-s.reloadModules: modules = true; default: }
++				select { case <-s.reloadSymbols: symbols = true; default: }
++				control.mu.Unlock()
++				if workerErr = eligible(); workerErr != nil { return }
++				if modules { if workerErr = scheduleModules(0, true); workerErr != nil { return } }
++				if symbols { if workerErr = scheduleSymbols(0, true); workerErr != nil { return } }
++				if nextModulesReload != noTimeout {
++					var changed bool
++					var loadErr, contractErr error
++					changed, loadErr, contractErr = executeModules(); workerErr = errors.Join(loadErr, contractErr); if workerErr != nil { return }
++					if changed { if workerErr = scheduleSymbols(0, true); workerErr != nil { return } }
++				}
++				if nextKallsymsReload != noTimeout { loadErr, contractErr := executeSymbols(); workerErr = errors.Join(loadErr, contractErr); if workerErr != nil { return } }
++				control.mu.Lock()
++				if len(s.reloadModules) != 0 || len(s.reloadSymbols) != 0 || control.inFlight != 0 || control.ingress != ownedFrozen {
++					workerErr = errors.New("owned cohort changed after cutoff")
+ 				}
+-				log.Warnf("Failed to reload kernel modules metadata: %v", err)
+-				activeModulesOp, _ = scope.AdmitKind(libpf.AuxiliarySourceModuleExec)
+-				nextModulesReload = reloadAfter(10 * time.Second)
++				control.mu.Unlock()
++				workerErr = errors.Join(workerErr, eligible())
++				return
+ 			}
++		}
++		select {
++		case <-wake:
++		case <-scopeDeadlineWake: workerErr = errors.Join(context.DeadlineExceeded, ownedWorkerContextError(ctx)); return
++		case <-s.reloadModules:
++			workerErr = scheduleModules(100*time.Millisecond, false)
+ 		case <-s.reloadSymbols:
+-			// Just trigger reloading of symbols with small delay to batch
+-			// potentially multiple module loads.
+-			if nextKallsymsReload == noTimeout {
+-				activeSymbolsOp, _ = scope.AdmitKind(libpf.AuxiliarySourceSymbolExec)
+-				nextKallsymsReload = reloadAfter(100 * time.Millisecond)
+-			}
++			workerErr = scheduleSymbols(100*time.Millisecond, false)
++		case <-nextModulesReload:
++			if control != nil {
++				control.mu.Lock(); flushing := control.flush != nil; control.mu.Unlock()
++				if flushing { continue }
++			}
++			changed, loadErr, contractErr := executeModules()
++			workerErr = contractErr
++			if loadErr != nil && contractErr == nil {
++				if control != nil { control.noteLoadFailure(loadErr) }
++				log.Warnf("Failed to reload kernel modules metadata: %v", loadErr)
++				workerErr = scheduleModules(10*time.Second, false)
++			} else if loadErr != nil { workerErr = errors.Join(loadErr, contractErr) }
++			if workerErr == nil && loadErr == nil && changed { workerErr = scheduleSymbols(time.Minute, false) }
+ 		case <-nextKallsymsReload:
+-			err := s.loadKallsyms()
+-			op := activeSymbolsOp
+-			activeSymbolsOp = nil
+-			if err == nil {
+-				if op != nil {
+-					_ = op.Complete()
+-				}
+-				log.Debugf("Kernel symbols reloaded")
+-				nextKallsymsReload = noTimeout
+-			} else {
+-				if op != nil {
+-					_ = op.Fail(err)
+-				}
+-				log.Warnf("Failed to reload kernel symbols: %v", err)
+-				activeSymbolsOp, _ = scope.AdmitKind(libpf.AuxiliarySourceSymbolExec)
+-				nextKallsymsReload = reloadAfter(time.Minute)
+-			}
++			if control != nil {
++				control.mu.Lock(); flushing := control.flush != nil; control.mu.Unlock()
++				if flushing { continue }
++			}
++			loadErr, contractErr := executeSymbols()
++			workerErr = contractErr
++			if loadErr != nil && contractErr == nil {
++				if control != nil { control.noteLoadFailure(loadErr) }
++				log.Warnf("Failed to reload kernel symbols: %v", loadErr)
++				workerErr = scheduleSymbols(time.Minute, false)
++			} else if loadErr != nil { workerErr = errors.Join(loadErr, contractErr) }
+ 		case <-ctx.Done():
+-			if activeModulesOp != nil {
+-				_ = activeModulesOp.Abort()
+-				activeModulesOp = nil
+-			}
+-			if activeSymbolsOp != nil {
+-				_ = activeSymbolsOp.Abort()
+-				activeSymbolsOp = nil
+-			}
+-			// Terminate also the kobject poller thread
+-			if periodiccaller.OwnedScopeFrom(ctx) == nil {
+-				_ = kobjectClient.Close()
+-			}
++			if control == nil && scope == nil { _ = kobjectClient.Close() }
++			if control != nil { workerErr = ctx.Err() }
+ 			return
+ 		}
++		if workerErr != nil { return }
++	}
++}
++// OwnedKobjectReceiver receives records from an already owned transport.
++type OwnedKobjectReceiver interface {
++	Receive() (*kobject.Event, error)
++	Acknowledge(error) error
++}
++
++type ownedMonitorActivation struct {
++	Mu *sync.Mutex
++	Activate <-chan struct{}
++	Reject <-chan struct{}
++	Err *error
++}
++
++// ownedWorkerContextError checks the worker's original absolute lifetime.
++func ownedWorkerContextError(ctx context.Context) error {
++	if ctx == nil { return errors.New("owned worker context is nil") }
++	err := ctx.Err()
++	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
++		err = errors.Join(err, context.DeadlineExceeded)
++	}
++	return err
++}
++
++func parseOwnedMonitorActivation(ctx context.Context, r OwnedKobjectReceiver) (*ownedMonitorActivation, error) {
++	if ctx == nil || r == nil {
++		return nil, errors.New("activation requires context and receiver")
++	}
++	value := reflect.ValueOf(r)
++	if !value.Type().Comparable() || !value.Comparable() {
++		return nil, errors.New("activation receiver is not comparable")
++	}
++	switch value.Kind() {
++	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
++		if value.IsNil() { return nil, errors.New("activation receiver is nil") }
++	}
++	envelope, ok := ctx.Value(r).(struct {
++		Mu *sync.Mutex
++		Activate <-chan struct{}
++		Reject <-chan struct{}
++		Err *error
++	})
++	if !ok || envelope.Mu == nil || envelope.Activate == nil || envelope.Reject == nil || envelope.Err == nil || envelope.Activate == envelope.Reject {
++		return nil, errors.New("invalid activation envelope")
++	}
++	h := ownedMonitorActivation(envelope)
++	h.Mu.Lock()
++	defer h.Mu.Unlock()
++	if err := errors.Join(ctx.Err(), *h.Err); err != nil { return nil, err }
++	select { case <-h.Activate: return nil, errors.New("activation already released"); default: }
++	select { case <-h.Reject: return nil, errors.New("activation already rejected"); default: }
++	return &h, nil
++}
++
++// publishFailure records a precommit failure without closing witness-owned channels.
++func (h *ownedMonitorActivation) publishFailure(err error) error {
++	if err == nil { return errors.New("activation failure is nil") }
++	h.Mu.Lock()
++	defer h.Mu.Unlock()
++	select { case <-h.Activate: return errors.New("activation already released"); default: }
++	*h.Err = errors.Join(*h.Err, err)
++	return nil
++}
++
++func (h *ownedMonitorActivation) waitActivation(scopeCtx context.Context) error {
++	if err := ownedWorkerContextError(scopeCtx); err != nil {
++		h.Mu.Lock(); shared := *h.Err; h.Mu.Unlock()
++		return errors.Join(err, shared)
++	}
++	deadline, hasDeadline := scopeCtx.Deadline()
++	var deadlineWake <-chan time.Time
++	if hasDeadline { timer := time.NewTimer(time.Until(deadline)); defer timer.Stop(); deadlineWake = timer.C }
++	select {
++	case <-h.Activate:
++	case <-h.Reject:
++	case <-scopeCtx.Done():
++	case <-deadlineWake:
++	}
++	scopeErr := ownedWorkerContextError(scopeCtx)
++	h.Mu.Lock()
++	var active, rejected bool
++	select { case <-h.Activate: active = true; default: }
++	select { case <-h.Reject: rejected = true; default: }
++	sharedErr := *h.Err
++	if hasDeadline && !time.Now().Before(deadline) { scopeErr = errors.Join(scopeErr, context.DeadlineExceeded) }
++	h.Mu.Unlock()
++	if err := errors.Join(scopeErr, sharedErr, ownedWorkerContextError(scopeCtx)); err != nil { return err }
++	if !active || rejected { return errors.New("activation rejected or ambiguous") }
++	return nil
++}
++
++type ownedPollOutcome uint8
++
++const (
++	ownedPollFailed ownedPollOutcome = iota
++	ownedPollDrained
++)
++
++type ownedIngress uint8
++
++const (
++	ownedAccepting ownedIngress = iota
++	ownedFrozen
++	ownedFailed
++)
++
++// inFlight reserves dispatch across the queue decision, terminals and ACK.
++type ownedMonitorControl struct {
++	mu       sync.Mutex
++	handoff  *ownedMonitorActivation
++	ingress  ownedIngress
++	inFlight uint64
++	cause    error
++	intentPhase ownedIntentPhase
++	pendingCalls uint64
++	queuedTerminals uint64
++	coalescedTerminals uint64
++	pollDone chan struct{}
++	pollOutcome ownedPollOutcome
++	pollErr error
++	workerDone chan struct{}
++	workerErr error
++	flushWake chan struct{}
++	flush *ownedFlushClaim
++}
++
++type ownedFlushPhase uint8
++const (
++	ownedFlushPending ownedFlushPhase = iota
++	ownedFlushCommitted
++	ownedFlushRejected
++)
++type ownedFlushClaim struct {
++	ctx context.Context
++	deadline time.Time
++	hasDeadline bool
++	phase ownedFlushPhase
++	done chan struct{}
++	err error
++}
++
++type monitorMode uint8
++const (
++	monitorUnused monitorMode = iota
++	monitorLegacyStarting
++	monitorLegacyRunning
++	monitorOwnedPreparing
++	monitorOwnedReady
++	monitorTerminal
++)
++
++type ownedIntentPhase uint8
++
++const (
++	ownedIntentCollecting ownedIntentPhase = iota
++	ownedIntentTransferring
++	ownedIntentSettled
++	ownedIntentAbandonedUnknown
++)
++
++var errOwnedIntentLive = errors.New("reload intent already seeded; use live producer")
++
++// reservePreactivationReload records intent without manufacturing source receipts.
++func reservePreactivationReload(ctx context.Context, h *ownedMonitorActivation, c *ownedMonitorControl) error {
++	if h == nil || h.Mu == nil || h.Err == nil || c == nil {
++		return errors.New("reload reservation requires activation and control")
++	}
++	h.Mu.Lock()
++	defer h.Mu.Unlock()
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	reject := func(err error) error {
++		c.intentPhase = ownedIntentAbandonedUnknown
++		c.ingress = ownedFailed
++		c.cause = errors.Join(c.cause, err)
++		*h.Err = errors.Join(*h.Err, err)
++		return err
++	}
++	if ctx == nil { return reject(errors.New("reload reservation requires context")) }
++	if err := ownedWorkerContextError(ctx); err != nil { return reject(fmt.Errorf("reload reservation context: %w", err)) }
++	if h.Activate == nil || h.Reject == nil || h.Activate == h.Reject { return reject(errors.New("invalid reload activation channels")) }
++	if *h.Err != nil { return reject(fmt.Errorf("reload activation failure: %w", *h.Err)) }
++	select { case <-h.Reject: return reject(errors.New("reload activation rejected")); default: }
++	if c.ingress != ownedAccepting { return reject(errors.New("reload ingress not accepting")) }
++	switch c.intentPhase {
++	case ownedIntentTransferring, ownedIntentSettled:
++		return errOwnedIntentLive
++	case ownedIntentCollecting:
++	case ownedIntentAbandonedUnknown:
++		return reject(errors.New("reload intent abandoned"))
++	default:
++		return reject(errors.New("invalid reload intent phase"))
++	}
++	if c.pendingCalls != 0 && c.inFlight == 0 { return reject(errors.New("reload cohort reservation missing")) }
++	if c.pendingCalls == ^uint64(0) || (c.pendingCalls == 0 && c.inFlight == ^uint64(0)) {
++		return reject(errors.New("reload reservation counter overflow"))
++	}
++	if c.pendingCalls == 0 { c.inFlight++ }
++	c.pendingCalls++
++	return nil
++}
++
++// replayOwnedReloads accounts the seeded cohort before the worker consumes it.
++func (s *Symbolizer) replayOwnedReloads(ctx context.Context, c *ownedMonitorControl, h *ownedMonitorActivation) (result error) {
++	if s == nil || c == nil || h == nil || h.Mu == nil || h.Err == nil || h.Activate == nil || h.Reject == nil {
++		return errors.New("reload replay requires an owned handoff")
++	}
++	var scope *periodiccaller.OwnedScope
++	if ctx != nil { scope = periodiccaller.OwnedScopeFrom(ctx) }
++	check := func() error {
++		if ctx == nil || scope == nil { return errors.New("reload replay requires an owned scope") }
++		if err := errors.Join(ownedWorkerContextError(ctx), scope.Failure()); err != nil { return err }
++		if _, err := scope.AuxiliaryBinding(); err != nil { return err }
++		h.Mu.Lock()
++		c.mu.Lock()
++		shared, cause, ingress, claim := *h.Err, c.cause, c.ingress, c.flush
++		var active, rejected bool
++		select { case <-h.Activate: active = true; default: }
++		select { case <-h.Reject: rejected = true; default: }
++		c.mu.Unlock()
++		h.Mu.Unlock()
++		if !active || rejected { return errors.Join(errors.New("reload activation not committed"), shared) }
++		if shared != nil { return shared }
++		if ingress != ownedAccepting && ingress != ownedFrozen { return errors.Join(errors.New("reload flow failed or invalid"), cause) }
++		if claim != nil {
++			if claim.ctx == nil { return errors.New("reload flush context is nil") }
++			if err := claim.ctx.Err(); err != nil { return err }
++			if deadline, ok := claim.ctx.Deadline(); ok && !time.Now().Before(deadline) { return context.DeadlineExceeded }
++		}
++		return nil
++	}
++	preErr := check()
++	var done <-chan struct{}
++	var workerDeadline time.Time
++	var hasWorkerDeadline bool
++	if ctx != nil { workerDeadline, hasWorkerDeadline = ctx.Deadline() }
++	if ctx != nil { done = ctx.Done() }
++	canceled := false
++	h.Mu.Lock()
++	c.mu.Lock()
++	if c.intentPhase != ownedIntentCollecting {
++		c.mu.Unlock(); h.Mu.Unlock()
++		return errors.New("reload cohort already transferred or abandoned")
++	}
++	n := c.pendingCalls
++	cohort := n != 0 && c.inFlight != 0
++	c.intentPhase = ownedIntentTransferring
++	select { case <-done: canceled = true; preErr = errors.Join(preErr, errors.New("reload scope ended before seed")); default: }
++	if hasWorkerDeadline && !time.Now().Before(workerDeadline) { preErr = errors.Join(preErr, context.DeadlineExceeded) }
++	if *h.Err != nil { preErr = errors.Join(preErr, *h.Err) }
++	if c.ingress != ownedAccepting && c.ingress != ownedFrozen { preErr = errors.Join(preErr, c.cause, errors.New("reload flow failed or invalid")) }
++	select { case <-h.Reject: preErr = errors.Join(preErr, errors.New("reload activation rejected")); default: }
++	if h.Activate == h.Reject { preErr = errors.Join(preErr, errors.New("invalid reload activation channels")) }
++	if n != 0 && !cohort { preErr = errors.Join(preErr, errors.New("reload cohort reservation missing")) }
++	if c.queuedTerminals != 0 || c.coalescedTerminals != 0 { preErr = errors.Join(preErr, errors.New("reload terminal cursors not fresh")) }
++	if cap(s.reloadSymbols) != 1 || len(s.reloadSymbols) != 0 { preErr = errors.Join(preErr, errors.New("reload seed channel not empty")) }
++	if preErr == nil && n != 0 {
++		select { case s.reloadSymbols <- libpf.Void{}: default: preErr = errors.New("reload seed channel occupied") }
++	}
++	c.mu.Unlock()
++	h.Mu.Unlock()
++	if canceled { preErr = errors.Join(preErr, ctx.Err()) }
++	defer func() {
++		var scopeErr error
++		if ctx != nil { scopeErr = ownedWorkerContextError(ctx) }
++		h.Mu.Lock()
++		c.mu.Lock()
++		if result == nil {
++			result = errors.Join(scopeErr, *h.Err)
++			if hasWorkerDeadline && !time.Now().Before(workerDeadline) { result = errors.Join(result, context.DeadlineExceeded) }
++			select { case <-done: result = errors.Join(result, errors.New("reload scope ended before handoff")); default: }
++			select { case <-h.Reject: result = errors.Join(result, errors.New("reload activation rejected")); default: }
++			if c.ingress != ownedAccepting && c.ingress != ownedFrozen { result = errors.Join(result, c.cause, errors.New("reload flow failed or invalid")) }
++			if c.intentPhase != ownedIntentTransferring || c.pendingCalls != n || (n == 0 && (c.queuedTerminals != 0 || c.coalescedTerminals != 0)) || (n != 0 && (c.queuedTerminals != 1 || c.coalescedTerminals != n-1)) {
++				result = errors.Join(result, errors.New("reload replay terminal mismatch"))
++			}
++		}
++		if cohort && c.inFlight == 0 { result = errors.Join(result, errors.New("reload cohort reservation underflow")) }
++		if result != nil {
++			c.intentPhase = ownedIntentAbandonedUnknown
++			c.ingress = ownedFailed
++			c.cause = errors.Join(c.cause, result)
++			select { case <-h.Activate: default: *h.Err = errors.Join(*h.Err, result) }
++		} else {
++			c.intentPhase = ownedIntentSettled
++		}
++		if cohort && c.inFlight != 0 { c.inFlight-- }
++		c.mu.Unlock()
++		h.Mu.Unlock()
++		if result != nil && ctx != nil { result = errors.Join(result, ownedWorkerContextError(ctx)) }
++		if result != nil { c.fail(scope, result) }
++		select { case c.flushWake <- struct{}{}: default: }
++	}()
++	if preErr != nil { return preErr }
++	for i := uint64(0); i < n; i++ {
++		if err := check(); err != nil { return err }
++		kind := libpf.AuxiliarySourceSymbolQueued
++		if i != 0 {
++			kind = libpf.AuxiliarySourceSymbolCoalesced
++			c.mu.Lock()
++			queued := false
++			select { case s.reloadSymbols <- libpf.Void{}: queued = true; default: }
++			c.mu.Unlock()
++			if queued { return errors.New("seeded reload token was consumed during replay") }
++		}
++		op, err := scope.AdmitKind(kind)
++		if err != nil { return fmt.Errorf("admit reload replay: %w", err) }
++		if op == nil { return errors.New("nil reload replay operation") }
++		if err := check(); err != nil { return errors.Join(err, op.Fail(err)) }
++		if err := op.Complete(); err != nil { return fmt.Errorf("complete reload replay: %w", err) }
++		c.mu.Lock()
++		if (i == 0 && c.queuedTerminals == ^uint64(0)) || (i != 0 && c.coalescedTerminals == ^uint64(0)) {
++			c.mu.Unlock(); return errors.New("reload terminal cursor overflow")
++		}
++		if i == 0 { c.queuedTerminals++ } else { c.coalescedTerminals++ }
++		c.mu.Unlock()
++	}
++	return check()
++}
++
++func (c *ownedMonitorControl) failure() error {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	if c.ingress == ownedFailed { return c.cause }
++	return nil
++}
++
++func (c *ownedMonitorControl) noteLoadFailure(err error) {
++	c.mu.Lock()
++	c.cause = errors.Join(c.cause, err)
++	c.mu.Unlock()
++}
++
++func (c *ownedMonitorControl) fail(scope *periodiccaller.OwnedScope, err error) {
++	if c.handoff != nil { c.handoff.Mu.Lock() }
++	c.mu.Lock()
++	c.ingress = ownedFailed
++	c.cause = errors.Join(c.cause, err)
++	if c.handoff != nil {
++		select { case <-c.handoff.Activate: default: *c.handoff.Err = errors.Join(*c.handoff.Err, err) }
++	}
++	c.mu.Unlock()
++	if c.handoff != nil { c.handoff.Mu.Unlock() }
++	if scope != nil {
++		scope.Fail(err)
++	}
++}
++
++func (s *Symbolizer) dispatchOwnedKobject(ctx context.Context, scope *periodiccaller.OwnedScope, r OwnedKobjectReceiver, c *ownedMonitorControl, event *kobject.Event) (err error) {
++	reserved := false
++	defer func() {
++		if ackErr := r.Acknowledge(err); ackErr != nil {
++			err = errors.Join(err, fmt.Errorf("acknowledge kobject record: %w", ackErr))
++		}
++		if reserved {
++			c.mu.Lock()
++			c.inFlight--
++			c.mu.Unlock()
++			select { case c.flushWake <- struct{}{}: default: }
++		}
++	}()
++	if err := ownedWorkerContextError(ctx); err != nil {
++		return fmt.Errorf("kobject dispatch context: %w", err)
++	}
++	if event == nil {
++		return errors.New("nil kobject record")
++	}
++	c.mu.Lock()
++	if c.ingress != ownedAccepting {
++		cause := c.cause
++		c.mu.Unlock()
++		return errors.Join(errors.New("kobject dispatch rejected by ingress"), cause)
++	}
++	if c.inFlight == ^uint64(0) { c.mu.Unlock(); return errors.New("kobject dispatch reservation overflow") }
++	c.inFlight++
++	reserved = true
++	c.mu.Unlock()
++	if err := ownedWorkerContextError(ctx); err != nil { return err }
++	receiveOp, err := scope.AdmitKind(libpf.AuxiliarySourceKobjectReceive)
++	if err != nil {
++		return fmt.Errorf("admit kobject receive: %w", err)
++	}
++	if receiveOp == nil {
++		return errors.New("nil kobject receive operation")
++	}
++	if event.Subsystem != "module" {
++		if err := receiveOp.Skip(); err != nil {
++			return fmt.Errorf("skip kobject receive: %w", err)
++		}
++		return nil
++	}
++	deadline, hasDeadline := ctx.Deadline()
++	done := ctx.Done()
++	c.mu.Lock()
++	ended := false
++	select { case <-done: ended = true; default: }
++	if ended || (hasDeadline && !time.Now().Before(deadline)) {
++		c.mu.Unlock(); err := ownedWorkerContextError(ctx); if err == nil { err = errors.New("owned worker context ended") }; return errors.Join(err, receiveOp.Fail(err))
++	}
++	if c.ingress != ownedAccepting && c.ingress != ownedFrozen {
++		cause := c.cause
++		c.mu.Unlock()
++		err := errors.Join(errors.New("reserved module dispatch failed"), cause)
++		return errors.Join(err, receiveOp.Fail(err))
++	}
++	kind := libpf.AuxiliarySourceModuleCoalesced
++	select {
++	case s.reloadModules <- libpf.Void{}:
++		kind = libpf.AuxiliarySourceModuleQueued
++	default:
+ 	}
++	c.mu.Unlock()
++	queueOp, err := scope.AdmitKind(kind)
++	if err == nil && queueOp == nil {
++		err = errors.New("nil module queue operation")
++	}
++	if err == nil {
++		err = queueOp.Complete()
++	}
++	if err != nil {
++		err = fmt.Errorf("record module dispatch: %w", err)
++		return errors.Join(err, receiveOp.Fail(err))
++	}
++	if err := receiveOp.Complete(); err != nil {
++		return fmt.Errorf("complete kobject receive: %w", err)
++	}
++	return nil
+ }
+ 
++func (s *Symbolizer) pollOwnedKobject(ctx context.Context, r OwnedKobjectReceiver, c *ownedMonitorControl) (ownedPollOutcome, error) {
++	if ctx == nil || r == nil || c == nil {
++		return ownedPollFailed, errors.New("owned poller requires context, receiver and control")
++	}
++	scope := periodiccaller.OwnedScopeFrom(ctx)
++	if scope == nil {
++		err := errors.New("owned poller requires a scope")
++		c.fail(nil, err)
++		return ownedPollFailed, err
++	}
++	if _, err := scope.AuxiliaryBinding(); err != nil {
++		err = fmt.Errorf("owned poller binding: %w", err)
++		c.fail(scope, err)
++		return ownedPollFailed, err
++	}
++	for {
++		if err := errors.Join(ownedWorkerContextError(ctx), c.failure(), scope.Failure()); err != nil {
++			c.fail(scope, err)
++			return ownedPollFailed, err
++		}
++		event, err := r.Receive()
++		if err == io.EOF {
++			if err := errors.Join(ownedWorkerContextError(ctx), c.failure(), scope.Failure()); err != nil {
++				c.fail(scope, err)
++				return ownedPollFailed, err
++			}
++			return ownedPollDrained, nil
++		}
++		if err != nil {
++			err = fmt.Errorf("receive owned kobject: %w", err)
++			c.fail(scope, err)
++			return ownedPollFailed, err
++		}
++		if err := s.dispatchOwnedKobject(ctx, scope, r, c, event); err != nil {
++			c.fail(scope, err)
++			return ownedPollFailed, err
++		}
++	}
++}
++
++// StartOwnedMonitor registers the actual idle loops for an already owned receiver.
++func (s *Symbolizer) StartOwnedMonitor(ctx context.Context, r OwnedKobjectReceiver) error {
++	h, err := parseOwnedMonitorActivation(ctx, r)
++	if err != nil { return err }
++	if err = ownedWorkerContextError(ctx); err != nil { _ = h.publishFailure(err); return err }
++	scope := periodiccaller.OwnedScopeFrom(ctx)
++	if scope == nil { err = errors.New("owned monitor requires scope") } else { _, err = scope.AuxiliaryBinding() }
++	if err != nil { _ = h.publishFailure(err); return err }
++	child, cancel := context.WithCancel(ctx)
++	c := &ownedMonitorControl{handoff: h, pollDone: make(chan struct{}), workerDone: make(chan struct{}), flushWake: make(chan struct{}, 1)}
++	s.monitorMu.Lock()
++	if s.monitorMode != monitorUnused || cap(s.reloadModules) != 1 || cap(s.reloadSymbols) != 1 || len(s.reloadModules) != 0 || len(s.reloadSymbols) != 0 {
++		s.monitorMu.Unlock(); cancel(); err = errors.New("monitor already used or requests unattributed"); _ = h.publishFailure(err); return err
++	}
++	s.monitorMode, s.scope, s.owned, s.activation, s.ownedCtx = monitorOwnedPreparing, scope, c, h, child
++	s.monitorMu.Unlock()
++	readyPublished := false
++	reject := func(err error, abandon bool) {
++		h.Mu.Lock(); c.mu.Lock()
++		c.ingress = ownedFailed; c.cause = errors.Join(c.cause, err)
++		select { case <-h.Activate: if !readyPublished { *h.Err = errors.Join(*h.Err, err) }; default: *h.Err = errors.Join(*h.Err, err) }
++		if abandon && c.intentPhase == ownedIntentCollecting {
++			c.intentPhase = ownedIntentAbandonedUnknown
++			if c.pendingCalls != 0 && c.inFlight != 0 { c.inFlight-- }
++		}
++		c.mu.Unlock(); h.Mu.Unlock()
++		cancel()
++	}
++	workerReady, pollReady := make(chan struct{}, 1), make(chan struct{}, 1)
++	readyGate := make(chan struct{})
++	waitActivation := func() error {
++		select {
++		case <-readyGate:
++		case <-child.Done(): return h.waitActivation(child)
++		case <-h.Reject: return h.waitActivation(child)
++		}
++		return h.waitActivation(child)
++	}
++	if err = ownedWorkerContextError(child); err != nil { reject(err, true); return err }
++	workerStarted := scope.Go(func() {
++		workerReady <- struct{}{}
++		err := waitActivation()
++		if err == nil { err = ownedWorkerContextError(child) }
++		if err != nil {
++			reject(err, true); c.mu.Lock(); c.workerErr = err; c.mu.Unlock(); close(c.workerDone); return
++		}
++		if err = s.replayOwnedReloads(child, c, h); err != nil {
++			c.mu.Lock(); c.workerErr = err; c.mu.Unlock(); close(c.workerDone); cancel(); return
++		}
++		s.reloadWorker(child, nil, c)
++	})
++	if !workerStarted { err = errors.New("owned worker registration failed"); reject(err, true); return err }
++	if err = ownedWorkerContextError(child); err != nil { reject(err, false); return err }
++	pollStarted := scope.Go(func() {
++		pollReady <- struct{}{}
++		outcome := ownedPollFailed
++		err := waitActivation()
++		if err == nil { err = ownedWorkerContextError(child) }
++		if err != nil { reject(err, false) } else { outcome, err = s.pollOwnedKobject(child, r, c) }
++		c.mu.Lock(); c.pollOutcome, c.pollErr = outcome, err; c.mu.Unlock()
++		close(c.pollDone)
++	})
++	if !pollStarted { err = errors.New("owned poller registration failed"); reject(err, false); return err }
++	waitReady := func(ch <-chan struct{}) error {
++		if err := ownedWorkerContextError(child); err != nil { return err }
++		var deadlineWake <-chan time.Time
++		if deadline, ok := child.Deadline(); ok { timer := time.NewTimer(time.Until(deadline)); defer timer.Stop(); deadlineWake = timer.C }
++		select {
++		case <-ch: return nil
++		case <-child.Done(): return child.Err()
++		case <-h.Reject: return h.waitActivation(child)
++		case <-deadlineWake: return errors.Join(context.DeadlineExceeded, ownedWorkerContextError(child))
++		}
++	}
++	if err = waitReady(workerReady); err == nil { err = waitReady(pollReady) }
++	if err == nil { err = errors.Join(ownedWorkerContextError(child), scope.Failure()) }
++	if err == nil { _, err = scope.AuxiliaryBinding() }
++	deadline, hasDeadline := child.Deadline()
++	done, contextEnded := child.Done(), false
++	h.Mu.Lock(); c.mu.Lock()
++	err = errors.Join(err, *h.Err, c.failureLocked())
++	select { case <-done: contextEnded = true; default: }
++	select { case <-h.Activate: err = errors.Join(err, errors.New("activation preceded readiness")); default: }
++	select { case <-h.Reject: err = errors.Join(err, errors.New("activation rejected before readiness")); default: }
++	if hasDeadline && !time.Now().Before(deadline) { err = errors.Join(err, context.DeadlineExceeded) }
++	if contextEnded { err = errors.Join(err, errors.New("owned monitor context ended")) }
++	if err != nil { *h.Err = errors.Join(*h.Err, err) } else { readyPublished = true }
++	c.mu.Unlock(); h.Mu.Unlock()
++	if contextEnded { err = errors.Join(err, child.Err()) }
++	if err != nil { reject(err, false); return err }
++	s.monitorMu.Lock(); s.monitorMode = monitorOwnedReady; s.monitorMu.Unlock()
++	close(readyGate)
++	return nil
++}
++
++func (c *ownedMonitorControl) failureLocked() error {
++	if c.ingress == ownedFailed { return c.cause }
++	return nil
++}
++
++// ownedFlushFinalEligibility samples the original lifetimes after actual returns.
++func ownedFlushFinalEligibility(claim *ownedFlushClaim, workerCtx context.Context, scope *periodiccaller.OwnedScope, pollDone, workerDone <-chan struct{}) (bool, error) {
++	firstErr := claim.ctx.Err()
++	select { case <-pollDone: default: return false, nil }
++	select { case <-workerDone: default: return false, nil }
++	if scope == nil { return true, errors.New("owned scope unavailable at final arbitration") }
++	scopeErr := scope.Failure()
++	_, bindingErr := scope.AuxiliaryBinding()
++	scopeErr = errors.Join(scopeErr, bindingErr, scope.Failure())
++	firstDone, scopeDone := claim.ctx.Done(), workerCtx.Done()
++	workerDeadline, hasWorkerDeadline := workerCtx.Deadline()
++	scopeErr = errors.Join(scopeErr, ownedWorkerContextError(workerCtx))
++	firstErr = errors.Join(firstErr, ownedWorkerContextError(claim.ctx))
++	select { case <-firstDone: if firstErr == nil { firstErr = errors.New("first flush context ended") }; default: }
++	select { case <-scopeDone: if scopeErr == nil { scopeErr = errors.New("owned scope ended") }; default: }
++	now := time.Now()
++	if claim.hasDeadline && !now.Before(claim.deadline) { firstErr = errors.Join(firstErr, context.DeadlineExceeded) }
++	if hasWorkerDeadline && !now.Before(workerDeadline) { scopeErr = errors.Join(scopeErr, context.DeadlineExceeded) }
++	return true, errors.Join(firstErr, scopeErr)
++}
++
++// FlushOwnedMonitor waits for the original frozen local monitor cohort.
++func (s *Symbolizer) FlushOwnedMonitor(ctx context.Context) error {
++	if ctx == nil { return errors.New("owned flush requires context") }
++	s.monitorMu.Lock()
++	mode, scope, c, h, workerCtx := s.monitorMode, s.scope, s.owned, s.activation, s.ownedCtx
++	s.monitorMu.Unlock()
++	if mode != monitorOwnedReady || scope == nil || c == nil || h == nil || workerCtx == nil { return errors.New("owned monitor is not ready") }
++	c.mu.Lock()
++	claim := c.flush
++	if claim != nil && claim.phase == ownedFlushCommitted { result := claim.err; c.mu.Unlock(); return result }
++	c.mu.Unlock()
++	created := false
++	if claim == nil {
++		_, bindingErr := scope.AuxiliaryBinding()
++		deadline, hasDeadline := ctx.Deadline()
++		h.Mu.Lock()
++		var active, rejected bool
++		select { case <-h.Activate: active = true; default: }
++		select { case <-h.Reject: rejected = true; default: }
++		gateErr := *h.Err
++		c.mu.Lock()
++		claim = c.flush
++		if claim == nil {
++			if !active || rejected || gateErr != nil || bindingErr != nil || c.ingress != ownedAccepting {
++				err := errors.Join(errors.New("owned monitor is not activated or eligible"), gateErr, bindingErr, c.cause)
++				c.mu.Unlock(); h.Mu.Unlock(); return err
++			}
++			claim = &ownedFlushClaim{ctx: ctx, deadline: deadline, hasDeadline: hasDeadline, done: make(chan struct{})}
++			c.flush, c.ingress, created = claim, ownedFrozen, true
++		}
++		c.mu.Unlock()
++		h.Mu.Unlock()
++	}
++	if created { select { case c.flushWake <- struct{}{}: default: } }
++	firstDone, callerDone, scopeDone := claim.ctx.Done(), ctx.Done(), workerCtx.Done()
++	pollWait, workerWait := c.pollDone, c.workerDone
++	workerDeadline, hasWorkerDeadline := workerCtx.Deadline()
++	var workerDeadlineWake <-chan time.Time
++	if hasWorkerDeadline { timer := time.NewTimer(time.Until(workerDeadline)); defer timer.Stop(); workerDeadlineWake = timer.C }
++	var deadlineWake <-chan time.Time
++	if claim.hasDeadline {
++		timer := time.NewTimer(time.Until(claim.deadline))
++		defer timer.Stop()
++		deadlineWake = timer.C
++	}
++	for {
++		c.mu.Lock()
++		if claim.phase == ownedFlushCommitted { result := claim.err; c.mu.Unlock(); return result }
++		c.mu.Unlock()
++		firstErr := claim.ctx.Err()
++		if claim.hasDeadline && !time.Now().Before(claim.deadline) { firstErr = errors.Join(firstErr, context.DeadlineExceeded) }
++		scopeErr := errors.Join(ownedWorkerContextError(workerCtx), scope.Failure())
++		_, bindingErr := scope.AuxiliaryBinding()
++		h.Mu.Lock()
++		gateErr := *h.Err
++		select { case <-h.Reject: gateErr = errors.Join(gateErr, errors.New("owned activation rejected")); default: }
++		c.mu.Lock()
++		if claim.phase == ownedFlushRejected {
++			err := errors.Join(claim.err, gateErr, c.cause, c.pollErr, c.workerErr)
++			c.mu.Unlock(); h.Mu.Unlock(); return err
++		}
++		if claim.phase == ownedFlushCommitted {
++			err := claim.err
++			c.mu.Unlock(); h.Mu.Unlock(); return err
++		}
++		var phaseErr error
++		if claim.phase != ownedFlushPending { phaseErr = errors.New("invalid owned flush phase") }
++		select { case <-firstDone: if firstErr == nil { firstErr = errors.New("first flush context ended") }; default: }
++		select { case <-scopeDone: if scopeErr == nil { scopeErr = errors.New("owned scope ended") }; default: }
++		if hasWorkerDeadline && !time.Now().Before(workerDeadline) { scopeErr = errors.Join(scopeErr, context.DeadlineExceeded) }
++		if claim.hasDeadline && !time.Now().Before(claim.deadline) { firstErr = errors.Join(firstErr, context.DeadlineExceeded) }
++		var pollReturned, workerReturned bool
++		select { case <-c.pollDone: pollReturned = true; default: }
++		select { case <-c.workerDone: workerReturned = true; default: }
++		failure := errors.Join(phaseErr, firstErr, scopeErr, bindingErr, gateErr, c.cause, c.pollErr, c.workerErr)
++		if failure == nil && pollReturned && c.pollOutcome != ownedPollDrained { failure = errors.New("owned poller did not drain") }
++		if failure == nil && pollReturned && workerReturned && (c.ingress != ownedFrozen || c.inFlight != 0 || c.intentPhase != ownedIntentSettled) {
++			failure = errors.New("owned flush cohort is not settled")
++		}
++		if failure == nil && pollReturned && workerReturned {
++			ready, finalErr := ownedFlushFinalEligibility(claim, workerCtx, scope, c.pollDone, c.workerDone)
++			if !ready { finalErr = errors.Join(finalErr, errors.New("owned returns changed during arbitration")) }
++			failure = errors.Join(failure, finalErr)
++		}
++		if failure != nil {
++			claim.phase, claim.err = ownedFlushRejected, failure
++			c.cause = errors.Join(c.cause, failure); c.ingress = ownedFailed
++			close(claim.done); c.mu.Unlock(); h.Mu.Unlock()
++			select { case c.flushWake <- struct{}{}: default: }
++			return failure
++		}
++		if pollReturned && workerReturned {
++			claim.phase = ownedFlushCommitted; close(claim.done); c.mu.Unlock(); h.Mu.Unlock(); return nil
++		}
++		c.mu.Unlock()
++		h.Mu.Unlock()
++		select {
++		case <-claim.done:
++		case <-firstDone:
++		case <-deadlineWake: deadlineWake = nil
++		case <-scopeDone:
++		case <-workerDeadlineWake: workerDeadlineWake = nil
++		case <-pollWait: pollWait = nil
++		case <-workerWait: workerWait = nil
++		case <-callerDone:
++			if claim.ctx.Err() == nil && !(claim.hasDeadline && !time.Now().Before(claim.deadline)) {
++				if err := ctx.Err(); err != nil { return err }
++				return errors.New("flush caller context ended")
++			}
++		}
++	}
++}
++
++
+ // pollKobjectClient listens for kernel kobject events to reload kallsyms when needed.
+ func (s *Symbolizer) pollKobjectClient(ctx context.Context, kobjectClient *kobject.Client) {
+ 	scope := periodiccaller.OwnedScopeFrom(ctx)
+@@ -672,12 +1479,20 @@
+ 
+ // Reload will trigger asynchronous update of modules and symbols.
+ func (s *Symbolizer) StartMonitor(ctx context.Context) error {
++	s.monitorMu.Lock()
++	if s.monitorMode != monitorUnused { s.monitorMu.Unlock(); return errors.New("monitor already used") }
++	s.monitorMode = monitorLegacyStarting
++	s.monitorMu.Unlock()
++	started := false
++	defer func() {
++		if !started { s.monitorMu.Lock(); s.monitorMode = monitorTerminal; s.monitorMu.Unlock() }
++	}()
+ 	kobjectClient, err := kobject.New()
+ 	if err != nil {
+ 		return fmt.Errorf("failed to create kobject netlink socket: %w", err)
+ 	}
+ 	if scope := periodiccaller.OwnedScopeFrom(ctx); scope != nil {
+-		s.scope = scope
++		s.monitorMu.Lock(); s.scope = scope; s.monitorMu.Unlock()
+ 		if err := scope.AddFinalizer(periodiccaller.OwnedCloser("auxiliary kobject close", kobjectClient.Close)); err != nil {
+ 			return errors.Join(err, kobjectClient.Close())
+ 		}
+@@ -685,20 +1500,64 @@
+ 			return err
+ 		}
+ 	}
+-	periodiccaller.GoOwned(ctx, func() { s.reloadWorker(ctx, kobjectClient) })
++	periodiccaller.GoOwned(ctx, func() { s.reloadWorker(ctx, kobjectClient, nil) })
+ 	periodiccaller.GoOwned(ctx, func() { s.pollKobjectClient(ctx, kobjectClient) })
++	s.monitorMu.Lock(); s.monitorMode = monitorLegacyRunning; s.monitorMu.Unlock()
++	started = true
+ 	return nil
+ }
+ 
+ // Reload triggers a non-blocking reload and update of Symbolizer
+ // with the recent information of /proc/kallsyms.
+ func (s *Symbolizer) Reload() {
++	s.monitorMu.Lock()
++	scope, c, h, ctx := s.scope, s.owned, s.activation, s.ownedCtx
++	if c != nil {
++		s.monitorMu.Unlock()
++		if err := ownedWorkerContextError(ctx); err != nil { c.fail(scope, err); return }
++		err := reservePreactivationReload(ctx, h, c)
++		if err == nil { return }
++		if !errors.Is(err, errOwnedIntentLive) { c.fail(scope, err); return }
++		if err = errors.Join(ownedWorkerContextError(ctx), scope.Failure()); err != nil { c.fail(scope, err); return }
++		deadline, hasDeadline := ctx.Deadline()
++		done := ctx.Done()
++		c.mu.Lock()
++		ended := false
++		select { case <-done: ended = true; default: }
++		if ended || (hasDeadline && !time.Now().Before(deadline)) {
++			c.mu.Unlock(); err = ownedWorkerContextError(ctx); if err == nil { err = errors.New("owned worker context ended") }; c.fail(scope, err); return
++		}
++		if c.ingress != ownedAccepting || c.inFlight == ^uint64(0) {
++			c.mu.Unlock(); c.fail(scope, errors.New("owned reload admission rejected")); return
++		}
++		c.inFlight++
++		kind := libpf.AuxiliarySourceSymbolCoalesced
++		select { case s.reloadSymbols <- libpf.Void{}: kind = libpf.AuxiliarySourceSymbolQueued; default: }
++		c.mu.Unlock()
++		var op *periodiccaller.OwnedOperation
++		err = ownedWorkerContextError(ctx)
++		if err == nil { op, err = scope.AdmitKind(kind) }
++		if err == nil && op == nil { err = errors.New("nil owned reload operation") }
++		if err == nil {
++			if cause := errors.Join(ownedWorkerContextError(ctx), scope.Failure()); cause != nil { err = errors.Join(cause, op.Fail(cause)) } else { err = op.Complete() }
++		}
++		if err != nil { c.fail(scope, fmt.Errorf("owned reload: %w", err)) }
++		c.mu.Lock()
++		underflow := c.inFlight == 0
++		if underflow { c.ingress = ownedFailed; c.cause = errors.Join(c.cause, errors.New("owned reload reservation underflow")) } else { c.inFlight-- }
++		c.mu.Unlock()
++		if underflow { c.fail(scope, errors.New("owned reload reservation underflow")) }
++		select { case c.flushWake <- struct{}{}: default: }
++		return
++	}
+ 	select {
+ 	case s.reloadSymbols <- libpf.Void{}:
+-		op, _ := s.scope.AdmitKind(libpf.AuxiliarySourceSymbolQueued)
++		s.monitorMu.Unlock()
++		op, _ := scope.AdmitKind(libpf.AuxiliarySourceSymbolQueued)
+ 		_ = op.Complete()
+ 	default:
+-		op, _ := s.scope.AdmitKind(libpf.AuxiliarySourceSymbolCoalesced)
++		s.monitorMu.Unlock()
++		op, _ := scope.AdmitKind(libpf.AuxiliarySourceSymbolCoalesced)
+ 		_ = op.Complete()
+ 	}
+ }

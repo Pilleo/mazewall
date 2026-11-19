@@ -73,4 +73,15 @@ Coordinator-owned backlog registration: add one open HIGH enforcer issue row for
 issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio; open count +1.
 
 ---
+## Repository-review qualification — 2026-11-04
+
+[LIF-Q1](../reviews/2026-11-04-repository-review-findings.md#lif-q1) concerns rollback
+**before domain registration**, not the fixed registered-domain late-snapshot race. A mock
+cleanup failure remains in the preparation exception but disappears from later runtime drain.
+Clarify the manager's retained rollback contract, then qualify it with a genuinely acquired
+owner held across drain and ordinary/fatal cleanup failures. No real descriptor leak is proved
+by the mock. Preserve every implemented resource/retirement correction and the unclosed
+acceptance above; this is a contract/evidence follow-up, not permission to invent FD ownership.
+
+---
 <!-- id: issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio  file: issue-20261008-034648-678-bind-prepared-core-resources-and-reviewed-operatio.md -->

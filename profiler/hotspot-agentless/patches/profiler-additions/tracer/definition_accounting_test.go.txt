@@ -1,0 +1,909 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package tracer
+
+import (
+	"context"
+	"errors"
+	"math"
+	"testing"
+	"time"
+	"unsafe"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"golang.org/x/sys/unix"
+)
+
+func definitionBindingFixture() libpf.TraceDefinitionBinding {
+	return libpf.TraceDefinitionBinding{Source: libpf.TraceDefinitionPerfOutputV1, Session: "session", HostTGID: 123, Birth: 456, CounterMapID: 7, PerfMapID: 8, PossibleCPUs: 1, Generation: 9}
+}
+
+func reportProducerFixture() (reportProducerBinding, []reportProducerSample) {
+	b := reportProducerBinding{Session: "model", PossibleCPUs: 2, Config: reportProducerConfig{Schema: 2, Enabled: 1, PID: 123, Birth: 456, Generation: 7}}
+	b.Maps = [6]reportProducerMapFacts{
+		{Type: uint32(cebpf.PerCPUArray), ID: 1, KeySize: 4, ValueSize: 832, MaxEntries: 1},
+		{Type: uint32(cebpf.Array), ID: 2, KeySize: 4, ValueSize: 32, MaxEntries: 1},
+		{Type: uint32(cebpf.PerfEventArray), ID: 3, KeySize: 4, ValueSize: 4, MaxEntries: 2},
+		{Type: uint32(cebpf.Hash), ID: 4, KeySize: 8, ValueSize: 1, MaxEntries: 65536},
+		{Type: uint32(cebpf.LRUHash), ID: 5, KeySize: 4, ValueSize: 8, MaxEntries: 65536},
+		{Type: uint32(cebpf.Hash), ID: 6, KeySize: 4, ValueSize: 1, MaxEntries: 2},
+	}
+	return b, []reportProducerSample{{CPU: 0}, {CPU: 1}}
+}
+
+func TestReportProducerSchema2GoLayout(t *testing.T) {
+	var config reportProducerConfig
+	if unsafe.Sizeof(config) != 32 || unsafe.Alignof(config) != 8 || unsafe.Offsetof(config.Schema) != 0 || unsafe.Offsetof(config.Enabled) != 4 || unsafe.Offsetof(config.PID) != 8 || unsafe.Offsetof(config.Reserved) != 12 || unsafe.Offsetof(config.Birth) != 16 || unsafe.Offsetof(config.Generation) != 24 { t.Fatal("report config ABI") }
+	var pid reportPIDCounts
+	if unsafe.Sizeof(pid) != 152 || unsafe.Alignof(pid) != 8 || unsafe.Offsetof(pid.Terminal) != 24 || unsafe.Offsetof(pid.TokenAttempted) != 56 || unsafe.Offsetof(pid.PIDAttempted) != 88 || unsafe.Offsetof(pid.PIDInserted) != 96 || unsafe.Offsetof(pid.PIDCoalesced) != 104 || unsafe.Offsetof(pid.PIDFailed) != 112 || unsafe.Offsetof(pid.ResetAttempted) != 120 || len(pid.Terminal) != 4 { t.Fatal("report PID ABI") }
+	if unsafe.Offsetof(pid.Entered) != 0 || unsafe.Offsetof(pid.Returned) != 8 || unsafe.Offsetof(pid.Active) != 16 || unsafe.Offsetof(pid.TokenSucceeded) != 64 || unsafe.Offsetof(pid.TokenFailed) != 72 || unsafe.Offsetof(pid.ResetBypass) != 80 || unsafe.Offsetof(pid.ResetSucceeded) != 128 || unsafe.Offsetof(pid.ResetNotFound) != 136 || unsafe.Offsetof(pid.ResetFailed) != 144 { t.Fatal("report PID member offsets") }
+	var trigger reportTriggerCounts
+	if unsafe.Sizeof(trigger) != 72 || unsafe.Alignof(trigger) != 8 || unsafe.Offsetof(trigger.LatchAccepted) != 24 || unsafe.Offsetof(trigger.OutputAttempted) != 48 { t.Fatal("report trigger ABI") }
+	if unsafe.Offsetof(trigger.Entered) != 0 || unsafe.Offsetof(trigger.Returned) != 8 || unsafe.Offsetof(trigger.Active) != 16 || unsafe.Offsetof(trigger.LatchInhibited) != 32 || unsafe.Offsetof(trigger.LatchFailed) != 40 || unsafe.Offsetof(trigger.OutputSubmitted) != 56 || unsafe.Offsetof(trigger.OutputFailed) != 64 { t.Fatal("report trigger member offsets") }
+	var counts reportProducerCounts
+	if unsafe.Sizeof(counts) != 832 || unsafe.Alignof(counts) != 8 || unsafe.Offsetof(counts.PID) != 0 || unsafe.Offsetof(counts.Trigger) != 608 || unsafe.Offsetof(counts.Errors) != 824 || len(counts.PID) != 4 || len(counts.Trigger) != 3 { t.Fatal("report producer ABI") }
+}
+
+func TestReportProducerRowsLocalModel(t *testing.T) {
+	b, rows := reportProducerFixture()
+	if err := validateReportProducerRows(b, b, rows); err != nil { t.Fatal(err) }
+	// An already-pending key is still a logical PID success, not a new key.
+	p := reportPIDCounts{Entered: 2, Returned: 2, Terminal: [4]uint64{0, 0, 0, 2}, TokenAttempted: 2, TokenSucceeded: 2, PIDAttempted: 2, PIDInserted: 1, PIDCoalesced: 1}
+	rows[0].Counts.PID[0], rows[0].Counts.PID[1] = p, p
+	rows[0].Counts.Trigger[0] = reportTriggerCounts{Entered: 1, Returned: 1, LatchAccepted: 1, OutputAttempted: 1, OutputFailed: 1}
+	if err := validateReportProducerRows(b, b, rows); err != nil { t.Fatal(err) }
+	rows[0].Counts.PID[0].PIDCoalesced++
+	rows[0].Counts.PID[1].PIDCoalesced++
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("malformed operation partition accepted") }
+	rows[0].Counts.PID[0], rows[0].Counts.PID[1] = p, p
+	rows[0].Counts.PID[0].Terminal[0], rows[0].Counts.PID[0].Terminal[3] = 1, 1
+	rows[0].Counts.PID[1].Terminal[0], rows[0].Counts.PID[1].Terminal[3] = 1, 1
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("coalesced logical success mismatch accepted") }
+	rows[0].Counts.PID[0], rows[0].Counts.PID[1] = p, p
+	rows[0].Counts.PID[0].TokenFailed, rows[0].Counts.PID[1].TokenFailed = 1, 1
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("token partition mismatch accepted") }
+	rows[0].Counts.PID[0], rows[0].Counts.PID[1] = p, p
+	rows[0].Counts.Trigger[0].OutputSubmitted = 1
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("trigger output mismatch accepted") }
+	rows[0].Counts.Trigger[0].OutputSubmitted = 0
+	rows[0].Counts.Trigger[0].Active = 1
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("held trigger accepted") }
+	rows[0].Counts.Trigger[0].Active = 0
+	rows[0].Counts.Trigger[2] = reportTriggerCounts{Entered: 1, Returned: 1, LatchInhibited: 1}
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("unknown trigger class accepted") }
+}
+
+func TestReportProducerStageClosureAndStickyFailures(t *testing.T) {
+	reset := reportPIDCounts{Entered: 1, Returned: 1, Terminal: [4]uint64{0, 0, 0, 1}, ResetBypass: 1, PIDAttempted: 1, PIDInserted: 1, ResetAttempted: 1, ResetSucceeded: 1}
+	mixed := reportPIDCounts{Entered: 3, Returned: 3, Terminal: [4]uint64{1, 1, 0, 1}, TokenAttempted: 2, TokenSucceeded: 1, TokenFailed: 1, PIDAttempted: 1, PIDInserted: 1}
+	stages := reportPIDCounts{Entered: 2, Returned: 2, Terminal: [4]uint64{0, 0, 1, 1}, TokenAttempted: 1, TokenSucceeded: 1, ResetBypass: 1, PIDAttempted: 2, PIDInserted: 1, PIDFailed: 1}
+	suppressed := reportTriggerCounts{Entered: 2, Returned: 2, LatchAccepted: 1, LatchInhibited: 1, OutputAttempted: 1, OutputFailed: 1}
+	tests := []struct { name string; pid reportPIDCounts; trigger reportTriggerCounts; invalid bool }{
+		{"reset-success", reset, reportTriggerCounts{}, false},
+		{"mixed-and-suppressed", mixed, suppressed, false},
+		{"balanced-stages", stages, reportTriggerCounts{}, false},
+		{"token-inflated", func() reportPIDCounts { p := stages; p.TokenAttempted++; p.TokenSucceeded++; return p }(), reportTriggerCounts{}, true},
+		{"token-deflated", func() reportPIDCounts { p := stages; p.TokenAttempted--; p.TokenSucceeded--; return p }(), reportTriggerCounts{}, true},
+		{"bypass-inflated", func() reportPIDCounts { p := stages; p.ResetBypass++; return p }(), reportTriggerCounts{}, true},
+		{"bypass-deflated", func() reportPIDCounts { p := stages; p.ResetBypass--; return p }(), reportTriggerCounts{}, true},
+		{"stage-sum-overflow", reportPIDCounts{Entered: 1, Returned: 1, Terminal: [4]uint64{0, 0, 0, 1}, TokenAttempted: math.MaxUint64, TokenSucceeded: math.MaxUint64, ResetBypass: 1, PIDAttempted: 1, PIDInserted: 1}, reportTriggerCounts{}, true},
+		{"reset-failure-zero-flags", func() reportPIDCounts { p := reset; p.ResetSucceeded = 0; p.ResetFailed = 1; return p }(), reportTriggerCounts{}, true},
+		{"latch-failure-zero-flags", mixed, reportTriggerCounts{Entered: 1, Returned: 1, LatchFailed: 1}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, rows := reportProducerFixture()
+			rows[0].Counts.PID[0], rows[0].Counts.PID[1] = tc.pid, tc.pid
+			rows[0].Counts.Trigger[0] = tc.trigger
+			err := validateReportProducerRows(b, b, rows)
+			if tc.invalid && !errors.Is(err, errReportProducerInvalid) { t.Fatalf("expected rejection: %v", err) }
+			if !tc.invalid && err != nil { t.Fatalf("local model rejected: %v", err) }
+		})
+	}
+}
+
+func TestReportProducerRowsRejectIncompleteAndInvalid(t *testing.T) {
+	b, rows := reportProducerFixture()
+	if !errors.Is(validateReportProducerRows(reportProducerBinding{}, reportProducerBinding{}, nil), errReportProducerInvalid) { t.Fatal("default config accepted") }
+	bad := b; bad.Config.Schema = 1
+	if !errors.Is(validateReportProducerRows(bad, bad, rows), errReportProducerInvalid) { t.Fatal("schema 1 accepted") }
+	bad = b; bad.Config.Generation++
+	if !errors.Is(validateReportProducerRows(b, bad, rows), errReportProducerInvalid) { t.Fatal("generation mismatch accepted") }
+	bad = b; bad.Maps[0].ValueSize = 40
+	if !errors.Is(validateReportProducerRows(bad, bad, rows), errReportProducerInvalid) { t.Fatal("wrong native layout accepted") }
+	if !errors.Is(validateReportProducerRows(b, reportProducerBinding{}, rows), errReportProducerMissing) { t.Fatal("missing binding accepted") }
+	if !errors.Is(validateReportProducerRows(b, b, rows[:1]), errReportProducerMissing) { t.Fatal("missing CPU accepted") }
+	rows[1].CPU = 0
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerMissing) { t.Fatal("duplicate CPU accepted") }
+	rows[1].CPU = 1
+	rows[0].Counts.PID[0].Active = 1
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("held producer accepted") }
+	rows[0].Counts.PID[0].Active = 0
+	for _, flag := range []uint64{1, 2, 4, 8} {
+		rows[0].Counts.Errors = flag
+		if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatalf("flag %d accepted", flag) }
+	}
+	rows[0].Counts.Errors = 0
+	large := reportPIDCounts{Entered: math.MaxUint64, Returned: math.MaxUint64, Terminal: [4]uint64{math.MaxUint64}}
+	small := reportPIDCounts{Entered: 1, Returned: 1, Terminal: [4]uint64{1}}
+	rows[0].Counts.PID[0], rows[0].Counts.PID[1] = large, large
+	rows[1].Counts.PID[0], rows[1].Counts.PID[1] = small, small
+	if !errors.Is(validateReportProducerRows(b, b, rows), errReportProducerInvalid) { t.Fatal("cross-CPU overflow accepted") }
+}
+
+func TestDefinitionAccountingNativeGoLayout(t *testing.T) {
+	var row libpf.TraceDefinitionCPUCounts
+	if unsafe.Sizeof(row) != 40 || unsafe.Offsetof(row.Attempted) != 0 || unsafe.Offsetof(row.Submitted) != 8 || unsafe.Offsetof(row.OutputFailed) != 16 || unsafe.Offsetof(row.RejectedSize) != 24 || unsafe.Offsetof(row.Overflow) != 32 {
+		t.Fatal("native Go counter row ABI changed")
+	}
+}
+
+func TestDefinitionAccountingCheckedConservation(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		rows              []libpf.TraceDefinitionCPUCounts
+		reader            libpf.TraceDefinitionReaderCounts
+		invalid           bool
+		undelivered, loss uint64
+	}{
+		{name: "classified_loss_not_additive_perf_loss", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: 10, Submitted: 7, OutputFailed: 2, RejectedSize: 1}}, reader: libpf.TraceDefinitionReaderCounts{Received: 5, HandedOff: 3, RejectedRecord: 1, HandoffAborted: 1, LostSamples: 999}, undelivered: 2, loss: 5},
+		{name: "zero", rows: []libpf.TraceDefinitionCPUCounts{{}}},
+		{name: "max_without_wrap", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: math.MaxUint64, Submitted: math.MaxUint64}}, undelivered: math.MaxUint64, loss: math.MaxUint64},
+		{name: "native_mismatch", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: 2, Submitted: 1}}, invalid: true},
+		{name: "native_add_overflow", rows: []libpf.TraceDefinitionCPUCounts{{Submitted: math.MaxUint64, OutputFailed: 1}}, invalid: true},
+		{name: "native_overflow_sticky", rows: []libpf.TraceDefinitionCPUCounts{{Overflow: 1}}, invalid: true},
+		{name: "aggregate_overflow", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: math.MaxUint64, Submitted: math.MaxUint64}, {Attempted: 1, Submitted: 1}}, invalid: true},
+		{name: "per_cpu_mismatch_hidden_by_aggregate", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: 1}, {Submitted: 1}}, invalid: true},
+		{name: "two_cpu_classified_loss", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: 4, Submitted: 4}, {Attempted: 2, Submitted: 1, OutputFailed: 1}}, reader: libpf.TraceDefinitionReaderCounts{Received: 4, HandedOff: 4}, undelivered: 1, loss: 2},
+		{name: "reader_mismatch", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: 2, Submitted: 2}}, reader: libpf.TraceDefinitionReaderCounts{Received: 2, HandedOff: 1}, invalid: true},
+		{name: "reader_add_overflow", rows: []libpf.TraceDefinitionCPUCounts{{}}, reader: libpf.TraceDefinitionReaderCounts{HandedOff: math.MaxUint64, RejectedRecord: 1}, invalid: true},
+		{name: "reader_overflow_sticky", rows: []libpf.TraceDefinitionCPUCounts{{}}, reader: libpf.TraceDefinitionReaderCounts{Overflow: true}, invalid: true},
+		{name: "received_exceeds_submitted", rows: []libpf.TraceDefinitionCPUCounts{{Attempted: 1, Submitted: 1}}, reader: libpf.TraceDefinitionReaderCounts{Received: 2, HandedOff: 2}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			binding := definitionBindingFixture()
+			binding.PossibleCPUs = len(tc.rows)
+			got, err := reconcileTraceDefinitions(binding, tc.rows, tc.reader)
+			if tc.invalid {
+				if err == nil {
+					t.Fatal("invalid conservation admitted", got)
+				}
+				return
+			}
+			if err != nil || got.Undelivered != tc.undelivered || got.EmissionLoss != tc.loss {
+				t.Fatal("wrong classified loss", got, err)
+			}
+		})
+	}
+}
+
+func TestDefinitionAccountingIndependentBinding(t *testing.T) {
+	want := definitionBindingFixture()
+	if err := validateTraceDefinitionBinding(want, want); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"source", "session", "pid", "birth", "counter", "perf", "cpus", "generation"} {
+		t.Run(field, func(t *testing.T) {
+			got := want
+			switch field {
+			case "source":
+				got.Source = 0
+			case "session":
+				got.Session = "other"
+			case "pid":
+				got.HostTGID++
+			case "birth":
+				got.Birth++
+			case "counter":
+				got.CounterMapID++
+			case "perf":
+				got.PerfMapID++
+			case "cpus":
+				got.PossibleCPUs++
+			case "generation":
+				got.Generation++
+			}
+			if err := validateTraceDefinitionBinding(want, got); err == nil {
+				t.Fatal("binding mismatch admitted", field)
+			}
+		})
+	}
+	if err := validateTraceDefinitionBinding(libpf.TraceDefinitionBinding{}, libpf.TraceDefinitionBinding{}); err == nil {
+		t.Fatal("matching zero bindings are not ownership")
+	}
+	if _, err := reconcileTraceDefinitions(want, nil, libpf.TraceDefinitionReaderCounts{}); err == nil {
+		t.Fatal("missing CPU row admitted")
+	}
+	if _, err := reconcileTraceDefinitions(want, make([]libpf.TraceDefinitionCPUCounts, 2), libpf.TraceDefinitionReaderCounts{}); err == nil {
+		t.Fatal("extra CPU row admitted")
+	}
+}
+
+type definitionLifetimeFixture struct{ failure error }
+
+func (f definitionLifetimeFixture) Session() string {
+	return "session"
+}
+func (f definitionLifetimeFixture) HostTGID() uint32 {
+	return 123
+}
+func (f definitionLifetimeFixture) Birth() uint64 {
+	return 456
+}
+func (f definitionLifetimeFixture) Validate() error {
+	return f.failure
+}
+
+func TestDefinitionAccountingAcquisitionNeverInventsMaps(t *testing.T) {
+	if source, err := newTraceDefinitionSource(nil, nil, nil, 0); err != nil || source != nil {
+		t.Fatal("legacy absence changed", source, err)
+	}
+	for _, failure := range []error{unix.EPERM, unix.EACCES} {
+		if source, err := newTraceDefinitionSource(definitionLifetimeFixture{failure: failure}, nil, nil, 1); source != nil || !errors.Is(err, failure) {
+			t.Fatal("provided lifetime failure downgraded", source, err)
+		}
+	}
+	if source, err := newTraceDefinitionSource(definitionLifetimeFixture{}, nil, nil, 1); source != nil || err == nil {
+		t.Fatal("absent original maps accepted", source, err)
+	}
+	tr := &Tracer{}
+	if binding, err := tr.TraceDefinitionBinding(); err == nil {
+		t.Fatal("unconfigured tracer invented binding", binding)
+	}
+	if observation, _ := tr.TraceDefinitionFinal(context.Background()); observation.Outcome == libpf.TraceDefinitionFinal {
+		t.Fatal("unconfigured tracer invented final zero observation")
+	}
+}
+
+func TestDefinitionAccountingMetricSwapDoesNotResetReceipt(t *testing.T) {
+	tr := &Tracer{}
+	c := &tr.traceReaderCounters
+	c.definitionReceived.Add(3)
+	c.definitionHandedOff.Add(1)
+	c.definitionRejectedRecord.Add(1)
+	c.definitionHandoffAborted.Add(1)
+	c.definitionReceived.Swap(0)
+	c.definitionHandedOff.Swap(0)
+	c.definitionRejectedRecord.Swap(0)
+	c.definitionHandoffAborted.Swap(0)
+	got := tr.traceDefinitionReaderObservation()
+	if got.Received != 3 || got.HandedOff != 1 || got.RejectedRecord != 1 || got.HandoffAborted != 1 {
+		t.Fatal("metric reset consumed receipt counters", got)
+	}
+}
+
+func TestDefinitionAccountingReaderOverflowSurvivesMetricReset(t *testing.T) {
+	tr := &Tracer{}
+	c := &tr.traceReaderCounters
+	c.definitionReceived.Add(math.MaxUint64)
+	c.definitionReceived.Add(1)
+	c.definitionHandedOff.Add(math.MaxUint64)
+	c.definitionHandedOff.Add(1)
+	for range 2 {
+		c.definitionReceived.Swap(0)
+		c.definitionHandedOff.Swap(0)
+		reader := tr.traceDefinitionReaderObservation()
+		if !reader.Overflow {
+			t.Fatal("wrapped cumulative reader counters lost sticky overflow", reader)
+		}
+		if _, err := reconcileTraceDefinitions(definitionBindingFixture(), []libpf.TraceDefinitionCPUCounts{{}}, reader); err == nil {
+			t.Fatal("wrapped zero counters certified conservation")
+		}
+	}
+}
+
+func TestDefinitionAggregateCannotHideContradictoryRows(t *testing.T) {
+	b := definitionBindingFixture()
+	b.PossibleCPUs = 2
+	rows := []libpf.TraceDefinitionCPUCounts{
+		{Attempted: 2, Submitted: 1},
+		{Attempted: 1, Submitted: 2},
+	}
+	_, err := reconcileTraceDefinitions(b, rows, libpf.TraceDefinitionReaderCounts{})
+	if err == nil {
+		t.Fatal("aggregate equality hid invalid per-CPU rows")
+	}
+}
+
+func TestDefinitionExpectedIdentityIsIndependent(t *testing.T) {
+	expected := definitionBindingFixture()
+	for _, mutate := range []func(*libpf.TraceDefinitionBinding){
+		func(b *libpf.TraceDefinitionBinding) { b.Session += "x" },
+		func(b *libpf.TraceDefinitionBinding) { b.HostTGID++ },
+		func(b *libpf.TraceDefinitionBinding) { b.Birth++ },
+		func(b *libpf.TraceDefinitionBinding) { b.CounterMapID++ },
+		func(b *libpf.TraceDefinitionBinding) { b.PerfMapID++ },
+		func(b *libpf.TraceDefinitionBinding) { b.Generation++ },
+		func(b *libpf.TraceDefinitionBinding) { b.PossibleCPUs++ },
+	} {
+		actual := expected
+		mutate(&actual)
+		if validateTraceDefinitionBinding(expected, actual) == nil {
+			t.Fatal("changed source identity accepted", actual)
+		}
+	}
+}
+
+func TestAcquireTraceDefinitionSourceRejectsMissingClones(t *testing.T) {
+	// 1. Missing counterMap -> rejected, no fallback to borrowed maps
+	{
+		mock := &mockAccountingLifetime{session: "s", tgid: 1, birth: 1}
+		owner := &definitionOwner{
+			state:        definitionOwnerOpen,
+			closeReqDone: make(chan struct{}),
+			lifetime:     mock,
+			countsMap:    nil, // missing
+			perfMap:      &cebpf.Map{},
+			configMap:    &cebpf.Map{},
+		}
+		borrowedMaps := map[string]*cebpf.Map{
+			traceDefinitionCounterMap: &cebpf.Map{},
+			"trace_events":             &cebpf.Map{},
+			traceDefinitionConfigMap:  &cebpf.Map{},
+		}
+		if src, err := acquireTraceDefinitionSource(owner, borrowedMaps); src != nil || err == nil {
+			t.Fatal("expected failure on missing clone map without fallback, got:", src, err)
+		}
+	}
+
+	// 2. Closed/Closing owner -> rejected immediately
+	{
+		mock := &mockAccountingLifetime{session: "s", tgid: 1, birth: 1}
+		owner := &definitionOwner{
+			state:        definitionOwnerClosing,
+			closeReqDone: make(chan struct{}),
+			lifetime:     mock,
+			countsMap:    &cebpf.Map{},
+			perfMap:      &cebpf.Map{},
+			configMap:    &cebpf.Map{},
+		}
+		if src, err := acquireTraceDefinitionSource(owner, nil); src != nil || err == nil {
+			t.Fatal("expected failure on closing owner, got:", src, err)
+		}
+	}
+
+	// 3. Quarantined owner -> rejected immediately
+	{
+		mock := &mockAccountingLifetime{session: "s", tgid: 1, birth: 1}
+		owner := &definitionOwner{
+			state:        definitionOwnerOpen,
+			quarantined:  true,
+			closeReqDone: make(chan struct{}),
+			lifetime:     mock,
+			countsMap:    &cebpf.Map{},
+			perfMap:      &cebpf.Map{},
+			configMap:    &cebpf.Map{},
+		}
+		if src, err := acquireTraceDefinitionSource(owner, nil); src != nil || err == nil {
+			t.Fatal("expected failure on quarantined owner, got:", src, err)
+		}
+	}
+}
+
+type mockAccountingLifetime struct {
+	session string
+	tgid    uint32
+	birth   uint64
+	failErr error
+}
+
+func (m *mockAccountingLifetime) Session() string  { return m.session }
+func (m *mockAccountingLifetime) HostTGID() uint32 { return m.tgid }
+func (m *mockAccountingLifetime) Birth() uint64    { return m.birth }
+func (m *mockAccountingLifetime) Validate() error  { return m.failErr }
+
+func TestTraceDefinitionExpiryBetweenIndependentQueries(t *testing.T) {
+	// 1. In traceDefinitionMapIDs: expiry after counter info stops before perf info
+	{
+		oldInfo := traceDefinitionInfoFn
+		defer func() { traceDefinitionInfoFn = oldInfo }()
+		mockInfo := func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+			return traceDefinitionMapInfo{Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 101}, nil
+		}
+		traceDefinitionInfoFn = mockInfo
+
+		counterMap := &cebpf.Map{}
+		perfMap := &cebpf.Map{}
+		calls := 0
+		admit := func() error {
+			calls++
+			if calls > 1 {
+				return errors.New("context expired before perf info")
+			}
+			return nil
+		}
+		_, _, err := traceDefinitionMapIDs(counterMap, perfMap, 1, mockInfo, admit)
+		if err == nil {
+			t.Fatal("expected admission error before perf info")
+		}
+		if calls != 2 {
+			t.Fatalf("expected exactly 2 admission checks, got %d", calls)
+		}
+	}
+
+	// 2. In configureTraceDefinitionSource: expiry before update prevents update and publication
+	{
+		mock := &mockAccountingLifetime{session: "s", tgid: 1, birth: 1}
+		var updateCalled bool
+		ops := traceDefinitionMapOps{
+			info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+				return traceDefinitionMapInfo{Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 102}, nil
+			},
+			lookup: func(m *cebpf.Map, key, value any) error {
+				return nil
+			},
+			update: func(m *cebpf.Map, key, value any, flags cebpf.MapUpdateFlags) error {
+				updateCalled = true
+				return nil
+			},
+		}
+		src := &traceDefinitionSource{
+			lifetime: mock,
+			counter:  &cebpf.Map{},
+			perf:     &cebpf.Map{},
+			binding:  libpf.TraceDefinitionBinding{CounterMapID: 10, PerfMapID: 20, PossibleCPUs: 1, HostTGID: 1, Birth: 1, Generation: 1},
+			ops:      ops,
+		}
+		configMap := &cebpf.Map{}
+		calls := 0
+		admit := func() error {
+			calls++
+			if calls > 3 { // expires before Update
+				return errors.New("context expired before config update")
+			}
+			return nil
+		}
+		err := configureTraceDefinitionSource(src, configMap, admit)
+		if err == nil {
+			t.Fatal("expected admission error before config update")
+		}
+		if src.config != nil {
+			t.Fatal("config map attached despite expiry before update")
+		}
+		if updateCalled {
+			t.Fatal("config map update was invoked after expiry")
+		}
+	}
+}
+
+func TestWithCoveredReadoutRejectsLatePublicationOnCommit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	owner := &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		ctx:          ctx,
+	}
+
+	// Action succeeds, but context is cancelled right before commit
+	err := owner.WithCoveredReadout(func() error {
+		cancel() // cancels context during action
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected WithCoveredReadout to reject completion on cancelled context")
+	}
+
+	// Also verify actual Close during action rejects completion commit
+	closeEntered := make(chan struct{})
+	owner2 := &definitionOwner{
+		state:        definitionOwnerOpen,
+		closeReqDone: make(chan struct{}),
+		closeEntered: closeEntered,
+	}
+	continueAction := make(chan struct{})
+	actionEntered := make(chan struct{})
+	actionDone := make(chan struct{})
+	var actionErr error
+
+	var closeWorkerDone = make(chan struct{})
+	var closeErr error
+	var closeStarted bool
+
+	defer func() {
+		select {
+		case <-continueAction:
+		default:
+			close(continueAction)
+		}
+		select {
+		case <-actionDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("cleanup timed out waiting for actionDone")
+		}
+		if closeStarted {
+			select {
+			case <-closeWorkerDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("cleanup timed out waiting for closeWorkerDone")
+			}
+		}
+	}()
+
+	go func() {
+		defer close(actionDone)
+		actionErr = owner2.WithCoveredReadout(func() error {
+			close(actionEntered)
+			<-continueAction
+			return nil
+		})
+	}()
+
+	select {
+	case <-actionEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for actionEntered")
+	}
+
+	closeStarted = true
+	go func() {
+		defer close(closeWorkerDone)
+		closeErr = owner2.Close()
+	}()
+
+	select {
+	case <-closeEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for closeEntered")
+	}
+
+	// Action returns while owner is closing
+	close(continueAction)
+
+	select {
+	case <-actionDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for actionDone")
+	}
+
+	if actionErr == nil {
+		t.Fatal("expected WithCoveredReadout to reject completion on closing owner")
+	}
+
+	select {
+	case <-closeWorkerDone:
+		if closeErr != nil {
+			t.Fatal("owner2 Close failed:", closeErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("owner2 Close timed out")
+	}
+}
+
+func TestTraceDefinitionBindingWithDistinctClonesAndCoveredReadout(t *testing.T) {
+	mock := &mockAccountingLifetime{session: "startup-sess", tgid: 111, birth: 222}
+
+	expectedBinding := libpf.TraceDefinitionBinding{
+		Source:       libpf.TraceDefinitionPerfOutputV1,
+		Session:      "startup-sess",
+		HostTGID:     111,
+		Birth:        222,
+		Generation:   1,
+		CounterMapID: 501,
+		PerfMapID:    502,
+		PossibleCPUs: 2,
+	}
+
+	cfg := traceDefinitionConfig{
+		PID:        111,
+		Enabled:    1,
+		Birth:      222,
+		Generation: 1,
+	}
+
+	createModelOps := func(counter, perf, config *cebpf.Map) traceDefinitionMapOps {
+		return traceDefinitionMapOps{
+			info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+				if m == counter {
+					return traceDefinitionMapInfo{Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 501}, nil
+				}
+				if m == perf {
+					return traceDefinitionMapInfo{Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 502}, nil
+				}
+				if m == config {
+					return traceDefinitionMapInfo{Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 503}, nil
+				}
+				return traceDefinitionMapInfo{}, unix.EINVAL
+			},
+			lookup: func(m *cebpf.Map, key, value any) error {
+				if m == config {
+					if ptr, ok := value.(*traceDefinitionConfig); ok {
+						*ptr = cfg
+						return nil
+					}
+				}
+				return nil
+			},
+		}
+	}
+
+	// 1. Positive: Startup binding succeeds with distinct original and cloned maps
+	{
+		origCounter, origPerf, origConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+		cloneCounter, clonePerf, cloneConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+		owner := &definitionOwner{
+			state:        definitionOwnerOpen,
+			closeReqDone: make(chan struct{}),
+		}
+		ops := createModelOps(cloneCounter, clonePerf, cloneConfig)
+		src := &traceDefinitionSource{
+			owner:        owner,
+			lifetime:     mock,
+			origCounter:  origCounter,
+			origPerf:     origPerf,
+			origConfig:   origConfig,
+			counter:      cloneCounter,
+			perf:         clonePerf,
+			config:       cloneConfig,
+			configID:     503,
+			nativeConfig: cfg,
+			binding:      expectedBinding,
+			ops:          ops,
+		}
+		tracer := &Tracer{
+			definitionSource: src,
+			definitionOwner:  owner,
+			ebpfMaps: map[string]*cebpf.Map{
+				traceDefinitionCounterMap: origCounter,
+				"trace_events":             origPerf,
+				traceDefinitionConfigMap:  origConfig,
+			},
+		}
+
+		binding, err := tracer.TraceDefinitionBinding()
+		if err != nil {
+			t.Fatalf("expected startup TraceDefinitionBinding to succeed, got: %v", err)
+		}
+		if binding != expectedBinding {
+			t.Fatalf("binding mismatch: expected %+v, got %+v", expectedBinding, binding)
+		}
+	}
+
+	// 2. Independent control: Replaced original map is rejected on a clean fixture
+	{
+		origCounter, origPerf, origConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+		cloneCounter, clonePerf, cloneConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+		owner := &definitionOwner{
+			state:        definitionOwnerOpen,
+			closeReqDone: make(chan struct{}),
+		}
+		ops := createModelOps(cloneCounter, clonePerf, cloneConfig)
+		src := &traceDefinitionSource{
+			owner:        owner,
+			lifetime:     mock,
+			origCounter:  origCounter,
+			origPerf:     origPerf,
+			origConfig:   origConfig,
+			counter:      cloneCounter,
+			perf:         clonePerf,
+			config:       cloneConfig,
+			configID:     503,
+			nativeConfig: cfg,
+			binding:      expectedBinding,
+			ops:          ops,
+		}
+		tracerReplacement := &Tracer{
+			definitionSource: src,
+			definitionOwner:  owner,
+			ebpfMaps: map[string]*cebpf.Map{
+				traceDefinitionCounterMap: &cebpf.Map{}, // unrelated replacement
+				"trace_events":             origPerf,
+				traceDefinitionConfigMap:  origConfig,
+			},
+		}
+		if _, err := tracerReplacement.TraceDefinitionBinding(); err == nil {
+			t.Fatal("expected TraceDefinitionBinding to reject replaced original counter map")
+		}
+	}
+
+	// 3. Independent control: Actual Close VS entered binding query schedule
+	{
+		origCounter, origPerf, origConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+		cloneCounter, clonePerf, cloneConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+
+		closeEntered := make(chan struct{})
+		owner := &definitionOwner{
+			state:        definitionOwnerOpen,
+			closeReqDone: make(chan struct{}),
+			closeEntered: closeEntered,
+		}
+
+		firstInfoEntered := make(chan struct{})
+		releaseFirstInfo := make(chan struct{})
+		var perfInfoCalled bool
+
+		ops := traceDefinitionMapOps{
+			info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+				if m == cloneCounter {
+					select {
+					case <-firstInfoEntered:
+					default:
+						close(firstInfoEntered)
+					}
+					<-releaseFirstInfo
+					return traceDefinitionMapInfo{Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 501}, nil
+				}
+				if m == clonePerf {
+					perfInfoCalled = true
+					return traceDefinitionMapInfo{Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 502}, nil
+				}
+				if m == cloneConfig {
+					return traceDefinitionMapInfo{Type: uint32(cebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1, ID: 503}, nil
+				}
+				return traceDefinitionMapInfo{}, unix.EINVAL
+			},
+			lookup: func(m *cebpf.Map, key, value any) error {
+				if m == cloneConfig {
+					if ptr, ok := value.(*traceDefinitionConfig); ok {
+						*ptr = cfg
+						return nil
+					}
+				}
+				return nil
+			},
+		}
+
+		src := &traceDefinitionSource{
+			owner:        owner,
+			lifetime:     mock,
+			origCounter:  origCounter,
+			origPerf:     origPerf,
+			origConfig:   origConfig,
+			counter:      cloneCounter,
+			perf:         clonePerf,
+			config:       cloneConfig,
+			configID:     503,
+			nativeConfig: cfg,
+			binding:      expectedBinding,
+			ops:          ops,
+		}
+		tracer := &Tracer{
+			definitionSource: src,
+			definitionOwner:  owner,
+			ebpfMaps: map[string]*cebpf.Map{
+				traceDefinitionCounterMap: origCounter,
+				"trace_events":             origPerf,
+				traceDefinitionConfigMap:  origConfig,
+			},
+		}
+
+		var bindingErr error
+		bindingDone := make(chan struct{})
+		var closeErr error
+		closeDone := make(chan struct{})
+		var bindingStarted, closeStarted bool
+
+		defer func() {
+			select {
+			case <-releaseFirstInfo:
+			default:
+				close(releaseFirstInfo)
+			}
+			if bindingStarted {
+				select {
+				case <-bindingDone:
+				case <-time.After(2 * time.Second):
+					t.Error("cleanup timed out waiting for bindingDone")
+				}
+			}
+			if closeStarted {
+				select {
+				case <-closeDone:
+				case <-time.After(2 * time.Second):
+					t.Error("cleanup timed out waiting for closeDone")
+				}
+			}
+		}()
+
+		// Launch TraceDefinitionBinding, which enters WithCoveredReadout and blocks in counter Info
+		bindingStarted = true
+		go func() {
+			defer close(bindingDone)
+			_, bindingErr = tracer.TraceDefinitionBinding()
+		}()
+
+		select {
+		case <-firstInfoEntered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for first Info to enter")
+		}
+
+		// Launch real owner.Close while readout action is entered
+		closeStarted = true
+		go func() {
+			defer close(closeDone)
+			closeErr = owner.Close()
+		}()
+
+		select {
+		case <-closeEntered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for owner closeEntered signal")
+		}
+
+		// Now release first Info; next query must check admission, see owner Closing, and abort
+		close(releaseFirstInfo)
+
+		select {
+		case <-bindingDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for binding action to return")
+		}
+
+		if bindingErr == nil {
+			t.Fatal("expected TraceDefinitionBinding to fail when owner closes concurrently")
+		}
+		if perfInfoCalled {
+			t.Fatal("subsequent queries proceeded after owner close was admitted")
+		}
+
+		select {
+		case <-closeDone:
+			if closeErr != nil {
+				t.Fatalf("owner Close failed: %v", closeErr)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for owner Close to complete")
+		}
+	}
+
+	// 4. Independent control: Query cancellation with actual context
+	{
+		origCounter, origPerf, origConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+		cloneCounter, clonePerf, cloneConfig := &cebpf.Map{}, &cebpf.Map{}, &cebpf.Map{}
+
+		ctxCancel, cancelFn := context.WithCancel(context.Background())
+		owner := &definitionOwner{
+			state:        definitionOwnerOpen,
+			closeReqDone: make(chan struct{}),
+			ctx:          ctxCancel,
+		}
+
+		var perfInfoCalled bool
+		ops := traceDefinitionMapOps{
+			info: func(m *cebpf.Map) (traceDefinitionMapInfo, error) {
+				if m == cloneCounter {
+					cancelFn() // cancel context during counter info
+					return traceDefinitionMapInfo{Type: uint32(cebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1, ID: 501}, nil
+				}
+				if m == clonePerf {
+					perfInfoCalled = true
+					return traceDefinitionMapInfo{Type: uint32(cebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: 2, ID: 502}, nil
+				}
+				return traceDefinitionMapInfo{}, unix.EINVAL
+			},
+		}
+
+		src := &traceDefinitionSource{
+			owner:        owner,
+			lifetime:     mock,
+			origCounter:  origCounter,
+			origPerf:     origPerf,
+			origConfig:   origConfig,
+			counter:      cloneCounter,
+			perf:         clonePerf,
+			config:       cloneConfig,
+			configID:     503,
+			nativeConfig: cfg,
+			binding:      expectedBinding,
+			ops:          ops,
+		}
+		tracer := &Tracer{
+			definitionSource: src,
+			definitionOwner:  owner,
+			ebpfMaps: map[string]*cebpf.Map{
+				traceDefinitionCounterMap: origCounter,
+				"trace_events":             origPerf,
+				traceDefinitionConfigMap:  origConfig,
+			},
+		}
+
+		_, err := tracer.TraceDefinitionBinding()
+		if err == nil {
+			t.Fatal("expected TraceDefinitionBinding to fail on cancelled context")
+		}
+		if perfInfoCalled {
+			t.Fatal("perf query proceeded despite context cancellation")
+		}
+	}
+}

@@ -33,7 +33,7 @@ public abstract class ManagedFixtureClasspathArgumentProvider implements Command
             var paths = List.of(
                 getPlatformJar().get().getAsFile().getCanonicalPath(),
                 getEnforcerJar().get().getAsFile().getCanonicalPath(),
-                dependency("kotlin-stdlib-2.4.20-Beta1.jar"),
+                dependency("kotlin-stdlib-2.4.21.jar"),
                 dependency("kotlinx-serialization-core-jvm-1.9.0.jar"),
                 dependency("kotlinx-serialization-json-jvm-1.9.0.jar"),
                 dependency("annotations-13.0.jar"),

@@ -121,22 +121,5 @@ if [ -n "$AST_GREP_BIN" ] && [ -x "$AST_GREP_BIN" ] && [ -f "$ROOT_DIR/sgconfig.
   "$AST_GREP_BIN" scan --no-repo-update || true
 fi
 
-# 5. Keep Codanna code atlas index fresh (optional, non-blocking background refresh)
-CODANNA_BIN=""
-if [ -f "$ROOT_DIR/scripts/find-tool.sh" ]; then
-  CODANNA_BIN="$(find_codanna 2>/dev/null || true)"
-elif command -v codanna >/dev/null 2>&1; then
-  CODANNA_BIN="$(command -v codanna)"
-fi
-
-if [ -n "$CODANNA_BIN" ] && [ -x "$CODANNA_BIN" ] && [ -f "$ROOT_DIR/.codanna/settings.toml" ]; then
-  echo "==> Refreshing Codanna code atlas index (background)..."
-  (
-    cd "$ROOT_DIR"
-    nohup "$CODANNA_BIN" index . --no-progress >/dev/null 2>&1 &
-    touch "$ROOT_DIR/.codanna/.last_indexed" 2>/dev/null || true
-  ) 2>/dev/null || true
-fi
-
 echo "==> Security audit and full Gradle build passed successfully."
 exit 0

@@ -1,0 +1,155 @@
+// Copyright 2026 The Inspektor Gadget authors
+// SPDX-License-Identifier: Apache-2.0
+package ebpfoperator
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/link"
+	"github.com/cilium/ebpf/ringbuf"
+)
+
+type definitionReadoutRoot struct {
+	link       link.Link
+	programID  ebpf.ProgramID
+	retired    bool
+	admission  *eventFinalizationAdmission
+	collection *ebpf.Collection
+	program    *ebpf.Program
+	maps       map[string]*ebpf.Map
+	reader     *ringbuf.Reader
+	drain      *eventDrainReader
+}
+
+type definitionReadoutWindow uint8
+
+const (
+	definitionReadoutNotEntered definitionReadoutWindow = iota
+	definitionReadoutActive
+	definitionReadoutClosed
+)
+
+// WithDefinitionReadout delegates only to this instance's existing native owner.
+// Attachment and native Join exclusively establish root retirement and the window.
+func (i *ebpfInstance) WithDefinitionReadout(session string, hostTGID uint32, birth uint64, action func() error) error {
+	if i.eventFinalizer == nil {
+		return fmt.Errorf("definition readout owner unavailable")
+	}
+	return i.eventFinalizer.withDefinitionReadout(i, session, hostTGID, birth, action)
+}
+
+func (o *eventStopOwner) withDefinitionReadout(i *ebpfInstance, session string, hostTGID uint32, birth uint64, action func() error) (retErr error) {
+	backend, ok := o.backend.(interface{ nativeReadoutHold() *eventReadoutHold })
+	if !ok {
+		return fmt.Errorf("native readout hold missing")
+	}
+	hold := backend.nativeReadoutHold()
+	if hold == nil {
+		return fmt.Errorf("native readout hold missing")
+	}
+	var ctx context.Context
+	reserved, leased := false, false
+	defer func() {
+		if leased {
+			o.mu.Lock()
+			o.definitionLeased = false
+			o.mu.Unlock()
+		}
+		if reserved {
+			retErr = errors.Join(retErr, hold.endResourceUse(ctx, false))
+		}
+	}()
+	err := func() error {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		if o.err != nil {
+			return o.err
+		}
+		if o != i.eventFinalizer || o.stage != eventReadersFlushing || o.definitionWindow != definitionReadoutActive || o.definitionContext == nil || o.definitionRoot == nil || o.definitionRoot.link == nil || o.definitionRoot.programID == 0 || !o.definitionRoot.retired || len(i.links) != 0 || o.observation.ReceiverJoined {
+			return fmt.Errorf("definition readout lacks original-root retirement/native Join window")
+		}
+		if err := o.definitionContext.Err(); err != nil {
+			return err
+		}
+		if o.definitionLeased {
+			return fmt.Errorf("definition readout already borrowed")
+		}
+		options := i.eventStopOptions
+		if options == nil || !(options.StrictFull || options.ObservedFull) || options.Accounting == nil || session == "" || hostTGID == 0 || birth == 0 || options.Accounting.Session != session || options.Accounting.PID != hostTGID || options.Accounting.Birth != birth {
+			return fmt.Errorf("definition readout target/profile mismatch")
+		}
+		ctx = o.definitionContext
+		if err := hold.beginBorrowerUse(ctx.Done()); err != nil {
+			return err
+		}
+		reserved = true
+		if err := o.validateRuntimeScope(i); err != nil {
+			return err
+		}
+		if action == nil {
+			return fmt.Errorf("definition readout action unavailable")
+		}
+		o.definitionLeased = true
+		leased = true
+		return nil
+	}()
+	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return errors.Join(action(), ctx.Err())
+}
+
+func (i *ebpfInstance) definitionReadoutConfigured() bool {
+	o := i.eventStopOptions
+	return o != nil && (o.StrictFull || o.ObservedFull) && o.Accounting != nil
+}
+
+// Called only after Start has acquired and taken ownership of the actual link.
+func (i *ebpfInstance) retainDefinitionRoot(prog *ebpf.Program, root link.Link) error {
+	if !i.definitionReadoutConfigured() {
+		return nil
+	}
+	if err := validateEventFinalizationScope(i, false, false); err != nil {
+		return err
+	}
+	if i.eventFinalizer == nil || prog == nil || root == nil || len(i.links) != 1 || i.links[0] != root {
+		return fmt.Errorf("definition attachment requires one original owned root")
+	}
+	o := i.eventFinalizer
+	a := o.admission
+	if a == nil || a.instance != i || a.tracer != i.tracers["openat"] || i.collection == nil || len(i.collection.Programs) != 1 || i.collection.Programs["capture_openat"] != prog || len(i.collection.Maps) != len(a.maps) {
+		return fmt.Errorf("definition attachment lacks admitted native collection")
+	}
+	maps := make(map[string]*ebpf.Map, len(a.maps))
+	for name := range a.maps {
+		m := i.collection.Maps[name]
+		if m == nil {
+			return fmt.Errorf("definition original map %q missing", name)
+		}
+		maps[name] = m
+	}
+	if a.tracer.mapType != ebpf.RingBuf || a.tracer.lostSampleMap != maps["events_lost_samples"] || a.tracer.ringbufReader == nil || a.tracer.perfReader != nil || a.tracer.eventDrain == nil {
+		return fmt.Errorf("definition attachment lacks original event reader/counter")
+	}
+	info, err := prog.Info()
+	if err != nil {
+		return fmt.Errorf("definition original program: %w", err)
+	}
+	id, ok := info.ID()
+	if !ok || id == 0 {
+		return fmt.Errorf("definition original program identity unavailable")
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.definitionRoot != nil || o.stage != eventStopRequested || o.definitionWindow != definitionReadoutNotEntered {
+		return fmt.Errorf("definition original attachment already acquired or stopping")
+	}
+	o.definitionRoot = &definitionReadoutRoot{link: root, programID: id, admission: a, collection: i.collection, program: prog, maps: maps, reader: a.tracer.ringbufReader, drain: a.tracer.eventDrain}
+	return nil
+}

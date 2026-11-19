@@ -3,6 +3,7 @@ package capture
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
@@ -21,6 +22,7 @@ import (
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/operators/simple"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/runtime/local"
 	"github.com/inspektor-gadget/inspektor-gadget/pkg/symbolizer"
+	"github.com/inspektor-gadget/inspektor-gadget/pkg/utils/host"
 	"golang.org/x/sys/unix"
 	orasoci "oras.land/oras-go/v2/content/oci"
 
@@ -39,12 +41,85 @@ func (s providerSink) Write(ctx context.Context, record model.Record) error {
 	return s.Sink.Write(ctx, record)
 }
 
+func (s providerSink) AccountingPrefix() (uint64, uint64, string, error) {
+	return extractAccountingPrefix(s.Sink)
+}
+
+type accountingPrefixer interface {
+	AccountingPrefix() (uint64, uint64, string, error)
+}
+
+func extractAccountingPrefix(s model.Sink) (uint64, uint64, string, error) {
+	for {
+		if p, ok := s.(accountingPrefixer); ok {
+			return p.AccountingPrefix()
+		}
+		if pr, ok := s.(productionSink); ok {
+			s = pr.Sink
+			continue
+		}
+		if ob, ok := s.(observedSink); ok {
+			s = ob.Sink
+			continue
+		}
+		break
+	}
+	return 0, 0, "", errors.New("accounting prefix unsupported on sink")
+}
+
+type productionAccountingWirePrefix struct {
+	Records uint64 `json:"records"`
+	Bytes   uint64 `json:"bytes"`
+	SHA256  string `json:"sha256"`
+}
+
+type productionAccountingReceipt struct {
+	Schema            uint32                         `json:"schema"`
+	SessionID         string                         `json:"session_id"`
+	HostPID           uint32                         `json:"host_pid"`
+	ProcessStartTicks uint64                         `json:"process_start_ticks"`
+	WirePrefix        productionAccountingWirePrefix `json:"wire_prefix"`
+	Sources           map[string]json.RawMessage     `json:"sources,omitempty"`
+}
+
 // Run uses one Gadget symbolizer and its existing process discovery, cache,
 // waiters, map replacements and pruning. Only event enrichment is queued here.
-func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
+type captureRun struct {
+	symbolizer           *symbolizer.Symbolizer
+	gadget               operators.GadgetContext
+	enrichment           *Enricher
+	pidfd                int
+	barrier              *identity.ExecBarrier
+	retained             bool
+	definitionAccounting *definitionAccounting
+}
+
+func (r *captureRun) DefinitionAccounting() *definitionAccounting {
+	if r == nil {
+		return nil
+	}
+	return r.definitionAccounting
+}
+
+func Run(ctx context.Context, cfg Config, writer io.Writer) error {
+	return (&captureRun{}).run(ctx, cfg, writer)
+}
+
+func (r *captureRun) run(ctx context.Context, cfg Config, writer io.Writer) error {
+	return runWithDefinitionReceipt(ctx, cfg, writer, r.runValidated)
+}
+
+func runWithDefinitionReceipt(ctx context.Context, cfg Config, writer io.Writer, operation func(context.Context, Config, io.Writer, *definitionLocalRun, *[]byte) error) (resultErr error) {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	local := &definitionLocalRun{}
+	var definitionRaw []byte
+	defer func() { resultErr = attachDefinitionReceipt(resultErr, definitionRaw, local) }()
+	return operation(ctx, cfg, writer, local, &definitionRaw)
+}
+
+func (r *captureRun) runValidated(ctx context.Context, cfg Config, writer io.Writer, local *definitionLocalRun, definitionRaw *[]byte) (resultErr error) {
 	requestCtx := ctx
 	hardEventDeadline := time.Now().Add(time.Minute)
 	if cfg.DrainEvents || cfg.DrainFull {
@@ -79,7 +154,14 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if err != nil {
 		return fmt.Errorf("own target pidfd: %w", err)
 	}
-	defer func() { resultErr = errors.Join(resultErr, unix.Close(pidfd)) }()
+	r.pidfd = pidfd
+	targetOwner := newCaptureTargetOwner(pidfd)
+	defer func() {
+		r.retained = retainFullResources
+		if err := targetOwner.Close(retainFullResources); err != nil {
+			resultErr = errors.Join(resultErr, err)
+		}
+	}()
 	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", cfg.PID))
 	if err != nil {
 		return err
@@ -97,9 +179,11 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		if err != nil {
 			return err
 		}
+		r.barrier = execBarrier
+		targetOwner.attachBarrier(execBarrier)
 		defer func() {
-			if !retainFullResources {
-				resultErr = errors.Join(resultErr, execBarrier.Close())
+			if err := targetOwner.CloseBarrier(retainFullResources); err != nil {
+				resultErr = errors.Join(resultErr, err)
 			}
 		}()
 		checks = append(checks, execBarrier.Check)
@@ -168,8 +252,8 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 		rawSink = newObservedSink(writer)
 	}
 	sink := providerSink{rawSink}
-	rt := local.New()
-	if err := rt.Init(nil); err != nil {
+	rt, err := newLocalRuntime(host.Init)
+	if err != nil {
 		return err
 	}
 	defer rt.Close()
@@ -188,6 +272,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	var reportedLoss datasource.ReportedLossReader
 	var expectedAccounting *accounting.Binding
 	var eventsOnly *eventsOnlyState
+	var defAccounting *definitionAccounting
 	operator := simple.New("mw-structured", simple.WithPriority(100), simple.OnInit(func(gc operators.GadgetContext) error {
 		var err error
 		if cfg.EventsOnly {
@@ -197,6 +282,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			}
 		} else {
 			options := symbolizer.SymbolizerOptions{UseOtelEbpfProfiler: true, Context: ownedCtx, HotSpotEpochTarget: epochTarget, OnHotSpotFatal: fatal.Record}
+			if cfg.DrainFull {
+				options.TraceDefinitionLifetime = definitionLifetime{session: sessionID, pid: uint32(cfg.PID), birth: ticks, ctx: ownedCtx, pidfd: pidfd, barrier: execBarrier, fatal: &fatal, observed: cfg.profile == wire.Observed25, expected: cfg.ExpectedTarget, gc: gc, owner: targetOwner}
+			}
 			if cfg.profile == wire.Observed25 {
 				options.HotSpotObservedPID = libpf.PID(cfg.PID)
 			}
@@ -204,6 +292,7 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			if err != nil {
 				return err
 			}
+			r.symbolizer = sym
 			for name, replacement := range sym.GetEbpfReplacements() {
 				gc.SetVar(name, replacement)
 			}
@@ -211,32 +300,9 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			if err != nil {
 				return err
 			}
+			r.enrichment = enrichment
 			if cfg.DrainFull {
-				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline, StrictFull: cfg.StrictEpoch, ObservedFull: cfg.profile == wire.Observed25, Accounting: &operators.SelectedAccountingTarget{Session: sessionID, PID: uint32(cfg.PID), Birth: ticks}, AfterReadout: func(stopCtx context.Context) error {
-					if err := ownedCtx.Err(); err != nil {
-						return errors.Join(err, fatal.Err())
-					}
-					if err := execBarrier.Check(); err != nil {
-						return err
-					}
-					if _, err := sym.DrainDefinitions(stopCtx); err != nil {
-						return err
-					}
-					finished := make(chan error, 1)
-					go func() { finished <- enrichment.Finish() }()
-					select {
-					case err := <-finished:
-						if err != nil {
-							return err
-						}
-					case <-stopCtx.Done():
-						return stopCtx.Err()
-					}
-					if err := sym.StopAuxiliary(stopCtx); err != nil {
-						return err
-					}
-					return errors.Join(ownedCtx.Err(), fatal.Err(), execBarrier.Check())
-				}})
+				gc.SetVar(operators.EventFinalizationOptionsKey, &operators.EventFinalizationOptions{HardDeadline: hardEventDeadline, StrictFull: cfg.StrictEpoch, ObservedFull: cfg.profile == wire.Observed25, Accounting: &operators.SelectedAccountingTarget{Session: sessionID, PID: uint32(cfg.PID), Birth: ticks}, AfterReadout: newDefinitionAfterReadout(ownedCtx, fatal.Err, execBarrier.Check, sym, &defAccounting, local, enrichment.Finish)})
 			}
 		}
 		found := false
@@ -291,51 +357,56 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 			}
 			expectedAccounting = &expected
 		}
-		if cfg.production || cfg.profile == wire.Observed25 {
-			check := func() error {
-				if err := ownedCtx.Err(); err != nil {
-					return errors.Join(err, fatal.Err())
-				}
-				if err := execBarrier.Check(); err != nil {
-					return err
-				}
-				poll := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
-				if _, err := unix.Poll(poll, 0); err != nil {
-					return err
-				}
-				if poll[0].Revents != 0 {
-					return fmt.Errorf("target unavailable before readiness")
-				}
-				stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", cfg.PID))
-				if err != nil {
-					return err
-				}
-				current, err := preflight.ParseStartTicks(string(stat))
-				if err != nil || current != ticks {
-					return errors.Join(fmt.Errorf("target generation changed before readiness"), err)
-				}
-				if cfg.profile == wire.Observed25 {
-					if err := identity.CheckObservedTarget(uint32(cfg.PID), cfg.ExpectedTarget); err != nil {
+		return withDefinitionStartup(cfg.DrainFull, sym, func(state *definitionAccounting) error {
+			defAccounting = state
+			r.definitionAccounting = state
+			if cfg.production || cfg.profile == wire.Observed25 {
+				check := func() error {
+					if err := ownedCtx.Err(); err != nil {
+						return errors.Join(err, fatal.Err())
+					}
+					if err := execBarrier.Check(); err != nil {
 						return err
 					}
+					poll := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
+					if _, err := unix.Poll(poll, 0); err != nil {
+						return err
+					}
+					if poll[0].Revents != 0 {
+						return fmt.Errorf("target unavailable before readiness")
+					}
+					stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", cfg.PID))
+					if err != nil {
+						return err
+					}
+					current, err := preflight.ParseStartTicks(string(stat))
+					if err != nil || current != ticks {
+						return errors.Join(fmt.Errorf("target generation changed before readiness"), err)
+					}
+					if cfg.profile == wire.Observed25 {
+						if err := identity.CheckObservedTarget(uint32(cfg.PID), cfg.ExpectedTarget); err != nil {
+							return err
+						}
+					}
+					return fatal.Err()
 				}
-				return fatal.Err()
+				if cfg.profile == wire.Observed25 {
+					if err := check(); err != nil {
+						return err
+					}
+					r, err := observedLifecycleRecord("collector_ready", sessionID, observedTarget.Target, observedTarget.JVMBuildID, observedTarget.JVMSHA256)
+					if err != nil {
+						return err
+					}
+					return sink.Write(ctx, r)
+				}
+				return writeProductionReady(ctx, sink, sessionID, uint32(cfg.PID), ticks, check)
 			}
-			if cfg.profile == wire.Observed25 {
-				if err := check(); err != nil {
-					return err
-				}
-				r, err := observedLifecycleRecord("collector_ready", sessionID, observedTarget.Target, observedTarget.JVMBuildID, observedTarget.JVMSHA256)
-				if err != nil {
-					return err
-				}
-				return sink.Write(ctx, r)
-			}
-			return writeProductionReady(ctx, sink, sessionID, uint32(cfg.PID), ticks, check)
-		}
-		return sink.Write(ctx, model.Record{SchemaVersion: 1, Kind: "collector_attached", SessionID: sessionID})
+			return sink.Write(ctx, model.Record{SchemaVersion: 1, Kind: "collector_attached", SessionID: sessionID})
+		})
 	}))
 	gc := gadgetcontext.New(ctx, cfg.Image, gadgetcontext.WithName("mw-hotspot-openat-structured"), gadgetcontext.WithOrasReadonlyTarget(pinnedTarget{Store: store, reference: cfg.Image}), gadgetcontext.WithDataOperators(ocihandler.OciHandler, operator))
+	r.gadget = gc
 	params := map[string]string{"operator.oci.ebpf.target_pid": strconv.Itoa(cfg.PID), "operator.oci.ebpf.target_start_ticks": strconv.FormatUint(ticks, 10), "operator.oci.ebpf.collect_ustack": "true", "operator.oci.ebpf.collect_otel_stack": "true", "operator.oci.ebpf.target_safepoint_counter": strconv.FormatUint(uint64(epochTarget.CounterAddress), 10), "operator.oci.ebpf.target_initial_safepoint_epoch": strconv.FormatUint(epochTarget.InitialEpoch, 10)}
 	if cfg.EventsOnly {
 		params["operator.oci.ebpf.collect_ustack"] = "false"
@@ -394,27 +465,102 @@ func Run(ctx context.Context, cfg Config, writer io.Writer) (resultErr error) {
 	if definitionHealth != nil {
 		summary.CollectionHealth = "partial"
 	}
+	var enrichCounts *accounting.Counts
 	if enrichment != nil {
 		summary.Stats = enrichment.Stats()
-		s := summary.Stats
-		summary.TerminalAccountingComplete = err == nil && s.Resolved+s.Unavailable+s.Skipped == s.Received
+		counts, accErr := enrichment.accounting()
+		if accErr != nil {
+			err = errors.Join(err, accErr)
+		} else {
+			enrichCounts = &counts
+		}
+		summary.TerminalAccountingComplete = err == nil && enrichCounts != nil && accounting.Evaluate(*enrichCounts).Complete
 	}
 	if eventsOnly != nil {
 		summary.Stats = eventsOnly.stats
 		summary.TerminalAccountingComplete = err == nil && eventsOnly.stats.Received == eventsOnly.stats.Skipped
 	}
+	local.closeMissing()
+	var definitionErr error
+	if (!cfg.DrainFull || (eventFinalization != nil && eventFinalization.ReceiverJoined)) && defAccounting != nil {
+		definitionErr = applyDefinitionAccounting(defAccounting, local, &summary)
+		*definitionRaw = append([]byte(nil), summary.Extensions["definition_accounting"]...)
+	}
+	definitions := projectDefinitionSources(defAccounting)
+	if !cfg.DrainFull {
+		publishDefinitionSources(&summary, definitions)
+	}
 	if cfg.DrainFull {
 		value, selectedErr := selectedFinal(gc)
-		selectedErr = errors.Join(selectedErr, applyCollectionInventory(expectedAccounting, value, eventFinalization, &summary))
+		selectedErr = errors.Join(selectedErr, applyCollectionInventory(expectedAccounting, value, eventFinalization, &summary, definitions, enrichCounts))
 		err = errors.Join(err, selectedErr)
 		if selectedErr != nil {
 			summary.TerminalAccountingComplete = false
 		}
 	}
+	err = errors.Join(err, definitionErr)
 	if err != nil {
 		summary.Errors = []string{err.Error()}
 	}
+	if prefixer, ok := any(sink).(accountingPrefixer); ok {
+		recs, bts, hsh, pErr := prefixer.AccountingPrefix()
+		if pErr == nil {
+			var pid uint32
+			var birth uint64
+			if expectedAccounting != nil {
+				pid = expectedAccounting.PID
+				birth = expectedAccounting.Birth
+			} else if cfg.ExpectedTarget.PID != 0 {
+				pid = cfg.ExpectedTarget.PID
+				birth = cfg.ExpectedTarget.StartTicks
+			} else if cfg.PID > 0 {
+				pid = uint32(cfg.PID)
+			}
+			sources := make(map[string]json.RawMessage)
+			if summary.SelectedAccounting != nil {
+				if raw, mErr := json.Marshal(summary.SelectedAccounting); mErr == nil {
+					sources["selected_events"] = raw
+				}
+			}
+			if enrichCounts != nil {
+				if raw, mErr := json.Marshal(enrichCounts); mErr == nil {
+					sources["enrichment"] = raw
+				}
+			}
+			if defRaw, exists := summary.Extensions["definition_accounting"]; exists && len(defRaw) > 0 {
+				sources["definitions"] = defRaw
+			}
+			pa := productionAccountingReceipt{
+				Schema:            1,
+				SessionID:         sessionID,
+				HostPID:           pid,
+				ProcessStartTicks: birth,
+				WirePrefix: productionAccountingWirePrefix{
+					Records: recs,
+					Bytes:   bts,
+					SHA256:  hsh,
+				},
+				Sources: sources,
+			}
+			if raw, mErr := json.Marshal(pa); mErr == nil {
+				if summary.Extensions == nil {
+					summary.Extensions = make(map[string]json.RawMessage)
+				}
+				summary.Extensions["production_accounting"] = raw
+			}
+		} else {
+			err = errors.Join(err, pErr)
+		}
+	}
 	return writeSessionSummary(cfg, sink, sessionID, summary, err)
+}
+
+func newLocalRuntime(initHost func(host.Config) error) (*local.Runtime, error) {
+	// Real preflight precedes this call; preserve host checks without Gadget's UID-only guard.
+	if err := initHost(host.Config{AutoMountFilesystems: false}); err != nil {
+		return nil, err
+	}
+	return local.New(), nil
 }
 
 func writeSessionSummary(cfg Config, sink model.Sink, session string, summary model.Summary, cause error) error {

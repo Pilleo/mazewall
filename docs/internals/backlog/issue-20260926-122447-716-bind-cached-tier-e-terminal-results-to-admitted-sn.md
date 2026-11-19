@@ -3,7 +3,8 @@ title: "Bind cached Tier E terminal results to admitted snapshot identity"
 severity: "MEDIUM"
 status: "open"
 priority: medium
-dependencies: []
+dependencies:
+  - "issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c"
 component: "profiler"
 target_modules: ["profiler"]
 target_files:
@@ -76,6 +77,15 @@ historical qualification. Remains open for orchestrator review/integration.
 ## Related work
 
 Distinct from [Tier E cleanup ownership](issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md): this concerns result/request identity after successful terminalization. Coordinate changes to their shared runtime file. Preserve the existing prevalidated-artifact admission and producer-closure contract; declare additional identity model files before implementation if needed.
+
+---
+## Repository-review revalidation — 2026-11-04
+
+[TE-08](../reviews/2026-11-04-repository-review-findings.md#te-08) confirms that null-keyed
+in-memory finalization returns the prior result before validating a conflicting snapshot's
+session. Test same/changed/wrong-session/mutated/cross-overload retries without repeating
+cleanup. Coordinate runtime state with cleanup405. The first finalization's identity check
+and descriptor-path retry behavior remain valid; no external policy bypass is claimed.
 
 ---
 <!-- id: issue-20260926-122447-716-bind-cached-tier-e-terminal-results-to-admitted-sn  file: issue-20260926-122447-716-bind-cached-tier-e-terminal-results-to-admitted-sn.md -->

@@ -45,4 +45,15 @@ Native packaged and optional framework runtime proof are subsequent coordinated
 release gates, not claimed by the policy-only host consumer fixtures.
 
 ---
+## Repository-review reconciliation — 2026-11-04
+
+[DOCS-03/ARCH-01](../reviews/2026-11-04-repository-review-findings.md#docs-03) require actual
+supported package/value vocabulary and platform/serialization dependency guidance. The approved
+platform api edge is necessary for supported consumers; do not restore the obsolete implementation
+claim. Final current-source consumer qualification additionally consumes BUILD-01's optional
+Kotlin lock/approval closure, TEST-04's scoped matrix/child budgets and ARCH-02's Portal binary
+bridges where applicable. Existing historical source/JDK receipts remain valid for their pins,
+not current Kotlin2.4.21 native qualification. No blanket dependency/support expansion is authorized.
+
+---
 <!-- id: issue-20261008-001530-668-stable-packaged-consumer-compatibility-gates  file: issue-20261008-001530-668-stable-packaged-consumer-compatibility-gates.md -->

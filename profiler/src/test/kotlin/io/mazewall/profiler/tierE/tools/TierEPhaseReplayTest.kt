@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.MessageDigest
+import java.util.Locale
 
 class TierEPhaseReplayTest {
     @Test
@@ -56,5 +57,5 @@ class TierEPhaseReplayTest {
         MessageDigest
             .getInstance("SHA-256")
         .digest(Files.readAllBytes(path))
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { "%02x".format(Locale.ROOT, it) }
 }

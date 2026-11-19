@@ -1,0 +1,11 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+package support
+
+import "testing"
+
+func TestTraceDefinitionEmbeddedABI(t *testing.T) {
+	if err := CheckTraceDefinitionABI(); err != nil {
+		t.Fatal(err)
+	}
+}

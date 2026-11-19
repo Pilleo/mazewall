@@ -1,0 +1,163 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package processmanager
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+
+	"go.opentelemetry.io/ebpf-profiler/host"
+	"go.opentelemetry.io/ebpf-profiler/interpreter"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf/pfelf"
+	"go.opentelemetry.io/ebpf-profiler/lpm"
+	"go.opentelemetry.io/ebpf-profiler/processmanager/execinfomanager"
+	"go.opentelemetry.io/ebpf-profiler/util"
+)
+
+type bootstrapAcquisition struct {
+	fileID    host.FileID
+	manager   bootstrapELFManager
+	instance  interpreter.Instance
+	pid       libpf.PID
+	key       util.OnDiskFileIdentifier
+	installed bool
+}
+
+type bootstrapELFManager interface {
+	AddOrIncRef(host.FileID, *pfelf.Reference) (execinfomanager.ExecutableInfo, error)
+	LoaderError(host.FileID) error
+	DecRef(host.FileID) error
+}
+
+type bootstrapJournal struct {
+	entries  []bootstrapAcquisition
+	info     *processInfo
+	pid      libpf.PID
+	prefixes []lpm.Prefix
+}
+
+// Retained ownership is evidence of incomplete cleanup, not permission to retry it.
+type bootstrapRollbackError struct {
+	cause   error
+	manager *ProcessManager
+	journal *bootstrapJournal
+}
+
+func (e *bootstrapRollbackError) Error() string {
+	return fmt.Sprintf("bootstrap rollback incomplete for PID %v: %v", e.journal.pid, e.cause)
+}
+
+func (e *bootstrapRollbackError) Unwrap() error { return e.cause }
+
+func (j *bootstrapJournal) rollbackOnFailure(pm *ProcessManager, err *error) {
+	if *err != nil {
+		*err = j.rollback(pm, *err)
+	}
+}
+
+func (j *bootstrapJournal) ownsPrefix(prefix lpm.Prefix) bool {
+	for _, owned := range j.prefixes {
+		if owned == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+func (j *bootstrapJournal) acquireELF(ctx context.Context, m bootstrapELFManager, id host.FileID, ref *pfelf.Reference) (execinfomanager.ExecutableInfo, error) {
+	if err := ctx.Err(); err != nil {
+		return execinfomanager.ExecutableInfo{}, err
+	}
+	info, err := m.AddOrIncRef(id, ref)
+	if err != nil {
+		return info, err
+	}
+	j.entries = append(j.entries, bootstrapAcquisition{fileID: id, manager: m})
+	if err := ctx.Err(); err != nil {
+		return info, err
+	}
+	if err := m.LoaderError(id); err != nil {
+		return info, fmt.Errorf("load ELF %v: %w", id, err)
+	}
+	return info, ctx.Err()
+}
+
+// Constructor bootstrap runs before PID workers, so borrowed process state is unsafe to mutate.
+func (j *bootstrapJournal) checkProcessLocked(pm *ProcessManager, pid libpf.PID) error {
+	info := pm.pidToProcessInfo[pid]
+	if info != nil && (info != j.info || len(info.mappings) != 0) {
+		return fmt.Errorf("PID %v has preexisting process state", pid)
+	}
+	for key, current := range pm.interpreters[pid] {
+		owned := false
+		for _, e := range j.entries {
+			if e.instance != nil && e.installed && e.pid == pid && e.key == key {
+				a, b := reflect.ValueOf(current), reflect.ValueOf(e.instance)
+				owned = a.IsValid() && a.Comparable() && a.Equal(b)
+				break
+			}
+		}
+		if !owned {
+			return fmt.Errorf("PID %v has preexisting interpreter %v", pid, key)
+		}
+	}
+	return nil
+}
+
+// Failed cleanup retains exact ownership evidence; it does not authorize a retry.
+func (j *bootstrapJournal) rollback(pm *ProcessManager, cause error) (result error) {
+	defer func() {
+		if result != nil && (len(j.prefixes) != 0 || len(j.entries) != 0 || j.info != nil) {
+			result = &bootstrapRollbackError{cause: result, manager: pm, journal: j}
+		}
+	}()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	for len(j.prefixes) != 0 {
+		i := len(j.prefixes) - 1
+		prefix := j.prefixes[i]
+		deleted, err := pm.ebpf.DeletePidPageMappingInfo(j.pid, []lpm.Prefix{prefix})
+		if err != nil || deleted != 1 {
+			return errors.Join(cause, fmt.Errorf("remove owned PID %v prefix %#x/%d (deleted %d): %w", j.pid, prefix.Key, prefix.Length, deleted, errors.Join(err, errors.New("prefix cleanup incomplete"))))
+		}
+		pm.pidPageToMappingInfoSize--
+		j.prefixes = j.prefixes[:i]
+	}
+	for len(j.entries) != 0 {
+		i := len(j.entries) - 1
+		e := j.entries[i]
+		if e.instance != nil {
+			if e.installed {
+				current, ok := pm.interpreters[e.pid][e.key]
+				a, b := reflect.ValueOf(current), reflect.ValueOf(e.instance)
+				if !ok || !a.IsValid() || !a.Comparable() || !a.Equal(b) {
+					return errors.Join(cause, fmt.Errorf("interpreter ownership changed for PID %v key %v", e.pid, e.key))
+				}
+			}
+			if err := e.instance.Detach(pm.ebpf, e.pid); err != nil {
+				return errors.Join(cause, fmt.Errorf("detach PID %v interpreter %v: %w", e.pid, e.key, err))
+			}
+			if e.installed {
+				delete(pm.interpreters[e.pid], e.key)
+			}
+		} else if err := e.manager.DecRef(e.fileID); err != nil {
+			return errors.Join(cause, fmt.Errorf("release ELF %v: %w", e.fileID, err))
+		}
+		j.entries = j.entries[:i]
+	}
+	if j.info != nil {
+		if pm.pidToProcessInfo[j.pid] != j.info {
+			return errors.Join(cause, fmt.Errorf("process-info ownership changed for PID %v", j.pid))
+		}
+		delete(pm.pidToProcessInfo, j.pid)
+		if len(pm.interpreters[j.pid]) == 0 {
+			delete(pm.interpreters, j.pid)
+		}
+		j.info = nil
+	}
+	return cause
+}

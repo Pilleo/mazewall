@@ -21,11 +21,16 @@ targets or the Go/Docker toolchains.
 
 ## Explicit build, verification and installation
 
+The Gradle Go asset tasks are opt-in and only registered when
+`-PincludeHotSpotGoBuild=true` (or `INCLUDE_HOTSPOT_GO_BUILD=true`) is set.
+CI Go validation (`go-validation`) is likewise opt-in via repository variable
+`ENABLE_GO_VALIDATION=true` or manual `workflow_dispatch` (`enable_go_validation=true`).
+
 ```bash
 # Go 1.26.11 and an explicitly configured rootful Docker builder are needed at build time.
-DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:buildHotSpotAssets
-./gradlew :profiler:verifyHotSpotAssets
-./gradlew :profiler:installHotSpotAssets -PhotSpotAssetsDirectory=/absolute/new/assets-directory
+DOCKER_HOST=unix:///var/run/docker.sock ./gradlew :profiler:buildHotSpotAssets -PincludeHotSpotGoBuild=true
+./gradlew :profiler:verifyHotSpotAssets -PincludeHotSpotGoBuild=true
+./gradlew :profiler:installHotSpotAssets -PincludeHotSpotGoBuild=true -PhotSpotAssetsDirectory=/absolute/new/assets-directory
 ```
 
 The equivalent Make commands are `make bundle`, `make verify-bundle`, and
@@ -54,8 +59,10 @@ This verifies the actual prepared-source identity and generated native hashes,
 stripped/static ELF layout and embedded Go provenance.
 Fault/diagnostic preparer variants have separate manifests and are not bundle inputs.
 
-The current accepted source overlay is
-`b9a9d70db7e37bba07293a635cac94cc540688b85e1f3aa31c2e9ad25cfeecf3`.
+The current source-preparation fingerprint is
+`7e09e472bd37c2c7b03aeb14dad509a0b56485bcfef2ddcb56e0891a2c08c7f9`.
+The checked target-bootstrap changes are host-tested; fresh native qualification
+remains pending. Earlier receipts, including `c39ce3f7…`, do not qualify this revision.
 
 The containerd overlay migrates Gadget's actual client and test utilities to
 patched `github.com/containerd/containerd/v2 v2.3.7`. Discovery retains `k8s.io`
@@ -171,7 +178,12 @@ selected experimental/replay contract; it is not production readiness.
 Gadget's successful OCI/ebpf Start (native readers/maps/link established), strict
 runtime discovery and a fresh target generation/pidfd/exec/fatal check. It carries
 host PID, start ticks, BOOTTIME clock/sample, exact JVM build/hash and provider pins.
-It does not wait for a useful Java stack; cold events may still be unavailable.
+For a bound strict HotSpot epoch target, profiler construction also completes
+checked process/interpreter bootstrap and revalidates the held target lifetime
+before readiness. A dummy PID-map entry alone is insufficient; failure rejects
+startup without extending its deadline. Legacy epoch-only and ordinary discovery
+remain best-effort. This does not wait for a useful Java stack; cold events may
+still be unavailable.
 Events from already-running target threads may precede ready. A failed startup
 does not emit ready. `collector_error` preserves diagnostics and native errno when
 available; an unjoined/blocked event writer cannot be safely used to append an error,

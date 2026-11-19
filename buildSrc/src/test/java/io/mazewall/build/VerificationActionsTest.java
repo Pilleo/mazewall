@@ -37,6 +37,7 @@ public final class VerificationActionsTest {
         try {
             SpotBugsReportTest.main(new String[0]);
             SpotBugsSourcePatchTest.main(new String[0]);
+            SpotBugsAuxClasspathFunctionalTest.main(new String[] {rootBuild.getParent().toString()});
         } catch (Exception failure) {
             throw new AssertionError("SpotBugs report contract failed", failure);
         }

@@ -1,4 +1,4 @@
-//go:build mw_kernel
+//go:build mw_kernel && linux
 
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
@@ -8,14 +8,130 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"reflect"
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/asm"
 	"go.opentelemetry.io/ebpf-profiler/kallsyms"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
 	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	pm "go.opentelemetry.io/ebpf-profiler/processmanager"
 	"sync"
 	"testing"
 	"time"
 )
+
+// Only map ownership is native here: the target lifetime is a memory model,
+// not native capture, producer conservation, or an all-source final receipt.
+func TestKernelAuxiliaryFinalRetainedMaps(t *testing.T) {
+	cpus, err := ebpf.PossibleCPU()
+	if err != nil { t.Fatal(err) }
+	type originalMap struct { m *ebpf.Map; closed bool }
+	maps := make(map[string]*ebpf.Map)
+	originals := make([]*originalMap, 0, 4)
+	originalsSafe := true
+	for _, item := range []struct { key string; spec *ebpf.MapSpec }{
+		{traceDefinitionCounterMap, &ebpf.MapSpec{Name: "counts", Type: ebpf.PerCPUArray, KeySize: 4, ValueSize: 40, MaxEntries: 1}},
+		{traceDefinitionConfigMap, &ebpf.MapSpec{Name: "config", Type: ebpf.Array, KeySize: 4, ValueSize: 24, MaxEntries: 1}},
+		{"trace_events", &ebpf.MapSpec{Name: "trace_events", Type: ebpf.PerfEventArray, KeySize: 4, ValueSize: 4, MaxEntries: uint32(cpus)}},
+		{"pid_events", &ebpf.MapSpec{Name: "pid_events", Type: ebpf.Hash, KeySize: 8, ValueSize: 1, MaxEntries: 32}},
+	} {
+		m, err := ebpf.NewMap(item.spec)
+		if err != nil { t.Fatal(err) }
+		original := &originalMap{m: m}
+		t.Cleanup(func() {
+			if original.closed { return }
+			if !originalsSafe { t.Error("original map retained after incomplete owner cleanup"); return }
+			original.closed = true
+			if err := original.m.Close(); err != nil { t.Error(err) }
+		})
+		maps[item.key] = m
+		originals = append(originals, original)
+	}
+	mock := &sealModelLifetime{mockRetainerLifetime: &mockRetainerLifetime{session: "kernel-retained-maps", tgid: 1234, birth: 5678}}
+	owner, err := acquireDefinitionOwner(context.Background(), mock, maps)
+	if err != nil {
+		var pending *traceDefinitionOwnerError
+		if errors.As(err, &pending) && pending.PendingOwner() != nil { owner = pending.PendingOwner() }
+	}
+	scopeJoined := true
+	if owner != nil {
+		originalsSafe = false
+		t.Cleanup(func() {
+			if !scopeJoined { t.Error("owner retained after incomplete scope stop"); return }
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := owner.closeWithContext(ctx); err != nil { t.Errorf("owner close: %v", err) }
+			select { case <-owner.closeReqDone: originalsSafe = true; case <-ctx.Done(): t.Error("owner physical close timed out") }
+		})
+	}
+	if err != nil { t.Fatal(err) }
+	if owner == nil { t.Fatal("missing owner") }
+	scope := periodiccaller.NewOwnedScope(context.Background(), nil)
+	scopeJoined = false
+	t.Cleanup(func() {
+		if scopeJoined { return }
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := scope.Stop(ctx); err != nil { t.Errorf("scope cleanup: %v", err) }
+		scopeJoined = scope.Joined()
+	})
+	if err := scope.BindLifetime(owner.HeldLifetime()); err != nil { t.Fatal(err) }
+	if !scope.ExecuteCallback(func() {}) { t.Fatal("scope callback did not complete") }
+	source, err := acquireTraceDefinitionSource(owner, maps)
+	if err != nil { t.Fatal(err) }
+	if source == nil { t.Fatal("missing source") }
+	tracer := &Tracer{auxiliaryScope: scope, definitionOwner: owner, definitionSource: source, ebpfMaps: maps,
+		pidEvents: make(chan libpf.PIDTID, 16), processManager: &pm.ProcessManager{}}
+	cfg := Config{HotSpotEpochTarget: libpf.HotSpotEpochTarget{PID: 1234}}
+	tracer.preparePIDMailbox(&cfg)
+	tracer.preparePIDProcess()
+	clones := []*ebpf.Map{owner.CountsMap(), owner.ConfigMap(), owner.PerfMap(), owner.PIDMap()}
+	ids := [4]uint32{owner.CountsID(), owner.configID, owner.PerfID(), owner.PIDID()}
+	shapes := [4]traceDefinitionMapInfo{
+		{Type: uint32(ebpf.PerCPUArray), KeySize: 4, ValueSize: 40, MaxEntries: 1},
+		{Type: uint32(ebpf.Array), KeySize: 4, ValueSize: 24, MaxEntries: 1},
+		{Type: uint32(ebpf.PerfEventArray), KeySize: 4, ValueSize: 4, MaxEntries: uint32(cpus)},
+		{Type: uint32(ebpf.Hash), KeySize: 8, ValueSize: 1, MaxEntries: 32},
+	}
+	var expected [4]traceDefinitionMapInfo
+	for i, original := range originals {
+		if clones[i] == nil || clones[i] == original.m { t.Fatal("missing distinct clone wrapper") }
+		expected[i], err = traceDefinitionInfo(original.m)
+		if err != nil || expected[i].ID == 0 { t.Fatalf("original info: %+v, %v", expected[i], err) }
+		shapes[i].ID = ids[i]
+		if expected[i] != shapes[i] { t.Fatalf("original shape: %+v, expected %+v", expected[i], shapes[i]) }
+		info, err := traceDefinitionInfo(clones[i])
+		if err != nil || info != expected[i] { t.Fatalf("clone info: %+v, expected %+v, %v", info, expected[i], err) }
+	}
+	for _, original := range originals {
+		original.closed = true
+		if err := original.m.Close(); err != nil { t.Fatal(err) }
+	}
+	for i, clone := range clones {
+		info, err := traceDefinitionInfo(clone)
+		if err != nil || info != expected[i] { t.Fatalf("retained clone info: %+v, expected %+v, %v", info, expected[i], err) }
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	got, stopErr := tracer.StopAuxiliaryFinal(ctx)
+	scopeJoined = scope.Joined()
+	select { case <-owner.closeReqDone: originalsSafe = true; case <-ctx.Done(): t.Error("owner physical close timed out") }
+	cancel()
+	if stopErr != nil || !scopeJoined || !originalsSafe { t.Fatalf("stop incomplete: %v", stopErr) }
+	if got.Disposition() != DefinitionAuxiliaryFrozenNonfinal || got.Reason() != DefinitionAuxiliaryReasonUnqualifiedSourceClosure { t.Fatalf("receipt: %v %v", got.Disposition(), got.Reason()) }
+	sc, scOK := got.Scope()
+	kinds, kindsOK := got.Kinds()
+	mailbox, mbOK := got.Mailbox()
+	process, procOK := got.Process()
+	if !scOK || !kindsOK || !mbOK || !procOK || got.Binding() != sc.Observation.Binding || got.Binding().Session != "kernel-retained-maps" || got.Binding().HostTGID != 1234 || got.Binding().Birth != 5678 || got.Binding().Generation == 0 { t.Fatal("missing modeled scope projections") }
+	if !mailbox.InfoReturned || mailbox.InfoID != expected[3].ID || mailbox.InfoType != expected[3].Type || mailbox.InfoKeySize != expected[3].KeySize || mailbox.InfoValueSize != expected[3].ValueSize || mailbox.InfoMaxEntries != expected[3].MaxEntries { t.Fatalf("detached PID info: %+v", mailbox) }
+	repeatCtx, repeatCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	repeat, repeatErr := tracer.StopAuxiliaryFinal(repeatCtx)
+	repeatCancel()
+	if repeatErr != nil || !reflect.DeepEqual(got, repeat) { t.Fatalf("repeated receipt changed: %v", repeatErr) }
+	if kinds2, ok := repeat.Kinds(); !ok || !reflect.DeepEqual(kinds, kinds2) { t.Fatal("kind copy changed") }
+	if mailbox2, ok := repeat.Mailbox(); !ok || mailbox != mailbox2 { t.Fatal("mailbox copy changed") }
+	if process2, ok := repeat.Process(); !ok || process != process2 { t.Fatal("process copy changed") }
+}
 
 func TestKernelDefinitionPerfDrainAuxiliaryHeldCallback(t *testing.T) {
 	cpus, err := ebpf.PossibleCPU()
@@ -53,7 +169,7 @@ func TestKernelDefinitionPerfDrainAuxiliaryHeldCallback(t *testing.T) {
 		if binary.LittleEndian.Uint64(data) != 42 {
 			t.Error("native callback payload invalid after reader retirement")
 		}
-	}, 4096)
+	}, 4096, nil)
 	readerClosed := make(chan struct{})
 	if err := scope.AddCloser(func() error { close(readerClosed); return nil }); err != nil {
 		t.Fatal(err)

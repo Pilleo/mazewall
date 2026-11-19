@@ -1,0 +1,1157 @@
+//go:build linux && mw_kernel && mw_native_composition
+
+package capture
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"os/exec"
+	"strconv"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/Pilleo/mazewall/hotspot-bridge/wire"
+	"golang.org/x/sys/unix"
+)
+
+const compositionVersion = "mw-native-composition/1"
+
+var compositionCases = map[string]int{
+	"TestKernelCaptureDefinitionComposition/joined":                   2,
+	"TestKernelCaptureDefinitionComposition/direct_drain":             1,
+	"TestKernelCaptureDefinitionComposition/held_tail_deadline":       2,
+	"TestKernelTraceDefinitionCloseVersusSample/close_first/fresh_0":  1,
+	"TestKernelTraceDefinitionCloseVersusSample/sample_first/fresh_0": 1,
+	"TestKernelTraceDefinitionCloseVersusSample/concurrent/fresh_0":   1,
+	"TestKernelTraceDefinitionCloseVersusSample/concurrent/fresh_1":   1,
+	"TestKernelTraceDefinitionCloseVersusSample/concurrent/fresh_2":   1,
+}
+
+// Re-encoding rejects duplicate/unknown keys as well as noncanonical JSON.
+type compositionPacket struct {
+	V          int    `json:"v"`
+	Seq        int    `json:"seq"`
+	Op         string `json:"op"`
+	Case       string `json:"case"`
+	Slot       int    `json:"slot"`
+	Bursts     int    `json:"bursts"`
+	StartNS    int64  `json:"start_ns"`
+	CleanupNS  int64  `json:"cleanup_ns"`
+	PID        int    `json:"pid"`
+	Birth      uint64 `json:"birth"`
+	Cgroup     uint64 `json:"cgroup"`
+	MountNS    uint64 `json:"mntns"`
+	I          int    `json:"i"`
+	Result     string `json:"result"`
+	N          int    `json:"n"`
+	Errno      int    `json:"errno"`
+	Reason     string `json:"reason"`
+	Acquired   int    `json:"acquired"`
+	Closed     int    `json:"closed"`
+	CloseError int    `json:"close_error"`
+	Open       int    `json:"open"`
+	Code       int    `json:"code"`
+	Signal     int    `json:"signal"`
+}
+
+func compositionWriteResult(result string, n, errno, size int) bool {
+	switch result {
+	case "full":
+		return n == size && errno == 0
+	case "short":
+		return n >= 0 && n < size && errno == 0
+	case "error":
+		return n == -1 && errno > 0 && errno <= 4095
+	case "uncertain":
+		return n == -1 && errno == 0
+	default:
+		return false
+	}
+}
+
+func (p compositionPacket) encode() ([]byte, error) {
+	bursts, ok := compositionCases[p.Case]
+	if !ok || p.V != 1 || p.Seq < 1 || p.Seq > 16 || p.Slot != 1 {
+		return nil, fmt.Errorf("invalid common fields")
+	}
+	s := fmt.Sprintf(`{"v":1,"seq":%d,"op":%q,"case":%q,"slot":1`, p.Seq, p.Op, p.Case)
+	valid := true
+	switch p.Op {
+	case "PREPARE":
+		valid = p.Bursts == bursts
+		s += fmt.Sprintf(`,"bursts":%d`, p.Bursts)
+	case "PIPES_OWNED":
+		valid = p.StartNS > 0 && p.CleanupNS > p.StartNS
+		s += fmt.Sprintf(`,"start_ns":%d,"cleanup_ns":%d`, p.StartNS, p.CleanupNS)
+	case "STARTED":
+		valid = p.PID > 0 && p.PID <= math.MaxInt32 && p.Birth > 0 && p.Cgroup > 0 && p.MountNS > 0
+		s += fmt.Sprintf(`,"pid":%d,"birth":%d,"cgroup":%d,"mntns":%d`, p.PID, p.Birth, p.Cgroup, p.MountNS)
+	case "BURST", "BURST_ALLOWED", "DONE":
+		valid = p.I >= 1 && p.I <= bursts
+		s += fmt.Sprintf(`,"i":%d`, p.I)
+	case "WRITTEN", "RELEASE_SENT":
+		size := 5
+		if p.Op == "WRITTEN" {
+			size = 2
+			valid = p.I >= 1 && p.I <= bursts
+			s += fmt.Sprintf(`,"i":%d`, p.I)
+		}
+		valid = valid && compositionWriteResult(p.Result, p.N, p.Errno, size)
+		s += fmt.Sprintf(`,"result":%q,"n":%d,"errno":%d`, p.Result, p.N, p.Errno)
+	case "HOLD":
+		switch p.Reason {
+		case "constructor", "native_cleanup", "source_io", "deadline", "protocol", "target_exit":
+		default:
+			valid = false
+		}
+		s += fmt.Sprintf(`,"reason":%q`, p.Reason)
+	case "SOURCE_CLOSED":
+		valid = p.Acquired >= 0 && p.Acquired <= 127 && p.Closed >= 0 && p.CloseError >= 0 && p.Open >= 0 && p.Closed|p.CloseError|p.Open == p.Acquired && p.Closed&p.CloseError == 0 && p.Closed&p.Open == 0 && p.CloseError&p.Open == 0
+		s += fmt.Sprintf(`,"acquired":%d,"closed":%d,"close_error":%d,"open":%d`, p.Acquired, p.Closed, p.CloseError, p.Open)
+	case "WAITED":
+		valid = p.PID > 0 && p.PID <= math.MaxInt32
+		switch p.Result {
+		case "ok":
+			valid = valid && p.Code == 0 && p.Signal == 0 && p.Errno == 0
+		case "exit":
+			valid = valid && p.Code > 0 && p.Code <= 255 && p.Signal == 0 && p.Errno == 0
+		case "signal":
+			valid = valid && p.Code == -1 && p.Signal > 0 && p.Signal <= 64 && p.Errno == 0
+		case "error":
+			valid = valid && p.Code == -1 && p.Signal == 0 && p.Errno >= 0 && p.Errno <= 4095
+		default:
+			valid = false
+		}
+		s += fmt.Sprintf(`,"pid":%d,"result":%q,"code":%d,"signal":%d,"errno":%d`, p.PID, p.Result, p.Code, p.Signal, p.Errno)
+	case "REGISTERED", "REGISTERED_ACK", "READY", "RELEASE_REQUEST", "SETTLED":
+	default:
+		valid = false
+	}
+	if !valid {
+		return nil, fmt.Errorf("invalid %s fields", p.Op)
+	}
+	return []byte(s + "}"), nil
+}
+
+func compositionDecode(b []byte, selected string, seq int) (compositionPacket, error) {
+	var p compositionPacket
+	if len(b) == 0 || len(b) > 4096 {
+		return p, fmt.Errorf("packet size")
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		return p, err
+	}
+	canonical, err := p.encode()
+	if err != nil || !bytes.Equal(b, canonical) || p.Case != selected || p.Seq != seq {
+		return p, fmt.Errorf("noncanonical or unbound packet")
+	}
+	return p, nil
+}
+
+func compositionNow() (int64, error) {
+	var ts unix.Timespec
+	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
+		return 0, err
+	}
+	if ts.Sec < 0 || ts.Nsec < 0 || ts.Nsec >= 1e9 || ts.Sec > (math.MaxInt64-ts.Nsec)/1e9 {
+		return 0, fmt.Errorf("invalid monotonic clock")
+	}
+	n := ts.Sec*1e9 + ts.Nsec
+	if n <= 0 {
+		return 0, fmt.Errorf("nonpositive monotonic clock")
+	}
+	return n, nil
+}
+
+func compositionRemaining(deadline int64) (time.Duration, error) {
+	n, err := compositionNow()
+	if err != nil {
+		return 0, err
+	}
+	if n >= deadline {
+		return 0, context.DeadlineExceeded
+	}
+	return time.Duration(deadline - n), nil
+}
+
+func compositionDecimal(name string) (int64, error) {
+	s := os.Getenv(name)
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 || strconv.FormatInt(n, 10) != s {
+		return 0, fmt.Errorf("invalid %s", name)
+	}
+	return n, nil
+}
+
+func compositionPoll(fd int, events int16, deadline int64) error {
+	for {
+		d, err := compositionRemaining(deadline)
+		if err != nil {
+			return err
+		}
+		ms := int64(d / time.Millisecond)
+		if d%time.Millisecond != 0 {
+			ms++
+		}
+		if ms > math.MaxInt32 {
+			ms = math.MaxInt32
+		}
+		p := []unix.PollFd{{Fd: int32(fd), Events: events}}
+		_, err = unix.Poll(p, int(ms))
+		if errors.Is(err, unix.EINTR) {
+			continue
+		} // Readiness only; never retry an effect.
+		if err != nil {
+			return err
+		}
+		if p[0].Revents&(unix.POLLERR|unix.POLLNVAL) != 0 {
+			return fmt.Errorf("control poll failure")
+		}
+		if p[0].Revents&(events|unix.POLLHUP) != 0 {
+			return nil
+		}
+	}
+}
+
+type compositionCell struct {
+	ready chan struct{}
+	value compositionPacket
+}
+
+type compositionSend struct {
+	ready    chan struct{}
+	done     chan struct{}
+	packet   compositionPacket
+	rights   []int
+	err      error
+	buildErr error
+	deadline int64
+}
+
+type compositionFD struct {
+	file      *os.File
+	fd        int
+	acquired  bool
+	attempted bool
+	err       error
+}
+
+type compositionSendRecord struct {
+	Seq                int
+	Op                 string
+	I                  int
+	Expected, N, Errno int
+	Result             string
+}
+
+// All seven explicit handles have one closer; os.Process's handle belongs to Wait.
+func (f *compositionFD) close(deadline int64) error {
+	if !f.acquired || f.attempted {
+		return f.err
+	}
+	if _, err := compositionRemaining(deadline); err != nil {
+		return err
+	}
+	f.attempted = true
+	if f.file != nil {
+		f.err = f.file.Close()
+	} else {
+		f.err = unix.Close(f.fd)
+	}
+	return f.err
+}
+
+type compositionChild struct {
+	mu                                        sync.Mutex
+	fd                                        int
+	controlOwned                              bool
+	coordinator                               int32
+	selected                                  string
+	bursts                                    int
+	T, C                                      int64
+	failed                                    chan struct{}
+	fatal                                     chan struct{}
+	workStopped, fatalClosed                  bool
+	fault                                     error
+	channelErr                                error
+	ioStarted                                 bool
+	stop                                      chan struct{}
+	tx                                        chan *compositionSend
+	txDone, rxDone                            chan struct{}
+	cells                                     map[string]*compositionCell
+	prepared, startAttempted, started, regAck bool
+	registrationComplete                      bool
+	launchAttempted                           bool
+	outstanding, completed                    int
+	written                                   bool
+	terminal                                  string
+	sourceQueued                              bool
+	sourceMask                                compositionPacket
+	rxSeq                                     int
+	handles                                   [7]compositionFD
+	cmd                                       *exec.Cmd
+	target                                    wire.Target
+	waitDone, waitSent                        chan struct{}
+	waitErr                                   error
+	waitSendErr                               error
+	waitPacket                                compositionPacket
+	controlCloseErr                           error
+	sends                                     []compositionSendRecord
+	receivedRights                            []compositionFD
+	writes                                    [2]compositionPacket
+	// Only the fixed inert actor installs this gate; native callers cannot select it.
+	waitGate <-chan struct{}
+}
+
+func (o *compositionChild) fail(err error) {
+	if err == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.workStopped {
+		o.workStopped = true
+		close(o.failed)
+	}
+	if err == context.DeadlineExceeded && o.channelErr == nil {
+		return
+	}
+	if o.fault == nil {
+		o.fault = err
+	}
+	if !o.fatalClosed {
+		o.fatalClosed = true
+		close(o.fatal)
+	}
+}
+
+func (o *compositionChild) failChannel(err error) {
+	if err == nil {
+		return
+	}
+	o.mu.Lock()
+	if o.channelErr == nil {
+		o.channelErr = err
+	}
+	o.mu.Unlock()
+	o.fail(err)
+}
+
+func (o *compositionChild) work() error {
+	o.mu.Lock()
+	err := o.fault
+	terminal := o.terminal
+	stopped := o.workStopped
+	o.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	if stopped {
+		return context.DeadlineExceeded
+	}
+	if terminal != "" {
+		return fmt.Errorf("work after terminal")
+	}
+	_, err = compositionRemaining(o.T)
+	return err
+}
+
+func newCompositionChild(t *testing.T, selected string) *compositionChild {
+	t.Helper()
+	if os.Getenv("MW_NATIVE_COMPOSITION_PROTOCOL") != compositionVersion || os.Getenv("MW_NATIVE_COMPOSITION_CASE") != selected || compositionCases[selected] == 0 {
+		t.Fatal("unbound composition selection")
+	}
+	fd, e1 := compositionDecimal("MW_NATIVE_COMPOSITION_CONTROL_FD")
+	pid, e2 := compositionDecimal("MW_NATIVE_COMPOSITION_COORDINATOR_PID")
+	T, e3 := compositionDecimal("MW_NATIVE_COMPOSITION_START_DEADLINE_NS")
+	C, e4 := compositionDecimal("MW_NATIVE_COMPOSITION_CLEANUP_DEADLINE_NS")
+	if err := errors.Join(e1, e2, e3, e4); err != nil {
+		t.Fatal(err)
+	}
+	if fd < 3 || fd > math.MaxInt32 || pid > math.MaxInt32 || T >= C {
+		t.Fatal("invalid control metadata")
+	}
+	unix.CloseOnExec(int(fd))
+	o := &compositionChild{fd: int(fd), controlOwned: true, coordinator: int32(pid), selected: selected, bursts: compositionCases[selected], T: T, C: C, failed: make(chan struct{}), fatal: make(chan struct{}), stop: make(chan struct{}), tx: make(chan *compositionSend, 16), txDone: make(chan struct{}), rxDone: make(chan struct{}), cells: make(map[string]*compositionCell), waitDone: make(chan struct{}), waitSent: make(chan struct{})}
+	for _, key := range []string{"PIPES_OWNED", "REGISTERED", "READY", "BURST_ALLOWED/1", "BURST_ALLOWED/2", "DONE/1", "DONE/2", "RELEASE_SENT", "SETTLED"} {
+		o.cells[key] = &compositionCell{ready: make(chan struct{})}
+	}
+	return o
+}
+
+// Called only after the fixture's one early cleanup has been installed.
+func (o *compositionChild) transport() error {
+	fdflags, err := unix.FcntlInt(uintptr(o.fd), unix.F_GETFD, 0)
+	if err != nil || fdflags&unix.FD_CLOEXEC == 0 {
+		return errors.Join(fmt.Errorf("control CLOEXEC not restored"), err)
+	}
+	typ, err := unix.GetsockoptInt(o.fd, unix.SOL_SOCKET, unix.SO_TYPE)
+	if err != nil || typ != unix.SOCK_SEQPACKET {
+		return errors.Join(fmt.Errorf("not seqpacket"), err)
+	}
+	domain, err := unix.GetsockoptInt(o.fd, unix.SOL_SOCKET, unix.SO_DOMAIN)
+	if err != nil || domain != unix.AF_UNIX {
+		return errors.Join(fmt.Errorf("not Unix domain"), err)
+	}
+	flags, err := unix.FcntlInt(uintptr(o.fd), unix.F_GETFL, 0)
+	if err != nil || flags&unix.O_NONBLOCK == 0 {
+		return errors.Join(fmt.Errorf("control must already be nonblocking"), err)
+	}
+	cred, err := unix.GetsockoptInt(o.fd, unix.SOL_SOCKET, unix.SO_PASSCRED)
+	if err != nil || cred != 1 {
+		return errors.Join(fmt.Errorf("SO_PASSCRED required before traffic"), err)
+	}
+	go o.sender()
+	go o.receiver()
+	o.ioStarted = true
+	return nil
+}
+
+func (o *compositionChild) enqueue(p compositionPacket, rights []int, deadline int64, pending bool) *compositionSend {
+	s := &compositionSend{ready: make(chan struct{}), done: make(chan struct{}), packet: p, rights: rights, deadline: deadline}
+	if !pending {
+		close(s.ready)
+	}
+	select {
+	case o.tx <- s:
+	default:
+		s.err = fmt.Errorf("outbox overflow")
+		close(s.done)
+		o.failChannel(s.err)
+	}
+	return s
+}
+
+func (o *compositionChild) send(p compositionPacket, rights []int, deadline int64) error {
+	s := o.enqueue(p, rights, deadline, false)
+	return o.sent(s)
+}
+
+func (o *compositionChild) sent(s *compositionSend) error {
+	d, err := compositionRemaining(s.deadline)
+	if err != nil {
+		o.fail(err)
+		return err
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-s.done:
+		return s.err
+	case <-timer.C:
+		o.fail(context.DeadlineExceeded)
+		return context.DeadlineExceeded
+	}
+}
+
+func compositionWorkOp(op string) bool {
+	switch op {
+	case "PREPARE", "PIPES_OWNED", "REGISTERED", "REGISTERED_ACK", "READY", "BURST", "BURST_ALLOWED", "DONE":
+		return true
+	}
+	return false
+}
+
+func (o *compositionChild) sender() {
+	defer close(o.txDone)
+	seq := 0
+	for {
+		select {
+		case <-o.stop:
+			return
+		case s := <-o.tx:
+			rawAttempted, badPacket, pollFault := false, false, false
+			d, err := compositionRemaining(s.deadline)
+			if err == nil {
+				timer := time.NewTimer(d)
+				select {
+				case <-s.ready:
+				case <-o.stop:
+					err = fmt.Errorf("transport stopped")
+				case <-timer.C:
+					err = context.DeadlineExceeded
+				}
+				timer.Stop()
+			}
+			if err == nil {
+				err = s.buildErr
+			}
+			o.mu.Lock()
+			fault := o.channelErr
+			o.mu.Unlock()
+			if err == nil {
+				err = fault
+			}
+			if err == nil && compositionWorkOp(s.packet.Op) {
+				err = o.work()
+			}
+			if err == nil {
+				err = compositionPoll(o.fd, unix.POLLOUT, s.deadline)
+				pollFault = err != nil && !errors.Is(err, context.DeadlineExceeded)
+			}
+			if err == nil {
+				seq++ // Attempt budget is consumed before the effect, never rolled back.
+				s.packet.V = 1
+				s.packet.Seq = seq
+				s.packet.Case = o.selected
+				s.packet.Slot = 1
+				var b []byte
+				b, err = s.packet.encode()
+				badPacket = err != nil
+				if err == nil {
+					_, err = compositionRemaining(s.deadline)
+				}
+				if err == nil {
+					var ancillary []byte
+					if len(s.rights) > 0 {
+						ancillary = unix.UnixRights(s.rights...)
+					}
+					var n int
+					o.mu.Lock()
+					o.sends = append(o.sends, compositionSendRecord{Seq: seq, Op: s.packet.Op, I: s.packet.I, Expected: len(b), N: -1, Result: "uncertain"})
+					index := len(o.sends) - 1
+					o.mu.Unlock()
+					_, err = compositionRemaining(s.deadline)
+					if err == nil && compositionWorkOp(s.packet.Op) {
+						err = o.work()
+					}
+					if err == nil {
+						rawAttempted = true
+						n, err = unix.SendmsgN(o.fd, b, ancillary, nil, unix.MSG_DONTWAIT|unix.MSG_NOSIGNAL)
+					} else {
+						n = -1
+					}
+					o.mu.Lock()
+					record := &o.sends[index]
+					record.N = n
+					record.Result = "full"
+					if err != nil {
+						record.N = -1
+						record.Result = "uncertain"
+						var errno syscall.Errno
+						if errors.As(err, &errno) && errno > 0 && errno <= 4095 {
+							record.Result = "error"
+							record.Errno = int(errno)
+						}
+					} else if n != len(b) {
+						record.Result = "short"
+					}
+					o.mu.Unlock()
+					if err == nil && n != len(b) {
+						err = fmt.Errorf("short seqpacket send: %d", n)
+					}
+				}
+			}
+			s.err = err
+			close(s.done)
+			if rawAttempted || badPacket || pollFault {
+				o.failChannel(err)
+			} else {
+				o.fail(err)
+			}
+		}
+	}
+}
+
+// Harvest rights first, even from a packet that is otherwise rejected.
+func compositionAncillary(b []byte) (rights []int, creds *unix.Ucred, err error) {
+	credentials, rightsHeaders := 0, 0
+	for len(b) >= unix.CmsgLen(0) {
+		// Parse one complete header at a time so a later malformed header cannot
+		// discard descriptors delivered in earlier valid headers.
+		hdr, data, rest, e := unix.ParseOneSocketControlMessage(b)
+		if e != nil {
+			err = errors.Join(err, e)
+			break
+		}
+		h := unix.SocketControlMessage{Header: hdr, Data: data}
+		b = rest
+		if h.Header.Level == unix.SOL_SOCKET && h.Header.Type == unix.SCM_RIGHTS {
+			rightsHeaders++
+			for i := 0; i+4 <= len(h.Data); i += 4 {
+				rights = append(rights, int(int32(binary.NativeEndian.Uint32(h.Data[i:i+4]))))
+			}
+			if len(h.Data)%4 != 0 {
+				err = errors.Join(err, fmt.Errorf("malformed rights"))
+			}
+		} else if h.Header.Level == unix.SOL_SOCKET && h.Header.Type == unix.SCM_CREDENTIALS {
+			credentials++
+			c, e := unix.ParseUnixCredentials(&h)
+			if e != nil {
+				err = errors.Join(err, e)
+			} else {
+				creds = c
+			}
+		} else {
+			err = errors.Join(err, fmt.Errorf("unknown ancillary"))
+		}
+	}
+	if credentials != 1 || rightsHeaders > 1 || len(b) != 0 {
+		err = errors.Join(err, fmt.Errorf("invalid ancillary framing"))
+	}
+	return
+}
+
+func (o *compositionChild) receiver() {
+	defer close(o.rxDone)
+	for {
+		select {
+		case <-o.stop:
+			return
+		default:
+		}
+		if err := compositionPoll(o.fd, unix.POLLIN, o.C); err != nil {
+			select {
+			case <-o.stop:
+				return
+			default:
+				o.failChannel(err)
+				return
+			}
+		}
+		b := make([]byte, 4096)
+		ancillary := make([]byte, unix.CmsgSpace(unix.SizeofUcred)+unix.CmsgSpace(3*4))
+		n, on, flags, _, recvErr := unix.Recvmsg(o.fd, b, ancillary, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC)
+		if errors.Is(recvErr, unix.EAGAIN) || errors.Is(recvErr, unix.EINTR) {
+			continue
+		}
+		rights, cred, err := compositionAncillary(ancillary[:on])
+		// These delivered descriptors are now owned, including on malformed packets.
+		o.mu.Lock()
+		base := len(o.receivedRights)
+		for _, fd := range rights {
+			o.receivedRights = append(o.receivedRights, compositionFD{fd: fd, acquired: true})
+		}
+		o.mu.Unlock()
+		for i, fd := range rights {
+			h := compositionFD{fd: fd, acquired: true}
+			closeErr := h.close(o.C)
+			o.mu.Lock()
+			o.receivedRights[base+i] = h
+			o.mu.Unlock()
+			err = errors.Join(err, closeErr)
+		}
+		if len(rights) != 0 {
+			err = errors.Join(err, fmt.Errorf("coordinator sent rights"))
+		}
+		err = errors.Join(err, recvErr)
+		if n <= 0 || flags&(unix.MSG_TRUNC|unix.MSG_CTRUNC) != 0 || cred == nil || cred.Pid != o.coordinator || cred.Uid != 1000 || cred.Gid != 1000 {
+			err = errors.Join(err, fmt.Errorf("invalid coordinator packet/credentials"))
+		}
+		o.rxSeq++
+		if err == nil {
+			var p compositionPacket
+			p, err = compositionDecode(b[:n], o.selected, o.rxSeq)
+			if err == nil {
+				err = o.deliver(p)
+			}
+		}
+		if err != nil {
+			select {
+			case <-o.stop:
+				return
+			default:
+				o.failChannel(err)
+				return
+			}
+		}
+	}
+}
+
+func (o *compositionChild) deliver(p compositionPacket) error {
+	if _, err := compositionRemaining(o.C); err != nil {
+		return err
+	}
+	var workErr error
+	if compositionWorkOp(p.Op) {
+		_, workErr = compositionRemaining(o.T)
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	key := p.Op
+	valid := false
+	switch p.Op {
+	case "PIPES_OWNED":
+		valid = o.prepared && o.attempted("PREPARE", 0) && p.StartNS == o.T && p.CleanupNS == o.C
+	case "REGISTERED":
+		valid = o.started && o.attempted("STARTED", 0)
+	case "READY":
+		valid = o.regAck && o.attempted("REGISTERED_ACK", 0)
+	case "BURST_ALLOWED":
+		key = fmt.Sprintf("BURST_ALLOWED/%d", p.I)
+		valid = o.outstanding == p.I && !o.written && o.terminal == "" && o.attempted("BURST", p.I)
+	case "DONE":
+		key = fmt.Sprintf("DONE/%d", p.I)
+		valid = o.outstanding == p.I && o.written && o.terminal == "" && o.attempted("WRITTEN", p.I)
+	case "RELEASE_SENT":
+		valid = o.terminal == "RELEASE_REQUEST" && o.attempted("RELEASE_REQUEST", 0)
+	case "SETTLED":
+		valid = o.terminal == "RELEASE_REQUEST" && o.sourceQueued && o.attempted("SOURCE_CLOSED", 0) && o.isSet("RELEASE_SENT") && o.sourceMask.Acquired == 127 && o.sourceMask.Closed == 127 && o.sourceMask.CloseError == 0 && o.sourceMask.Open == 0
+	}
+	if compositionWorkOp(p.Op) && (workErr != nil || o.workStopped || o.fault != nil || o.terminal != "") {
+		valid = false
+	}
+	c := o.cells[key]
+	if !valid || c == nil || o.isSet(key) {
+		return fmt.Errorf("out-of-state %s", p.Op)
+	}
+	c.value = p
+	close(c.ready)
+	return nil
+}
+
+// Call with mu held; attempts are monotone and bounded by the wire budget.
+func (o *compositionChild) attempted(op string, i int) bool {
+	for _, s := range o.sends {
+		if s.Op == op && s.I == i {
+			return true
+		}
+	}
+	return false
+}
+
+// Call with mu held; cells are single-assignment.
+func (o *compositionChild) isSet(key string) bool {
+	select {
+	case <-o.cells[key].ready:
+		return true
+	default:
+		return false
+	}
+}
+
+func (o *compositionChild) await(key string, deadline int64) (compositionPacket, error) {
+	d, err := compositionRemaining(deadline)
+	if err != nil {
+		return compositionPacket{}, err
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	failed := o.failed
+	if deadline == o.C {
+		failed = o.fatal
+	}
+	select {
+	case <-o.cells[key].ready:
+		o.mu.Lock()
+		p := o.cells[key].value
+		o.mu.Unlock()
+		return p, nil
+	case <-failed:
+		o.mu.Lock()
+		err = o.fault
+		o.mu.Unlock()
+		if err == nil {
+			err = context.DeadlineExceeded
+		}
+		return compositionPacket{}, err
+	case <-timer.C:
+		return compositionPacket{}, context.DeadlineExceeded
+	}
+}
+
+func (o *compositionChild) acquirePipePair(i int) error {
+	if i < 0 || i > 4 || i%2 != 0 || o.handles[i].acquired || o.handles[i+1].acquired {
+		return fmt.Errorf("duplicate/invalid pipe acquisition")
+	}
+	if err := o.work(); err != nil {
+		return err
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	o.handles[i] = compositionFD{file: r, fd: int(r.Fd()), acquired: true}
+	o.handles[i+1] = compositionFD{file: w, fd: int(w.Fd()), acquired: true}
+	return nil
+}
+
+func (o *compositionChild) pipes() error {
+	for i := 0; i < 6; i += 2 {
+		if err := o.acquirePipePair(i); err != nil {
+			return err
+		}
+	}
+	seen := make(map[[2]uint64]bool)
+	for i := 0; i < 6; i += 2 {
+		var a, b unix.Stat_t
+		if err := unix.Fstat(o.handles[i].fd, &a); err != nil {
+			return err
+		}
+		if err := unix.Fstat(o.handles[i+1].fd, &b); err != nil {
+			return err
+		}
+		key := [2]uint64{uint64(a.Dev), a.Ino}
+		if a.Mode&unix.S_IFMT != unix.S_IFIFO || b.Mode&unix.S_IFMT != unix.S_IFIFO || a.Dev != b.Dev || a.Ino != b.Ino || seen[key] {
+			return fmt.Errorf("invalid pipe identity")
+		}
+		seen[key] = true
+	}
+	for i := 0; i < 6; i++ {
+		if err := unix.SetNonblock(o.handles[i].fd, i == 1 || i == 2 || i == 4); err != nil {
+			return err
+		}
+	}
+	for i := 0; i < 6; i++ {
+		flags, err := unix.FcntlInt(uintptr(o.handles[i].fd), unix.F_GETFL, 0)
+		if err != nil {
+			return err
+		}
+		desc, err := unix.FcntlInt(uintptr(o.handles[i].fd), unix.F_GETFD, 0)
+		if err != nil {
+			return err
+		}
+		mode := unix.O_RDONLY
+		if i%2 == 1 {
+			mode = unix.O_WRONLY
+		}
+		parent := i == 1 || i == 2 || i == 4
+		if flags&unix.O_ACCMODE != mode || (flags&unix.O_NONBLOCK != 0) != parent || desc&unix.FD_CLOEXEC == 0 {
+			return fmt.Errorf("unexpected pipe flags at bit %d", 1<<i)
+		}
+	}
+	return nil
+}
+
+func (o *compositionChild) launch(cmd *exec.Cmd) error {
+	o.mu.Lock()
+	if o.launchAttempted || o.terminal != "" {
+		o.mu.Unlock()
+		return fmt.Errorf("one child launch only")
+	}
+	o.launchAttempted = true
+	o.mu.Unlock()
+	if len(cmd.ExtraFiles) != 0 || cmd.Cancel != nil || cmd.SysProcAttr != nil || cmd.Stdin != nil || cmd.Stdout != nil || cmd.Stderr != nil {
+		return fmt.Errorf("unexpected child wiring/cancellation")
+	}
+	if err := o.work(); err != nil {
+		return err
+	}
+	if err := o.pipes(); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	o.prepared = true
+	o.mu.Unlock()
+	if err := o.send(compositionPacket{Op: "PREPARE", Bursts: o.bursts}, []int{o.handles[1].fd, o.handles[2].fd, o.handles[4].fd}, o.T); err != nil {
+		return err
+	}
+	if _, err := o.await("PIPES_OWNED", o.T); err != nil {
+		return err
+	}
+	if err := o.work(); err != nil {
+		return err
+	}
+	if err := errors.Join(o.handles[2].close(o.C), o.handles[4].close(o.C)); err != nil {
+		return err
+	}
+	cmd.Stdin = o.handles[0].file
+	cmd.Stdout = o.handles[3].file
+	cmd.Stderr = o.handles[5].file
+	pidfd := -1
+	cmd.SysProcAttr = &syscall.SysProcAttr{PidFD: &pidfd}
+	o.cmd = cmd
+	if err := o.work(); err != nil {
+		return err
+	}
+	o.startAttempted = true
+	startErr := cmd.Start()
+	var started *compositionSend
+	if startErr == nil {
+		if pidfd >= 0 {
+			o.handles[6] = compositionFD{fd: pidfd, acquired: true}
+		}
+		o.mu.Lock()
+		o.started = true
+		o.mu.Unlock()
+		// Reserve FIFO position without tuple IO, then launch the real waiter.
+		started = o.enqueue(compositionPacket{Op: "STARTED"}, []int{pidfd}, o.C, true)
+		go o.wait()
+	}
+	closeErr := errors.Join(o.handles[0].close(o.C), o.handles[3].close(o.C), o.handles[5].close(o.C))
+	if startErr != nil {
+		return errors.Join(startErr, closeErr)
+	}
+	target, err := compositionTarget(cmd.Process.Pid)
+	if pidfd < 0 {
+		err = errors.Join(err, fmt.Errorf("successful Start without captured pidfd"))
+	}
+	o.target = target
+	started.packet = compositionPacket{Op: "STARTED", PID: cmd.Process.Pid, Birth: target.StartTicks, Cgroup: target.CgroupID, MountNS: target.MountNS}
+	started.buildErr = err
+	close(started.ready)
+	if err != nil || closeErr != nil {
+		o.fail(errors.Join(err, closeErr))
+		return errors.Join(err, closeErr)
+	}
+	if err = o.sent(started); err != nil {
+		return err
+	}
+	if _, err = o.await("REGISTERED", o.T); err != nil {
+		return err
+	}
+	if err = o.handles[6].close(o.C); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	o.regAck = true
+	o.mu.Unlock()
+	if err = o.send(compositionPacket{Op: "REGISTERED_ACK"}, nil, o.T); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	o.registrationComplete = true
+	o.mu.Unlock()
+	if _, err = o.await("READY", o.T); err != nil {
+		return err
+	}
+	return o.work()
+}
+
+func (o *compositionChild) wait() {
+	if o.waitGate != nil {
+		<-o.waitGate
+	}
+	err := o.cmd.Wait() // The only actual Wait call, on every successful Start.
+	p := compositionPacket{Op: "WAITED", PID: o.cmd.Process.Pid, Result: "error", Code: -1}
+	if err == nil {
+		p.Result = "ok"
+		p.Code = 0
+	} else if state := o.cmd.ProcessState; state != nil {
+		if ws, ok := state.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			p.Result = "signal"
+			p.Signal = int(ws.Signal())
+		} else if state.ExitCode() > 0 && state.ExitCode() <= 255 {
+			p.Result = "exit"
+			p.Code = state.ExitCode()
+		}
+	}
+	if p.Result == "error" {
+		var errno syscall.Errno
+		if errors.As(err, &errno) && errno <= 4095 {
+			p.Errno = int(errno)
+		}
+	}
+	o.mu.Lock()
+	o.waitErr = err
+	o.waitPacket = p
+	terminal := o.terminal
+	o.mu.Unlock()
+	close(o.waitDone) // Local result publication never waits for cleanup or TX.
+	if terminal != "RELEASE_REQUEST" {
+		o.fail(fmt.Errorf("target exited before release: %w", err))
+	}
+	sendErr := o.send(p, nil, o.C)
+	o.mu.Lock()
+	o.waitSendErr = sendErr
+	o.mu.Unlock()
+	close(o.waitSent)
+}
+
+// Fixed command, one raw attempt; shared with the real-pipe EAGAIN control.
+func compositionBurstWrite(fd, i int) (compositionPacket, error) {
+	n, err := unix.Write(fd, []byte("8\n"))
+	p := compositionPacket{Op: "WRITTEN", I: i, N: n, Result: "full"}
+	if err != nil {
+		p.N = -1
+		p.Result = "uncertain"
+		var errno syscall.Errno
+		if errors.As(err, &errno) && errno > 0 && errno <= 4095 {
+			p.Result = "error"
+			p.Errno = int(errno)
+		}
+	} else if n != 2 {
+		p.Result = "short"
+	}
+	return p, err
+}
+
+func (o *compositionChild) burst() error {
+	if err := o.work(); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	if !o.regAck || !o.isSet("READY") || o.outstanding != 0 || o.completed >= o.bursts {
+		o.mu.Unlock()
+		return fmt.Errorf("invalid burst state")
+	}
+	i := o.completed + 1
+	o.outstanding = i
+	o.written = false
+	o.mu.Unlock()
+	if err := o.send(compositionPacket{Op: "BURST", I: i}, nil, o.T); err != nil {
+		return err
+	}
+	if _, err := o.await(fmt.Sprintf("BURST_ALLOWED/%d", i), o.T); err != nil {
+		return err
+	}
+	if err := o.work(); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	o.writes[i-1] = compositionPacket{Op: "WRITTEN", I: i, Result: "uncertain", N: -1}
+	o.mu.Unlock()
+	if err := o.work(); err != nil {
+		return err
+	}
+	p, err := compositionBurstWrite(o.handles[1].fd, i)
+	o.mu.Lock()
+	o.writes[i-1] = p
+	o.written = p.Result == "full"
+	o.mu.Unlock()
+	sendErr := o.send(p, nil, o.C)
+	if p.Result != "full" {
+		err = errors.Join(err, fmt.Errorf("burst write %s n=%d errno=%d", p.Result, p.N, p.Errno))
+		o.fail(err)
+	}
+	if err = errors.Join(err, sendErr); err != nil {
+		return err
+	}
+	if _, err = o.await(fmt.Sprintf("DONE/%d", i), o.T); err != nil {
+		return err
+	}
+	o.mu.Lock()
+	o.completed = i
+	o.outstanding = 0
+	o.mu.Unlock()
+	return nil
+}
+
+func (o *compositionChild) closeSources() compositionPacket {
+	p := compositionPacket{Op: "SOURCE_CLOSED"}
+	for i := range o.handles {
+		h := &o.handles[i]
+		if !h.acquired {
+			continue
+		}
+		bit := 1 << i
+		p.Acquired |= bit
+		_ = h.close(o.C)
+		if !h.attempted {
+			p.Open |= bit
+		} else if h.err != nil {
+			p.CloseError |= bit
+		} else {
+			p.Closed |= bit
+		}
+	}
+	return p
+}
+
+// Only compositionFixture.cleanup calls this after its real native retirement.
+func (o *compositionChild) finish(nativeErr error) error {
+	_, deadlineErr := compositionRemaining(o.C)
+	o.mu.Lock()
+	if o.terminal != "" {
+		o.mu.Unlock()
+		return fmt.Errorf("duplicate cleanup terminal")
+	}
+	err := errors.Join(nativeErr, o.fault)
+	for i := range o.handles {
+		err = errors.Join(err, o.handles[i].err)
+	}
+	if !o.registrationComplete || o.outstanding != 0 {
+		err = errors.Join(err, fmt.Errorf("registration/burst incomplete"))
+	}
+	err = errors.Join(err, deadlineErr)
+	p := compositionPacket{Op: "RELEASE_REQUEST"}
+	if err != nil {
+		p.Op = "HOLD"
+		p.Reason = "native_cleanup"
+		if nativeErr == nil {
+			p.Reason = "source_io"
+		}
+	}
+	o.terminal = p.Op
+	o.mu.Unlock()
+	var terminalErr error
+	if o.ioStarted {
+		terminalErr = o.send(p, nil, o.C)
+	} else {
+		terminalErr = fmt.Errorf("transport not started")
+	}
+	if p.Op == "RELEASE_REQUEST" && terminalErr == nil {
+		released, e := o.await("RELEASE_SENT", o.C)
+		terminalErr = errors.Join(terminalErr, e)
+		if e == nil && released.Result != "full" {
+			terminalErr = errors.Join(terminalErr, fmt.Errorf("exit write %s", released.Result))
+		}
+	}
+	closed := o.closeSources()
+	o.mu.Lock()
+	o.sourceMask = closed
+	o.sourceQueued = true
+	o.mu.Unlock()
+	var closeErr error
+	if o.ioStarted {
+		closeErr = o.send(closed, nil, o.C)
+	}
+	if closed.CloseError != 0 || closed.Open != 0 {
+		closeErr = errors.Join(closeErr, fmt.Errorf("source masks %+v", closed))
+	}
+	if p.Op == "RELEASE_REQUEST" && terminalErr == nil && closeErr == nil {
+		_, terminalErr = o.await("SETTLED", o.C)
+		if terminalErr == nil {
+			d, e := compositionRemaining(o.C)
+			if e != nil {
+				terminalErr = e
+			} else {
+				timer := time.NewTimer(d)
+				select {
+				case <-o.waitSent:
+					o.mu.Lock()
+					terminalErr = errors.Join(o.waitErr, o.waitSendErr, o.fault)
+					o.mu.Unlock()
+				case <-timer.C:
+					terminalErr = context.DeadlineExceeded
+				}
+				timer.Stop()
+			}
+		}
+	}
+	close(o.stop)
+	// Shutdown only wakes our control IO; it is never a target signal or exit.
+	if !o.controlOwned {
+		return errors.Join(err, terminalErr, closeErr)
+	}
+	if _, e := compositionRemaining(o.C); e == nil {
+		if o.ioStarted {
+			o.controlCloseErr = unix.Shutdown(o.fd, unix.SHUT_RDWR)
+			d, e := compositionRemaining(o.C)
+			if e == nil {
+				timer := time.NewTimer(d)
+				select {
+				case <-o.txDone:
+				case <-timer.C:
+					e = context.DeadlineExceeded
+				}
+				if e == nil {
+					select {
+					case <-o.rxDone:
+					case <-timer.C:
+						e = context.DeadlineExceeded
+					}
+				}
+				timer.Stop()
+			}
+			if e != nil {
+				o.controlCloseErr = errors.Join(o.controlCloseErr, e)
+			} else {
+				o.controlCloseErr = errors.Join(o.controlCloseErr, unix.Close(o.fd))
+			}
+		} else {
+			o.controlCloseErr = unix.Close(o.fd)
+		}
+	} else {
+		o.controlCloseErr = e
+	}
+	return errors.Join(err, terminalErr, closeErr, o.controlCloseErr)
+}

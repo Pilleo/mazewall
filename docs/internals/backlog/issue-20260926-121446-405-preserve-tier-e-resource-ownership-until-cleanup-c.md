@@ -25,6 +25,13 @@ target_files:
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/daemon/TierETargetRegistrationTest.kt"
   - "profiler/src/test/kotlin/io/mazewall/profiler/tierE/daemon/TierETerminalReportFileSinkTest.kt"
   - "docs/internals/designs/profiler/tier-e-split-privilege-deployment.md"
+   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierEProfilerSession.kt"
+   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/TierERecoveryReader.kt"
+   - "profiler/src/main/kotlin/io/mazewall/profiler/internal/attribution/CoverageRecoveryScanner.kt"
+   - "profiler/src/main/kotlin/io/mazewall/profiler/tierE/engine/TierEbpfEngine.kt"
+   - "profiler/src/test/kotlin/io/mazewall/profiler/attribution/TierERecoveryReaderTest.kt"
+   - "profiler/src/test/kotlin/io/mazewall/profiler/attribution/TierECollectorRuntimeTest.kt"
+   - "profiler/src/test/kotlin/io/mazewall/profiler/attribution/TierECollectorServiceTest.kt"
 target_symbols:
   - "TierEDaemonService"
   - "TierECollectorRuntime"
@@ -156,6 +163,49 @@ report-only evidence remains `policy_eligibility=false`.
 ## Related work and boundaries
 
 This is a residual cleanup-ownership gap after [bounded Tier E lifecycle](resolved/issue-20260910-000105-bound-tier-e-retention-and-lifecycle.md), distinct from [collector integration and polling qualification](issue-20260918-210822-014-integrate-a-production-owned-tier-e-collector-loop.md). Preserve the producer-closure evidence contract and polling defaults. Read `../designs/core/notification-liveness-contract.md` before implementation. Declare affected test files in the task scope before execution.
+
+---
+## Repository-review expansion — 2026-11-04
+
+[TE-05](../reviews/2026-11-04-repository-review-findings.md#te-05) follows failed retirement
+through daemon/runtime/loop: clearing active state and marking closed before fallible finish
+defeats the ring reader's correct retained-unmap owner. Require a reachable closing owner,
+truthful incomplete terminal, independent cleanup and no replacement acquisition.
+[TE-06](../reviews/2026-11-04-repository-review-findings.md#te-06) adds a distinct end-to-end
+deadline hole: runtime finish calls metrics under the timed-out poller's monitor after bounded
+join. Test runtime finish with interrupt-resistant held poll, returning bounded incomplete
+evidence before releasing it, then exact retry/retirement. A service-only interruptible-latch
+test is insufficient. These source-confirmed cases extend Plan A A1; no native fault run here.
+
+## Recovery-reader physical-retirement follow-up — 2026-11-05
+
+[Recursive review D-01](../reviews/2026-11-05-state-complexity-review.md)
+adds the independent recovery map reader. `TierERecoveryReader.kt:38–42` returns
+one Boolean for both physical exit and scan health (`!thread.isAlive && !failed`).
+`TierEProfilerSession.kt:693–705,1098–1110` forgets the reader/scanner and releases
+queue/source ownership even when false. The scanner can still hold the map FD
+captured at `TierEbpfEngine.kt:788–790` and use it at `:799–835` after retirement
+closes it at `:1151`. Actual EBADF/FD reuse was not runtime-reproduced here.
+
+- Distinguish `Retired(scanHealth)` from `StillRunning(readerOwner)` stop outcomes.
+  Retain the live reader, queue reservation and source/map on timeout or interrupted
+  join; do not close/recycle its map, perform an exclusive final scan or permit
+  replacement while it can issue map syscalls.
+- Failed-but-retired scanning remains evidence-incomplete but may release physical
+  resources. Join/interrupt/map I/O remain effects; a pure release decision must
+  not conflate evidence health with liveness.
+- Deterministically hold an interrupt-resistant scan after resource acquisition.
+  Require bounded incomplete delivery and retained ownership before release, then
+  actual join and exactly-once outstanding cleanup. Include successful exit,
+  failed-but-dead exit, interrupted join and first cleanup failure.
+- Exercise the session/runtime boundary, not only the reader outcome. Preserve
+  the existing refusal to final-scan without stop proof and existing collector
+  timeout/unmap controls. Actual BPF FD lifetime still needs native qualification;
+  host checks and the implementation completion gate remain required.
+
+This extends the same physical-ownership issue, not the resolved retention work.
+Do not make bounded result delivery wait indefinitely for retirement or let a
+replacement hide outstanding ownership.
 
 ---
 <!-- id: issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c  file: issue-20260926-121446-405-preserve-tier-e-resource-ownership-until-cleanup-c.md -->

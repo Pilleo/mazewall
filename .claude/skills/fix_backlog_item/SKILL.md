@@ -8,7 +8,7 @@ description: >
 # Fix backlog item
 
 1. Read the issue in `docs/internals/backlog/`. Answer its questions from the repo before asking a human.
-2. `./scripts/adkw blast-radius <Symbol>`. If Codanna is not `READY`, record degraded evidence and continue.
+2. `./scripts/adkw blast-radius <Symbol>`. If it is not `READY`, record degraded evidence and continue.
 3. Write a failing test. Do not implement until it fails for the right reason.
 4. Implement the smallest fix. Do not swallow errors or disable tests to get green.
 5. Run the relevant project test command.

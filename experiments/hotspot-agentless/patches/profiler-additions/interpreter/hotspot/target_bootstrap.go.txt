@@ -1,0 +1,81 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package hotspot
+
+import (
+	"encoding/binary"
+	"fmt"
+	"io"
+
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+)
+
+func (d *hotspotInstance) CheckHotSpotEpochBootstrap(target libpf.HotSpotEpochTarget) error {
+	if err := target.Validate(); err != nil {
+		return fmt.Errorf("invalid HotSpot bootstrap target: %w", err)
+	}
+	if d.epochTarget != target {
+		return fmt.Errorf("HotSpot bootstrap target mismatch")
+	}
+	return d.checkHotSpotBootstrapReady()
+}
+
+func (d *hotspotInstance) ConfigureHotSpotObservedBootstrap(pid libpf.PID) error {
+	if pid == 0 || d.observedBootstrapPID != 0 || d.epochTarget.PID != 0 || d.mainMappingsInserted {
+		return fmt.Errorf("invalid HotSpot observed bootstrap configuration")
+	}
+	d.observedBootstrapPID = pid
+	return nil
+}
+
+func (d *hotspotInstance) CheckHotSpotObservedBootstrap(pid libpf.PID) error {
+	if pid == 0 || d.observedBootstrapPID != pid || d.epochTarget.PID != 0 {
+		return fmt.Errorf("HotSpot observed bootstrap target mismatch")
+	}
+	return d.checkHotSpotBootstrapReady()
+}
+
+func (d *hotspotInstance) strictBootstrap() bool {
+	return d.epochTarget.PID != 0 || d.observedBootstrapPID != 0
+}
+
+func (d *hotspotInstance) checkHotSpotBootstrapReady() error {
+	if d.d == nil {
+		return fmt.Errorf("HotSpot bootstrap VM data incomplete")
+	}
+	vm := d.d.Get()
+	if vm == nil {
+		return fmt.Errorf("HotSpot bootstrap VM data incomplete")
+	}
+	if vm.initReadErr != nil {
+		return fmt.Errorf("HotSpot bootstrap initialization: %w", vm.initReadErr)
+	}
+	if vm.err != nil {
+		return fmt.Errorf("HotSpot bootstrap VM data: %w", vm.err)
+	}
+	if !d.mainMappingsInserted || len(d.heapAreas) == 0 {
+		return fmt.Errorf("HotSpot bootstrap mappings incomplete")
+	}
+	for _, area := range d.heapAreas {
+		if area.start == 0 || area.end <= area.start || area.codeStart < area.start || area.codeStart >= area.end {
+			return fmt.Errorf("invalid HotSpot bootstrap heap area")
+		}
+	}
+	return nil
+}
+
+func (d *hotspotInstance) bootstrapPointer(addr libpf.Address) (libpf.Address, error) {
+	if !d.strictBootstrap() {
+		return d.rm.Ptr(addr), nil
+	}
+	var buf [8]byte
+	n, err := d.rm.ReadAt(buf[:], int64(addr))
+	if err != nil {
+		return 0, err
+	}
+	if n != len(buf) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	return libpf.Address(binary.LittleEndian.Uint64(buf[:])) - d.rm.Bias, nil
+}

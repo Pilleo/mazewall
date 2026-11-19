@@ -1,0 +1,1875 @@
+package tracer
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"reflect"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+	"unsafe"
+
+	cebpf "github.com/cilium/ebpf"
+	"github.com/cilium/ebpf/asm"
+	"github.com/cilium/ebpf/btf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/support"
+	"golang.org/x/sys/unix"
+)
+
+type kwPreparationPhase uint8
+const (
+	kwFactoryPrepared kwPreparationPhase = iota
+	kwFactoryAcquiring
+	kwFactoryHandedOff
+	kwFactoryRejected
+	kwFactoryRetired
+)
+
+type preparedKobjectWitness struct {
+	mu sync.Mutex
+	graphBodyClaimed bool
+	startClaim *kwFactoryStartClaim
+	phase kwPreparationPhase
+	scope *periodiccaller.OwnedScope
+	binding libpf.AuxiliaryBinding
+	spec *cebpf.CollectionSpec
+	err error
+	stopRequested bool
+	transport *kwUnjoinedSocket
+	reader *kwSocketReader
+	objects *kwNativeObjects
+	epoch *kwNativeEpoch
+	component *kobjectWitness
+}
+
+type kwFactoryLowLevelCalls struct {
+	socket kwSocketCalls
+	objects kwObjectCalls
+	attachment kwAttachmentCalls
+	kernelBTF func() (*btf.Spec, error)
+	control *kwFactoryControlCalls
+	perf *kwPerfEventCalls
+}
+
+type kwFactoryControlCalls struct {
+	info kwObjectInfoCall
+	mmap func(int, int64, int, int, int) ([]byte, error)
+	munmap func([]byte) error
+	pageSize int
+}
+
+func kwDefaultFactoryLowLevelCalls() kwFactoryLowLevelCalls {
+	return kwFactoryLowLevelCalls{socket: kwDefaultSocketCalls(), objects: kwDefaultObjectCalls(), attachment: kwDefaultAttachmentCalls(), kernelBTF: btf.LoadKernelSpec,
+		control: &kwFactoryControlCalls{info: kwNativeObjectInfoCall, mmap: unix.Mmap, munmap: unix.Munmap, pageSize: os.Getpagesize()},
+		perf: &kwPerfEventCalls{readFile: os.ReadFile, perfOpen: func(a *unix.PerfEventAttr, symbol []byte, pid, cpu, group, flags int) (int, error) { fd, err := unix.PerfEventOpen(a, pid, cpu, group, flags); runtime.KeepAlive(symbol); runtime.KeepAlive(a); return fd, err }, closeFD: unix.Close}}
+}
+
+func kwFactoryControlMap(fd int64, raw kwFactoryControlCalls, eligible func() error) (*kwControlMapping, error) {
+	if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+	mmap := raw.mmap
+	if mmap != nil { mmap = func(fd int, offset int64, length, prot, flags int) ([]byte, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+		b, err := raw.mmap(fd, offset, length, prot, flags); return b, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	gate, err := mapKobjectControlWithCalls(fd, raw.info, mmap, raw.munmap, raw.pageSize)
+	return gate, errors.Join(err, kwAcquisitionEligible(eligible))
+}
+
+func kwFactoryPerfEvent(ctx context.Context, hook kwHook, direction kwDirection, raw kwPerfEventCalls, eligible func() error) (*kwProbeFD, error) {
+	calls := raw
+	if raw.readFile != nil { calls.readFile = func(path string) ([]byte, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+		b, err := raw.readFile(path); return b, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.perfOpen != nil { calls.perfOpen = func(a *unix.PerfEventAttr, symbol []byte, pid, cpu, group, flags int) (int, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return -1, err }
+		fd, err := raw.perfOpen(a, symbol, pid, cpu, group, flags); return fd, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	probe, err := openKobjectPerfEventWithCalls(ctx, hook, direction, calls)
+	return probe, errors.Join(err, kwAcquisitionEligible(eligible))
+}
+
+// factoryGraphStateLocked checks only prepared-owned state; it never calls Scope or Context.
+func (p *preparedKobjectWitness) factoryGraphStateLocked(c *kwFactoryStartClaim) error {
+	if c == nil || p.startClaim != c || p.scope == nil || p.phase != kwFactoryAcquiring || p.stopRequested || c.phase != kwFactoryClaimPending || c.enrollment != kwEnrollmentOwned || c.pinPhase != kwFactoryPinCleanupOwned || c.pin == nil || c.acquisition != kwAcquisitionRunning || c.launchPhase != kwLaunchStarted { return errors.New("factory acquisition authority lost") }
+	return p.err
+}
+
+type kwFactoryGraphSnapshot struct {
+	scope *periodiccaller.OwnedScope
+	first, worker context.Context
+	binding libpf.AuxiliaryBinding
+	deadline time.Time
+	hasDeadline bool
+	pin *periodiccaller.OwnedOperation
+}
+
+func (p *preparedKobjectWitness) factoryGraphSnapshotLocked(c *kwFactoryStartClaim) kwFactoryGraphSnapshot {
+	return kwFactoryGraphSnapshot{p.scope, c.first, c.worker, c.binding, c.deadline, c.hasDeadline, c.pin}
+}
+
+func (s kwFactoryGraphSnapshot) matchesLocked(p *preparedKobjectWitness, c *kwFactoryStartClaim) bool {
+	return p.scope == s.scope && reflect.ValueOf(c.first) == reflect.ValueOf(s.first) && reflect.ValueOf(c.worker) == reflect.ValueOf(s.worker) && reflect.DeepEqual(c.binding, s.binding) && c.deadline == s.deadline && c.hasDeadline == s.hasDeadline && c.pin == s.pin
+}
+
+// factoryGraphEligibilitySnapshot queries Scope and Context without holding p.mu.
+func (p *preparedKobjectWitness) factoryGraphEligibilitySnapshot(c *kwFactoryStartClaim) (kwFactoryGraphSnapshot, error) {
+	if p == nil || c == nil { return kwFactoryGraphSnapshot{}, errors.New("missing factory acquisition authority") }
+	p.mu.Lock(); stateErr := p.factoryGraphStateLocked(c)
+	if stateErr != nil { p.mu.Unlock(); return kwFactoryGraphSnapshot{}, stateErr }
+	snapshot := p.factoryGraphSnapshotLocked(c)
+	p.mu.Unlock()
+	var deadlineErr error; if snapshot.hasDeadline && !time.Now().Before(snapshot.deadline) { deadlineErr = context.DeadlineExceeded }
+	actual, bindingErr := snapshot.scope.AuxiliaryBinding()
+	externalErr := errors.Join(kwEpochScopeError(snapshot.first), deadlineErr, kwEpochScopeError(snapshot.worker), kwEpochScopeError(snapshot.scope.Context()), snapshot.scope.Failure(), bindingErr, libpf.ValidateAuxiliaryBinding(snapshot.binding, actual))
+	p.mu.Lock(); stateErr = p.factoryGraphStateLocked(c)
+	if !snapshot.matchesLocked(p, c) { stateErr = errors.Join(stateErr, errors.New("factory acquisition snapshot changed")) }
+	p.mu.Unlock()
+	return snapshot, errors.Join(externalErr, stateErr)
+}
+
+func (p *preparedKobjectWitness) factoryGraphEligibility(c *kwFactoryStartClaim) error { _, err := p.factoryGraphEligibilitySnapshot(c); return err }
+
+// Called only by the published, owned acquisition job; it never settles that job.
+func (p *preparedKobjectWitness) acquireFactoryGraph(c *kwFactoryStartClaim, calls *kwFactoryLowLevelCalls) (result error) {
+	if p == nil || c == nil || calls == nil { return errors.New("missing factory acquisition input") }
+	snapshot, err := p.factoryGraphEligibilitySnapshot(c); if err != nil { return err }
+	p.mu.Lock()
+	if p.startClaim != c || p.scope == nil || p.spec == nil || p.graphBodyClaimed || c.phase != kwFactoryClaimPending || c.enrollment != kwEnrollmentOwned || c.pinPhase != kwFactoryPinCleanupOwned || c.pin == nil || c.acquisition != kwAcquisitionRunning || c.acquisitionDone == nil || c.launchPhase != kwLaunchStarted || c.launchPublication == nil || p.transport != nil || p.reader != nil || p.objects != nil || p.epoch != nil || p.component != nil { p.mu.Unlock(); return errors.New("factory graph acquisition unavailable") }
+	select { case <-c.launchPublication: default: p.mu.Unlock(); return errors.New("factory launch not published") }
+	if !snapshot.matchesLocked(p, c) { p.mu.Unlock(); return errors.New("factory acquisition snapshot changed") }
+	if err := p.factoryGraphStateLocked(c); err != nil { p.mu.Unlock(); return err }
+	p.graphBodyClaimed = true; scope, spec := p.scope, p.spec; p.mu.Unlock()
+	defer func() { if result != nil { result = errors.Join(result, p.requestFactoryCleanup(c)) } }()
+	eligible := func() error { return p.factoryGraphEligibility(c) }
+	if err := eligible(); err != nil { return err }
+	transport, err := acquireKobjectSocketWithCalls(c.first, c.binding.Generation, kwGuardAcquisitionCalls(calls.socket, eligible))
+	if transport != nil { p.mu.Lock(); p.transport = transport; p.mu.Unlock() }
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if transport == nil { return errors.New("factory socket returned no owner") }
+	if err := eligible(); err != nil { return err }
+	err = transport.restoreRuntimeCalls(calls.socket)
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if err := eligible(); err != nil { return err }
+	reader, err := newKobjectSocketReader(c.first, c.worker, transport)
+	if reader != nil { p.mu.Lock(); p.transport = nil; p.reader = reader; p.mu.Unlock() }
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if reader == nil { return errors.New("factory reader returned no owner") }
+	binding, err := reader.Binding()
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if binding.cookie == 0 || binding.portID == 0 || binding.generation != c.binding.Generation { return errors.New("factory reader binding invalid") }
+	if calls.kernelBTF == nil { return errors.New("missing factory kernel BTF loader") }
+	if err := eligible(); err != nil { return err }
+	kernel, err := calls.kernelBTF()
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if kernel == nil { return errors.New("factory kernel BTF missing") }
+	if err := eligible(); err != nil { return err }
+	objectCalls := calls.objects
+	if objectCalls.mapControl != nil && calls.control != nil { objectCalls.mapControl = func(fd int64) (*kwControlMapping, error) { return kwFactoryControlMap(fd, *calls.control, eligible) } }
+	objects, err := loadKobjectNativeObjectsWithCalls(c.first, spec, kernel, binding, kwGuardObjectCalls(objectCalls, eligible))
+	if objects != nil { p.mu.Lock(); p.objects = objects; p.mu.Unlock() }
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if objects == nil { return errors.New("factory objects returned no owner") }
+	if err := eligible(); err != nil { return err }
+	attachmentCalls := calls.attachment
+	if attachmentCalls.perf != nil && calls.perf != nil { attachmentCalls.perf = func(ctx context.Context, hook kwHook, direction kwDirection) (*kwProbeFD, error) { return kwFactoryPerfEvent(ctx, hook, direction, *calls.perf, eligible) } }
+	err = attachKobjectNativeObjectsWithCalls(c.first, objects, kernel, kwGuardAttachmentCalls(attachmentCalls, eligible))
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if err := eligible(); err != nil { return err }
+	epoch, err := newKobjectNativeEpoch(c.first, c.worker, objects, binding)
+	if epoch != nil && err == nil { p.mu.Lock(); p.objects = nil; p.epoch = epoch; p.mu.Unlock() }
+	if err := errors.Join(err, eligible()); err != nil { return err }
+	if epoch == nil { return errors.New("factory epoch returned no owner") }
+	if err := eligible(); err != nil { return err }
+	component, err := newKobjectWitness(scope, epoch, reader, c.monitor)
+	if err != nil { return errors.Join(err, eligible()) }
+	if component == nil { return errors.New("factory component returned no owner") }
+	handoffSnapshot, externalErr := p.factoryGraphEligibilitySnapshot(c)
+	p.mu.Lock()
+	p.epoch, p.reader, p.component = nil, nil, component
+	err = errors.Join(externalErr, p.factoryGraphStateLocked(c))
+	if !handoffSnapshot.matchesLocked(p, c) { err = errors.Join(err, errors.New("factory handoff snapshot changed")) }
+	if err == nil { p.phase = kwFactoryHandedOff }
+	p.mu.Unlock()
+	if err != nil { return err }
+	return component.start(c.first)
+}
+
+func kwPreparationBinding(ctx context.Context, scope *periodiccaller.OwnedScope) (libpf.AuxiliaryBinding, error) {
+	if ctx == nil || scope == nil { return libpf.AuxiliaryBinding{}, errors.New("missing witness preparation context or scope") }
+	binding, bindingErr := scope.AuxiliaryBinding()
+	err := errors.Join(kwEpochScopeError(ctx), kwEpochScopeError(scope.Context()), scope.Failure(), bindingErr)
+	if err != nil { return libpf.AuxiliaryBinding{}, err }
+	if binding.Generation == 0 { return libpf.AuxiliaryBinding{}, errors.New("missing witness scope generation") }
+	return binding, nil
+}
+
+func prepareKobjectWitness(ctx context.Context, scope *periodiccaller.OwnedScope) (*preparedKobjectWitness, error) {
+	initial, err := kwPreparationBinding(ctx, scope); if err != nil { return nil, err }
+	spec, loadErr := support.LoadCollectionSpec()
+	current, scopeErr := kwPreparationBinding(ctx, scope)
+	if err := errors.Join(loadErr, scopeErr); err != nil { return nil, err }
+	if err := libpf.ValidateAuxiliaryBinding(initial, current); err != nil { return nil, err }
+	p, err := prepareKobjectWitnessWithSpec(ctx, scope, spec); if err != nil { return nil, err }
+	current, scopeErr = kwPreparationBinding(ctx, scope)
+	if scopeErr != nil { return nil, scopeErr }
+	if err := errors.Join(libpf.ValidateAuxiliaryBinding(initial, p.binding), libpf.ValidateAuxiliaryBinding(initial, current)); err != nil { return nil, err }
+	return p, nil
+}
+
+func kwPrepareInitializerValue(value any, clone bool) (any, error) {
+	switch v := value.(type) {
+	case []byte:
+		if clone { return bytes.Clone(v), nil }; return v, nil
+	case nil, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, uintptr, float32, float64, complex64, complex128, string:
+		return v, nil
+	default:
+		return nil, fmt.Errorf("unsupported mutable witness map initializer %T", value)
+	}
+}
+
+func kwPrepareMapInitializers(spec *cebpf.CollectionSpec, clone bool) error {
+	for name, root := range spec.Maps {
+		seen := make(map[*cebpf.MapSpec]bool)
+		for m := root; m != nil; m = m.InnerMap {
+			if seen[m] { return fmt.Errorf("cyclic witness inner map %s", name) }; seen[m] = true
+			for i := range m.Contents {
+				key, err := kwPrepareInitializerValue(m.Contents[i].Key, clone); if err != nil { return fmt.Errorf("map %s key: %w", name, err) }
+				value, err := kwPrepareInitializerValue(m.Contents[i].Value, clone); if err != nil { return fmt.Errorf("map %s value: %w", name, err) }
+				if clone { m.Contents[i].Key, m.Contents[i].Value = key, value }
+			}
+			if m.InnerMap == m { break }
+		}
+	}
+	return nil
+}
+
+func prepareKobjectWitnessWithSpec(ctx context.Context, scope *periodiccaller.OwnedScope, spec *cebpf.CollectionSpec) (*preparedKobjectWitness, error) {
+	binding, err := kwPreparationBinding(ctx, scope); if err != nil { return nil, err }
+	if spec == nil { return nil, errors.New("missing witness collection") }
+	initializersErr := kwPrepareMapInitializers(spec, false)
+	current, scopeErr := kwPreparationBinding(ctx, scope)
+	if err := errors.Join(initializersErr, scopeErr); err != nil { return nil, err }
+	if err := libpf.ValidateAuxiliaryBinding(binding, current); err != nil { return nil, err }
+	private := spec.Copy()
+	validationErr := kwPrepareMapInitializers(private, true)
+	if validationErr == nil { validationErr = validateKobjectNativeSpec(private) }
+	current, scopeErr = kwPreparationBinding(ctx, scope)
+	if err := errors.Join(validationErr, scopeErr); err != nil { return nil, err }
+	if err := libpf.ValidateAuxiliaryBinding(binding, current); err != nil { return nil, err }
+	return &preparedKobjectWitness{phase: kwFactoryPrepared, scope: scope, binding: binding, spec: private}, nil
+}
+
+type kwEpochReadoutCalls struct {
+	mapInfo func(int64) (kwMapInfo, error)
+	mapElem kwMapElemCall
+	program func(int64) (kwProgramInfo, error)
+	classic func(int64) (kwLinkInfo, error)
+	tracing func(int64) (kwTracingLinkInfo, error)
+	barrier func(context.Context) error
+}
+
+type kwReadoutPhase uint8
+const (
+	kwReadoutIntermediate kwReadoutPhase = iota
+	kwReadoutTerminal
+	kwReadoutCached
+)
+
+func kwUnqueriedReadoutGuards(cause error) [kwHookCount][kwDirectionCount]kwHookGuard {
+	var guards [kwHookCount][kwDirectionCount]kwHookGuard
+	for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ {
+		guards[h][d].availability = kwGuardMissing
+		guards[h][d].err = errors.Join(cause, fmt.Errorf("guard %d/%d not qualified: %w", h, d, errors.ErrUnsupported))
+	} }; return guards
+}
+
+type kwEpochSettleCalls struct {
+	mapInfo func(int64) (kwMapInfo, error)
+	mapElem kwMapElemCall
+	wait func(context.Context, context.Context) error
+}
+
+func kwEpochFirstStopError(ctx context.Context, deadline time.Time, hasDeadline bool) error {
+	if ctx == nil { return nil }; if err := ctx.Err(); err != nil { return err }; if hasDeadline && !time.Now().Before(deadline) { return context.DeadlineExceeded }; return nil
+}
+
+func kwEpochGateSample(o *kwNativeObjects) (uint64, error) {
+	if o == nil { return 0, errors.New("missing epoch owner") }
+	o.mu.Lock(); defer o.mu.Unlock(); defer runtime.KeepAlive(o)
+	g := o.gate; if g == nil { return 0, errors.New("missing epoch gate") }
+	active, err := g.active(); if err != nil { return 0, err }
+	g.mu.Lock(); defer g.mu.Unlock(); defer runtime.KeepAlive(g.bytes)
+	if g.state == kwControlRetired || g.word == nil { return 0, errors.New("epoch gate unavailable") }
+	word := g.sampleWordLocked(); if word&kwControlClosed == 0 { return 0, errors.New("epoch admission is not closed") }
+	return active | (word &^ kwControlClosed), nil
+}
+
+func (e *kwNativeEpoch) Settle(ctx context.Context) error {
+	return e.settleWithCalls(ctx, kwEpochSettleCalls{mapInfo: readKobjectMapInfo, mapElem: kwNativeMapElemCall, wait: func(first, scope context.Context) error {
+		timer := time.NewTimer(time.Millisecond); defer timer.Stop(); select { case <-timer.C: return nil; case <-first.Done(): return first.Err(); case <-scope.Done(): return scope.Err() }
+	}})
+}
+
+// A settled result is only provisional root drain, not native qualification.
+func (e *kwNativeEpoch) settleWithCalls(ctx context.Context, calls kwEpochSettleCalls) error {
+	if e == nil || ctx == nil { return errors.New("missing epoch or stop context") }
+	e.mu.Lock()
+	if e.operation != kwEpochIdle { e.mu.Unlock(); return errors.New("native epoch operation pending") }
+	if e.phase == kwEpochSettled {
+		err := errors.Join(e.cause, kwEpochScopeError(e.scope), kwEpochFirstStopError(e.firstStop, e.stopDeadline, e.stopHasDeadline)); if err != nil { e.phase = kwEpochQuarantined; e.cause = err }; e.mu.Unlock(); return err
+	}
+	if e.phase != kwEpochClosing || e.terminal { err := errors.Join(e.cause, kwEpochScopeError(e.scope), kwEpochFirstStopError(e.firstStop, e.stopDeadline, e.stopHasDeadline), errors.New("native epoch cannot settle")); e.mu.Unlock(); return err }
+	if calls.mapInfo == nil || calls.mapElem == nil || calls.wait == nil { e.mu.Unlock(); return errors.New("incomplete settle effects") }
+	if e.firstStop == nil { e.firstStop = ctx; e.stopDeadline, e.stopHasDeadline = ctx.Deadline() }
+	first, deadline, hasDeadline, scope, o := e.firstStop, e.stopDeadline, e.stopHasDeadline, e.scope, e.objects
+	e.operation = kwEpochSettleOperation; e.mu.Unlock()
+	eligible := func() error { return errors.Join(kwEpochFirstStopError(first, deadline, hasDeadline), kwEpochScopeError(scope)) }
+	terminal := func() bool { e.mu.Lock(); defer e.mu.Unlock(); return e.terminal }
+	var result error
+	for {
+		if result = eligible(); result != nil { break }; if terminal() { result = errors.New("retirement requested during settle"); break }
+		before, err := kwEpochGateSample(o); if err != nil { result = err; break }; if result = eligible(); result != nil { break }
+		mapInfo := func(fd int64) (kwMapInfo, error) { if err := eligible(); err != nil { return kwMapInfo{}, err }; v, err := calls.mapInfo(fd); return v, errors.Join(err, eligible()) }
+		boundary := func() error { err := eligible(); if terminal() { err = errors.Join(err, errors.New("retirement requested during settle")) }; return err }
+		var blocked, after error
+		mapElem := func(command uintptr, attr *kwMapElemAttr, key, out []byte) syscall.Errno { if err := boundary(); err != nil { blocked = err; return syscall.ECANCELED }; errno := calls.mapElem(command, attr, key, out); after = boundary(); return errno }
+		counts, err := readKobjectCountsWithCalls(o, mapInfo, mapElem); if blocked != nil { err = blocked }; result = errors.Join(err, after, eligible()); if result != nil { break }
+		if err := validateKobjectCounters(kobjectNativeReadout{faults: counts.faults, firstError: counts.firstError}); err != nil { result = err; break }
+		roots, ok := kwSum(counts.stages[kwEnv].attempted, counts.stages[kwRelay].attempted); if !ok || counts.rootReturned > counts.rootStarted { result = errors.New("invalid root counter arithmetic"); break }
+		for _, s := range counts.stages { if _, ok := kwSum(s.succeeded, s.failed, s.skipped, s.active); !ok { result = errors.New("stage counter overflow"); break } }; if result != nil { break }
+		afterGate, err := kwEpochGateSample(o); if err != nil { result = err; break }; if result = eligible(); result != nil { break }
+		stageActive := false; for _, s := range counts.stages { if s.active != 0 { stageActive = true } }
+		if before == 0 && afterGate == 0 && counts.rootStarted == counts.rootReturned && !stageActive {
+			if roots != counts.rootStarted { result = errors.New("root counter mismatch"); break }
+			for _, s := range counts.stages { sum, ok := kwSum(s.succeeded, s.failed, s.skipped, s.active); if !ok || sum != s.attempted { result = errors.New("stage counter mismatch"); break } }; break
+		}
+		if terminal() { result = errors.New("retirement requested during settle"); break }
+		result = calls.wait(first, scope); result = errors.Join(result, eligible()); if result != nil { break }
+	}
+	e.mu.Lock(); result = errors.Join(e.cause, result, eligible()); if e.terminal { result = errors.Join(result, errors.New("native epoch retirement requested during settle")) }
+	if result == nil { e.phase = kwEpochSettled; e.operation = kwEpochIdle; e.mu.Unlock(); return nil }; e.mu.Unlock()
+	o.mu.Lock(); var closeErr error; if o.gate == nil { closeErr = errors.New("native epoch gate unavailable") } else { _, closeErr = o.gate.closeAdmission() }; o.mu.Unlock()
+	e.mu.Lock(); defer e.mu.Unlock(); result = errors.Join(result, closeErr, e.cause, eligible()); if e.terminal { result = errors.Join(result, errors.New("native epoch retirement requested during settle")) }
+	e.phase = kwEpochQuarantined; e.cause = result; e.operation = kwEpochIdle; return result
+}
+
+func (e *kwNativeEpoch) Readout() (kobjectNativeReadout, error) {
+	return e.readoutWithCalls(kwEpochReadoutCalls{mapInfo: readKobjectMapInfo, mapElem: kwNativeMapElemCall, program: readKobjectProgramInfo, classic: readKobjectLinkInfo, tracing: readKobjectTracingLinkInfo, barrier: performKobjectGlobalBarrier})
+}
+
+func kwEpochScopeError(ctx context.Context) error {
+	if ctx == nil { return errors.New("missing native epoch scope") }
+	if err := ctx.Err(); err != nil { return err }
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) { return context.DeadlineExceeded }
+	return nil
+}
+
+func kwMergeGuardIssue(g *kwHookGuard, state kwGuardAvailability, err error, initialized bool) {
+	if !initialized { g.availability = state } else if g.availability == kwGuardAvailable || state == kwGuardMissing { g.availability = state }
+	g.err = errors.Join(g.err, err)
+}
+
+func kwCheckClassicGuardSlotLocked(o *kwNativeObjects, h kwHook, d kwDirection, g *kwHookGuard, classic func(int64) (kwLinkInfo, error), eligible func() error, markAvailable bool) (kwLinkInfo, bool, bool, error) {
+	if err := eligible(); err != nil { return kwLinkInfo{}, false, false, err }
+	slot := o.probes[h][d]; baseline := o.baseline[h][d]
+	if markAvailable { g.availability = kwGuardAvailable }
+	init := markAvailable || g.availability != kwGuardMissing
+	baseErr := fmt.Errorf("guard %d/%d width and lifetime unqualified: %w", h, d, errors.ErrUnsupported)
+	var early kwLinkInfo
+	var queried bool
+	healthy := true
+	if slot.event == nil || slot.event.FD() < 0 {
+		healthy = false
+		kwMergeGuardIssue(g, kwGuardMissing, errors.Join(baseErr, fmt.Errorf("guard %d/%d perf event missing", h, d)), init); init = true
+	} else if slot.event.kind != kwProbePerf {
+		healthy = false
+		kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d perf owner kind", h, d)), init); init = true
+	}
+	if slot.link == nil || slot.link.FD() < 0 {
+		healthy = false
+		kwMergeGuardIssue(g, kwGuardMissing, errors.Join(baseErr, fmt.Errorf("guard %d/%d link missing", h, d)), init); return early, false, false, eligible()
+	}
+	if slot.link.kind != kwProbeLink {
+		healthy = false
+		kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d link owner kind", h, d)), init); init = true
+	}
+	v, err := classic(int64(slot.link.FD()))
+	post := eligible()
+	if err != nil {
+		healthy = false
+		kwMergeGuardIssue(g, kwGuardNativeError, errors.Join(baseErr, fmt.Errorf("guard %d/%d classic query: %w", h, d, err)), init)
+	} else {
+		g.link, early, queried = v, v, true
+		if v.returnedLength < 56 || v.linkType != kwLinkPerfEvent || v.id == 0 || slot.classic.id == 0 || v.id != slot.classic.id || baseline.id == 0 || v.programID != baseline.id || slot.classic.programID != baseline.id || v.perfType != kwPerfKprobe+uint32(d) || v.address == 0 || v.missed != 0 {
+			healthy = false
+			kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d classic metadata mismatch", h, d)), init)
+		} else {
+			g.err = errors.Join(g.err, baseErr)
+		}
+	}
+	return early, queried, healthy, post
+}
+
+func kwCheckProgramGuardSlotLocked(o *kwNativeObjects, h kwHook, d kwDirection, g *kwHookGuard, program func(int64) (kwProgramInfo, error), eligible func() error, earlyFault bool) error {
+	if err := eligible(); err != nil { return err }
+	p := o.programs[h][d]; baseline := o.baseline[h][d]
+	expectedProgram := cebpf.Kprobe; if h > kwHookRelay { expectedProgram = cebpf.Tracing }
+	if !earlyFault { g.availability = kwGuardAvailable }
+	init := true
+	baseErr := fmt.Errorf("guard %d/%d width and lifetime unqualified: %w", h, d, errors.ErrUnsupported)
+	if p == nil || p.FD() < 0 {
+		kwMergeGuardIssue(g, kwGuardMissing, errors.Join(baseErr, fmt.Errorf("guard %d/%d program missing", h, d)), init)
+		return eligible()
+	}
+	v, err := program(int64(p.FD()))
+	post := eligible()
+	if err != nil {
+		kwMergeGuardIssue(g, kwGuardNativeError, errors.Join(baseErr, fmt.Errorf("guard %d/%d program query: %w", h, d, err)), init)
+	} else {
+		g.program = v
+		if v.returnedLength < 216 || v.id == 0 || baseline.id == 0 || v.id != baseline.id || v.programType != baseline.programType || v.programType != uint32(p.Type()) || v.programType != uint32(expectedProgram) || v.recursionMisses != 0 {
+			kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d program metadata mismatch", h, d)), init)
+		} else {
+			g.err = errors.Join(g.err, baseErr)
+		}
+	}
+	return post
+}
+
+func kwCheckTracingGuardSlotLocked(o *kwNativeObjects, h kwHook, d kwDirection, g *kwHookGuard, tracing func(int64) (kwTracingLinkInfo, error), eligible func() error) error {
+	if err := eligible(); err != nil { return err }
+	slot := o.probes[h][d]; baseline := o.baseline[h][d]
+	baseErr := fmt.Errorf("guard %d/%d width and lifetime unqualified: %w", h, d, errors.ErrUnsupported)
+	if slot.link == nil || slot.link.FD() < 0 {
+		kwMergeGuardIssue(g, kwGuardMissing, errors.Join(baseErr, fmt.Errorf("guard %d/%d link missing", h, d)), true)
+		return eligible()
+	}
+	if slot.link.kind != kwProbeLink {
+		kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d link owner kind", h, d)), true)
+	}
+	v, err := tracing(int64(slot.link.FD()))
+	post := eligible()
+	if err != nil {
+		kwMergeGuardIssue(g, kwGuardNativeError, errors.Join(baseErr, fmt.Errorf("guard %d/%d tracing query: %w", h, d, err)), true)
+	} else {
+		g.tracingAttachmentID, g.tracingAttachmentType = v.targetBTFID, v.attachType
+		expectedAttach := cebpf.AttachTraceFEntry; if d == kwExit { expectedAttach = cebpf.AttachTraceFExit }
+		if v.returnedLength < 28 || v.linkType != 2 || v.id == 0 || slot.tracing.id == 0 || v.id != slot.tracing.id || baseline.id == 0 || v.programID != baseline.id || slot.tracing.programID != baseline.id || v.attachType != uint32(expectedAttach) || v.attachType != slot.tracing.attachType || v.targetBTFID == 0 || v.targetBTFID != slot.tracing.targetBTFID || v.targetObjectID != slot.tracing.targetObjectID {
+			kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d tracing metadata mismatch", h, d)), true)
+		} else {
+			g.err = errors.Join(g.err, baseErr)
+		}
+	}
+	return post
+}
+
+func kwRecheckClassicExitSlotLocked(o *kwNativeObjects, h kwHook, g *kwHookGuard, early kwLinkInfo, earlyOK bool, classic func(int64) (kwLinkInfo, error), eligible func() error) error {
+	if err := eligible(); err != nil { return err }
+	slot := o.probes[h][kwExit]; baseline := o.baseline[h][kwExit]
+	baseErr := fmt.Errorf("guard %d/%d width and lifetime unqualified: %w", h, kwExit, errors.ErrUnsupported)
+	if slot.link == nil || slot.link.FD() < 0 {
+		kwMergeGuardIssue(g, kwGuardMissing, errors.Join(baseErr, fmt.Errorf("guard %d/%d exit link missing at recheck", h, kwExit)), true)
+		return eligible()
+	}
+	if slot.link.kind != kwProbeLink {
+		kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d exit link owner kind at recheck", h, kwExit)), true)
+	}
+	// Never overwrite early-captured g.link or its missed count on recheck.
+	recheck, err := classic(int64(slot.link.FD()))
+	post := eligible()
+	if err != nil {
+		kwMergeGuardIssue(g, kwGuardNativeError, errors.Join(baseErr, fmt.Errorf("guard %d/%d exit link recheck: %w", h, kwExit, err)), true)
+		return post
+	}
+	identityMismatch := recheck.returnedLength < 56 || recheck.linkType != kwLinkPerfEvent || recheck.id == 0 || slot.classic.id == 0 || recheck.id != slot.classic.id || baseline.id == 0 || recheck.programID != baseline.id || slot.classic.programID != baseline.id || (g.program.id != 0 && recheck.programID != g.program.id) || recheck.perfType != kwPerfKretprobe || recheck.address == 0
+	if earlyOK && (recheck.linkType != early.linkType || recheck.id != early.id || recheck.programID != early.programID || recheck.perfType != early.perfType || recheck.address != early.address) {
+		identityMismatch = true
+	}
+	if identityMismatch {
+		kwMergeGuardIssue(g, kwGuardWrong, errors.Join(baseErr, fmt.Errorf("guard %d/%d exit link identity changed", h, kwExit)), true)
+	}
+	return post
+}
+
+// The outer owner retains its operation borrow until all actual callbacks return.
+func (e *kwNativeEpoch) readoutWithCalls(calls kwEpochReadoutCalls) (kobjectNativeReadout, error) {
+	var result kobjectNativeReadout
+	if e == nil { return result, errors.New("missing native epoch") }
+	e.mu.Lock()
+	result.binding = e.binding
+	if e.readoutPhase == kwReadoutCached { result = e.readoutCached; err := errors.Join(e.readoutErr, kwEpochScopeError(e.scope), kwEpochFirstStopError(e.firstStop, e.stopDeadline, e.stopHasDeadline)); e.mu.Unlock(); return result, err }
+	if e.phase == kwEpochRetired || e.phase == kwEpochRetiring || e.terminal || e.operation != kwEpochIdle { err := errors.Join(e.cause, errors.New("native epoch readout unavailable or busy")); e.mu.Unlock(); return result, err }
+	var rejection error
+	if e.phase == kwEpochQuarantined { rejection = errors.Join(e.cause, errors.New("native epoch quarantined")) }
+	if calls.mapInfo == nil || calls.mapElem == nil || calls.program == nil || calls.classic == nil || calls.tracing == nil || calls.barrier == nil { rejection = errors.Join(rejection, errors.New("incomplete native readout effects")) }
+	if e.firstStop == nil { rejection = errors.Join(rejection, errors.New("native readout has no first stop context")) }
+	if e.objects == nil || e.binding.cookie == 0 || e.binding.portID == 0 || e.binding.generation == 0 { rejection = errors.Join(rejection, errors.New("native readout missing owner or binding")) }
+	rejection = errors.Join(rejection, kwEpochScopeError(e.scope), kwEpochFirstStopError(e.firstStop, e.stopDeadline, e.stopHasDeadline))
+	if rejection != nil { result.guards = kwUnqueriedReadoutGuards(rejection); e.phase = kwEpochQuarantined; e.cause = errors.Join(e.cause, rejection, errors.ErrUnsupported); e.readoutPhase, e.readoutCached, e.readoutErr = kwReadoutCached, result, e.cause; cause := e.cause; e.mu.Unlock(); return result, cause }
+	e.operation = kwEpochReadoutOperation; o, expectedBinding, scope, first, deadline, hasDeadline := e.objects, e.binding, e.scope, e.firstStop, e.stopDeadline, e.stopHasDeadline
+	e.mu.Unlock()
+	result.guards = kwUnqueriedReadoutGuards(nil)
+	for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ { result.guards[h][d].err = nil } }
+	eligible := func() error {
+		err := errors.Join(kwEpochScopeError(scope), kwEpochFirstStopError(first, deadline, hasDeadline))
+		if e.terminalReq.Load() { err = errors.Join(err, errors.New("native epoch retirement requested during readout")) }
+		return err
+	}
+	var ownerErr, stopErr, barrierErr, countErr error
+	o.mu.Lock(); ownerOK := o.epochOwned && o.attached && o.layout.generation == expectedBinding.generation; o.mu.Unlock()
+	if !ownerOK { ownerErr = errors.New("native readout owner or binding mismatch") }
+	var earlyExit [kwHookRelay + 1]kwLinkInfo
+	var earlyQueried [kwHookRelay + 1]bool
+	var earlyFault [kwHookRelay + 1]bool
+	// Step 2: collect early classic EXIT link miss snapshots before any barrier or counter read.
+	if ownerErr == nil {
+		if err := eligible(); err != nil { stopErr = err } else {
+			o.mu.Lock()
+			for h := kwHookEnv; h <= kwHookRelay && stopErr == nil; h++ {
+				g := &result.guards[h][kwExit]
+				var healthy bool
+				earlyExit[h], earlyQueried[h], healthy, stopErr = kwCheckClassicGuardSlotLocked(o, h, kwExit, g, calls.classic, eligible, false)
+				earlyFault[h] = !healthy
+			}
+			o.mu.Unlock()
+		}
+	}
+	// Step 3: ordinary MEMBARRIER_CMD_GLOBAL using the original stored firstStop context.
+	if ownerErr == nil && stopErr == nil {
+		if err := eligible(); err != nil { stopErr = err } else {
+			barrierErr = calls.barrier(first)
+			if barrierErr == nil { result.barrier = kwReturnSucceeded } else { result.barrier = kwReturnFailed }
+			stopErr = eligible()
+		}
+	}
+	// Step 4 & 5: later counts, 14 programs, 4 ENTRY classic links, 6 tracing links, then 4 EXIT link identity rechecks.
+	if ownerErr == nil && stopErr == nil && barrierErr == nil {
+		mapInfo := func(fd int64) (kwMapInfo, error) { if err := eligible(); err != nil { return kwMapInfo{}, err }; v, err := calls.mapInfo(fd); return v, errors.Join(err, eligible()) }
+		var mapBlocked, mapAfter error
+		mapElem := func(command uintptr, attr *kwMapElemAttr, key, out []byte) syscall.Errno { if err := eligible(); err != nil { mapBlocked = err; return syscall.ECANCELED }; errno := calls.mapElem(command, attr, key, out); mapAfter = eligible(); return errno }
+		counts, rawCountErr := readKobjectCountsWithCalls(o, mapInfo, mapElem)
+		if mapBlocked != nil { countErr = mapBlocked } else if rawCountErr != nil { countErr = rawCountErr } else {
+			result.faults = counts.faults
+			result.firstError = counts.firstError
+			result.stages = counts.stages
+			result.recipient = counts.recipient
+			result.rootStarted = counts.rootStarted
+			result.rootReturned = counts.rootReturned
+			result.classicEntries = counts.classicEntries
+			countErr = validateKobjectCounters(counts)
+		}
+		stopErr = errors.Join(mapBlocked, mapAfter, eligible())
+		if stopErr == nil {
+			o.mu.Lock()
+			for h := kwHook(0); h < kwHookCount && stopErr == nil; h++ {
+				for d := kwDirection(0); d < kwDirectionCount && stopErr == nil; d++ {
+					early := h <= kwHookRelay && d == kwExit && earlyFault[h]
+					stopErr = kwCheckProgramGuardSlotLocked(o, h, d, &result.guards[h][d], calls.program, eligible, early)
+				}
+			}
+			for h := kwHookEnv; h <= kwHookRelay && stopErr == nil; h++ {
+				_, _, _, stopErr = kwCheckClassicGuardSlotLocked(o, h, kwEnter, &result.guards[h][kwEnter], calls.classic, eligible, true)
+			}
+			for h := kwHookRecipient; h < kwHookCount && stopErr == nil; h++ {
+				for d := kwDirection(0); d < kwDirectionCount && stopErr == nil; d++ {
+					stopErr = kwCheckTracingGuardSlotLocked(o, h, d, &result.guards[h][d], calls.tracing, eligible)
+				}
+			}
+			for h := kwHookEnv; h <= kwHookRelay && stopErr == nil; h++ {
+				stopErr = kwRecheckClassicExitSlotLocked(o, h, &result.guards[h][kwExit], earlyExit[h], earlyQueried[h], calls.classic, eligible)
+			}
+			o.mu.Unlock()
+		}
+	}
+	commonErr := errors.Join(ownerErr, barrierErr, stopErr, eligible())
+	var guardErrs []error
+	for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ {
+		g := &result.guards[h][d]
+		if g.availability == kwGuardMissing && g.err == nil {
+			g.err = fmt.Errorf("guard %d/%d not qualified: %w", h, d, errors.ErrUnsupported)
+		}
+		g.err = errors.Join(commonErr, g.err, fmt.Errorf("guard %d/%d width and lifetime unqualified: %w", h, d, errors.ErrUnsupported))
+		guardErrs = append(guardErrs, g.err)
+	} }
+	err := errors.Join(ownerErr, barrierErr, countErr, errors.Join(guardErrs...), stopErr, eligible())
+	e.mu.Lock()
+	if e.terminal {
+		e.mu.Unlock()
+		o.mu.Lock(); var safetyErr error; if o.gate == nil { safetyErr = errors.New("native epoch gate unavailable") } else { _, safetyErr = o.gate.closeAdmission() }; o.mu.Unlock()
+		e.mu.Lock(); err = errors.Join(err, safetyErr, errors.New("native epoch retirement requested during readout"))
+	}
+	err = errors.Join(e.cause, err, eligible())
+	if err != nil { e.phase = kwEpochQuarantined; e.cause = err; e.readoutPhase, e.readoutCached, e.readoutErr = kwReadoutCached, result, err } else if e.readoutPhase == kwReadoutIntermediate { e.readoutPhase = kwReadoutTerminal } else { e.readoutPhase, e.readoutCached, e.readoutErr = kwReadoutCached, result, nil }
+	e.operation = kwEpochIdle
+	e.mu.Unlock()
+	return result, err
+}
+
+// Terminal metadata is factual only; width, lifetime and runtime profile remain unqualified.
+func readKobjectNativeGuards(o *kwNativeObjects) ([kwHookCount][kwDirectionCount]kwHookGuard, error) {
+	return readKobjectNativeGuardsWithCalls(o, readKobjectProgramInfo, readKobjectLinkInfo, readKobjectTracingLinkInfo)
+}
+
+func readKobjectNativeGuardsWithCalls(o *kwNativeObjects, program func(int64) (kwProgramInfo, error), classic func(int64) (kwLinkInfo, error), tracing func(int64) (kwTracingLinkInfo, error)) ([kwHookCount][kwDirectionCount]kwHookGuard, error) {
+	var guards [kwHookCount][kwDirectionCount]kwHookGuard
+	if o != nil { o.mu.Lock(); defer o.mu.Unlock(); defer runtime.KeepAlive(o) }
+	var all []error
+	for h := kwHook(0); h < kwHookCount; h++ { for d := kwDirection(0); d < kwDirectionCount; d++ {
+		g := &guards[h][d]; g.availability = kwGuardAvailable
+		issues := []error{fmt.Errorf("guard %d/%d width and lifetime unqualified: %w", h, d, errors.ErrUnsupported)}
+		mark := func(state kwGuardAvailability, err error) { if g.availability == kwGuardAvailable || state == kwGuardMissing { g.availability = state }; issues = append(issues, err) }
+		if o == nil { mark(kwGuardMissing, errors.New("missing native owner")); g.err = errors.Join(issues...); all = append(all, g.err); continue }
+		baseline := o.baseline[h][d]; slot := o.probes[h][d]; p := o.programs[h][d]
+		expectedProgram := cebpf.Kprobe; if h > kwHookRelay { expectedProgram = cebpf.Tracing }
+		if h <= kwHookRelay { if slot.event == nil || slot.event.FD() < 0 { mark(kwGuardMissing, fmt.Errorf("guard %d/%d perf event missing", h, d)) } else if slot.event.kind != kwProbePerf { mark(kwGuardWrong, fmt.Errorf("guard %d/%d perf owner kind", h, d)) } }
+		if p == nil || p.FD() < 0 { mark(kwGuardMissing, fmt.Errorf("guard %d/%d program missing", h, d)) } else if program == nil { mark(kwGuardMissing, errors.New("missing program query")) } else {
+			v, err := program(int64(p.FD())); if err != nil { mark(kwGuardNativeError, fmt.Errorf("guard %d/%d program query: %w", h, d, err)) } else {
+				g.program = v
+				if v.returnedLength < 216 || v.id == 0 || baseline.id == 0 || v.id != baseline.id || v.programType != baseline.programType || v.programType != uint32(p.Type()) || v.programType != uint32(expectedProgram) || v.recursionMisses != 0 { mark(kwGuardWrong, fmt.Errorf("guard %d/%d program metadata mismatch", h, d)) }
+			}
+		}
+		if slot.link == nil || slot.link.FD() < 0 { mark(kwGuardMissing, fmt.Errorf("guard %d/%d link missing", h, d)) } else if h <= kwHookRelay {
+			if slot.link.kind != kwProbeLink { mark(kwGuardWrong, fmt.Errorf("guard %d/%d link owner kind", h, d)) }
+			if classic == nil { mark(kwGuardMissing, errors.New("missing classic link query")) } else {
+				v, err := classic(int64(slot.link.FD())); if err != nil { mark(kwGuardNativeError, fmt.Errorf("guard %d/%d classic query: %w", h, d, err)) } else {
+					g.link = v
+					if v.returnedLength < 56 || v.linkType != kwLinkPerfEvent || v.id == 0 || slot.classic.id == 0 || v.id != slot.classic.id || baseline.id == 0 || v.programID != baseline.id || slot.classic.programID != baseline.id || v.perfType != kwPerfKprobe+uint32(d) || v.address == 0 || v.missed != 0 { mark(kwGuardWrong, fmt.Errorf("guard %d/%d classic metadata mismatch", h, d)) }
+				}
+			}
+		} else {
+			if slot.link.kind != kwProbeLink { mark(kwGuardWrong, fmt.Errorf("guard %d/%d link owner kind", h, d)) }
+			if tracing == nil { mark(kwGuardMissing, errors.New("missing tracing link query")) } else {
+				v, err := tracing(int64(slot.link.FD())); if err != nil { mark(kwGuardNativeError, fmt.Errorf("guard %d/%d tracing query: %w", h, d, err)) } else {
+					g.tracingAttachmentID, g.tracingAttachmentType = v.targetBTFID, v.attachType
+					expectedAttach := cebpf.AttachTraceFEntry; if d == kwExit { expectedAttach = cebpf.AttachTraceFExit }
+					if v.returnedLength < 28 || v.linkType != 2 || v.id == 0 || slot.tracing.id == 0 || v.id != slot.tracing.id || baseline.id == 0 || v.programID != baseline.id || slot.tracing.programID != baseline.id || v.attachType != uint32(expectedAttach) || v.attachType != slot.tracing.attachType || v.targetBTFID == 0 || v.targetBTFID != slot.tracing.targetBTFID || v.targetObjectID != slot.tracing.targetObjectID { mark(kwGuardWrong, fmt.Errorf("guard %d/%d tracing metadata mismatch", h, d)) }
+				}
+			}
+		}
+		g.err = errors.Join(issues...); all = append(all, g.err)
+	} }
+	return guards, errors.Join(all...)
+}
+
+const kwNoHzMaxBytes = 4096
+
+func readKobjectNoHzFrom(open func() (io.ReadCloser, error)) ([]byte, error) {
+	if open == nil { return nil, errors.New("missing nohz opener") }
+	f, err := open()
+	if err != nil { if f != nil { return nil, errors.Join(err, f.Close()) }; return nil, err }
+	if f == nil { return nil, errors.New("missing nohz file") }
+	b, readErr := io.ReadAll(io.LimitReader(f, kwNoHzMaxBytes+1)); closeErr := f.Close()
+	if len(b) > kwNoHzMaxBytes { readErr = errors.Join(readErr, errors.New("nohz list exceeds limit")) }
+	if err := errors.Join(readErr, closeErr); err != nil { return nil, err }; return b, nil
+}
+
+func parseKobjectNoHz(raw []byte) (bool, error) {
+	if len(raw) > kwNoHzMaxBytes { return false, errors.New("nohz list exceeds limit") }
+	s := strings.Trim(string(raw), " \t\n\r\v\f")
+	// Linux v6.12.117 drivers/base/cpu.c:304-309 formats tick_nohz_full_mask via %*pbl;
+	// without boot-time tick_nohz_full_setup (kernel/time/tick-sched.c:608-612), the mask is NULL so lib/vsprintf.c check_pointer emits "(null)".
+	if s == "" || s == "(null)" { return false, nil }
+	parse := func(s string) (uint64, error) {
+		if s == "" { return 0, errors.New("empty CPU number") }
+		for _, c := range s { if c < '0' || c > '9' { return 0, errors.New("invalid CPU number") } }
+		return strconv.ParseUint(s, 10, 32)
+	}
+	for _, item := range strings.Split(s, ",") {
+		parts := strings.Split(item, "-"); if len(parts) > 2 { return false, errors.New("invalid CPU range") }
+		first, err := parse(parts[0]); if err != nil { return false, fmt.Errorf("nohz CPU: %w", err) }
+		if len(parts) == 2 { last, err := parse(parts[1]); if err != nil { return false, fmt.Errorf("nohz CPU range: %w", err) }; if last < first { return false, errors.New("inverted CPU range") } }
+	}
+	return true, nil
+}
+
+// The caller retains its operation borrow until the actual barrier call returns.
+func performKobjectGlobalBarrier(ctx context.Context) error {
+	read := func() ([]byte, error) { return readKobjectNoHzFrom(func() (io.ReadCloser, error) { return os.Open("/sys/devices/system/cpu/nohz_full") }) }
+	call := func(command, flags, cpu int) (int64, error) { r, _, errno := unix.Syscall(unix.SYS_MEMBARRIER, uintptr(command), uintptr(flags), uintptr(cpu)); if errno != 0 { return 0, errno }; return int64(r), nil }
+	return performKobjectGlobalBarrierWithCalls(ctx, read, call)
+}
+
+func performKobjectGlobalBarrierWithCalls(ctx context.Context, read func() ([]byte, error), call func(int, int, int) (int64, error)) error {
+	if ctx == nil || read == nil || call == nil { return errors.New("invalid global barrier arguments") }
+	if err := kwEpochScopeError(ctx); err != nil { return err }
+	raw, err := read(); if err = errors.Join(kwEpochScopeError(ctx), err); err != nil { return fmt.Errorf("read nohz list: %w", err) }
+	active, err := parseKobjectNoHz(raw); if err != nil { return fmt.Errorf("parse nohz list: %w", err) }; if active { return errors.New("nohz_full is active") }
+	if err := kwEpochScopeError(ctx); err != nil { return err }
+	mask, err := call(0, 0, 0); if err = errors.Join(kwEpochScopeError(ctx), err); err != nil { return fmt.Errorf("query global barrier: %w", err) }
+	if mask < 0 || uint64(mask) > math.MaxUint32 || mask&1 == 0 { return errors.New("ordinary global barrier unavailable") }
+	if err := kwEpochScopeError(ctx); err != nil { return err }
+	result, err := call(1, 0, 0); if err = errors.Join(kwEpochScopeError(ctx), err); err != nil { return fmt.Errorf("global barrier: %w", err) }
+	if result != 0 { return fmt.Errorf("unexpected global barrier result %d", result) }; return nil
+}
+
+type kwMapElemAttr struct { fd, pad uint32; key, value, flags uint64 }
+type kwMapElemCall func(uintptr, *kwMapElemAttr, []byte, []byte) syscall.Errno
+
+func kwNativeMapElemCall(command uintptr, attr *kwMapElemAttr, key, out []byte) syscall.Errno {
+	_, _, errno := unix.Syscall(unix.SYS_BPF, command, uintptr(unsafe.Pointer(attr)), unsafe.Sizeof(*attr))
+	runtime.KeepAlive(key); runtime.KeepAlive(out); runtime.KeepAlive(attr)
+	return errno
+}
+
+type kwMapReadRole uint8
+const (
+	kwReadCounts kwMapReadRole = iota
+	kwReadBinding
+	kwReadContexts
+)
+
+type kwBindingWire struct { cookie, portID, generation, listenMask, abiVersion uint64 }
+
+// The owner lock retains the real FD through metadata verification and return.
+func kwReadOwnedMap(o *kwNativeObjects, role kwMapReadRole, info func(int64) (kwMapInfo, error), call kwMapElemCall) ([]byte, error) {
+	if o == nil || info == nil || call == nil { return nil, errors.New("invalid owned map read") }
+	var name string; var kind cebpf.MapType; var keySize, valueSize, entries uint32
+	switch role {
+	case kwReadCounts: name, kind, keySize, valueSize, entries = "kw_counts", cebpf.Array, 4, kwCounterWireSize, 1
+	case kwReadBinding: name, kind, keySize, valueSize, entries = "kw_binding", cebpf.Array, 4, 40, 1
+	case kwReadContexts: name, kind, keySize, valueSize, entries = "kw_contexts", cebpf.Hash, 8, 280, 4096
+	default: return nil, errors.New("invalid owned map role")
+	}
+	o.mu.Lock(); defer o.mu.Unlock(); defer runtime.KeepAlive(o)
+	var owned *kwLoadedMap
+	for i := range o.maps { if o.maps[i].name == name { if owned != nil { return nil, fmt.Errorf("duplicate owned map %s", name) }; owned = &o.maps[i] } }
+	if owned == nil || owned.object == nil || owned.object.FD() < 0 || int64(owned.object.FD()) > math.MaxInt32 || owned.object.Type() != kind || owned.info.id == 0 { return nil, fmt.Errorf("invalid owned map %s", name) }
+	fd := int64(owned.object.FD())
+	actual, err := info(fd); if err != nil { return nil, fmt.Errorf("map %s info: %w", name, err) }
+	if actual.returnedLength < 24 || actual.id == 0 || actual.id != owned.info.id || actual.mapType != uint32(kind) || actual.keySize != keySize || actual.valueSize != valueSize || actual.maxEntries != entries || actual.flags != 0 { return nil, fmt.Errorf("map %s identity or shape mismatch", name) }
+	var key [4]byte
+	size, command := int(valueSize), uintptr(unix.BPF_MAP_LOOKUP_ELEM)
+	if role == kwReadContexts { size, command = 8, uintptr(unix.BPF_MAP_GET_NEXT_KEY) }
+	out := make([]byte, size); attr := kwMapElemAttr{fd: uint32(fd)}
+	var keyBytes []byte
+	if role != kwReadContexts { keyBytes = key[:] }
+	var pin runtime.Pinner; pin.Pin(&out[0]); pin.Pin(&attr); if role != kwReadContexts { pin.Pin(&key[0]) }; defer pin.Unpin()
+	attr.value = uint64(uintptr(unsafe.Pointer(&out[0]))); if role != kwReadContexts { attr.key = uint64(uintptr(unsafe.Pointer(&key[0]))) }
+	errno := call(command, &attr, keyBytes, out); runtime.KeepAlive(owned.object); runtime.KeepAlive(key); runtime.KeepAlive(out); runtime.KeepAlive(&attr)
+	if role == kwReadContexts && errno == syscall.ENOENT { return nil, nil }
+	if errno != 0 { return nil, fmt.Errorf("map %s operation: %w", name, errno) }
+	if role == kwReadContexts { return nil, errors.New("kobject context map is not empty") }
+	return out, nil
+}
+
+func readKobjectCountsWithCalls(o *kwNativeObjects, info func(int64) (kwMapInfo, error), call kwMapElemCall) (kobjectNativeReadout, error) {
+	raw, err := kwReadOwnedMap(o, kwReadCounts, info, call); if err != nil { return kobjectNativeReadout{}, err }; return decodeKobjectCounters(raw)
+}
+
+func readKobjectCounts(o *kwNativeObjects) (kobjectNativeReadout, error) {
+	return readKobjectCountsWithCalls(o, readKobjectMapInfo, kwNativeMapElemCall)
+}
+
+func readKobjectBindingWithCalls(o *kwNativeObjects, info func(int64) (kwMapInfo, error), call kwMapElemCall) (kwBindingWire, error) {
+	raw, err := kwReadOwnedMap(o, kwReadBinding, info, call); if err != nil { return kwBindingWire{}, err }
+	w := kwBindingWire{cookie: binary.NativeEndian.Uint64(raw), portID: binary.NativeEndian.Uint64(raw[8:]), generation: binary.NativeEndian.Uint64(raw[16:]), listenMask: binary.NativeEndian.Uint64(raw[24:]), abiVersion: binary.NativeEndian.Uint64(raw[32:])}
+	if w.abiVersion != kwBindingABIVersion { return kwBindingWire{}, fmt.Errorf("native binding map mismatch: ABI version %d, want %d", w.abiVersion, kwBindingABIVersion) }
+	return w, nil
+}
+
+func readKobjectBinding(o *kwNativeObjects) (kwBindingWire, error) {
+	return readKobjectBindingWithCalls(o, readKobjectMapInfo, kwNativeMapElemCall)
+}
+
+func checkKobjectContextsEmptyWithCalls(o *kwNativeObjects, info func(int64) (kwMapInfo, error), call kwMapElemCall) error {
+	_, err := kwReadOwnedMap(o, kwReadContexts, info, call); return err
+}
+
+func checkKobjectContextsEmpty(o *kwNativeObjects) error {
+	return checkKobjectContextsEmptyWithCalls(o, readKobjectMapInfo, kwNativeMapElemCall)
+}
+
+const (
+	kwPerfTypePath = "/sys/bus/event_source/devices/kprobe/type"
+	kwPerfRetprobePath = "/sys/bus/event_source/devices/kprobe/format/retprobe"
+)
+
+type kwProbeKind uint8
+const (
+	kwProbePerf kwProbeKind = iota
+	kwProbeLink
+)
+
+type kwProbeFD struct {
+	mu sync.Mutex
+	fd int
+	kind kwProbeKind
+	closeFD func(int) error
+	closed bool
+	closeErr error
+}
+
+func (p *kwProbeFD) FD() int {
+	if p == nil { return -1 }; p.mu.Lock(); defer p.mu.Unlock(); if p.closed { return -1 }; return p.fd
+}
+
+func (p *kwProbeFD) Close() error {
+	if p == nil { return nil }; p.mu.Lock(); defer p.mu.Unlock()
+	if p.closed { return p.closeErr }
+	fd := p.fd; p.fd = -1; p.closed = true; p.closeErr = p.closeFD(fd)
+	return p.closeErr
+}
+
+type kwPerfEventCalls struct {
+	readFile func(string) ([]byte, error)
+	perfOpen func(*unix.PerfEventAttr, []byte, int, int, int, int) (int, error)
+	closeFD func(int) error
+}
+
+func kwProbeDecimal(raw []byte, prefix string, max uint64) (uint64, error) {
+	if len(raw) == 0 || len(raw) > 128 { return 0, errors.New("invalid probe text length") }
+	s := strings.TrimSuffix(string(raw), "\n")
+	if !strings.HasPrefix(s, prefix) { return 0, errors.New("invalid probe text prefix") }; s = strings.TrimPrefix(s, prefix)
+	if len(s) == 0 { return 0, errors.New("empty probe number") }
+	for _, c := range s { if c < '0' || c > '9' { return 0, errors.New("invalid probe number") } }
+	n, err := strconv.ParseUint(s, 10, 64); if err != nil || n > max { return 0, errors.New("probe number out of range") }; return n, nil
+}
+
+func kwFinishProbe(ctx context.Context, fd int64, kind kwProbeKind, closeFD func(int) error, cause error) (*kwProbeFD, error) {
+	cause = errors.Join(ctx.Err(), cause)
+	if fd < 0 || fd > math.MaxInt32 { if cause != nil { return nil, cause }; return nil, errors.New("invalid returned probe descriptor") }
+	p := &kwProbeFD{fd: int(fd), kind: kind, closeFD: closeFD}
+	if cause != nil { if cleanup := p.Close(); cleanup != nil { return p, errors.Join(cause, fmt.Errorf("close probe descriptor: %w", cleanup)) }; return nil, cause }
+	return p, nil
+}
+
+// The future owner must retain its acquisition borrow through actual return.
+func openKobjectPerfEvent(ctx context.Context, hook kwHook, direction kwDirection) (*kwProbeFD, error) {
+	return openKobjectPerfEventWithCalls(ctx, hook, direction, kwPerfEventCalls{readFile: os.ReadFile, perfOpen: func(a *unix.PerfEventAttr, symbol []byte, pid, cpu, group, flags int) (int, error) { fd, err := unix.PerfEventOpen(a, pid, cpu, group, flags); runtime.KeepAlive(symbol); runtime.KeepAlive(a); return fd, err }, closeFD: unix.Close})
+}
+
+func openKobjectPerfEventWithCalls(ctx context.Context, hook kwHook, direction kwDirection, calls kwPerfEventCalls) (*kwProbeFD, error) {
+	if ctx == nil || calls.readFile == nil || calls.perfOpen == nil || calls.closeFD == nil || hook > kwHookRelay || direction >= kwDirectionCount { return nil, errors.New("invalid perf probe arguments") }
+	targets := [...]string{"kobject_uevent_env", "kobject_uevent_net_broadcast", "alloc_uevent_skb", "uevent_net_rcv_skb"}
+	read := func(path string) ([]byte, error) { if err := ctx.Err(); err != nil { return nil, err }; b, err := calls.readFile(path); if err = errors.Join(ctx.Err(), err); err != nil { return nil, err }; return b, nil }
+	raw, err := read(kwPerfTypePath); if err != nil { return nil, fmt.Errorf("read kprobe PMU type: %w", err) }
+	typ, err := kwProbeDecimal(raw, "", math.MaxUint32); if err != nil || typ == 0 { return nil, errors.New("invalid kprobe PMU type") }
+	var config uint64
+	if direction == kwExit { raw, err = read(kwPerfRetprobePath); if err != nil { return nil, fmt.Errorf("read retprobe format: %w", err) }; bit, err := kwProbeDecimal(raw, "config:", 63); if err != nil { return nil, err }; config = uint64(1) << bit }
+	if err := ctx.Err(); err != nil { return nil, err }
+	symbol := append([]byte(targets[hook]), 0); var pin runtime.Pinner; pin.Pin(&symbol[0]); defer pin.Unpin()
+	attr := unix.PerfEventAttr{Size: unix.PERF_ATTR_SIZE_VER1, Type: uint32(typ), Config: config, Ext1: uint64(uintptr(unsafe.Pointer(&symbol[0])))}
+	fd, callErr := calls.perfOpen(&attr, symbol, -1, 0, -1, unix.PERF_FLAG_FD_CLOEXEC); runtime.KeepAlive(symbol); runtime.KeepAlive(&attr)
+	return kwFinishProbe(ctx, int64(fd), kwProbePerf, calls.closeFD, callErr)
+}
+
+type kwLinkCreateAttr struct { progFD, targetFD, attachType, flags uint32 }
+type kwLinkCreateCall func(*kwLinkCreateAttr, uintptr) (int64, error)
+
+// Program and target FD borrows must outlive the actual link-create return.
+func createKobjectRawLink(ctx context.Context, programFD, targetFD int, attach cebpf.AttachType) (*kwProbeFD, error) {
+	return createKobjectRawLinkWithCalls(ctx, programFD, targetFD, attach, func(a *kwLinkCreateAttr, size uintptr) (int64, error) { r, _, errno := unix.Syscall(unix.SYS_BPF, uintptr(unix.BPF_LINK_CREATE), uintptr(unsafe.Pointer(a)), size); runtime.KeepAlive(a); if errno != 0 { return -1, errno }; return int64(r), nil }, unix.Close)
+}
+
+func createKobjectRawLinkWithCalls(ctx context.Context, programFD, targetFD int, attach cebpf.AttachType, call kwLinkCreateCall, closeFD func(int) error) (*kwProbeFD, error) {
+	if ctx == nil || call == nil || closeFD == nil || programFD < 0 || targetFD < 0 || int64(programFD) > math.MaxInt32 || int64(targetFD) > math.MaxInt32 || (attach != cebpf.AttachPerfEvent && attach != cebpf.AttachTraceFEntry && attach != cebpf.AttachTraceFExit) || (attach != cebpf.AttachPerfEvent && targetFD != 0) { return nil, errors.New("invalid link create arguments") }
+	if err := ctx.Err(); err != nil { return nil, err }
+	attr := kwLinkCreateAttr{progFD: uint32(programFD), targetFD: uint32(targetFD), attachType: uint32(attach)}
+	fd, err := call(&attr, unsafe.Sizeof(attr)); runtime.KeepAlive(&attr)
+	return kwFinishProbe(ctx, fd, kwProbeLink, closeFD, err)
+}
+
+const kwControlClosed uint64 = uint64(1) << 63
+
+type kwOwnedBPFMap interface { FD() int; Type() cebpf.MapType; Close() error }
+type kwOwnedBPFProgram interface { FD() int; Type() cebpf.ProgramType; Close() error }
+type kwObjectCalls struct {
+	newMap func(*cebpf.MapSpec) (kwOwnedBPFMap, error)
+	newProgram func(*cebpf.ProgramSpec, *btf.Spec) (kwOwnedBPFProgram, error)
+	mapInfo func(int64) (kwMapInfo, error)
+	programInfo func(int64) (kwProgramInfo, error)
+	mapControl func(int64) (*kwControlMapping, error)
+}
+type kwLoadedMap struct { name string; object kwOwnedBPFMap; info kwMapInfo }
+type kwAttachedProbe struct {
+	event, link *kwProbeFD
+	program kwProgramInfo
+	classic kwLinkInfo
+	tracing kwTracingLinkInfo
+}
+type kwAttachmentCalls struct {
+	perf func(context.Context, kwHook, kwDirection) (*kwProbeFD, error)
+	link func(context.Context, int, int, cebpf.AttachType) (*kwProbeFD, error)
+	program func(int64) (kwProgramInfo, error)
+	classic func(int64) (kwLinkInfo, error)
+	tracing func(int64) (kwTracingLinkInfo, error)
+}
+
+func kwAcquisitionEligible(eligible func() error) error {
+	if eligible == nil { return errors.New("missing acquisition eligibility") }
+	return eligible()
+}
+
+func kwGuardObjectCalls(raw kwObjectCalls, eligible func() error) kwObjectCalls {
+	var guarded kwObjectCalls
+	if raw.newMap != nil { guarded.newMap = func(spec *cebpf.MapSpec) (kwOwnedBPFMap, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+		object, err := raw.newMap(spec); return object, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.newProgram != nil { guarded.newProgram = func(spec *cebpf.ProgramSpec, kernel *btf.Spec) (kwOwnedBPFProgram, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+		object, err := raw.newProgram(spec, kernel); return object, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.mapInfo != nil { guarded.mapInfo = func(fd int64) (kwMapInfo, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return kwMapInfo{}, err }
+		info, err := raw.mapInfo(fd); return info, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.programInfo != nil { guarded.programInfo = func(fd int64) (kwProgramInfo, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return kwProgramInfo{}, err }
+		info, err := raw.programInfo(fd); return info, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.mapControl != nil { guarded.mapControl = func(fd int64) (*kwControlMapping, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+		gate, err := raw.mapControl(fd); return gate, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	return guarded
+}
+
+func kwGuardAttachmentCalls(raw kwAttachmentCalls, eligible func() error) kwAttachmentCalls {
+	var guarded kwAttachmentCalls
+	if raw.perf != nil { guarded.perf = func(ctx context.Context, hook kwHook, direction kwDirection) (*kwProbeFD, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+		probe, err := raw.perf(ctx, hook, direction); return probe, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.link != nil { guarded.link = func(ctx context.Context, program, target int, attach cebpf.AttachType) (*kwProbeFD, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return nil, err }
+		probe, err := raw.link(ctx, program, target, attach); return probe, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.program != nil { guarded.program = func(fd int64) (kwProgramInfo, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return kwProgramInfo{}, err }
+		info, err := raw.program(fd); return info, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.classic != nil { guarded.classic = func(fd int64) (kwLinkInfo, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return kwLinkInfo{}, err }
+		info, err := raw.classic(fd); return info, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	if raw.tracing != nil { guarded.tracing = func(fd int64) (kwTracingLinkInfo, error) {
+		if err := kwAcquisitionEligible(eligible); err != nil { return kwTracingLinkInfo{}, err }
+		info, err := raw.tracing(fd); return info, errors.Join(err, kwAcquisitionEligible(eligible))
+	} }
+	return guarded
+}
+
+type kwOwnerGateState uint8
+const (
+	kwOwnerGateUnknown kwOwnerGateState = iota
+	kwOwnerBeforeMapping
+	kwOwnerGateTracked
+	kwOwnerGateReleased
+)
+
+type kwNativeObjects struct {
+	mu sync.Mutex
+	maps []kwLoadedMap
+	programs [kwHookCount][kwDirectionCount]kwOwnedBPFProgram
+	baseline [kwHookCount][kwDirectionCount]kwProgramInfo
+	acquiredPrograms []kwOwnedBPFProgram
+	acquiredProbes []*kwProbeFD
+	probes [kwHookCount][kwDirectionCount]kwAttachedProbe
+	attachStarted, attached bool
+	epochOwned bool
+	attachErr error
+	gate *kwControlMapping
+	gateOwnership kwOwnerGateState
+	layout kwKernelLayout
+	ready bool
+	cleanupErr error
+}
+
+type kwEpochPhase uint8
+const (
+	kwEpochCold kwEpochPhase = iota
+	kwEpochClosing
+	kwEpochSettled
+	kwEpochQuarantined
+	kwEpochRetiring
+	kwEpochRetired
+)
+
+type kwEpochOperation uint8
+const (
+	kwEpochIdle kwEpochOperation = iota
+	kwEpochGateOperation
+	kwEpochRetireOperation
+	kwEpochReadoutOperation
+	kwEpochSettleOperation
+	kwEpochOpenOperation
+	kwEpochFenceOperation
+)
+
+// This cold-owner unit does not yet implement the complete native epoch interface.
+type kwNativeEpoch struct {
+	mu sync.Mutex
+	phase kwEpochPhase
+	operation kwEpochOperation
+	terminal bool
+	terminalReq atomic.Bool
+	objects *kwNativeObjects
+	binding kobjectSocketBinding
+	startup, scope context.Context
+	startupDeadline time.Time
+	startupHasDeadline bool
+	openAttempted bool
+	openLayout kwKernelLayout
+	fenceAttempted bool
+	fenceErr error
+	firstStop context.Context
+	stopDeadline time.Time
+	stopHasDeadline bool
+	readoutPhase kwReadoutPhase
+	readoutCached kobjectNativeReadout
+	readoutErr error
+	cause, cleanupErr error
+}
+
+func newKobjectNativeEpoch(startup, scope context.Context, objects *kwNativeObjects, binding kobjectSocketBinding) (*kwNativeEpoch, error) {
+	if startup == nil || scope == nil || objects == nil || binding.cookie == 0 || binding.portID == 0 || binding.generation == 0 {
+		return nil, errors.New("invalid native epoch transfer")
+	}
+	if err := errors.Join(startup.Err(), scope.Err()); err != nil { return nil, err }
+	objects.mu.Lock()
+	defer objects.mu.Unlock()
+	if !objects.ready || !objects.attached || objects.epochOwned || objects.gate == nil || objects.layout.generation != binding.generation {
+		return nil, errors.New("native epoch requires a fresh attached object owner")
+	}
+	objects.gate.mu.Lock()
+	fresh := objects.gateOwnership == kwOwnerGateTracked && objects.gate.history == kwGateNeverOpened && objects.gate.state == kwControlPrepared && objects.gate.word != nil && objects.gate.sampleWordLocked() == kwControlClosed
+	objects.gate.mu.Unlock()
+	if !fresh { return nil, errors.New("native epoch gate is not freshly closed") }
+	if err := errors.Join(startup.Err(), scope.Err()); err != nil { return nil, err }
+	deadline, hasDeadline := startup.Deadline()
+	e := &kwNativeEpoch{objects: objects, binding: binding, startup: startup, scope: scope, startupDeadline: deadline, startupHasDeadline: hasDeadline, openLayout: objects.layout}
+	objects.epochOwned = true
+	return e, nil
+}
+
+// Open integrates a one-shot physical attempt; qualification is not available.
+func (e *kwNativeEpoch) Open(binding kobjectSocketBinding) error {
+	return e.openWithCalls(binding, kwEpochReadoutCalls{mapInfo: readKobjectMapInfo, mapElem: kwNativeMapElemCall, program: readKobjectProgramInfo, classic: readKobjectLinkInfo, tracing: readKobjectTracingLinkInfo})
+}
+
+// Fence rejects until genuine runtime RCU and profile qualification exists.
+func (e *kwNativeEpoch) Fence(ctx context.Context) error {
+	if e == nil || ctx == nil { return errors.New("missing epoch or fence context") }
+	e.mu.Lock()
+	if e.operation != kwEpochIdle { err := errors.Join(e.cause, errors.New("native epoch operation pending")); e.mu.Unlock(); return err }
+	if e.fenceAttempted { err := errors.Join(e.fenceErr, kwEpochFirstStopError(e.firstStop, e.stopDeadline, e.stopHasDeadline), kwEpochScopeError(e.scope)); e.mu.Unlock(); return err }
+	if e.phase != kwEpochSettled || e.firstStop == nil || e.terminal { err := errors.Join(e.cause, errors.New("native epoch is not eligible for fence")); e.mu.Unlock(); return err }
+	e.fenceAttempted = true; e.operation = kwEpochFenceOperation
+	first, deadline, hasDeadline, scope, o := e.firstStop, e.stopDeadline, e.stopHasDeadline, e.scope, e.objects
+	e.mu.Unlock()
+	result := errors.Join(kwEpochFirstStopError(first, deadline, hasDeadline), kwEpochScopeError(scope), fmt.Errorf("native fence runtime qualification unavailable: %w", errors.ErrUnsupported))
+	if !reflect.ValueOf(ctx).Comparable() || !reflect.ValueOf(first).Comparable() || ctx != first { result = errors.Join(result, errors.New("native fence requires original first-stop context")) }
+	o.mu.Lock(); var closeErr error; if o.gate == nil { closeErr = errors.New("native epoch gate unavailable") } else { _, closeErr = o.gate.closeAdmission() }; o.mu.Unlock()
+	e.mu.Lock(); defer e.mu.Unlock(); result = errors.Join(e.cause, result, closeErr, kwEpochFirstStopError(first, deadline, hasDeadline), kwEpochScopeError(scope)); if e.terminal { result = errors.Join(result, errors.New("retirement requested during fence")) }
+	e.phase = kwEpochQuarantined; e.cause = result; e.fenceErr = result; e.operation = kwEpochIdle; return result
+}
+
+func (e *kwNativeEpoch) openWithCalls(binding kobjectSocketBinding, calls kwEpochReadoutCalls) error {
+	if e == nil { return errors.New("missing native epoch") }
+	e.mu.Lock()
+	if e.openAttempted || e.operation != kwEpochIdle || e.phase != kwEpochCold || e.terminal { err := errors.Join(e.cause, errors.New("native open unavailable or busy")); e.mu.Unlock(); return err }
+	e.openAttempted = true; e.operation = kwEpochOpenOperation
+	o, expected, layout, startup, deadline, hasDeadline, scope := e.objects, e.binding, e.openLayout, e.startup, e.startupDeadline, e.startupHasDeadline, e.scope
+	e.mu.Unlock()
+	eligible := func() error { err := errors.Join(kwEpochFirstStopError(startup, deadline, hasDeadline), kwEpochScopeError(scope)); e.mu.Lock(); if e.terminal { err = errors.Join(err, errors.New("retirement requested during open")) }; e.mu.Unlock(); return err }
+	result := eligible()
+	if binding != expected || binding.cookie == 0 || binding.portID == 0 || binding.generation == 0 { result = errors.Join(result, errors.New("native open binding mismatch")) }
+	if calls.mapInfo == nil || calls.mapElem == nil || calls.program == nil || calls.classic == nil || calls.tracing == nil { result = errors.Join(result, errors.New("incomplete native open effects")) }
+	if result == nil {
+		o.mu.Lock(); ready := o.ready && o.attached && o.epochOwned && o.gate != nil && o.layout == layout && layout.generation == binding.generation && layout.listenMask != 0 && layout.listenMask&(layout.listenMask-1) == 0
+		if ready { o.gate.mu.Lock(); ready = o.gate.state == kwControlPrepared && o.gate.word != nil && o.gate.sampleWordLocked() == kwControlClosed; o.gate.mu.Unlock() }; o.mu.Unlock()
+		if !ready { result = errors.New("native open owner not ready") }
+	}
+	if result == nil {
+		mapInfo := func(fd int64) (kwMapInfo, error) { if err := eligible(); err != nil { return kwMapInfo{}, err }; v, err := calls.mapInfo(fd); return v, errors.Join(err, eligible()) }
+		var blocked, after error
+		mapElem := func(cmd uintptr, attr *kwMapElemAttr, key, out []byte) syscall.Errno { if err := eligible(); err != nil { blocked = err; return syscall.ECANCELED }; errno := calls.mapElem(cmd, attr, key, out); after = eligible(); return errno }
+		wire, err := readKobjectBindingWithCalls(o, mapInfo, mapElem); if blocked != nil { err = blocked }; result = errors.Join(result, err, after)
+		if err == nil && (wire.cookie != binding.cookie || wire.portID != uint64(binding.portID) || wire.generation != binding.generation || wire.listenMask != layout.listenMask || wire.abiVersion != kwBindingABIVersion) { result = errors.Join(result, errors.New("native binding map mismatch")) }
+		program := func(fd int64) (kwProgramInfo, error) { if err := eligible(); err != nil { return kwProgramInfo{}, err }; v, err := calls.program(fd); return v, errors.Join(err, eligible()) }
+		classic := func(fd int64) (kwLinkInfo, error) { if err := eligible(); err != nil { return kwLinkInfo{}, err }; v, err := calls.classic(fd); return v, errors.Join(err, eligible()) }
+		tracing := func(fd int64) (kwTracingLinkInfo, error) { if err := eligible(); err != nil { return kwTracingLinkInfo{}, err }; v, err := calls.tracing(fd); return v, errors.Join(err, eligible()) }
+		_, guardErr := readKobjectNativeGuardsWithCalls(o, program, classic, tracing); result = errors.Join(result, guardErr, eligible())
+	}
+	result = errors.Join(result, fmt.Errorf("native open qualification unavailable: %w", errors.ErrUnsupported))
+	o.mu.Lock(); var closeErr error; if o.gate == nil { closeErr = errors.New("native epoch gate unavailable") } else { _, closeErr = o.gate.closeAdmission() }; o.mu.Unlock()
+	e.mu.Lock(); defer e.mu.Unlock(); result = errors.Join(e.cause, result, closeErr, kwEpochFirstStopError(startup, deadline, hasDeadline), kwEpochScopeError(scope)); if e.terminal { result = errors.Join(result, errors.New("retirement requested during open")) }; e.startup = nil; e.phase = kwEpochQuarantined; e.cause = result; e.operation = kwEpochIdle; return result
+}
+
+func (e *kwNativeEpoch) CloseAdmission() error {
+	if e == nil { return errors.New("missing native epoch") }
+	e.mu.Lock()
+	if e.phase == kwEpochRetired || e.phase == kwEpochRetiring {
+		e.mu.Unlock(); return errors.New("native epoch is retiring or retired")
+	}
+	if e.operation != kwEpochIdle {
+		e.mu.Unlock(); return errors.New("native epoch operation pending")
+	}
+	e.operation = kwEpochGateOperation
+	o := e.objects
+	e.mu.Unlock()
+	o.mu.Lock()
+	var err error
+	if o.gate == nil { err = errors.New("native epoch gate is unavailable") } else { _, err = o.gate.closeAdmission() }
+	o.mu.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.operation = kwEpochIdle
+	if err != nil || e.terminal || e.phase == kwEpochQuarantined {
+		e.phase = kwEpochQuarantined
+		e.cause = errors.Join(e.cause, err)
+	} else if e.phase == kwEpochCold || e.phase == kwEpochClosing { e.phase = kwEpochClosing }
+	return err
+}
+
+// Until Open exists, this owner can retire only resources whose gate never opened.
+func (e *kwNativeEpoch) Retire() error {
+	if e == nil { return nil }
+	e.mu.Lock()
+	e.terminal = true
+	e.terminalReq.Store(true)
+	if e.phase == kwEpochRetired { err := e.cleanupErr; e.mu.Unlock(); return err }
+	if e.operation != kwEpochIdle {
+		e.phase = kwEpochQuarantined
+		e.mu.Unlock(); return errors.New("native epoch retirement waits for actual operation return")
+	}
+	e.operation, e.phase = kwEpochRetireOperation, kwEpochRetiring
+	o := e.objects
+	e.mu.Unlock()
+	// Claiming the operation precedes every access to the parent's mutable gate.
+	o.mu.Lock()
+	safetyErr := o.gate.closeForColdRetire()
+	o.mu.Unlock()
+	if safetyErr == nil { safetyErr = o.retire() }
+	o.mu.Lock()
+	released := o.gate == nil && len(o.maps) == 0 && len(o.acquiredPrograms) == 0 && len(o.acquiredProbes) == 0
+	o.mu.Unlock()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.operation = kwEpochIdle
+	e.cleanupErr = errors.Join(e.cleanupErr, safetyErr)
+	if released { e.phase = kwEpochRetired } else { e.phase = kwEpochQuarantined }
+	return e.cleanupErr
+}
+
+// Attachment metadata alone never proves counter width, lifetime or OPEN eligibility.
+func attachKobjectNativeObjects(ctx context.Context, o *kwNativeObjects, kernel *btf.Spec) error {
+	return attachKobjectNativeObjectsWithCalls(ctx, o, kernel, kwDefaultAttachmentCalls())
+}
+
+func kwDefaultAttachmentCalls() kwAttachmentCalls {
+	return kwAttachmentCalls{
+		perf: openKobjectPerfEvent, link: createKobjectRawLink,
+		program: readKobjectProgramInfo, classic: readKobjectLinkInfo, tracing: readKobjectTracingLinkInfo,
+	}
+}
+
+// The outer startup waiter retains this operation's borrow until actual return.
+func attachKobjectNativeObjectsWithCalls(ctx context.Context, o *kwNativeObjects, kernel *btf.Spec, calls kwAttachmentCalls) (result error) {
+	if o == nil { return errors.New("missing kobject object owner") }
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if !o.ready || o.attachStarted { return errors.Join(o.attachErr, errors.New("kobject attachment attempt already consumed or unavailable")) }
+	o.attachStarted = true
+	defer func() {
+		if result != nil { o.ready = false; o.attached = false; o.attachErr = errors.Join(o.attachErr, result) }
+	}()
+	if ctx == nil || kernel == nil || calls.perf == nil || calls.link == nil || calls.program == nil || calls.classic == nil || calls.tracing == nil {
+		return errors.New("incomplete kobject attachment acquisition")
+	}
+	roles := [...]struct { target string; tracing bool }{
+		{"kobject_uevent_env", false}, {"kobject_uevent_net_broadcast", false},
+		{"alloc_uevent_skb", false}, {"uevent_net_rcv_skb", false},
+		{"do_one_broadcast", true}, {"__netlink_sendskb", true}, {"netlink_overrun", true},
+	}
+	for hook, role := range roles {
+		if err := kwEpochScopeError(ctx); err != nil { return err }
+		var targetID btf.TypeID
+		if role.tracing {
+			var function *btf.Func
+			if err := kernel.TypeByName(role.target, &function); err != nil { return fmt.Errorf("resolve kobject tracing target %s: %w", role.target, err) }
+			if function == nil { return errors.New("nil kobject tracing target") }
+			var err error
+			targetID, err = kernel.TypeID(function)
+			if err != nil { return fmt.Errorf("identify kobject tracing target %s: %w", role.target, err) }
+			if targetID == 0 { return errors.New("zero kobject tracing target identity") }
+		}
+		for direction := kwEnter; direction < kwDirectionCount; direction++ {
+			if err := kwEpochScopeError(ctx); err != nil { return err }
+			program := o.programs[hook][direction]
+			if program == nil || program.FD() < 0 { return errors.New("missing owned kobject program") }
+			slot := &o.probes[hook][direction]
+			targetFD := 0
+			attach := cebpf.AttachPerfEvent
+			if role.tracing {
+				attach = cebpf.AttachTraceFEntry
+				if direction == kwExit { attach = cebpf.AttachTraceFExit }
+			} else {
+				var err error
+				perfHook := kwHook(hook)
+				if err := kwEpochScopeError(ctx); err != nil { return err }
+				slot.event, err = calls.perf(ctx, perfHook, direction)
+				if slot.event != nil { o.acquiredProbes = append(o.acquiredProbes, slot.event) }
+				if cause := errors.Join(kwEpochScopeError(ctx), err); cause != nil { return cause }
+				if slot.event == nil || slot.event.kind != kwProbePerf || slot.event.FD() < 0 { return errors.New("invalid kobject perf-event owner") }
+				targetFD = slot.event.FD()
+			}
+			programFD := program.FD()
+			if err := kwEpochScopeError(ctx); err != nil { return err }
+			var err error
+			slot.link, err = calls.link(ctx, programFD, targetFD, attach)
+			if slot.link != nil { o.acquiredProbes = append(o.acquiredProbes, slot.link) }
+			if cause := errors.Join(kwEpochScopeError(ctx), err); cause != nil { return cause }
+			if slot.link == nil || slot.link.kind != kwProbeLink || slot.link.FD() < 0 { return errors.New("invalid kobject link owner") }
+			infoFD := int64(program.FD())
+			if err := kwEpochScopeError(ctx); err != nil { return err }
+			slot.program, err = calls.program(infoFD)
+			if cause := errors.Join(kwEpochScopeError(ctx), err); cause != nil { return cause }
+			baseline := o.baseline[hook][direction]
+			if slot.program.returnedLength < 216 || slot.program.id == 0 || slot.program.id != baseline.id ||
+				slot.program.programType != baseline.programType || slot.program.recursionMisses != 0 {
+				return errors.New("kobject attached program identity or baseline changed")
+			}
+			if role.tracing {
+				linkFD := int64(slot.link.FD())
+				if err := kwEpochScopeError(ctx); err != nil { return err }
+				slot.tracing, err = calls.tracing(linkFD)
+				if cause := errors.Join(kwEpochScopeError(ctx), err); cause != nil { return cause }
+				info := slot.tracing
+				if info.returnedLength < 28 || info.id == 0 || info.linkType != 2 || info.programID != slot.program.id ||
+					info.attachType != uint32(attach) || info.targetBTFID != uint32(targetID) {
+					return errors.New("kobject tracing link identity or target mismatch")
+				}
+			} else {
+				linkFD := int64(slot.link.FD())
+				if err := kwEpochScopeError(ctx); err != nil { return err }
+				slot.classic, err = calls.classic(linkFD)
+				if cause := errors.Join(kwEpochScopeError(ctx), err); cause != nil { return cause }
+				info := slot.classic
+				if info.returnedLength < 56 || info.id == 0 || info.linkType != kwLinkPerfEvent || info.programID != slot.program.id ||
+					info.perfType != kwPerfKprobe+uint32(direction) || info.address == 0 || info.missed != 0 {
+					return errors.New("kobject classic link identity or miss baseline mismatch")
+				}
+			}
+		}
+	}
+	if err := kwEpochScopeError(ctx); err != nil { return err }
+	o.attached = true
+	return nil
+}
+
+// ctx must retain both the startup caller's deadline and scope cancellation.
+// The caller retains the acquisition borrow through actual return, including expiry.
+func loadKobjectNativeObjects(ctx context.Context, full *cebpf.CollectionSpec, kernel *btf.Spec, binding kobjectSocketBinding) (*kwNativeObjects, error) {
+	return loadKobjectNativeObjectsWithCalls(ctx, full, kernel, binding, kwDefaultObjectCalls())
+}
+
+func kwDefaultObjectCalls() kwObjectCalls {
+	return kwObjectCalls{
+		newMap: func(spec *cebpf.MapSpec) (kwOwnedBPFMap, error) {
+			m, err := cebpf.NewMap(spec)
+			if m == nil { return nil, err }
+			return m, err
+		},
+		newProgram: func(spec *cebpf.ProgramSpec, types *btf.Spec) (kwOwnedBPFProgram, error) {
+			p, err := cebpf.NewProgramWithOptions(spec, cebpf.ProgramOptions{KernelTypes: types})
+			if p == nil { return nil, err }
+			return p, err
+		},
+		mapInfo: readKobjectMapInfo, programInfo: readKobjectProgramInfo,
+		mapControl: func(fd int64) (*kwControlMapping, error) {
+			return mapKobjectControlWithCalls(fd, kwNativeObjectInfoCall, unix.Mmap, unix.Munmap, os.Getpagesize())
+		},
+	}
+}
+
+func loadKobjectNativeObjectsWithCalls(ctx context.Context, full *cebpf.CollectionSpec, kernel *btf.Spec, binding kobjectSocketBinding, calls kwObjectCalls) (*kwNativeObjects, error) {
+	if ctx == nil || calls.newMap == nil || calls.newProgram == nil || calls.mapInfo == nil || calls.programInfo == nil || calls.mapControl == nil {
+		return nil, errors.New("incomplete kobject object acquisition")
+	}
+	if err := kwEpochScopeError(ctx); err != nil { return nil, err }
+	spec, layout, err := prepareKobjectNativeSpec(full, kernel, binding)
+	if err != nil { return nil, errors.Join(kwEpochScopeError(ctx), err) }
+	owner := &kwNativeObjects{layout: layout, gateOwnership: kwOwnerBeforeMapping}
+	fail := func(cause error) (*kwNativeObjects, error) {
+		cleanup := owner.retire()
+		if cleanup != nil { return owner, errors.Join(kwEpochScopeError(ctx), cause, cleanup) }
+		return nil, errors.Join(kwEpochScopeError(ctx), cause)
+	}
+	for _, name := range [...]string{"kw_counts", "kw_binding", "kw_control", "kw_contexts", ".rodata.var"} {
+		if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+		expected := spec.Maps[name]
+		if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+		object, acquireErr := calls.newMap(expected)
+		// A returned resource is owned even when the effect also reports failure.
+		if object != nil { owner.maps = append(owner.maps, kwLoadedMap{name: name, object: object}) }
+		if err := errors.Join(kwEpochScopeError(ctx), acquireErr); err != nil { return fail(err) }
+		if object == nil || object.FD() < 0 { return fail(errors.New("kobject map acquisition returned no valid handle")) }
+		fd := int64(object.FD())
+		if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+		info, infoErr := calls.mapInfo(fd)
+		if infoErr == nil { owner.maps[len(owner.maps)-1].info = info }
+		if err := errors.Join(kwEpochScopeError(ctx), infoErr); err != nil { return fail(err) }
+		if info.returnedLength < 24 || info.id == 0 || info.mapType != uint32(expected.Type) || object.Type() != expected.Type ||
+			info.keySize != expected.KeySize || info.valueSize != expected.ValueSize || info.maxEntries != expected.MaxEntries || info.flags != expected.Flags {
+			return fail(fmt.Errorf("actual kobject map %s does not match its prepared shape", name))
+		}
+	}
+	if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+	controlFD := int64(owner.maps[2].object.FD())
+	if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+	owner.gate, err = calls.mapControl(controlFD)
+	if owner.gate != nil { owner.gateOwnership = kwOwnerGateTracked } else if err == nil { owner.gateOwnership = kwOwnerGateUnknown }
+	if cause := errors.Join(kwEpochScopeError(ctx), err); cause != nil { return fail(cause) }
+	if owner.gate == nil { return fail(errors.New("kobject gate acquisition returned no mapping")) }
+	for _, m := range owner.maps {
+		seen := false
+		for name, program := range spec.Programs {
+			err := program.Instructions.AssociateMap(m.name, m.object)
+			if err == nil { seen = true; continue }
+			if !errors.Is(err, asm.ErrUnreferencedSymbol) { return fail(fmt.Errorf("associate witness program %s: %w", name, err)) }
+		}
+		if !seen { return fail(fmt.Errorf("owned kobject map %s is unreferenced", m.name)) }
+		delete(spec.Maps, m.name)
+	}
+	for hook, prefix := range [...]string{"kw_env", "kw_broadcast", "kw_allocation", "kw_relay", "kw_recipient", "kw_enqueue", "kw_overrun"} {
+		for direction, suffix := range [...]string{"_enter", "_exit"} {
+			progName := prefix + suffix
+			if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+			expected := spec.Programs[progName]
+			if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+			object, acquireErr := calls.newProgram(expected, kernel)
+			if object != nil { owner.acquiredPrograms = append(owner.acquiredPrograms, object) }
+			if acquireErr != nil { acquireErr = fmt.Errorf("load kobject program %s: %w", progName, acquireErr) }
+			if err := errors.Join(kwEpochScopeError(ctx), acquireErr); err != nil { return fail(err) }
+			if object == nil || object.FD() < 0 { return fail(errors.New("kobject program acquisition returned no valid handle")) }
+			fd := int64(object.FD())
+			if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+			info, infoErr := calls.programInfo(fd)
+			if infoErr == nil { owner.baseline[hook][direction] = info }
+			if err := errors.Join(kwEpochScopeError(ctx), infoErr); err != nil { return fail(err) }
+			if info.returnedLength < 216 || info.id == 0 || info.programType != uint32(expected.Type) || object.Type() != expected.Type || info.recursionMisses != 0 {
+				return fail(fmt.Errorf("actual kobject program %s does not match its baseline", prefix+suffix))
+			}
+			owner.programs[hook][direction] = object
+		}
+	}
+	if err := kwEpochScopeError(ctx); err != nil { return fail(err) }
+	// Acquisition readiness is not the later startup/expiry activation claim.
+	owner.ready = true
+	return owner, nil
+}
+
+// Later epoch teardown must detach links, fence producers and settle all borrows first.
+func (o *kwNativeObjects) retire() error {
+	if o == nil { return nil }
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.gate != nil { if o.gateOwnership != kwOwnerGateTracked { return errors.Join(o.cleanupErr, fmt.Errorf("untracked control mapping: %w", errors.ErrUnsupported)) }; if err := o.gate.closeForColdRetire(); err != nil { return errors.Join(o.cleanupErr, err) } } else if o.gateOwnership != kwOwnerGateReleased && (o.gateOwnership != kwOwnerBeforeMapping || o.epochOwned) { return errors.Join(o.cleanupErr, fmt.Errorf("control ownership unknown: %w", errors.ErrUnsupported)) }
+	o.ready = false
+	o.attached = false
+	for len(o.acquiredProbes) != 0 {
+		i := len(o.acquiredProbes)-1
+		p := o.acquiredProbes[i]
+		o.acquiredProbes = o.acquiredProbes[:i]
+		o.cleanupErr = errors.Join(o.cleanupErr, p.Close())
+	}
+	for len(o.acquiredPrograms) != 0 {
+		i := len(o.acquiredPrograms)-1
+		p := o.acquiredPrograms[i]
+		o.acquiredPrograms = o.acquiredPrograms[:i]
+		// Never retry an FD close: Linux may have released it even on error.
+		o.cleanupErr = errors.Join(o.cleanupErr, p.Close())
+	}
+	if o.gate != nil {
+		if err := o.gate.retire(); err != nil { return errors.Join(o.cleanupErr, err) }
+		o.gate = nil
+		o.gateOwnership = kwOwnerGateReleased
+	}
+	for len(o.maps) != 0 {
+		i := len(o.maps)-1
+		m := o.maps[i]
+		o.maps = o.maps[:i]
+		o.cleanupErr = errors.Join(o.cleanupErr, m.object.Close())
+	}
+	return o.cleanupErr
+}
+
+type kwControlState uint8
+const (
+	kwControlPrepared kwControlState = iota
+	kwControlOpen
+	kwControlClosedState
+	kwControlRetiring
+	kwControlRetired
+)
+
+type kwGateHistory uint8
+const (
+	kwGateHistoryUnknown kwGateHistory = iota
+	kwGateNeverOpened
+	kwGateEverOpened
+)
+
+type kwControlMapping struct {
+	mu sync.Mutex
+	bytes []byte
+	word *uint64
+	state kwControlState
+	munmap func([]byte) error
+	mapID uint32
+	history kwGateHistory
+}
+
+// Caller retains the actual map FD and its borrow until mapping retirement.
+func mapKobjectControl(m *cebpf.Map) (*kwControlMapping, error) {
+	if m == nil { return nil, errors.New("nil control map") }
+	return mapKobjectControlWithCalls(int64(m.FD()), kwNativeObjectInfoCall, unix.Mmap, unix.Munmap, os.Getpagesize())
+}
+
+// A non-nil result with an error owns a mapping whose cleanup must be retried.
+func mapKobjectControlWithCalls(fd int64, info kwObjectInfoCall, mmap func(int, int64, int, int, int) ([]byte, error), munmap func([]byte) error, pageSize int) (*kwControlMapping, error) {
+	if fd < 0 || fd > math.MaxInt32 || info == nil || mmap == nil || munmap == nil || pageSize <= 0 || pageSize%8 != 0 { return nil, errors.New("invalid control mapping arguments") }
+	meta, err := readKobjectMapInfoWithCall(fd, info)
+	if err != nil { return nil, fmt.Errorf("control map info: %w", err) }
+	if meta.mapType != uint32(cebpf.Array) || meta.keySize != 4 || meta.valueSize != 8 || meta.maxEntries != 1 || meta.flags != unix.BPF_F_MMAPABLE { return nil, errors.New("invalid actual control map shape") }
+	b, mapErr := mmap(int(fd), 0, pageSize, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
+	fail := func(cause error) (*kwControlMapping, error) {
+		if b == nil { return nil, cause }
+		cleanupErr := munmap(b); runtime.KeepAlive(b)
+		if cleanupErr != nil { return &kwControlMapping{bytes: b, state: kwControlClosedState, munmap: munmap, mapID: meta.id}, errors.Join(cause, fmt.Errorf("unmap invalid control mapping: %w", cleanupErr)) }
+		return nil, cause
+	}
+	if mapErr != nil { return fail(fmt.Errorf("map control: %w", mapErr)) }
+	if len(b) != pageSize || len(b) < 8 || uintptr(unsafe.Pointer(&b[0]))%8 != 0 { return fail(errors.New("invalid control mapping length or alignment")) }
+	word := (*uint64)(unsafe.Pointer(&b[0]))
+	initial := atomic.LoadUint64(word); runtime.KeepAlive(b)
+	if initial != kwControlClosed { return fail(errors.New("control mapping not freshly closed")) }
+	return &kwControlMapping{bytes: b, word: word, state: kwControlPrepared, munmap: munmap, mapID: meta.id, history: kwGateNeverOpened}, nil
+}
+
+func (g *kwControlMapping) open() error {
+	g.mu.Lock(); defer g.mu.Unlock(); defer runtime.KeepAlive(g.bytes)
+	if g.state != kwControlPrepared || g.history != kwGateNeverOpened || g.word == nil { return errors.New("control mapping is not prepared") }
+	g.state = kwControlClosedState
+	if !atomic.CompareAndSwapUint64(g.word, kwControlClosed, 0) { g.history = kwGateHistoryUnknown; atomic.OrUint64(g.word, kwControlClosed); return errors.New("control admission open failed") }
+	g.history = kwGateEverOpened
+	g.state = kwControlOpen
+	return nil
+}
+
+func (g *kwControlMapping) closeAdmission() (uint64, error) {
+	g.mu.Lock(); defer g.mu.Unlock(); defer runtime.KeepAlive(g.bytes)
+	if g.state == kwControlRetired || g.word == nil { return 0, errors.New("control mapping unavailable") }
+	switch g.state { case kwControlPrepared, kwControlOpen, kwControlClosedState, kwControlRetiring: default: if g.history == kwGateNeverOpened { g.history = kwGateHistoryUnknown }; return 0, fmt.Errorf("control lifecycle unknown: %w", errors.ErrUnsupported) }
+	old := atomic.OrUint64(g.word, kwControlClosed); if (old != kwControlClosed || g.state == kwControlOpen) && g.history == kwGateNeverOpened { g.history = kwGateHistoryUnknown }; if g.state != kwControlRetiring { g.state = kwControlClosedState }
+	return old | kwControlClosed, nil
+}
+
+func (g *kwControlMapping) closeForColdRetire() error {
+	if g == nil { return fmt.Errorf("control provenance unavailable: %w", errors.ErrUnsupported) }
+	g.mu.Lock(); defer g.mu.Unlock(); defer runtime.KeepAlive(g.bytes)
+	return g.admitColdRetireLocked()
+}
+
+func (g *kwControlMapping) admitColdRetireLocked() error {
+	if g.state == kwControlRetired || g.word == nil || len(g.bytes) < 8 || unsafe.Pointer(g.word) != unsafe.Pointer(&g.bytes[0]) || g.mapID == 0 || g.munmap == nil { return fmt.Errorf("control provenance invalid: %w", errors.ErrUnsupported) }
+	switch g.state { case kwControlPrepared, kwControlOpen, kwControlClosedState, kwControlRetiring: default: return fmt.Errorf("control lifecycle unknown: %w", errors.ErrUnsupported) }
+	old := atomic.OrUint64(g.word, kwControlClosed); if g.history == kwGateNeverOpened && (old != kwControlClosed || g.state == kwControlOpen) { g.history = kwGateHistoryUnknown }; if g.state != kwControlRetiring { g.state = kwControlClosedState }
+	if g.history != kwGateNeverOpened { return fmt.Errorf("hot or unknown control provenance: %w", errors.ErrUnsupported) }
+	g.state = kwControlRetiring; return nil
+}
+
+func (g *kwControlMapping) sampleWordLocked() uint64 {
+	word := atomic.LoadUint64(g.word)
+	if g.history == kwGateNeverOpened && (word != kwControlClosed || g.state == kwControlOpen) { g.history = kwGateHistoryUnknown }
+	return word
+}
+
+func (g *kwControlMapping) active() (uint64, error) {
+	g.mu.Lock(); defer g.mu.Unlock(); defer runtime.KeepAlive(g.bytes)
+	if g.state == kwControlRetired || g.word == nil { return 0, errors.New("control mapping unavailable") }
+	return g.sampleWordLocked() &^ kwControlClosed, nil
+}
+
+// The epoch must detach and fence producers and settle borrows before retirement.
+func (g *kwControlMapping) retire() error {
+	g.mu.Lock(); defer g.mu.Unlock(); defer runtime.KeepAlive(g.bytes)
+	if g.state == kwControlRetired { return nil }
+	if err := g.admitColdRetireLocked(); err != nil { return err }
+	if err := g.munmap(g.bytes); err != nil { return fmt.Errorf("unmap control: %w", err) }
+	g.state = kwControlRetired; g.word = nil; g.bytes = nil
+	return nil
+}
+
+func kwUnwrapType(t btf.Type) (btf.Type, error) {
+	for i := 0; i < 32; i++ {
+		if t == nil { return nil, errors.New("nil BTF type") }
+		switch v := t.(type) {
+		case *btf.Typedef: if v == nil { return nil, errors.New("nil BTF typedef") }; t = v.Type
+		case *btf.Const: if v == nil { return nil, errors.New("nil BTF const") }; t = v.Type
+		case *btf.Volatile: if v == nil { return nil, errors.New("nil BTF volatile") }; t = v.Type
+		case *btf.Restrict: if v == nil { return nil, errors.New("nil BTF restrict") }; t = v.Type
+		case *btf.TypeTag: if v == nil { return nil, errors.New("nil BTF type tag") }; t = v.Type
+		case *btf.Int: if v == nil { return nil, errors.New("nil BTF int") }; return v, nil
+		case *btf.Struct: if v == nil { return nil, errors.New("nil BTF struct") }; return v, nil
+		case *btf.Pointer: if v == nil { return nil, errors.New("nil BTF pointer") }; return v, nil
+		case *btf.Fwd: if v == nil { return nil, errors.New("nil BTF forward") }; return v, nil
+		case *btf.Enum: if v == nil { return nil, errors.New("nil BTF enum") }; return v, nil
+		default: return t, nil
+		}
+	}
+	return nil, errors.New("BTF qualifier cycle or depth exceeded")
+}
+
+func kwMemberPath(root *btf.Struct, names ...string) (btf.Type, uint32, error) {
+	if root == nil || root.Size == 0 || root.Size > 1<<20 || len(names) == 0 { return nil, 0, errors.New("invalid BTF root") }
+	current := root
+	var offset uint64
+	for i, name := range names {
+		var member *btf.Member
+		for j := range current.Members { if current.Members[j].Name == name { if member != nil { return nil, 0, fmt.Errorf("duplicate member %s", name) }; member = &current.Members[j] } }
+		if member == nil || member.BitfieldSize != 0 || member.Offset%8 != 0 { return nil, 0, fmt.Errorf("invalid member %s", name) }
+		leaf, err := kwUnwrapType(member.Type); if err != nil { return nil, 0, err }
+		var width uint32
+		switch v := leaf.(type) { case *btf.Int: width = v.Size; case *btf.Struct: width = v.Size; case *btf.Pointer: width = 8; default: return nil, 0, fmt.Errorf("unsupported member type %s", name) }
+		local := uint64(member.Offset / 8)
+		if width == 0 || current.Size == 0 || current.Size > 1<<20 || local+uint64(width) > uint64(current.Size) { return nil, 0, fmt.Errorf("member %s out of bounds", name) }
+		offset += local
+		if offset > math.MaxUint32 || offset+uint64(width) > uint64(root.Size) { return nil, 0, fmt.Errorf("member %s root bounds", name) }
+		if i == len(names)-1 { return leaf, uint32(offset), nil }
+		next, ok := leaf.(*btf.Struct); if !ok { return nil, 0, fmt.Errorf("member %s is not struct", name) }; current = next
+	}
+	return nil, 0, errors.New("empty member path")
+}
+
+func kwInteger(t btf.Type, width uint32, allowSigned bool) bool {
+	i, ok := t.(*btf.Int)
+	return ok && i != nil && i.Size == width && (i.Encoding == btf.Unsigned || (allowSigned && i.Encoding == btf.Signed))
+}
+
+func kwPointerTo(t btf.Type, name string, integer bool) bool {
+	p, ok := t.(*btf.Pointer); if !ok || p == nil { return false }
+	target, err := kwUnwrapType(p.Target); if err != nil { return false }
+	if integer { return kwInteger(target, 8, false) }
+	switch v := target.(type) { case *btf.Struct: return v.Name == name; case *btf.Fwd: return v.Kind == btf.FwdStruct && v.Name == name }
+	return false
+}
+
+func deriveKobjectKernelLayout(kernel *btf.Spec, binding kobjectSocketBinding) (kwKernelLayout, error) {
+	var l kwKernelLayout
+	if kernel == nil || binding.cookie == 0 || binding.portID == 0 || binding.generation == 0 || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") { return l, errors.New("invalid kobject layout binding or architecture") }
+	var sock, nlk, broadcast *btf.Struct
+	var ulong *btf.Int
+	if err := kernel.TypeByName("long unsigned int", &ulong); err != nil { return l, fmt.Errorf("BTF unsigned long: %w", err) }
+	if !kwInteger(ulong, 8, false) { return l, errors.New("invalid BTF unsigned long") }
+	for _, target := range []struct{name string; out **btf.Struct}{{"sock", &sock}, {"netlink_sock", &nlk}, {"netlink_broadcast_data", &broadcast}} {
+		if err := kernel.TypeByName(target.name, target.out); err != nil { return l, fmt.Errorf("BTF %s: %w", target.name, err) }
+		if *target.out == nil || (*target.out).Size == 0 || (*target.out).Size > 1<<20 { return l, fmt.Errorf("invalid BTF size for %s", target.name) }
+	}
+	embedded, offset, err := kwMemberPath(nlk, "sk"); if err != nil || offset != 0 || embedded != sock { return l, errors.New("invalid netlink socket embedding") }
+	l = kwKernelLayout{generation: binding.generation, version: 1, pointerBytes: 8, ulongBytes: 8, sockSize: sock.Size, nlkSize: nlk.Size, bcastSize: broadcast.Size}
+	fields := []struct { root *btf.Struct; path []string; out *uint32; kind string }{
+		{sock, []string{"__sk_common", "skc_cookie", "counter"}, &l.sockCookie, "i64"},
+		{sock, []string{"__sk_common", "skc_net", "net"}, &l.sockNet, "net"},
+		{nlk, []string{"flags"}, &l.nlkFlags, "u64"}, {nlk, []string{"portid"}, &l.nlkPortid, "u32"},
+		{nlk, []string{"ngroups"}, &l.nlkNgroups, "u32"}, {nlk, []string{"groups"}, &l.nlkGroups, "groups"},
+		{broadcast, []string{"exclude_sk"}, &l.bcastExclude, "sock"}, {broadcast, []string{"net"}, &l.bcastNet, "net"},
+		{broadcast, []string{"portid"}, &l.bcastPortid, "u32"}, {broadcast, []string{"group"}, &l.bcastGroup, "u32"},
+	}
+	for _, f := range fields {
+		t, o, err := kwMemberPath(f.root, f.path...); if err != nil { return kwKernelLayout{}, fmt.Errorf("BTF %s: %w", strings.Join(f.path, "."), err) }
+		valid := false
+		switch f.kind { case "i64": valid = kwInteger(t, 8, true); case "u64": valid = t == ulong; case "u32": valid = kwInteger(t, 4, false); case "groups":
+			if p, ok := t.(*btf.Pointer); ok && p != nil { if target, err := kwUnwrapType(p.Target); err == nil { valid = target == ulong } }
+		case "net": valid = kwPointerTo(t, "net", false); case "sock":
+			if p, ok := t.(*btf.Pointer); ok && p != nil { if target, err := kwUnwrapType(p.Target); err == nil { valid = target == sock } }
+		}
+		if !valid { return kwKernelLayout{}, fmt.Errorf("invalid BTF type %s", strings.Join(f.path, ".")) }; *f.out = o
+	}
+	count := 0
+	for typ, err := range kernel.All() {
+		if err != nil { return kwKernelLayout{}, fmt.Errorf("BTF enum iteration: %w", err) }
+		e, ok := typ.(*btf.Enum); if !ok { continue }; if e == nil { return kwKernelLayout{}, errors.New("nil BTF enum") }
+		for _, v := range e.Values { if v.Name == "NETLINK_F_LISTEN_ALL_NSID" { count++; if (e.Size != 4 && e.Size != 8) || v.Value >= 64 { return kwKernelLayout{}, errors.New("invalid listen-all enum index") }; l.listenMask = uint64(1) << v.Value } }
+	}
+	if count != 1 { return kwKernelLayout{}, errors.New("missing or ambiguous listen-all enum") }
+	return l, nil
+}
+
+func configureKobjectKernelLayout(coll *cebpf.CollectionSpec, kernel *btf.Spec, binding kobjectSocketBinding) (kwKernelLayout, error) {
+	if err := validateKobjectNativeSpec(coll); err != nil { return kwKernelLayout{}, err }
+	l, err := deriveKobjectKernelLayout(kernel, binding); if err != nil { return kwKernelLayout{}, err }
+	encoded := l.encode()
+	if err := coll.Variables["kw_layout"].Set(encoded); err != nil { return kwKernelLayout{}, fmt.Errorf("set kobject layout: %w", err) }
+	return l, nil
+}
+
+// Validate the fresh compiled graph before any loader changes its layout variable.
+// The shape alone is not evidence of runtime kernel qualification.
+func validateKobjectNativeSpec(spec *cebpf.CollectionSpec) error {
+	if spec == nil { return errors.New("kobject graph: nil collection") }
+	roles := [...]struct { prefix, target string; tracing bool }{
+		{"kw_env", "kobject_uevent_env", false},
+		{"kw_broadcast", "kobject_uevent_net_broadcast", false},
+		{"kw_allocation", "alloc_uevent_skb", false},
+		{"kw_relay", "uevent_net_rcv_skb", false},
+		{"kw_recipient", "do_one_broadcast", true},
+		{"kw_enqueue", "__netlink_sendskb", true},
+		{"kw_overrun", "netlink_overrun", true},
+	}
+	for _, role := range roles {
+		for _, exit := range []bool{false, true} {
+			suffix, section := "_enter", "kprobe/"
+			if exit { suffix, section = "_exit", "kretprobe/" }
+			if role.tracing { section = "fentry/"; if exit { section = "fexit/" } }
+			name := role.prefix + suffix
+			p := spec.Programs[name]
+			if p == nil { return fmt.Errorf("kobject graph: program %s missing", name) }
+			if p.SectionName != section+role.target || len(p.Instructions) == 0 { return fmt.Errorf("kobject graph: program %s section or instructions invalid", name) }
+			if role.tracing {
+				attach := cebpf.AttachTraceFEntry; if exit { attach = cebpf.AttachTraceFExit }
+				if p.Type != cebpf.Tracing || p.AttachTo != role.target || p.AttachType != attach { return fmt.Errorf("kobject graph: tracing program %s type or attachment invalid", name) }
+			} else if p.Type != cebpf.Kprobe { return fmt.Errorf("kobject graph: classic program %s type invalid", name) }
+		}
+	}
+	for name := range spec.Programs {
+		if !strings.HasPrefix(name, "kw_") { continue }
+		known := false
+		for _, role := range roles { if name == role.prefix+"_enter" || name == role.prefix+"_exit" { known = true; break } }
+		if !known { return fmt.Errorf("kobject graph: unexpected program %s", name) }
+	}
+	maps := [...]struct { name string; kind cebpf.MapType; key, value, entries, flags uint32 }{
+		{"kw_control", cebpf.Array, 4, 8, 1, unix.BPF_F_MMAPABLE},
+		{"kw_binding", cebpf.Array, 4, 40, 1, 0},
+		{"kw_counts", cebpf.Array, 4, kwCounterWireSize, 1, 0},
+		{"kw_contexts", cebpf.Hash, 8, 280, 4096, 0},
+	}
+	for _, expected := range maps {
+		m := spec.Maps[expected.name]
+		if m == nil { return fmt.Errorf("kobject graph: map %s missing", expected.name) }
+		if m.Type != expected.kind || m.KeySize != expected.key || m.ValueSize != expected.value || m.MaxEntries != expected.entries || m.Flags != expected.flags { return fmt.Errorf("kobject graph: map %s shape invalid", expected.name) }
+	}
+	for name := range spec.Maps {
+		if !strings.HasPrefix(name, "kw_") { continue }
+		known := false
+		for _, expected := range maps { if name == expected.name { known = true; break } }
+		if !known { return fmt.Errorf("kobject graph: unexpected map %s", name) }
+	}
+	v := spec.Variables["kw_layout"]
+	if v == nil || v.Size() != 80 || spec.Types == nil { return errors.New("kobject graph: kw_layout variable or type missing or wrong size") }
+	var layoutType *btf.Var
+	if err := spec.Types.TypeByName("kw_layout", &layoutType); err != nil { return fmt.Errorf("kobject graph: kw_layout BTF variable: %w", err) }
+	if layoutType == nil || layoutType.Type == nil { return errors.New("kobject graph: kw_layout BTF type missing") }
+	size, err := btf.Sizeof(layoutType.Type)
+	if err != nil || size != 80 { return fmt.Errorf("kobject graph: kw_layout BTF size invalid: %d: %v", size, err) }
+	var initial [80]byte
+	if err := v.Get(&initial); err != nil { return fmt.Errorf("kobject graph: kw_layout read: %w", err) }
+	if initial != [80]byte{} { return errors.New("kobject graph: kw_layout not initially zero") }
+	return nil
+}
+
+// kwKernelLayout is an internal wire representation, not a qualification.
+type kwKernelLayout struct {
+	generation, listenMask uint64
+	version, pointerBytes, ulongBytes uint32
+	sockSize, nlkSize, bcastSize uint32
+	sockCookie, sockNet, nlkFlags, nlkPortid, nlkNgroups, nlkGroups uint32
+	bcastExclude, bcastNet, bcastPortid, bcastGroup uint32
+}
+
+func (l kwKernelLayout) encode() [80]byte {
+	var b [80]byte
+	binary.NativeEndian.PutUint64(b[0:8], l.generation)
+	binary.NativeEndian.PutUint64(b[8:16], l.listenMask)
+	fields := [...]uint32{l.version, l.pointerBytes, l.ulongBytes, l.sockSize, l.nlkSize, l.bcastSize, l.sockCookie, l.sockNet, l.nlkFlags, l.nlkPortid, l.nlkNgroups, l.nlkGroups, l.bcastExclude, l.bcastNet, l.bcastPortid, l.bcastGroup}
+	for i, v := range fields { binary.NativeEndian.PutUint32(b[16+i*4:], v) }
+	return b
+}
+
+const (
+	kwBindingABIVersion = 2
+	kwCounterWireSize = 256
+	kwKnownFaultMask uint64 = (1 << 14) - 1
+	kwFaultEPERM uint64 = 1 << 12
+	kwFaultEACCES uint64 = 1 << 13
+	kwProgramKprobe = 2
+	kwProgramTracing = 26
+	kwLinkPerfEvent = 7
+	kwPerfKprobe = 3
+	kwPerfKretprobe = 4
+)
+
+func decodeKobjectCounters(raw []byte) (kobjectNativeReadout, error) {
+	var r kobjectNativeReadout
+	if len(raw) != kwCounterWireSize { return r, fmt.Errorf("kobject counters: length %d, want %d", len(raw), kwCounterWireSize) }
+	u64 := func(offset int) uint64 { return binary.NativeEndian.Uint64(raw[offset:]) }
+	r.faults, r.firstError = u64(0), int64(u64(8))
+	for i := range r.stages {
+		o := 16 + i*40
+		r.stages[i] = kwStageFacts{u64(o), u64(o+8), u64(o+16), u64(o+24), u64(o+32)}
+	}
+	r.recipient = kwRecipientFacts{u64(176), u64(184), u64(192), u64(200)}
+	r.rootStarted, r.rootReturned = u64(208), u64(216)
+	for i := range r.classicEntries { r.classicEntries[i] = u64(224 + i*8) }
+	return r, nil
+}
+
+type kwObjectInfoAttr struct {
+	fd uint32
+	infoLen uint32
+	info uint64
+}
+
+type kwObjectInfoCall func(*kwObjectInfoAttr, []byte) syscall.Errno
+
+func kwNativeObjectInfoCall(attr *kwObjectInfoAttr, raw []byte) syscall.Errno {
+	_, _, errno := unix.Syscall(unix.SYS_BPF, uintptr(unix.BPF_OBJ_GET_INFO_BY_FD), uintptr(unsafe.Pointer(attr)), unsafe.Sizeof(*attr))
+	runtime.KeepAlive(raw)
+	runtime.KeepAlive(attr)
+	return errno
+}
+
+// The caller must retain its actual FD borrow until this function returns.
+func queryKobjectObjectInfo(fd int64, raw []byte, call kwObjectInfoCall) (uint32, error) {
+	if fd < 0 || fd > math.MaxInt32 || len(raw) == 0 || uint64(len(raw)) > math.MaxUint32 || call == nil { return 0, errors.New("invalid kobject object info query") }
+	// The kernel-facing integer address must remain stable across the call.
+	var pin runtime.Pinner
+	pin.Pin(&raw[0])
+	defer pin.Unpin()
+	attr := kwObjectInfoAttr{fd: uint32(fd), infoLen: uint32(len(raw)), info: uint64(uintptr(unsafe.Pointer(&raw[0])))}
+	errno := call(&attr, raw)
+	runtime.KeepAlive(raw)
+	runtime.KeepAlive(&attr)
+	if errno != 0 { return 0, fmt.Errorf("kobject object info: %w", errno) }
+	return attr.infoLen, nil
+}
+
+type kwTracingLinkInfo struct {
+	linkType, id, programID, attachType, targetObjectID, targetBTFID, returnedLength uint32
+}
+
+type kwMapInfo struct {
+	mapType, id, keySize, valueSize, maxEntries, flags, returnedLength uint32
+}
+
+func decodeKobjectMapInfo(raw []byte, returnedLength uint32) (kwMapInfo, error) {
+	if returnedLength < 24 || uint64(returnedLength) > uint64(len(raw)) {
+		return kwMapInfo{}, errors.New("short or inconsistent kobject map info")
+	}
+	i := kwMapInfo{
+		mapType: binary.NativeEndian.Uint32(raw), id: binary.NativeEndian.Uint32(raw[4:]),
+		keySize: binary.NativeEndian.Uint32(raw[8:]), valueSize: binary.NativeEndian.Uint32(raw[12:]),
+		maxEntries: binary.NativeEndian.Uint32(raw[16:]), flags: binary.NativeEndian.Uint32(raw[20:]),
+		returnedLength: returnedLength,
+	}
+	if i.id == 0 || i.keySize == 0 || i.valueSize == 0 || i.maxEntries == 0 ||
+		(i.mapType != uint32(cebpf.Array) && i.mapType != uint32(cebpf.Hash)) {
+		return kwMapInfo{}, errors.New("invalid kobject map info identity")
+	}
+	return i, nil
+}
+
+func readKobjectMapInfoWithCall(fd int64, call kwObjectInfoCall) (kwMapInfo, error) {
+	var raw [24]byte
+	length, err := queryKobjectObjectInfo(fd, raw[:], call)
+	if err != nil { return kwMapInfo{}, err }
+	return decodeKobjectMapInfo(raw[:], length)
+}
+
+func readKobjectMapInfo(fd int64) (kwMapInfo, error) {
+	return readKobjectMapInfoWithCall(fd, kwNativeObjectInfoCall)
+}
+
+func decodeKobjectTracingLinkInfo(raw []byte, returnedLength uint32) (kwTracingLinkInfo, error) {
+	var l kwTracingLinkInfo
+	if uint64(returnedLength) > uint64(len(raw)) || returnedLength < 28 { return l, errors.New("short or inconsistent tracing link info") }
+	l = kwTracingLinkInfo{linkType: binary.NativeEndian.Uint32(raw), id: binary.NativeEndian.Uint32(raw[4:]), programID: binary.NativeEndian.Uint32(raw[8:]), attachType: binary.NativeEndian.Uint32(raw[16:]), targetObjectID: binary.NativeEndian.Uint32(raw[20:]), targetBTFID: binary.NativeEndian.Uint32(raw[24:]), returnedLength: returnedLength}
+	if l.linkType != 2 || l.id == 0 || l.programID == 0 || (l.attachType != 24 && l.attachType != 25) || l.targetBTFID == 0 { return kwTracingLinkInfo{}, errors.New("invalid tracing link identity") }
+	return l, nil
+}
+
+func readKobjectProgramInfoWithCall(fd int64, call kwObjectInfoCall) (kwProgramInfo, error) {
+	raw := make([]byte, 216)
+	n, err := queryKobjectObjectInfo(fd, raw, call)
+	if err != nil { return kwProgramInfo{}, err }
+	return decodeKobjectProgramInfo(raw, n)
+}
+
+func readKobjectProgramInfo(fd int64) (kwProgramInfo, error) {
+	return readKobjectProgramInfoWithCall(fd, kwNativeObjectInfoCall)
+}
+
+func readKobjectLinkInfoWithCall(fd int64, call kwObjectInfoCall) (kwLinkInfo, error) {
+	raw := make([]byte, 56)
+	n, err := queryKobjectObjectInfo(fd, raw, call)
+	if err != nil { return kwLinkInfo{}, err }
+	return decodeKobjectLinkInfo(raw, n)
+}
+
+func readKobjectLinkInfo(fd int64) (kwLinkInfo, error) {
+	return readKobjectLinkInfoWithCall(fd, kwNativeObjectInfoCall)
+}
+
+func readKobjectTracingLinkInfoWithCall(fd int64, call kwObjectInfoCall) (kwTracingLinkInfo, error) {
+	raw := make([]byte, 28)
+	n, err := queryKobjectObjectInfo(fd, raw, call)
+	if err != nil { return kwTracingLinkInfo{}, err }
+	return decodeKobjectTracingLinkInfo(raw, n)
+}
+
+func readKobjectTracingLinkInfo(fd int64) (kwTracingLinkInfo, error) {
+	return readKobjectTracingLinkInfoWithCall(fd, kwNativeObjectInfoCall)
+}
+
+func validateKobjectCounters(r kobjectNativeReadout) error {
+	var faults []error
+	if r.faults != 0 { faults = append(faults, fmt.Errorf("kobject native faults %#x (unknown %#x)", r.faults, r.faults &^ kwKnownFaultMask)) }
+	if r.faults&kwFaultEPERM != 0 { faults = append(faults, syscall.EPERM) }
+	if r.faults&kwFaultEACCES != 0 { faults = append(faults, syscall.EACCES) }
+	if r.firstError < 0 {
+		magnitude := uint64(-(r.firstError + 1)) + 1
+		faults = append(faults, fmt.Errorf("native error %d: %w", r.firstError, syscall.Errno(magnitude)))
+	} else if r.firstError > 0 { faults = append(faults, fmt.Errorf("invalid positive native error %d", r.firstError)) }
+	if len(faults) != 0 { return errors.Join(faults...) }
+	for i, s := range r.stages {
+		total, ok := kwSum(s.succeeded, s.failed, s.skipped, s.active)
+		if !ok || total != s.attempted || s.failed != 0 || s.active != 0 { return fmt.Errorf("kobject stage %d accounting invalid", i) }
+	}
+	p := r.recipient
+	total, ok := kwSum(p.queued, p.overrun, p.filteredOrFailed)
+	if !ok || total != p.admitted || p.overrun != 0 || p.filteredOrFailed != 0 { return errors.New("kobject recipient accounting invalid") }
+	roots, ok := kwSum(r.stages[kwEnv].attempted, r.stages[kwRelay].attempted)
+	if !ok || roots != r.rootStarted || r.rootStarted != r.rootReturned { return errors.New("kobject root accounting invalid") }
+	return nil
+}
+
+func decodeKobjectProgramInfo(raw []byte, returnedLength uint32) (kwProgramInfo, error) {
+	var p kwProgramInfo
+	if uint64(returnedLength) > uint64(len(raw)) || returnedLength < 216 { return p, errors.New("short or inconsistent program info") }
+	p = kwProgramInfo{programType: binary.NativeEndian.Uint32(raw), id: binary.NativeEndian.Uint32(raw[4:]), returnedLength: returnedLength, recursionMisses: binary.NativeEndian.Uint64(raw[208:])}
+	if (p.programType != kwProgramKprobe && p.programType != kwProgramTracing) || p.id == 0 { return kwProgramInfo{}, errors.New("invalid program info identity") }
+	return p, nil
+}
+
+func decodeKobjectLinkInfo(raw []byte, returnedLength uint32) (kwLinkInfo, error) {
+	var l kwLinkInfo
+	if uint64(returnedLength) > uint64(len(raw)) || returnedLength < 56 { return l, errors.New("short or inconsistent link info") }
+	l = kwLinkInfo{linkType: binary.NativeEndian.Uint32(raw), id: binary.NativeEndian.Uint32(raw[4:]), programID: binary.NativeEndian.Uint32(raw[8:]), perfType: binary.NativeEndian.Uint32(raw[16:]), returnedLength: returnedLength, address: binary.NativeEndian.Uint64(raw[40:]), missed: binary.NativeEndian.Uint64(raw[48:])}
+	if l.linkType != kwLinkPerfEvent || l.id == 0 || l.programID == 0 || (l.perfType != kwPerfKprobe && l.perfType != kwPerfKretprobe) || l.address == 0 { return kwLinkInfo{}, errors.New("invalid classic link identity") }
+	return l, nil
+}

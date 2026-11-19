@@ -1,0 +1,384 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package tracer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"runtime"
+	"sync"
+	"time"
+
+	cebpf "github.com/cilium/ebpf"
+	"go.opentelemetry.io/ebpf-profiler/libpf"
+	"go.opentelemetry.io/ebpf-profiler/periodiccaller"
+	"go.opentelemetry.io/ebpf-profiler/process"
+)
+
+type tracerCloseState struct {
+	once       sync.Once
+	done       chan struct{}
+	err        error
+	afterClose func() error
+}
+
+func (t *Tracer) closeScopedTracer(ctx context.Context) error {
+	return t.closeScopedTracerWith(ctx, t.closePhysicalTail)
+}
+
+func (t *Tracer) closeScopedTracerWith(ctx context.Context, physical func() error) error {
+	scope := t.auxiliaryScope
+	scopeErr := scope.Stop(ctx)
+	owner := t.definitionOwner
+	if owner != nil {
+		owner.sealReadoutAdmission()
+	}
+	state := &t.scopedClose
+	state.once.Do(func() {
+		state.done = make(chan struct{})
+		go func() {
+			defer close(state.done)
+			_ = owner.closeAfterScope(context.Background(), scope)
+			state.err = physical()
+			if state.afterClose != nil {
+				state.err = errors.Join(state.err, state.afterClose())
+			}
+			if state.err != nil {
+				if owner != nil {
+					owner.mu.Lock()
+					owner.closeErr = errors.Join(owner.closeErr, state.err)
+					owner.mu.Unlock()
+				}
+				scope.Fail(state.err)
+			}
+		}()
+	})
+	finish := func() error {
+		err := errors.Join(scopeErr, owner.CloseErr(), state.err)
+		t.publishAuxiliaryLocal(err)
+		return err
+	}
+	select {
+	case <-state.done:
+		return finish()
+	default:
+	}
+	select {
+	case <-state.done:
+		return finish()
+	case <-ctx.Done():
+		select {
+		case <-state.done:
+			return finish()
+		default:
+			var pending error = ctx.Err()
+			if owner != nil {
+				pending = &traceDefinitionOwnerError{cause: ctx.Err(), owner: owner}
+			}
+			err := errors.Join(scopeErr, pending)
+			t.publishAuxiliaryLocal(err)
+			return err
+		}
+	}
+}
+
+func completeTracerBootstrap(ctx context.Context, t *Tracer, cfg *Config,
+	epochBootstrap, observedBootstrap func(context.Context, process.Process, libpf.TraceDefinitionLifetime) error,
+	dispose func(error) error, newProcess func(libpf.PID, libpf.PID) process.Process,
+) (*Tracer, error) {
+	target, lifetime := cfg.HotSpotEpochTarget, cfg.TraceDefinitionLifetime
+	observed := cfg.HotSpotObservedPID
+	if target.PID != 0 && observed != 0 {
+		return nil, dispose(errors.New("conflicting HotSpot targets"))
+	}
+	if lifetime == nil || (target.PID == 0 && observed == 0) {
+		return t, nil
+	}
+	pid, bootstrap := target.PID, epochBootstrap
+	if observed != 0 {
+		pid, bootstrap = observed, observedBootstrap
+	}
+	err := ctx.Err()
+	if err == nil && target.PID != 0 {
+		err = target.Validate()
+	}
+	if err == nil {
+		err = lifetime.Validate()
+	}
+	if err == nil && (uint32(pid) != lifetime.HostTGID() || lifetime.Session() == "" || (target.PID != 0 && target.ProcessStartTicks != lifetime.Birth())) {
+		err = errors.New("configured HotSpot target does not match lifetime")
+	}
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err == nil {
+		err = bootstrap(ctx, newProcess(pid, pid), lifetime)
+	}
+	if err != nil {
+		return nil, dispose(err)
+	}
+	return t, nil
+}
+
+// bootstrapCleanupError retains ownership when disposal is uncertain; it is not retryable.
+type bootstrapCleanupError struct {
+	tracer   *Tracer
+	programs map[string]*cebpf.Program
+	maps     map[string]*cebpf.Map
+	err      error
+	reportDisposal *failedReportDisposal
+}
+
+// fd is provenance captured before Close disowns it, never a closeable token.
+type reportCloseDisposition struct {
+	fd int
+	err error
+}
+
+type failedReportDisposal struct {
+	maps map[*cebpf.Map]reportCloseDisposition
+	programs map[*cebpf.Program]reportCloseDisposition
+	unknown bool
+	once sync.Once
+	park chan struct{}
+}
+
+type reportAwaitAction uint8
+
+const (
+	reportAwaitConstruction reportAwaitAction = iota
+	reportAwaitQuarantine
+	reportAwaitComplete
+)
+
+type reportPreparationKeeper struct {
+	once sync.Once
+	ready chan struct{}
+	graph *failedReportDisposal
+	beforeWait func(reportAwaitAction)
+}
+
+func registerReportPreparationKeeper(add func(func() error) error) (*reportPreparationKeeper, error) {
+	k := &reportPreparationKeeper{ready: make(chan struct{})}
+	if err := add(k.awaitDisposition); err != nil {
+		return nil, err
+	}
+	return k, nil
+}
+
+func (k *reportPreparationKeeper) complete(g *failedReportDisposal) {
+	if k == nil { return }
+	k.once.Do(func() {
+		k.graph = g
+		close(k.ready)
+	})
+}
+
+func (k *reportPreparationKeeper) nextAction() reportAwaitAction {
+	select {
+	case <-k.ready:
+	default:
+		return reportAwaitConstruction
+	}
+	g := k.graph
+	if g == nil || !g.unknown { return reportAwaitComplete }
+	select {
+	case <-g.park:
+		return reportAwaitComplete
+	default:
+		return reportAwaitQuarantine
+	}
+}
+
+func (k *reportPreparationKeeper) awaitDisposition() error {
+	for {
+		action := k.nextAction()
+		if k.beforeWait != nil { k.beforeWait(action) }
+		switch action {
+		case reportAwaitConstruction:
+			<-k.ready
+		case reportAwaitQuarantine:
+			g := k.graph
+			<-g.park
+			runtime.KeepAlive(g)
+		case reportAwaitComplete:
+			return nil
+		default:
+			panic("invalid report preparation wait action")
+		}
+	}
+}
+
+func transferReportPreparation(t *Tracer, k *reportPreparationKeeper) {
+	k.complete(nil)
+	runtime.KeepAlive(t)
+}
+
+func captureReportClose(fd func() int, closeOwned func() error) reportCloseDisposition {
+	d := reportCloseDisposition{fd: fd()}
+	d.err = closeOwned()
+	return d
+}
+
+type reportDisposalEffects struct {
+	programFD func(*cebpf.Program) int
+	closeProgram func(*cebpf.Program) error
+	mapFD func(*cebpf.Map) int
+	closeMap func(*cebpf.Map) error
+}
+
+func (e *bootstrapCleanupError) disposeReportOriginals() error {
+	return e.disposeReportOriginalsWith(reportDisposalEffects{
+		programFD: (*cebpf.Program).FD, closeProgram: (*cebpf.Program).Close,
+		mapFD: (*cebpf.Map).FD, closeMap: (*cebpf.Map).Close,
+	})
+}
+
+func (e *bootstrapCleanupError) disposeReportOriginalsWith(effects reportDisposalEffects) error {
+	g := &failedReportDisposal{
+		maps: make(map[*cebpf.Map]reportCloseDisposition),
+		programs: make(map[*cebpf.Program]reportCloseDisposition),
+		park: make(chan struct{}),
+	}
+	e.reportDisposal = g
+	err := e.disposeOriginals(func(p *cebpf.Program) error {
+		d := captureReportClose(func() int { return effects.programFD(p) }, func() error { return effects.closeProgram(p) })
+		g.programs[p] = d
+		return d.err
+	}, func(m *cebpf.Map) error {
+		d := captureReportClose(func() int { return effects.mapFD(m) }, func() error { return effects.closeMap(m) })
+		g.maps[m] = d
+		return d.err
+	})
+	g.unknown = err != nil
+	return err
+}
+
+func disposeMapAcquisitionFailure(cause error, maps map[string]*cebpf.Map, programs map[string]*cebpf.Program, dispose func(*bootstrapCleanupError) error) error {
+	cleanup := &bootstrapCleanupError{maps: maps, programs: programs, err: cause}
+	if closeErr := dispose(cleanup); closeErr != nil {
+		cleanup.err = errors.Join(cause, closeErr)
+		return cleanup
+	}
+	return cause
+}
+
+func completeReportPreparationFailure(e *bootstrapCleanupError, keeper *reportPreparationKeeper, scope *periodiccaller.OwnedScope, start func(func())) {
+	if scope != nil && e.reportDisposal != nil && e.reportDisposal.unknown {
+		keeper.complete(e.reportDisposal)
+		scope.Fail(e.err)
+	} else {
+		e.reportDisposal.quarantine(scope != nil, start)
+	}
+}
+
+func (g *failedReportDisposal) quarantine(scoped bool, start func(func())) {
+	if g == nil || scoped || !g.unknown {
+		return
+	}
+	g.once.Do(func() {
+		start(func() {
+			<-g.park
+			runtime.KeepAlive(g)
+		})
+	})
+}
+
+func startReportQuarantine(park func()) { go park() }
+
+func (e *bootstrapCleanupError) Error() string { return e.err.Error() }
+func (e *bootstrapCleanupError) Unwrap() error { return e.err }
+
+func stopFailedConstructor(failed, handled bool, cause error, stop func(context.Context) error) error {
+	if !failed || handled {
+		return cause
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return errors.Join(cause, stop(ctx))
+}
+
+func disposeBootstrapFailure(t *Tracer, cause error) error {
+	return disposeBootstrapFailureWith(t, cause, func(ctx context.Context) error {
+		if t.auxiliaryScope == nil {
+			return nil
+		}
+		return t.auxiliaryScope.Stop(ctx)
+	}, (*cebpf.Program).Close, (*cebpf.Map).Close)
+}
+
+func disposeBootstrapFailureWith(t *Tracer, cause error, stop func(context.Context) error,
+	closeProgram func(*cebpf.Program) error, closeMap func(*cebpf.Map) error,
+) error {
+	return disposeBootstrapFailureWithTail(t, cause, stop, closeProgram, closeMap, t.closePhysicalTail)
+}
+
+func disposeBootstrapFailureWithTail(t *Tracer, cause error, stop func(context.Context) error,
+	closeProgram func(*cebpf.Program) error, closeMap func(*cebpf.Map) error, physical func() error,
+) error {
+	if t.definitionSource != nil {
+		t.definitionSource.fail(cause)
+	}
+	e := &bootstrapCleanupError{tracer: t, programs: make(map[string]*cebpf.Program), maps: make(map[string]*cebpf.Map), err: cause}
+	for name, p := range t.ebpfProgs {
+		e.programs[name] = p
+	}
+	for name, m := range t.ebpfMaps {
+		e.maps[name] = m
+	}
+	if t.auxiliaryScope != nil {
+		t.scopedClose.afterClose = func() error {
+			return e.disposeOriginals(closeProgram, closeMap)
+		}
+		t.auxiliaryScope.Fail(cause)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := t.closeScopedTracerWith(ctx, physical)
+		cancel()
+		if err != nil {
+			e.err = errors.Join(e.err, fmt.Errorf("stop auxiliary scope: %w", err))
+		}
+		return e
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	err := stop(ctx)
+	cancel()
+	if err != nil {
+		e.err = errors.Join(e.err, fmt.Errorf("stop auxiliary scope: %w", err))
+		return e
+	}
+	e.err = errors.Join(e.err, e.disposeOriginals(closeProgram, closeMap))
+	return e
+}
+
+func (e *bootstrapCleanupError) disposeOriginals(closeProgram func(*cebpf.Program) error, closeMap func(*cebpf.Map) error) error {
+	var disposeErr error
+	programErrors := make(map[*cebpf.Program]error)
+	for name, p := range e.programs {
+		err, seen := programErrors[p]
+		if !seen {
+			err = closeProgram(p)
+			programErrors[p] = err
+		}
+		if err != nil {
+			disposeErr = errors.Join(disposeErr, fmt.Errorf("close program %s: %w", name, err))
+		} else {
+			delete(e.programs, name)
+		}
+	}
+	mapErrors := make(map[*cebpf.Map]error)
+	for name, m := range e.maps {
+		err, seen := mapErrors[m]
+		if !seen {
+			err = closeMap(m)
+			mapErrors[m] = err
+		}
+		if err != nil {
+			disposeErr = errors.Join(disposeErr, fmt.Errorf("close map %s: %w", name, err))
+		} else {
+			delete(e.maps, name)
+		}
+	}
+	return disposeErr
+}

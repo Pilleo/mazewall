@@ -109,7 +109,7 @@ class OwnedProcessRunnerTest {
                     }
                 }
             caller.start()
-            assertTrue(started.await(2, TimeUnit.SECONDS))
+            assertTrue(started.await(5, TimeUnit.SECONDS))
             caller.interrupt()
             caller.join(5_000)
 

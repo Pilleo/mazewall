@@ -14,7 +14,7 @@ func TestAuxiliaryCanceledMapAdmissionAndNilDeleteCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &asyncUpdateWorker{ctx: ctx, queue: make(chan asyncMapInMapUpdate, 1)}
 	p := &asyncMapUpdaterPool{workers: []*asyncUpdateWorker{w}}
-	w.queue <- asyncMapInMapUpdate{} // A deletion owns no inner-map descriptor.
+	preloadLegacyForTest(p, nil, 1, nil) // A deletion owns no inner-map descriptor.
 	done := make(chan struct{})
 	producer := make(chan struct{})
 	go func() { defer close(producer); p.EnqueueUpdate(nil, 1, nil) }()
@@ -33,6 +33,10 @@ func TestAuxiliaryCanceledMapAdmissionAndNilDeleteCleanup(t *testing.T) {
 	}
 	if len(w.queue) != 0 {
 		t.Fatal("orphaned post-cancel map update")
+	}
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 2 || obs.Applied != 0 || obs.Pending != 0 || !obs.PendingKnown || obs.QueueAccepted+obs.Refused != 2 || obs.Aborted != obs.QueueAccepted || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
 	}
 }
 
@@ -54,5 +58,9 @@ func TestAuxiliaryMapWorkerPoolJoinsOwnedScope(t *testing.T) {
 		if len(w.queue) != 0 {
 			t.Fatal("sealed worker accepted update")
 		}
+	}
+	obs := p.queueObservation(true)
+	if obs.RequestsOwned != 20 || obs.QueueAccepted != 0 || obs.Refused != 20 || obs.Pending != 0 || !obs.PendingKnown || !obs.AllWorkersEnded || !obs.ScopeJoinedWitness || obs.ProofErr != nil {
+		t.Fatalf("obs=%+v", obs)
 	}
 }

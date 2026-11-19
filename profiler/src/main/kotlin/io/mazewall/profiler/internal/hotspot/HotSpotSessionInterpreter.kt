@@ -11,11 +11,12 @@ internal class HotSpotSessionInterpreter(
     expectedStartTicks: ULong,
     limits: HotSpotReplayLimits,
     timing: HotSpotCollectorTiming,
+    expectation: HotSpotCaptureExpectation = HotSpotCaptureExpectation.Strict,
 ) {
     private val machine = HotSpotSessionMachine(timing.startupNanos, timing.sessionNanos, timing.stopNanos)
     private val current = AtomicReference<HotSpotSessionState>(HotSpotSessionState.Created)
-    private val protocol = HotSpotProtocol(expectedPid, expectedStartTicks)
-    private val accumulator = HotSpotEvidenceAssembler(limits).begin()
+    private val protocol = HotSpotProtocol(expectedPid, expectedStartTicks, expectation)
+    private val accumulator = HotSpotEvidenceAssembler(limits, expectation).begin()
     private val stderr = ByteArrayOutputStream()
     private var discarded = 0L
     private var session: String? = null
@@ -43,14 +44,15 @@ internal class HotSpotSessionInterpreter(
         } else {
             checkHotSpotProtocol(session != null, "payload preceded session start")
             accumulator.accept(row)
-            if (row.kind == "session_summary") {
-                val proof = accumulator.finish()
-                finalEvidence = proof
-                event(protocol.summaryEvent(proof))
-            } else {
-                emptyList()
-            }
+            emptyList()
         }
+    }
+
+    @Synchronized
+    fun wireReceipt(receipt: HotSpotWireReceipt): List<HotSpotSessionEffect> {
+        val proof = accumulator.finish(receipt)
+        finalEvidence = proof
+        return event(protocol.summaryEvent(proof))
     }
 
     @Synchronized

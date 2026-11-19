@@ -149,4 +149,14 @@ This is planned follow-up work; the incident recovery and passing container gate
 do not establish that all ownership-producing paths are already corrected.
 
 ---
+## Repository-review locality/context expansion — 2026-11-04
+
+[TOOL-01](../reviews/2026-11-04-repository-review-findings.md#tool-01) adds build-context
+eligibility and endpoint ordering: validate the **effective default endpoint before context
+transfer**, and use a minimal/source-free runner-image context rather than the broad checkout.
+Test explicit/default local and remote endpoint cases with no build effect on refusal. Existing
+UID-map/writable-bind protection is present. No secret content was inspected, transferred or
+observed in an image; this finding is not a reproduced leak or a request to handle credentials.
+
+---
 <!-- id: issue-20260925-141818-005-prevent-root-owned-outputs-from-containerized-test  file: issue-20260925-141818-005-prevent-root-owned-outputs-from-containerized-test.md -->
