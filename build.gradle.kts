@@ -430,6 +430,7 @@ dependencyCheck {
     if (securitySnapshotUpdate) {
         nvd.validForHours.set(0)
         nvd.resultsPerPage.set(500)
+        nvd.delay.set(1000)
     }
     failBuildOnCVSS = 7.0f
     format = "ALL"
@@ -456,6 +457,7 @@ tasks.withType<ConfiguredTask>().configureEach {
     if (securitySnapshotUpdate) {
         nvd.validForHours.set(0)
         nvd.resultsPerPage.set(500)
+        nvd.delay.set(1000)
     }
 }
 

@@ -316,6 +316,8 @@ public final class SecuritySnapshotVerificationFunctionalTest {
                 def expected = gradle.startParameter.projectProperties['mazewall.securitySnapshotUpdate'] == 'true'
                 assert (extension.nvd.validForHours.orNull == 0) == expected
                 assert (updater.nvd.validForHours.orNull == 0) == expected
+                assert (extension.nvd.delay.orNull == 1000) == expected
+                assert (updater.nvd.delay.orNull == 1000) == expected
                 if (expected) {
                     assert extension.nvd.resultsPerPage.get() == 500
                     assert updater.nvd.resultsPerPage.get() == 500
