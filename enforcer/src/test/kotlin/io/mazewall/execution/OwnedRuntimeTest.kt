@@ -629,9 +629,12 @@ class OwnedRuntimeTest {
                             assertIs<IllegalStateException>(duplicateFailure.get())
                             assertTrue(pin.isLiveForIo())
                         } finally {
-                            duplicate.interrupt()
-                            if (duplicate.isAlive) releaseValidation.countDown()
-                            duplicate.join(5000)
+                            if (duplicateDone.count == 0L) duplicate.join(2000)
+                            if (duplicate.isAlive) {
+                                duplicate.interrupt()
+                                releaseValidation.countDown()
+                                duplicate.join(5000)
+                            }
                             check(!duplicate.isAlive)
                         }
                         assertIs<DrainReport.Incomplete>(runtime.drain(Duration.ofMillis(30)))
