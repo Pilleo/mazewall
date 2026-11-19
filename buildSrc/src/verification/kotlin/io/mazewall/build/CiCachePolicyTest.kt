@@ -644,7 +644,7 @@ object CiCachePolicyTest {
         check("workflow_dispatch:" in updater && "schedule:" in updater)
         check("github.event.repository.default_branch" in updater)
         check("cancel-in-progress: false" in updater)
-        check("-Pmazewall.securitySnapshotUpdate=true" in updater && "nvd.api.results.per.page=500" in updater)
+        check("-Pmazewall.securitySnapshotUpdate=true" in updater && "nvd.api.results.per.page=500" in updater && "nvd.api.delay=1000" in updater)
         check("check-records security-update.log" in updater && "verifySecuritySnapshot" in updater)
         check("!cancelled()" in updater && "actions/upload-artifact@" in updater)
         check("actions/cache/save@" in updater && "lookup-only: true" in updater)
